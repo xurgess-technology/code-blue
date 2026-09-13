@@ -51,7 +51,7 @@ func _ready() -> void:
 
 func _physics_process(delta: float) -> void:
 	t += delta
-	if t > (240.0 if net_role == "" else 90.0) and not _done:
+	if _now() > (240.0 if net_role == "" else 90.0) and not _done:
 		_fail("timed out")
 		_finish()
 
@@ -62,10 +62,18 @@ func _physics_process(delta: float) -> void:
 
 func _run_solo() -> void:
 	# The secret code on the title screen arms Solo.
-	for ch in "xxclear":
-		main.menu.dev_code.feed(ch)
-	_check(main.menu.dev_code.armed, "typing the code arms the menu")
-	main.menu._on_solo()
+	# Real key events, through the same input path the keyboard uses. Typing into the name
+	# field must not count; typing on the bare menu must.
+	var saved_name: String = main.menu._name_edit.text
+	main.menu._name_edit.grab_focus()
+	await _type("clear")
+	_check(not main.menu.dev_code.armed, "typing the code into the name field does nothing")
+	main.menu._name_edit.text = saved_name
+	get_viewport().gui_release_focus()
+	await _type("xxclear")
+	_check(main.menu.dev_code.armed, "typing the code on the menu arms it")
+	# What the Solo button does, minus saving the name to the player's prefs.
+	_check(main.menu._dev_start(false), "Solo while armed goes to the dev room")
 	await _frames(10)
 	_check(game.dev_mode, "Solo while armed enters the dev room")
 	_check(game.phase == Game.Phase.SHIFT, "the dev room is on shift")
@@ -79,8 +87,23 @@ func _run_solo() -> void:
 		_finish()
 		return
 
-	dev.request("gun", {"on": true})
-	_check(dev.has_gun(me.peer_id), "the dev gun is out")
+	# The panel: F1 opens it, its buttons ask the dev room, F1 closes it.
+	await _key(KEY_F1)
+	_check(main.dev_panel.is_open(), "F1 opens the dev panel in the dev room")
+	var buttons: Array = main.dev_panel.find_children("*", "Button", true, false)
+	for b in buttons:
+		if b.text == "+ Dummy":
+			b.pressed.emit()
+	_check(dev.bots.size() == 1, "the panel's + Dummy button spawns a dummy")
+	for b in buttons:
+		if b.text == "Remove all":
+			b.pressed.emit()
+	_check(dev.bots.is_empty(), "the panel's Remove all button removes it")
+	var gun_box: CheckBox = main.dev_panel._c["gun"]
+	gun_box.button_pressed = true
+	_check(dev.has_gun(me.peer_id), "the panel's Dev gun box hands you the gun")
+	await _key(KEY_F1)
+	_check(not main.dev_panel.is_open(), "F1 closes the dev panel")
 
 	# ---- monsters: kill one, knock one down
 	var m = dev.spawn_monster("discharged", "pen")
@@ -91,6 +114,7 @@ func _run_solo() -> void:
 	_shoot(m, DevRoomScript.KILL)
 	await _frames(3)
 	_check(not game.monsters.has(mid), "a kill shot removes the monster")
+	_check(game.get_node("Entities").find_child("DevCorpse", false, false) != null, "the killed monster leaves a falling body")
 	var m2 = dev.spawn_monster("discharged", "pen")
 	await _seconds(0.3)
 	_shoot(m2, DevRoomScript.KNOCK)
@@ -321,51 +345,53 @@ func _take_shots() -> void:
 	dev.spawn_monster("night_nurse", "pen")
 	for i in 3:
 		dev.spawn_bot("dummy")
-	var bid: int = dev.spawn_bot("bot", me)
 	dev.set_patient("seal", "amputation")
 	dev.stock_shelf()
 	await _seconds(1.0)
-	_stand(Vector3(12.0, 0, 17.2))
-	_look_at(Vector3(12.0, 1.2, 4.0))
+	_stand(Vector3(12.0, 0, 17.4))
+	_look_at(Vector3(12.0, 1.0, 4.0))
 	await _seconds(1.0)
 	await _shot("01_room_from_spawn")
-	_stand(Vector3(13.0, 0, 13.5))
-	_look_at(Vector3(6.0, 1.0, 11.0))
+	_stand(Vector3(14.0, 0, 15.5))
+	_look_at(Vector3(4.0, 0.9, 11.5))
 	await _seconds(0.6)
 	await _shot("02_or_table_and_containers")
-	_stand(Vector3(18.0, 0, 14.0))
-	_look_at(Vector3(23.5, 1.0, 13.0))
+	_stand(Vector3(19.0, 0, 13.4))
+	_look_at(Vector3(23.6, 0.9, 13.2))
 	await _seconds(0.6)
 	await _shot("03_dispensers")
-	_stand(Vector3(12.0, 0, 9.3))
-	_look_at(Vector3(12.0, 1.3, 3.0))
+	# The gun, from the lab side of the barrier.
+	_stand(Vector3(12.0, 0, 9.5))
+	_look_at(Vector3(12.0, 0.8, 3.0))
 	await _seconds(0.6)
-	var m = game.monsters.values()[0]
-	_shoot(m, DevRoomScript.KNOCK)
+	_shoot(game.monsters.values()[0], DevRoomScript.KNOCK)
 	await _frames(2)
 	await _shot("04_gun_knock_tracer")
 	await _seconds(0.5)
-	_shoot(game.monsters.values()[1], DevRoomScript.KILL)
+	_shoot(game.monsters.values()[game.monsters.size() - 1], DevRoomScript.KILL)
 	await _frames(3)
 	await _shot("05_gun_kill_tracer")
-	await _seconds(0.8)
+	await _seconds(0.9)
 	await _shot("06_monster_falls")
-	_stand(Vector3(17.75, 0, 14.5))
+	dev.request("kill_monsters")
+	_stand(Vector3(17.75, 0, 14.8))
 	_look_at(Vector3(17.75, 1.0, 10.2))
 	await _seconds(0.5)
 	var d: Player = game.players[dev.bots.keys()[1]]
 	_shoot(d, DevRoomScript.KNOCK)
-	await _seconds(0.6)
+	await _seconds(0.7)
 	await _shot("07_dummies_one_down")
 	main.dev_panel.toggle(true)
 	await _seconds(0.5)
 	await _shot("08_panel")
 	main.dev_panel.toggle(false)
+	var bid: int = dev.spawn_bot("bot", me)
 	dev.set_patient("bob", "gunshot")
+	dev.request("clear_shelf")
 	dev.order_bot(bid, "operate")
-	_stand(Vector3(8.5, 0, 14.0))
+	_stand(Vector3(10.5, 0, 14.2))
 	_look_at(Vector3(8.5, 1.0, 11.5))
-	await _until(func(): return game.players[bid].operating, 40.0)
+	await _until(func(): return game.players[bid].operating, 60.0)
 	await _seconds(3.0)
 	await _shot("09_bot_operating")
 
@@ -425,9 +451,30 @@ func _finish() -> void:
 	_done = true
 	_say("------------------------------------------")
 	_say("result=%s failures=%d" % ["PASS" if _failures.is_empty() else "FAIL", _failures.size()])
-	if Net.active:
-		Net.leave()
 	get_tree().quit(0 if _failures.is_empty() else 1)
+
+
+func _key(code: Key) -> void:
+	for down in [true, false]:
+		var ev := InputEventKey.new()
+		ev.pressed = down
+		ev.keycode = code
+		ev.physical_keycode = code
+		Input.parse_input_event(ev)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+
+func _type(text: String) -> void:
+	for ch in text:
+		for down in [true, false]:
+			var ev := InputEventKey.new()
+			ev.pressed = down
+			ev.unicode = ch.unicode_at(0)
+			ev.keycode = OS.find_keycode_from_string(ch.to_upper())
+			ev.physical_keycode = ev.keycode
+			Input.parse_input_event(ev)
+		await get_tree().process_frame
 
 
 func _frames(n: int) -> void:
@@ -441,10 +488,16 @@ func _seconds(s: float) -> void:
 		await get_tree().physics_frame
 
 
+## Waits on game time solo; on real time in the network test, where the other process runs at
+## its own pace (--fixed-fps makes game time race ahead of the wall clock).
 func _until(cond: Callable, timeout: float) -> bool:
-	var end := t + timeout
-	while t < end:
+	var end := _now() + timeout
+	while _now() < end:
 		if cond.call():
 			return true
 		await get_tree().physics_frame
 	return bool(cond.call())
+
+
+func _now() -> float:
+	return t if net_role == "" else Time.get_ticks_msec() / 1000.0

@@ -153,7 +153,8 @@ static func tracer(parent: Node, from: Vector3, to: Vector3, mode: String, hit: 
 				n.queue_free())
 
 
-## A monster that was just killed: its model falls over where it stood, lies there, sinks away.
+## A monster that was just killed: its model falls over backwards where it stood, lies there,
+## then sinks away.
 static func monster_corpse(parent: Node, kind: String, pos: Vector3, yaw: float) -> void:
 	if parent == null or not parent.is_inside_tree():
 		return
@@ -168,7 +169,7 @@ static func monster_corpse(parent: Node, kind: String, pos: Vector3, yaw: float)
 	if model.has_method("play"):
 		model.play("idle", 0.0, 0.0)
 	var tw := root.create_tween()
-	tw.tween_property(model, "rotation:x", -PI / 2.0 * 0.96, 0.45).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.tween_property(model, "rotation:x", PI / 2.0 * 0.96, 0.45).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	tw.parallel().tween_property(model, "position:y", 0.25, 0.45)
 	tw.tween_interval(CORPSE_TIME)
 	tw.tween_property(root, "position:y", pos.y - 1.2, 1.5)

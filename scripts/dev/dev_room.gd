@@ -22,6 +22,10 @@ const GUN_COOLDOWN := 0.16
 const KNOCK_STUN := 3.0
 const MONSTER_KNOCK_SECONDS := 4.0
 const AUTO_REVIVE_SECONDS := 4.0
+## Where the first-person gun sits on the camera: low on the right, clear of the crosshair.
+const GUN_FP_POS := Vector3(0.24, -0.23, -0.46)
+## Render layer 18 for the first-person gun (layer 20 is the minigames').
+const GUN_FP_LAYER := 1 << 17
 const ORDERS := ["follow", "stay", "carry", "operate"]
 const MONSTER_KINDS := ["discharged", "night_nurse"]
 const BOT_NAMES := ["Dr. Botsworth", "Nurse Unit", "Intern 404", "Dr. Clank", "Orderly-9", "Dr. Servo", "Scrub Bot", "Dr. Byte"]
@@ -84,7 +88,27 @@ func on_enter() -> void:
 	reset_state()
 	game._set_phase(game.Phase.SHIFT)
 	game.vitals = 100.0
+	if is_host():
+		_stock_containers()
 	game.say("Dev room. F1 opens the dev panel.", 5.0)
+
+
+## Fill every container with what that kind of container normally holds.
+func _stock_containers() -> void:
+	for e in game.level_info.get("containers", []):
+		var ct = e.get("node")
+		if ct == null or not is_instance_valid(ct) or not ct.is_inside_tree():
+			continue
+		var kinds := []
+		for kind in Items.ITEMS.keys():
+			if Items.def(kind).get("found", {}).has(String(e.type)):
+				kinds.append(kind)
+		if kinds.is_empty():
+			continue
+		for i in ct.slot_count():
+			var kind: String = kinds[i % kinds.size()]
+			var batch: Array = Items.def(kind).get("batch", [1, 1])
+			game._spawn_item(kind, int(batch[batch.size() - 1]), ct.slot_transform(i), WorldItemScript.State.IN_CONTAINER, String(e.id), i)
 
 
 ## A patient was saved or lost in the dev room: clear the table, stay in the room.
@@ -342,11 +366,17 @@ func _update_gun_visual(p: Node, delta: float) -> void:
 	if fp == null:
 		fp = Node3D.new()
 		fp.name = "DevGunFP"
-		fp.position = Vector3(0.2, -0.2, -0.36)
+		fp.position = GUN_FP_POS
+		fp.scale = Vector3.ONE * 0.75
 		var g := GunFx.make_gun()
 		g.rotation.y = 0.04
 		fp.add_child(g)
 		p.camera.add_child(fp)
+		# The flashlight sits a hand's width from the gun and would bleach it white: keep the
+		# first-person gun on its own render layer and out of the flashlight's cull mask.
+		for mi in fp.find_children("*", "MeshInstance3D", true, false):
+			(mi as MeshInstance3D).layers = GUN_FP_LAYER
+		p.flashlight.light_cull_mask = p.flashlight.light_cull_mask & ~GUN_FP_LAYER
 		tp = Node3D.new()
 		tp.name = "DevGunTP"
 		tp.position = Vector3(0.28, 1.2, -0.38)
@@ -359,7 +389,7 @@ func _update_gun_visual(p: Node, delta: float) -> void:
 		p.hands.visible = false
 	var r: float = maxf(0.0, float(_recoil.get(p.peer_id, 0.0)) - delta * 7.0)
 	_recoil[p.peer_id] = r
-	fp.position = Vector3(0.2, -0.2 + r * 0.02, -0.36 + r * 0.07)
+	fp.position = GUN_FP_POS + Vector3(0.0, r * 0.02, r * 0.06)
 	fp.rotation.x = r * 0.35
 
 

@@ -27,9 +27,9 @@ func _build() -> void:
 	set_meta("interact_id", "dev_disp_%s" % kind)
 
 	var steel := StandardMaterial3D.new()
-	steel.albedo_color = Color(0.3, 0.33, 0.36)
-	steel.metallic = 0.7
-	steel.roughness = 0.35
+	steel.albedo_color = Color(0.55, 0.56, 0.58)
+	steel.metallic = 0.3
+	steel.roughness = 0.5
 	var base := MeshInstance3D.new()
 	var bm := BoxMesh.new()
 	bm.size = Vector3(0.7, 0.95, 0.5)
@@ -54,20 +54,30 @@ func _build() -> void:
 
 	var shown: Node3D = GunFx.make_gun() if gun else ItemModels.make(kind, _batch())
 	shown.name = "Shown"
-	shown.position = Vector3(0, 0.96, 0)
+	shown.position = Vector3(0, 0.955, 0)
+	shown.scale = Vector3.ONE * 2.2
 	if gun:
-		shown.position = Vector3(0, 1.1, 0)
+		shown.position = Vector3(0, 1.08, 0.05)
 		shown.rotation = Vector3(0, PI / 2.0, 0)
-		shown.scale = Vector3.ONE * 1.6
+		shown.scale = Vector3.ONE * 1.5
 	add_child(shown)
+	# A small spotlight over each one so the item reads against the wall.
+	var spot := OmniLight3D.new()
+	spot.light_color = glow.emission.lightened(0.5)
+	spot.light_energy = 0.5
+	spot.omni_range = 1.0
+	spot.shadow_enabled = false
+	spot.light_volumetric_fog_energy = 0.0
+	spot.position = Vector3(0, 1.5, 0.3)
+	add_child(spot)
 
 	var label := Label3D.new()
 	label.text = "DEV GUN" if gun else Items.display_name(kind).to_upper()
-	label.font_size = 40
-	label.pixel_size = 0.004
-	label.outline_size = 8
-	label.modulate = glow.emission.lightened(0.3)
-	label.position = Vector3(0, 0.7, 0.26)
+	label.font_size = 52
+	label.pixel_size = 0.0028
+	label.outline_size = 10
+	label.modulate = glow.emission.lightened(0.45)
+	label.position = Vector3(0, 0.72, 0.255)
 	add_child(label)
 
 	var cs := CollisionShape3D.new()

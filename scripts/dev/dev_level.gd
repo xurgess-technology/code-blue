@@ -27,8 +27,8 @@ const PEN_Z := 6.8
 const BARRIER_D := 1.2
 const BARRIER_H := 1.1
 const GATE_X := Vector2(10.8, 13.2)
-const LIGHT_RANGE := 6.5
-const LIGHT_ENERGY := 1.5
+const LIGHT_RANGE := 6.0
+const LIGHT_ENERGY := 1.05
 
 const TABLE := Vector3(8.5, 0.0, 11.5)
 const SHELF := Vector3(5.2, 0.0, 11.5)
@@ -60,8 +60,8 @@ static func build(info: Dictionary) -> Node3D:
 	# Walls face inward.
 	root.add_child(_quad_mesh("WallN", [Vector3(W, 0, 0), Vector3(0, 0, 0), Vector3(0, H, 0), Vector3(W, H, 0)], Vector3.BACK, wall_mat))
 	root.add_child(_quad_mesh("WallS", [Vector3(0, 0, D), Vector3(W, 0, D), Vector3(W, H, D), Vector3(0, H, D)], Vector3.FORWARD, wall_mat))
-	root.add_child(_quad_mesh("WallW", [Vector3(0, 0, D), Vector3(0, 0, 0), Vector3(0, H, 0), Vector3(0, H, D)], Vector3.RIGHT, wall_mat))
-	root.add_child(_quad_mesh("WallE", [Vector3(W, 0, 0), Vector3(W, 0, D), Vector3(W, H, D), Vector3(W, H, 0)], Vector3.LEFT, wall_mat))
+	root.add_child(_quad_mesh("WallW", [Vector3(0, 0, 0), Vector3(0, 0, D), Vector3(0, H, D), Vector3(0, H, 0)], Vector3.RIGHT, wall_mat))
+	root.add_child(_quad_mesh("WallE", [Vector3(W, 0, D), Vector3(W, 0, 0), Vector3(W, H, 0), Vector3(W, H, D)], Vector3.LEFT, wall_mat))
 	_shape(body, Vector3(W, 0.4, D), Vector3(W * 0.5, -0.2, D * 0.5))
 	_shape(body, Vector3(W, 0.4, D), Vector3(W * 0.5, H + 0.2, D * 0.5))
 	_shape(body, Vector3(W, H, 0.4), Vector3(W * 0.5, H * 0.5, -0.2))
@@ -174,7 +174,7 @@ static func build(info: Dictionary) -> Node3D:
 	for i in kinds.size():
 		var d = DispenserScript.create(String(kinds[i]))
 		d.position = Vector3(W - 0.35, 0.0, dz0 + step * i)
-		d.rotation.y = PI / 2.0   # the dispenser's front (+Z) faces -X, into the room
+		d.rotation.y = -PI / 2.0   # the dispenser's front (+Z) faces -X, into the room
 		disp_root.add_child(d)
 		_obstacles.append([d.position, Vector3(0.7, 0, 0.9)])
 
@@ -320,7 +320,7 @@ static func _fixture(pen: bool) -> Node3D:
 	bulb.omni_range = LIGHT_RANGE
 	bulb.light_energy = LIGHT_ENERGY * (0.75 if pen else 1.0)
 	bulb.light_color = col
-	bulb.light_volumetric_fog_energy = 1.2
+	bulb.light_volumetric_fog_energy = 0.35   # a clean, clinical room: little haze
 	bulb.shadow_enabled = false
 	bulb.set_meta("base_energy", bulb.light_energy)
 	n.add_child(bulb)
