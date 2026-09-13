@@ -360,6 +360,8 @@ func _hand_over(id: int, cr: Dictionary, c: Dictionary) -> void:
 	c.vitals = float(c.get("vitals", 100.0))
 	game._apply_cases_locally()
 	var pname: String = Procedures.patient(String(c.patient_id)).get("name", "The patient")
+	if pname.begins_with("The "):
+		pname = "the " + pname.substr(4)   # "The seal" mid-sentence
 	game.say("The paramedics put %s on the table. Good luck." % pname, 4.0)
 	game._sound("deliver", game.table_position(table))
 	if extra_at < 0.0 and not extra_done and not bool(c.get("optional", false)):

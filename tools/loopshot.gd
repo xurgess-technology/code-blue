@@ -74,17 +74,31 @@ func _run() -> void:
 	await _wait(0.3)
 	game.loop.answer(bot)
 	await _until(func(): return game.cases.size() == 2 and String(game.cases[1].state) == "on_table", 150.0)
+	await _until(func(): return game.loop.crews.is_empty(), 60.0)
 	await _wait(1.0)
 	var a: Vector3 = game.table_position(int(game.cases[0].table))
 	var b: Vector3 = game.table_position(int(game.cases[1].table))
+	for c in game.cases:
+		var body := game.body_for_table(int(c.table))
+		print("[loopshot] %s on table %d at %s, body at %s" % [c.patient_id, int(c.table), str(game.table_position(int(c.table))), str(body.global_position if body != null else null)])
 	var mid := (a + b) * 0.5
 	var across := (b - a).normalized()
 	var side := across.cross(Vector3.UP).normalized()
-	var cam := game._floor_at(mid + side * 3.6 + across * 0.8)
-	_look_from(cam, mid + Vector3.UP * 0.9)
-	await _shot("06_two_patients", 1.0)
-	_look_from(game._floor_at(mid - side * 3.6 - across * 0.8), mid + Vector3.UP * 0.9)
-	await _shot("07_two_patients_other_side", 1.0)
+	var n := 0
+	for sgn in [1.0, -1.0]:
+		var cam: Vector3 = mid + side * 3.2 * sgn + across * 0.6
+		var q := PhysicsRayQueryParameters3D.create(mid + Vector3.UP * 1.6, cam + Vector3.UP * 1.6)
+		q.collision_mask = C.L_WORLD
+		if not bot.get_world_3d().direct_space_state.intersect_ray(q).is_empty():
+			continue   # that side is behind a wall
+		_look_from(game._floor_at(cam), mid + Vector3.UP * 0.8)
+		await _shot("06_two_patients" if n == 0 else "07_two_patients_other_side", 1.0)
+		n += 1
+	# From the foot of one table, looking along both.
+	_look_from(game._floor_at(a - across * 2.6 + side * 1.0), b + Vector3.UP * 0.8)
+	await _shot("07b_two_patients_along", 1.0)
+	_look_from(game._floor_at(b + side * 2.2 + across * 0.4), b + Vector3.UP * 0.9)
+	await _shot("07c_extra_patient_close", 1.0)
 
 	# 6. Both stable, clock out: the paycheck.
 	for c in game.cases:
