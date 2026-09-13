@@ -104,7 +104,7 @@ func setup(g: Node) -> void:
 ## still read (it used to be energy 2.2 with a shallow falloff, which bleached skin nearly white
 ## at the 0.4-0.6 m the operating camera sits from the site). tools/minigame_lab.gd --look=or
 ## builds the same lamp through this function.
-const LAMP_ENERGY := 0.6
+const LAMP_ENERGY := 0.5
 const LAMP_COLOR := Color(1.0, 0.98, 0.95)
 const LAMP_RANGE := 2.5
 const LAMP_ANGLE := 40.0

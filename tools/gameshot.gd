@@ -9,6 +9,7 @@ extends Node
 
 const OUT_DIR := "res://tools/game_shots"
 const SETTLE_FRAMES := 26
+const ModelScript := preload("res://scripts/orscreen/or_screen_model.gd")
 
 var main: Node3D
 var game: Game
@@ -54,6 +55,9 @@ func _ready() -> void:
 		{"name": "05_monster_close", "fn": _pose_monster},
 		{"name": "06_surgery_hud", "fn": _pose_surgery},
 		{"name": "14_orscreen_low_vitals", "fn": _pose_screen_low, "settle": 40},
+		{"name": "18_orscreen_two_cases", "fn": _pose_screen_two_cases, "settle": 40},
+		{"name": "19_orscreen_incoming", "fn": _pose_screen_incoming, "settle": 40},
+		{"name": "20_orscreen_flatline", "fn": _pose_screen_flatline, "settle": 40},
 		{"name": "07_dark_no_light", "fn": _pose_dark},
 		{"name": "08_lectern_guide", "fn": _pose_lectern},
 		{"name": "09_container_open", "fn": _pose_container},
@@ -267,7 +271,65 @@ func _pose_screen_amputation() -> void:
 	_look_at_screen(4.5, -0.8)
 
 
+## Several patients through the `loop` worker's game.cases shape, shown with the screen's test seam
+## until that worker's cases exist on this branch.
+func _fake_cases(cases: Array, shelf: Dictionary, vitals := 100.0) -> void:
+	_ensure_shift()
+	var fake := FakeCases.new()
+	fake.cases = cases
+	fake.shelf = shelf
+	fake.vitals = vitals
+	var s := _screen()
+	if s != null:
+		s.model_override = ModelScript.build(fake)
+	fake.free()
+
+
+func _pose_screen_two_cases() -> void:
+	_fake_cases([
+		{"id": 1, "table": 0, "patient_id": "bob", "ailment_id": "gunshot", "step_index": 1, "vitals": 74.0, "state": "on_table"},
+		{"id": 2, "table": 1, "patient_id": "seal", "ailment_id": "amputation", "step_index": 0, "vitals": 21.0, "state": "on_table"},
+	], {"forceps": 1, "anesthetic": 1, "gauze": 2})
+	_look_at_screen(3.6, 0.4)
+
+
+func _pose_screen_incoming() -> void:
+	_fake_cases([
+		{"id": 1, "table": 0, "patient_id": "bob", "ailment_id": "amputation", "step_index": 2, "vitals": 46.0, "state": "on_table"},
+		{"id": 2, "table": 1, "patient_id": "seal", "ailment_id": "gunshot", "step_index": 0, "vitals": 100.0, "state": "incoming"},
+	], {"bone_saw": 1, "gauze": 1})
+	_look_at_screen(3.6, -0.4)
+
+
+func _pose_screen_flatline() -> void:
+	_fake_cases([
+		{"id": 1, "table": 0, "patient_id": "seal", "ailment_id": "gunshot", "step_index": 1, "vitals": 0.0, "state": "dead"},
+	], {})
+	_look_at_screen(4.0, 0.0)
+
+
+func _pose_screen_real() -> void:
+	var s := _screen()
+	if s != null:
+		s.model_override = {}
+
+
+class FakeCases extends Node:
+	var phase := 2
+	var shift := 1
+	var vitals := 100.0
+	var case := {}
+	var cases: Array = []
+	var shelf := {}
+	var players := {}
+	var surgery = null
+
+	func shelf_count(kind: String) -> int:
+		return int(shelf.get(kind, 0))
+
+
 func _pose_hud_walking() -> void:
+	_pose_screen_real()
 	_pose_corridor()
 	bot.set_flashlight(true)
 	bot.stamina = 0.45

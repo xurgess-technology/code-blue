@@ -34,6 +34,8 @@ var placement := ""
 var enabled := true
 ## Picture refreshes so far (tests use it to check the gating).
 var refresh_count := 0
+## Test seam (tools/gameshot.gd): when not empty, shown instead of the model built from the game.
+var model_override: Dictionary = {}
 
 var _level: Node = null
 var _place_wait := -1
@@ -91,7 +93,7 @@ func _process(delta: float) -> void:
 		if _light_accum >= 1.0 / LIGHT_HZ:
 			_light_accum = 0.0
 			if _since_refresh > 1.0 / LIGHT_HZ:
-				model = ModelScript.build(game)
+				model = model_override if not model_override.is_empty() else ModelScript.build(game)
 			_tint_light()
 	var vis := _visibility()
 	if vis < 0.0:
@@ -132,7 +134,7 @@ func _physics_process(_delta: float) -> void:
 func refresh_now() -> void:
 	if not mounted():
 		return
-	model = ModelScript.build(game)
+	model = model_override if not model_override.is_empty() else ModelScript.build(game)
 	_canvas.model = model
 	_canvas.queue_redraw()
 	_vp.render_target_update_mode = SubViewport.UPDATE_ONCE

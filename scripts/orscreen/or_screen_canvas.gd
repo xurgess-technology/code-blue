@@ -118,8 +118,8 @@ func _draw_panel_wide(r: Rect2, p: Dictionary) -> void:
 	var vtxt := _vitals_text(p)
 	_txt(Vector2(28, vy + vh - 22), vtxt, 150, col)
 	var nw := _font.get_string_size(vtxt, HORIZONTAL_ALIGNMENT_LEFT, -1, 150).x
-	_beat_dot(Vector2(28 + nw + 22, vy + 40), p, col, 14.0)
-	var ex := maxf(330.0, 28 + nw + 50)
+	_beat_dot(Vector2(28 + nw + 34, vy + vh * 0.5), p, col, 12.0)
+	var ex := maxf(330.0, 28 + nw + 70)
 	_ecg(Rect2(ex, vy + 14, w - ex - 30, vh - 28), float(p.vitals), _rhythm(p), col, 5.0)
 	# Checklist
 	var y := vy + vh + 18.0
@@ -150,8 +150,8 @@ func _draw_panel_narrow(r: Rect2, p: Dictionary) -> void:
 	var vtxt := _vitals_text(p)
 	_txt(Vector2(x + 16, vy + vpx - 2), vtxt, vpx, col)
 	var nw := _font.get_string_size(vtxt, HORIZONTAL_ALIGNMENT_LEFT, -1, vpx).x
-	_beat_dot(Vector2(x + 16 + nw + 16, vy + 22), p, col, 10.0)
-	var ex := x + 16 + nw + 36
+	_beat_dot(Vector2(x + 16 + nw + 22, vy + vpx * 0.45), p, col, 8.0)
+	var ex := x + 16 + nw + 44
 	_ecg(Rect2(ex, vy + 8, x + w - 16 - ex, vpx - 6), float(p.vitals), _rhythm(p), col, 4.0)
 	var y := vy + vpx + 22.0
 	var steps: Array = p.steps
@@ -212,13 +212,20 @@ static func bpm_for(vitals: float) -> float:
 
 
 func _beat_dot(at: Vector2, p: Dictionary, col: Color, radius := 9.0) -> void:
+	var c := col
 	if String(p.state) == "dead":
-		if _blink(2.0):
-			draw_circle(at, radius, RED)
-		return
-	var ph := fmod(t * bpm_for(float(p.vitals)) / 60.0, 1.0)
-	var a := clampf(1.0 - absf(ph - 0.31) * 6.0, 0.25, 1.0)
-	draw_circle(at, radius, Color(col, a))
+		if not _blink(2.0):
+			return
+		c = RED
+	else:
+		var ph := fmod(t * bpm_for(float(p.vitals)) / 60.0, 1.0)
+		c = Color(col, clampf(1.0 - absf(ph - 0.31) * 5.0, 0.3, 1.0))
+	# A small heart that beats with the trace.
+	var k := radius / 6.0
+	var o := at + Vector2(0, radius * 0.4)
+	draw_circle(o + Vector2(-3.2, -2.0) * k, 3.6 * k, c)
+	draw_circle(o + Vector2(3.2, -2.0) * k, 3.6 * k, c)
+	draw_colored_polygon(PackedVector2Array([o + Vector2(-6.7, -0.9) * k, o + Vector2(6.7, -0.9) * k, o + Vector2(0, 7.0) * k]), c)
 
 
 ## A scrolling ECG strip over the last few seconds, newest at the right edge.
