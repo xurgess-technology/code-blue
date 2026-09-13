@@ -16,3 +16,7 @@ prototype-web/tmp/
 Thumbs.db
 .DS_Store
 .claude/worktrees/
+
+
+# Multiplayer test logs (tools/nettest_run.gd)
+tools/nettest_logs/

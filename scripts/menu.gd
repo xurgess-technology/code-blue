@@ -8,6 +8,8 @@ signal chose_join(player_name: String, address: String)
 ## Settings hook: the Settings button; main.gd opens the settings screen.
 signal chose_settings
 
+signal chose_host_steam(player_name: String)
+
 ## DEV HOOK (scripts/dev): Solo or Host while the secret code is armed. host = true to host.
 signal chose_dev(player_name: String, host: bool)
 
@@ -80,7 +82,7 @@ func _build() -> void:
 	row.add_theme_constant_override("separation", 10)
 	col.add_child(row)
 	var solo := _button("Solo shift")
-	var host := _button("Host a shift")
+	var host := _button("Host (IP)")
 	row.add_child(solo)
 	row.add_child(host)
 	# Settings hook: not in _buttons, so it stays usable while a join is pending.
@@ -88,6 +90,12 @@ func _build() -> void:
 	settings.name = "SettingsButton"
 	settings.pressed.connect(func(): chose_settings.emit())
 	row.add_child(settings)
+
+	# net hook: Steam hosting, only when GodotSteam loaded and the Steam client is running.
+	var host_steam := _button("Host with Steam")
+	host_steam.visible = Net.steam_available()
+	row.add_child(host_steam)
+	host_steam.pressed.connect(_on_host_steam)
 
 	var row2 := HBoxContainer.new()
 	row2.add_theme_constant_override("separation", 10)
@@ -97,7 +105,7 @@ func _build() -> void:
 	_addr_edit.text = _load_pref("addr", "")
 	_addr_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row2.add_child(_addr_edit)
-	var join := _button("Join")
+	var join := _button("Join (IP)")
 	join.size_flags_horizontal = Control.SIZE_SHRINK_END
 	row2.add_child(join)
 
@@ -109,6 +117,8 @@ func _build() -> void:
 
 	var help := Label.new()
 	help.text = "Hosting listens on port %d. Friends on your network join with the address shown once you are in.\nOver the internet, forward that port or put everyone on Tailscale." % C.DEFAULT_PORT
+	if Net.steam_available():
+		help.text = "Host with Steam, then invite friends from the pause menu or the Steam overlay (Shift+Tab).\n" + help.text
 	help.add_theme_font_size_override("font_size", 12)
 	help.add_theme_color_override("font_color", Color("7a8790"))
 	col.add_child(help)
@@ -119,7 +129,7 @@ func _build() -> void:
 	controls.add_theme_color_override("font_color", Color("5e6a73"))
 	col.add_child(controls)
 
-	_buttons = [solo, host, join]
+	_buttons = [solo, host, join, host_steam]
 	solo.pressed.connect(_on_solo)
 	host.pressed.connect(_on_host)
 	join.pressed.connect(_on_join)
@@ -206,6 +216,12 @@ func _dev_start(host: bool) -> bool:
 func _on_background_input(e: InputEvent) -> void:
 	if e is InputEventMouseButton and e.pressed:
 		get_viewport().gui_release_focus()
+
+func _on_host_steam() -> void:
+	_save_prefs()
+	set_enabled(false)
+	_status.text = "Opening a Steam lobby..."
+	chose_host_steam.emit(player_name())
 
 
 func _on_join() -> void:
