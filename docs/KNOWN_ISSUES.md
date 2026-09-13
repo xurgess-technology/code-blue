@@ -264,9 +264,9 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   depth, and not topped up by the softlock guard.
 - **Nettest with lag fails before any downed code runs** (also on `main` after the hospital merge):
   `deliver` and `downed` with `--lag=120 --jitter=40 --loss=0.03` stop receiving snapshots a few
-  seconds into the shift (the host logs 2.3 KB keyframes over the MTU). `late_join` failed once on
-  this branch without lag (the host never saw the late joiner's "spectating" message); not
-  investigated.
+  seconds into the shift (the host logs 2.3 KB keyframes over the MTU). `late_join` failed twice
+  on this branch when it ran while other headless tests loaded the CPU (the late joiner lost its
+  connection during the lobby rebuild); alone it passes (19 s), as on `main`.
 - **`tools/mapcheck.gd` reports seed 112** (a morgue tray anchor 3.3 m off the navmesh); the same
   on `main` before the pod removal.
 
