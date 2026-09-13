@@ -188,7 +188,7 @@ func _put(n: Node3D, spot, on_surface: bool) -> void:
 func _search_spots() -> Dictionary:
 	var clock_raw: Vector3 = game.clock_pos()
 	var clock: Vector3 = game._floor_at(clock_raw)
-	var keep_clear: Array = [clock, game.pod_pos(), game.table_pos()]
+	var keep_clear: Array = [clock, game.table_pos()]  # downed: the Re-Gen Pod is gone
 	for key in ["lectern", "shelf"]:
 		var e = _info.get(key)
 		if e is Dictionary and e.has("position"):

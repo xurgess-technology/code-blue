@@ -50,7 +50,7 @@ func _draw() -> void:
 		return
 	var w := size.x
 	var h := size.y
-	var in_surgery: bool = game.surgery != null and game.surgery.camera() != null
+	var in_surgery: bool = game.surgery_camera() != null  # downed hook: either table
 	_draw_vignette(w, h)
 	var me = game.local_player()
 	if me != null and me.alive and not game.paused and not in_surgery:
@@ -276,23 +276,24 @@ func _draw_dead_banner(w: float) -> void:
 	var watching = game.viewed_player()
 	var text := "Nobody left to watch."
 	if watching != null and watching != game.local_player():
-		text = ("Watching %s. You clock in at the next shift." if waiting else "Watching %s. A teammate can revive you at the Re-Gen Pod.") % watching.player_name
+		text = ("Watching %s. You clock in at the next shift." if waiting else "Watching %s. You are back next shift.") % watching.player_name
 	_text(Vector2(0, 102), text, 13, Color("c9d1d9"), HORIZONTAL_ALIGNMENT_CENTER, w)
 
 
-## Hold-E progress for the time clock and the Re-Gen Pod.
+## Hold-E progress for the time clock and for lifting a downed teammate.
 func _draw_holds(w: float, h: float) -> void:
 	var progress := 0.0
 	var label := ""
+	var me = game.local_player()
 	if game.phase == Game.Phase.LOBBY and game.punch > 0.0:
 		progress = game.punch
 		label = "CLOCKING IN"
 	elif game.phase == Game.Phase.SHIFT and game.punch > 0.0:
 		progress = game.punch   # loop: clocking out
 		label = "CLOCKING OUT"
-	elif game.phase == Game.Phase.SHIFT and game.pod > 0.0:
-		progress = game.pod
-		label = "RE-GEN POD"
+	elif me != null and me.carry_hold > 0.0:   # downed hook
+		progress = clampf(me.carry_hold / Game.CARRY_HOLD, 0.0, 1.0)
+		label = "LIFTING"
 	if progress <= 0.0:
 		return
 	drawn.append("hold")

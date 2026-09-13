@@ -37,11 +37,9 @@ static func build(info: Dictionary) -> Node3D:
 
 	var table_pos := Vector3(fw * 0.5, 0.0, fh * 0.4)
 	var clock_pos := Vector3(fw * 0.35, 0.0, fh * 0.85)
-	var pod_pos := Vector3(fw * 0.65, 0.0, fh * 0.85)
 
 	_add_table(root, body, table_pos)
 	_add_pillar(root, body, clock_pos, Color("3dff7a"))
-	_add_pillar(root, body, pod_pos, Color("4fe0c8"))
 
 	# Ceiling fixtures
 	var lights: Array = []
@@ -68,7 +66,6 @@ static func build(info: Dictionary) -> Node3D:
 	info["monster_spawns"] = monster_spawns
 	info["table"] = table_pos
 	info["clock"] = clock_pos
-	info["pod"] = pod_pos
 	info["lights"] = lights
 	info["fallback"] = true
 	return root

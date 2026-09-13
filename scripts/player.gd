@@ -71,6 +71,23 @@ var stun: float = 0.0
 ## DEV HOOK: flying through walls (dev panel).
 var noclip: bool = false
 
+## Downed (sweep 2 wave 3, docs/CONTRACTS.md "Downed players"). All host authoritative and
+## replicated in report_full. A downed player is still `alive` (not dead) but not standing: it lies
+## on the floor, crawls, bleeds out over `bleed` seconds, and cannot use anything but E to call
+## for help. `carried_by` / `carrying` are peer ids (0 = nobody). `on_table` means lying on the
+## OR's player table. `carry_hold` is how long this player has held E on a downed teammate.
+var downed: bool = false
+var bleed: float = 0.0
+var carried_by: int = 0
+var carrying: int = 0
+var on_table: bool = false
+var carry_hold: float = 0.0
+## The aim target teammates hold E on to pick this player up (layer on only while downed).
+var downed_aim: Area3D
+
+const CRAWL_SPEED := 0.75
+const CARRY_SPEED_K := 0.6
+
 var _shove_seen: int = 0
 var _drop_seen: int = 0
 var _interact_seen: int = 0
@@ -215,7 +232,47 @@ func _build() -> void:
 	_held_tp.position = Vector3(-0.25, 1.05, -0.35)
 	body_visual.add_child(_held_tp)
 
+	# Downed: lying along -Z from the feet (see _update_down_pose), aimable from above.
+	downed_aim = DownedAim.new()
+	downed_aim.name = "DownedAim"
+	downed_aim.collision_layer = 0
+	downed_aim.collision_mask = 0
+	downed_aim.monitoring = false
+	downed_aim.add_to_group("interactable")
+	downed_aim.set_meta("interact_id", "pl_%d" % peer_id)
+	var aim_shape := CollisionShape3D.new()
+	var aim_cap := CapsuleShape3D.new()
+	aim_cap.radius = 0.42
+	aim_cap.height = 1.9
+	aim_shape.shape = aim_cap
+	aim_shape.rotation_degrees = Vector3(90, 0, 0)
+	aim_shape.position = Vector3(0, 0.3, -0.85)
+	downed_aim.add_child(aim_shape)
+	add_child(downed_aim)
+
 	set_process_input(is_local)
+
+
+## Downed hook: teammates aim at a downed player and hold E to pick them up. The hold itself is
+## simulated by the host (game._tick_carry_holds); nothing happens on a press.
+class DownedAim extends Area3D:
+	func _owner_player() -> Node:
+		return get_parent()
+
+	func interact_prompt(q) -> String:
+		var p = _owner_player()
+		var g = p.game if p != null else null
+		if g == null or q == p or not g.can_pick_up(q, p, false):
+			return ""
+		if not q.hands_empty():
+			return "!Empty your hands to carry %s." % p.player_name
+		return "Hold E: pick up %s" % p.player_name
+
+	func interact_hold() -> float:
+		return 1.0
+
+	func interact(_q) -> void:
+		pass
 
 
 func _ready() -> void:
@@ -338,12 +395,17 @@ func _input(event: InputEvent) -> void:
 		# Settings hook: "sensitivity" multiplies the base look speed.
 		var sens: float = MOUSE_SENS * float(Settings.get_value("sensitivity"))
 		_yaw -= event.relative.x * sens
-		_pitch = clampf(_pitch - event.relative.y * sens, -1.3, 1.3)
+		# Downed hook: flat on the player table you can look straight up at the ceiling.
+		var lim := 1.55 if on_table else 1.3
+		_pitch = clampf(_pitch - event.relative.y * sens, -lim, lim)
 
 
 func _physics_process(delta: float) -> void:
+	# Downed hook: carried or on the table, the body goes where the carrier or the table puts it.
+	if carried_by != 0 or on_table:
+		_pinned_step(delta)
 	# DEV HOOK: the host drives dev room bots as if they were its own players.
-	if is_local or (is_bot and game != null and game.is_host()):
+	elif is_local or (is_bot and game != null and game.is_host()):
 		_local_step(delta)
 	else:
 		_remote_step(delta)
@@ -353,6 +415,10 @@ func _physics_process(delta: float) -> void:
 		_fix_links()
 	if not alive:
 		dead_time += delta
+	# Downed hook: every machine runs the bleed clock (the host's is the truth, see apply_remote_full).
+	if downed and alive and game != null:
+		bleed = maxf(0.0, bleed - delta * float(game.bleed_rate(self)))
+	downed_aim.collision_layer = C.L_INTERACT if downed and alive and carried_by == 0 and not on_table else 0
 
 
 func _local_step(delta: float) -> void:
@@ -386,6 +452,9 @@ func _local_step(delta: float) -> void:
 	if can_move and not bot_active and Input.is_action_just_pressed("interact") \
 			and aim_id != "" and aim_hold <= 0.0 and not aim_prompt.begins_with("!"):
 		interact_count += 1
+	# Downed hook: downed, E calls for help; carrying, E puts them down (or on the table, above).
+	elif can_move and not bot_active and Input.is_action_just_pressed("interact") and (downed or carrying != 0):
+		interact_count += 1
 
 	rotation.y = _yaw
 	head.rotation.x = _pitch
@@ -398,10 +467,15 @@ func _local_step(delta: float) -> void:
 		return
 
 	moving = input_dir.length() > 0.1 and not operating
-	sprinting = moving and can_move and want_sprint and stamina > 0.0
+	sprinting = moving and can_move and want_sprint and stamina > 0.0 and not downed and carrying == 0
 	stamina = clampf(stamina + (-delta / 4.5 if sprinting else delta / 5.0), 0.0, 1.0)
 
 	var speed: float = 0.0 if operating else (C.SPRINT_SPEED if sprinting else C.WALK_SPEED)
+	# Downed hook: crawling is slow; a teammate over your shoulder slows you down.
+	if downed:
+		speed = CRAWL_SPEED
+	elif carrying != 0:
+		speed *= CARRY_SPEED_K
 	var dir := (transform.basis * Vector3(input_dir.x, 0.0, input_dir.y)).normalized()
 	var target := dir * speed + _knock
 	var a: float = ACCEL if is_on_floor() else AIR_ACCEL
@@ -424,6 +498,8 @@ func _local_step(delta: float) -> void:
 			set_flashlight(not flashlight_on)
 			Audio.play("click")
 		_shove_cd = maxf(0.0, _shove_cd - delta)
+		if downed or carrying != 0:
+			_shove_cd = maxf(_shove_cd, 0.2)   # downed hook: no shoving, dropping or slot changes
 		# DEV HOOK: with the dev gun out, the left mouse button fires instead of shoving.
 		var gun_out: bool = g != null and g.dev_mode and g.dev.has_gun(peer_id) and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 		if Input.is_action_just_pressed("shove") and _shove_cd <= 0.0 and not gun_out:
@@ -439,8 +515,8 @@ func _local_step(delta: float) -> void:
 		if Input.is_action_just_pressed("slot_prev"):
 			select_step(-1)
 
-	# Footsteps
-	if moving and is_on_floor():
+	# Footsteps (a crawl makes none)
+	if moving and is_on_floor() and not downed:
 		_step_accum += delta * (3.0 if sprinting else 1.9)
 		if _step_accum >= 1.0:
 			_step_accum = 0.0
@@ -463,28 +539,66 @@ func _remote_step(delta: float) -> void:
 	global_position = global_position.lerp(_target_pos, k)
 	rotation.y = lerp_angle(rotation.y, _target_yaw, k)
 	head.rotation.x = lerpf(head.rotation.x, _pitch, k)
-	if moving:
+	if moving and not downed:
 		_step_accum += delta * (3.0 if sprinting else 1.9)
 		if _step_accum >= 1.0:
 			_step_accum = 0.0
 			Audio.play("step", global_position, -8.0, 0.12)
 
 
+## Downed hook: carried or lying on the player table. Every machine puts the body where the carrier
+## or the table says (game.pinned_pose); the local player keeps looking around with the mouse and
+## E still calls for help.
+func _pinned_step(delta: float) -> void:
+	velocity = Vector3.ZERO
+	_knock = Vector3.ZERO
+	moving = false
+	sprinting = false
+	var pose: Transform3D = game.pinned_pose(self) if game != null else global_transform
+	global_position = pose.origin
+	_target_pos = pose.origin
+	var local_driver: bool = is_local or (is_bot and game != null and game.is_host())
+	if local_driver:
+		if bot_active:
+			_yaw = bot_yaw
+			_pitch = bot_pitch
+			if bot_press != _bot_press_seen:
+				_bot_press_seen = bot_press
+				interact_count += 1
+		elif Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and Input.is_action_just_pressed("interact") and (game == null or not game.paused):
+			interact_count += 1
+		wants_interact = false
+		rotation.y = _yaw
+		head.rotation.x = _pitch
+		_update_aim()
+		if game != null and game.is_host():
+			_consume_actions()
+	else:
+		rotation.y = pose.basis.get_euler().y
+		head.rotation.x = lerpf(head.rotation.x, _pitch, clampf(delta * 12.0, 0.0, 1.0))
+
+
 ## Host-side: turn the shove/drop counters into actual events, exactly once each.
 func _consume_actions() -> void:
 	if game == null:
 		return
+	# Downed hook: a downed player only calls for help; a carrier only puts down or places.
+	var busy := downed or carrying != 0
 	if shove_count != _shove_seen:
 		_shove_seen = shove_count
-		if alive:
+		if alive and not busy:
 			game.player_shoved(self)
 	if drop_count != _drop_seen:
 		_drop_seen = drop_count
-		if alive:
+		if alive and not busy:
 			game.drop_selected(self)
 	if interact_count != _interact_seen:
 		_interact_seen = interact_count
-		if alive:
+		if alive and downed:
+			game.downed_call_out(self)
+		elif alive and carrying != 0:
+			game.carrier_pressed_interact(self, aim_id)
+		elif alive:
 			game.player_pressed_interact(self, aim_id)
 
 
@@ -498,6 +612,10 @@ func _update_aim() -> void:
 	aim_prompt = ""
 	aim_hold = 0.0
 	if not alive:
+		return
+	# Downed hook: on the floor or the table there is nothing to use, only a call for help.
+	if downed:
+		aim_prompt = "Call for help"
 		return
 	var node: Node = null
 	if bot_active and bot_aim_id != "" and game != null:
@@ -515,6 +633,17 @@ func _update_aim() -> void:
 		node = hit.collider
 		while node != null and not node.has_meta("interact_id"):
 			node = node.get_parent()
+	# Downed hook: a carrier can only put someone on the player table, or down anywhere else.
+	if carrying != 0:
+		var who = game.players.get(carrying) if game != null else null
+		var drop_text := "Put %s down" % (who.player_name if who != null else "them")
+		if node == null or not node.has_meta("interact_id") or String(node.get_meta("interact_id")) != "player_table":
+			aim_prompt = drop_text
+			return
+		var tp: String = node.interact_prompt(self)
+		if tp == "" or tp.begins_with("!"):
+			aim_prompt = drop_text
+			return
 	if node == null or not node.has_method("interact_prompt"):
 		return
 	var prompt: String = node.interact_prompt(self)
@@ -786,6 +915,7 @@ func revive_full() -> void:
 	slots = empty_slots()
 	selected = 0
 	operating = false
+	_clear_downed()
 	_set_visible_alive(true)
 
 
@@ -794,19 +924,40 @@ func revive(with_hp: int) -> void:
 	alive = true
 	dead_time = 0.0
 	invuln = 3.0
+	_clear_downed()
 	_set_visible_alive(true)
 
 
+var _downed_seen := false
+
+
+## Downed hook: laid on the player table you look up at the ceiling, feet (and the surgeon) ahead.
+func look_up_from_table() -> void:
+	var yaw := float(game.player_table_yaw()) - PI * 0.5 if game != null else rotation.y
+	_yaw = yaw
+	_pitch = 1.15
+	bot_yaw = yaw
+	bot_pitch = 1.15
+	rotation.y = yaw
+	head.rotation.x = _pitch
+
+
+## Downed hook: back on your feet, nobody carrying anybody, off the table.
+func _clear_downed() -> void:
+	downed = false
+	bleed = 0.0
+	carried_by = 0
+	carrying = 0
+	on_table = false
+	carry_hold = 0.0
+
+
+## Host: the hit lands. At 0 HP the game downs the player (game.damage_player); nobody dies of a hit.
 func take_hit(dmg: int, knock: Vector3) -> void:
 	hp = maxi(0, hp - dmg)
 	invuln = 3.0
 	apply_knock(knock)
 	flinch()
-	if hp <= 0:
-		alive = false
-		dead_time = 0.0
-		operating = false
-		_set_visible_alive(false)
 
 
 func apply_knock(knock: Vector3) -> void:
@@ -825,18 +976,48 @@ func _set_visible_alive(a: bool) -> void:
 	if not is_local:
 		body_visual.visible = a or is_bot  # DEV HOOK: dead bots stay, lying where they fell
 		name_tag.visible = a
-	collision_layer = C.L_PLAYER if a else 0
+	# Downed hook: a downed body is walked over, not bumped into (teammates aim at DownedAim).
+	collision_layer = C.L_PLAYER if a and not downed else 0
 
 
-## DEV HOOK (scripts/dev): knocked down (stun) you see the floor; everyone else sees you lying
-## on it. Dead bots lie there too. Wave 3's downed state replaces this.
+## Downed hook: set every visual that follows from downed / carried / on_table. Idempotent.
+func refresh_downed_visuals() -> void:
+	_set_visible_alive(alive)
+	if on_table and not is_local:
+		body_visual.visible = false   # the lying PlayerBody on the table stands in
+		name_tag.visible = false
+	if is_local:
+		hands.visible = alive and not downed and (game == null or not game.dev_mode or not game.dev.has_gun(peer_id))
+
+
+## Knocked down (dev stun) or downed you see the floor; everyone else sees you lying on it. Carried,
+## you hang over the carrier's shoulder. Dead bots lie there too.
 func _update_down_pose(delta: float) -> void:
-	var down := stun > 0.0 or (is_bot and not alive)
+	var down := stun > 0.0 or downed or (is_bot and not alive)
 	if is_local and not is_bot:
-		var eye := 0.45 if down and alive else C.EYE_H
+		var eye := C.EYE_H
+		if on_table:
+			eye = 0.28
+		elif carried_by != 0:
+			eye = 0.3
+		elif down and alive:
+			eye = 0.45
 		if not is_equal_approx(head.position.y, eye):
-			head.position.y = move_toward(head.position.y, eye, delta * 6.0)
+			head.position.y = eye if carried_by != 0 or on_table else move_toward(head.position.y, eye, delta * 6.0)
+		# Carried, your view hangs back over the carrier's shoulder instead of inside their head.
+		var back := 1.0 if carried_by != 0 else 0.0
+		if not is_equal_approx(head.position.z, back):
+			head.position.z = back
 		return
+	if carried_by != 0:
+		# A fireman's carry over the right shoulder (game.pinned_pose puts the root there): legs
+		# down the front, the rest of the body down the carrier's back.
+		body_visual.rotation = Vector3(PI * 0.5, 0.0, 0.0)
+		body_visual.position = Vector3(0.0, 0.0, -0.6)
+		return
+	if not is_zero_approx(body_visual.position.z):
+		body_visual.rotation = Vector3.ZERO
+		body_visual.position = Vector3.ZERO
 	var tilt := -PI * 0.47 if down else 0.0
 	if not is_equal_approx(body_visual.rotation.x, tilt):
 		body_visual.rotation.x = move_toward(body_visual.rotation.x, tilt, delta * 6.0)
@@ -860,7 +1041,7 @@ func apply_remote_state(s: Array) -> void:
 	if s.size() < 9:
 		return
 	var bits := int(s[3])
-	if alive:
+	if alive and carried_by == 0 and not on_table:   # downed hook: pinned bodies follow the host
 		_target_pos = s[0]
 		global_position = s[0]
 	_target_yaw = float(s[1])
@@ -889,6 +1070,9 @@ func report_full() -> Dictionary:
 		"pi": snappedf(head.rotation.x, 1.0 / 128.0),
 		"fl": flashlight_on, "sp": sprinting, "mv": moving, "op": operating,
 		"hp": hp, "al": alive, "iv": invuln > 0.0, "sl": slots.duplicate(true), "sel": selected,
+		# downed hook
+		"dn": downed, "bl": snappedf(bleed, 1.0), "cb": carried_by, "ca": carrying, "ot": on_table,
+		"ch": snappedf(carry_hold, 0.1),
 	}
 
 
@@ -913,6 +1097,21 @@ func apply_remote_full(s: Dictionary) -> void:
 			alive = false
 			dead_time = 0.0
 			_set_visible_alive(false)
+	# Downed hook: the host's downed state. The bleed clock runs locally between corrections.
+	var was := [downed, carried_by, carrying, on_table, alive]
+	downed = bool(s.get("dn", false))
+	carried_by = int(s.get("cb", 0))
+	carrying = int(s.get("ca", 0))
+	on_table = bool(s.get("ot", false))
+	carry_hold = float(s.get("ch", 0.0))
+	var host_bleed := float(s.get("bl", 0.0))
+	if not downed or absf(host_bleed - bleed) > 1.5:
+		bleed = host_bleed
+	if was != [downed, carried_by, carrying, on_table, alive] or not _downed_seen:
+		_downed_seen = true
+		if on_table and not bool(was[3]) and is_local:
+			look_up_from_table()
+		refresh_downed_visuals()
 	operating = s.op
 	if is_local:
 		return

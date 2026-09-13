@@ -40,6 +40,7 @@ const SCENARIOS := [
 	{"name": "host_kill", "scenario": "host_kill", "clients": 2, "timeout": 180, "may_die": [0]},
 	# Seed 4247 is the seal with an amputation: four steps, the longest case.
 	{"name": "economy", "scenario": "economy", "clients": 3, "timeout": 300, "start_after": {3: "[marker] economy_bought"}},
+	{"name": "downed", "scenario": "downed", "clients": 2, "timeout": 300},
 	{"name": "full_shift_lag", "scenario": "full_shift", "clients": 2, "timeout": 900, "lag": true, "extra": ["--seed=4247"]},
 	# loop (sweep 2): two patients on two tables, two clients operating at once.
 	{"name": "two_patients", "scenario": "two_patients", "clients": 2, "timeout": 300},

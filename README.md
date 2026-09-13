@@ -22,7 +22,7 @@ Or open the folder as a project in the Godot editor and press F5.
 | --- | --- |
 | Mouse / WASD / Shift | Look, move, sprint |
 | F | Flashlight |
-| E | Use what you are looking at: take, open, put on the shelf, operate. Hold for the time clock and the Re-Gen Pod |
+| E | Use what you are looking at: take, open, put on the shelf, operate. Hold for the time clock and to pick up a downed teammate; E again puts them down or on the player table. Downed, E calls for help |
 | 1-4 / mouse wheel | Select a hand slot (bulky loot fills two) |
 | G | Set down what is in the selected slot |
 | R | Read the medical guide (while holding it or looking at it) |

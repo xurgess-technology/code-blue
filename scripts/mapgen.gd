@@ -516,7 +516,7 @@ static func validate(gen: Dictionary) -> PackedStringArray:
 
 	# Landmarks.
 	var spots: Dictionary = gen.get("spots", {})
-	for key in ["clock", "phone", "lectern", "shelf", "or_screen", "entrance", "ambulance", "shop", "sell_bin", "gold_pile", "pod"]:
+	for key in ["clock", "phone", "lectern", "shelf", "or_screen", "entrance", "ambulance", "shop", "sell_bin", "gold_pile"]:
 		if not spots.has(key):
 			problems.append("spot '%s' was never placed" % key)
 	var room_of := func(p: Vector2) -> Dictionary:
@@ -534,7 +534,7 @@ static func validate(gen: Dictionary) -> PackedStringArray:
 			player += 1
 	if patient != 2 or player != 1:
 		problems.append("expected 2 patient tables and 1 player table, found %d and %d" % [patient, player])
-	for key in ["clock", "lectern", "pod"]:
+	for key in ["clock", "lectern"]:
 		if spots.has(key) and String(room_of.call(spots[key].pos).get("kind", "")) != "break_room":
 			problems.append("%s is not in the break room" % key)
 	if spots.has("phone") and String(room_of.call(spots.phone.pos + Vector2(0.3, 0.0)).get("kind", "")) != "break_room":

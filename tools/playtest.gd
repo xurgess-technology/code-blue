@@ -107,6 +107,10 @@ func _physics_process(delta: float) -> void:
 				by = "%s (%s, %.1f m)" % [m.kind, Monster.State.keys()[m.state], md]
 		_say("t=%.0f hit by %s, hp=%d" % [elapsed, by, bot.hp])
 	last_hp = bot.hp
+	if bot.downed:
+		# Solo, nobody can carry you to the table: the shift is lost (all_players_out).
+		_fail("the bot went down at t=%.0f after %d hits (bleeding out, alive=%s)" % [elapsed, hits, str(bot.alive)])
+		return
 	if not bot.alive:
 		_fail("the bot died at t=%.0f after %d hits" % [elapsed, hits])
 		return

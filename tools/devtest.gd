@@ -52,7 +52,7 @@ func _ready() -> void:
 
 func _physics_process(delta: float) -> void:
 	t += delta
-	if _now() > (240.0 if net_role == "" else 90.0) and not _done:
+	if _now() > (420.0 if net_role == "" else 90.0) and not _done:
 		_fail("timed out")
 		_finish()
 
@@ -140,11 +140,11 @@ func _run_solo() -> void:
 	await _frames(2)
 	_shoot(dummy, DevRoomScript.KNOCK)
 	await _frames(2)
-	_check(dummy.alive and dummy.hp == 1 and dummy.stun > 0.0, "a knock-down leaves a dummy at 1 HP, stunned (hp=%d stun=%.1f)" % [dummy.hp, dummy.stun])
+	_check(dummy.alive and dummy.downed and dummy.hp == 0 and dummy.bleed > 290.0, "a knock-down shot downs a dummy (hp=%d downed=%s bleed=%.0f)" % [dummy.hp, str(dummy.downed), dummy.bleed])
 	await _seconds(0.5)
-	_shoot(dummy, DevRoomScript.KILL)
+	_shoot(dummy, DevRoomScript.KILL, 0.3)
 	await _frames(2)
-	_check(not dummy.alive, "a kill shot kills a dummy")
+	_check(not dummy.alive and not dummy.downed, "a kill shot kills a downed dummy outright")
 
 	# ---- a bot: knock down, then work
 	dev.request("revive_all")
@@ -156,12 +156,15 @@ func _run_solo() -> void:
 	await _frames(2)
 	_shoot(bot, DevRoomScript.KNOCK)
 	await _frames(2)
-	_check(bot.alive and bot.hp == 1 and bot.stun > 0.0, "a knock-down leaves a bot at 1 HP, stunned")
+	_check(bot.alive and bot.downed, "a knock-down shot downs a bot")
 	await _seconds(0.6)   # the knock-back slide
 	var pos_before := bot.global_position
 	await _seconds(1.0)
-	_check(bot.global_position.distance_to(pos_before) < 0.2, "a knocked-down bot does not walk (moved %.2f m)" % bot.global_position.distance_to(pos_before))
-	await _seconds(2.0)
+	_check(bot.global_position.distance_to(pos_before) < 0.2 and brain.status == "downed", "a downed bot lies still (moved %.2f m, status '%s')" % [bot.global_position.distance_to(pos_before), brain.status])
+	dev.request("revive_all")
+	await _frames(2)
+	_check(bot.alive and not bot.downed and bot.hp == bot.max_hp, "revive all gets a downed bot up")
+	await _seconds(1.0)
 
 	dev.order_bot(bid, "carry", "gauze", "shelf")
 	var ok := await _until(func(): return brain.completed >= 1, 60.0)
@@ -180,6 +183,29 @@ func _run_solo() -> void:
 	ok = await _until(func(): return int(game.case.get("step_index", 0)) >= 1, 150.0)
 	_check(ok, "a bot stocks the shelf and operates the first step (step %d, status '%s')" % [int(game.case.get("step_index", 0)), brain.status])
 	_check(brain.completed >= 3 and brain.order == "stay", "the operate order completes")
+	dev.request("clear_patient")
+
+	# ---- downed (sweep 2 wave 3): a bot carries a downed dummy to the player table and stitches it
+	var did2: int = dev.spawn_bot("dummy")
+	var dummy2: Player = game.players[did2]
+	await _frames(3)
+	dev.request("down_me", {"id": did2})
+	await _frames(2)
+	_check(dummy2.downed, "the panel's Down button downs a dummy")
+	_check(not game.player_table.is_empty() and game.find_interactable("player_table") != null, "the dev room has a player table")
+	dev.request("clear_shelf")
+	dev.order_bot(bid, "carry", "", "table")
+	ok = await _until(func(): return dummy2.on_table, 60.0)
+	_check(ok, "a bot lifts a downed dummy and lays it on the player table (status '%s')" % brain.status)
+	_check(game.player_surgery.patient() == dummy2 and game.player_surgery.patient_body != null, "the stitches case starts with the lying body")
+	dev.order_bot(bid, "operate")
+	ok = await _until(func(): return bot.operating, 90.0)
+	var kits_before: int = game.shelf_count("suture_kit")
+	_check(ok and kits_before >= 1, "a bot stocks a suture kit and starts stitching (shelf %d, status '%s')" % [kits_before, brain.status])
+	ok = await _until(func(): return dummy2.alive and not dummy2.downed, 60.0)
+	_check(ok and dummy2.hp == Game.REVIVE_HP, "the bot stitches the dummy back up (status '%s', hp %d)" % [brain.status, dummy2.hp])
+	_check(game.shelf_count("suture_kit") == kits_before - 1 and game.player_surgery.case.is_empty(), "one suture kit was used and the table is free")
+	dev.remove_bot(did2)
 
 	# ---- the shift loop's patient hooks (loop, sweep 2): phone call, extra patient, two tables
 	await _loop_hooks()
@@ -198,12 +224,19 @@ func _run_solo() -> void:
 	_check(me.hp == hp_before, "god mode ignores monster hits")
 	dev.request("god", {"on": false})
 	game.knock_down_player(me, "test")
-	_check(me.alive and me.hp == 1 and me.stun > 0.0, "knock_down_player leaves you at 1 HP, stunned")
+	_check(me.alive and me.downed and me.hp == 0, "knock_down_player downs you")
 	game.kill_monster(m3)
-	await _seconds(3.2)
+	await _seconds(0.5)
+	me.revive_full()
+	for b in main.dev_panel.find_children("*", "Button", true, false):
+		if b.text == "Down me":
+			b.pressed.emit()
+	_check(me.downed, "the panel's Down me button downs you")
 	me.revive_full()
 	game.damage_player(me, 1, "test")
 	_check(me.hp == me.max_hp - 1, "damage_player takes HP")
+	game.damage_player(me, 9, "test")
+	_check(me.alive and me.downed, "damage to 0 HP downs instead of killing")
 	me.revive_full()
 
 	dev.request("noclip", {"on": true})
@@ -413,10 +446,10 @@ func _run_client() -> void:
 	_stand(dummy.global_position + Vector3(0, 0, 4.0))
 	await _seconds(0.5)
 	_shoot(dummy, DevRoomScript.KNOCK)
-	ok = await _until(func(): return dummy.hp == 1, 4.0)
-	_check(ok, "the client's knock-down reached the dummy (hp %d)" % dummy.hp)
+	ok = await _until(func(): return dummy.downed, 4.0)
+	_check(ok, "the client's knock-down downed the dummy (hp %d)" % dummy.hp)
 	await _seconds(0.3)
-	_shoot(dummy, DevRoomScript.KILL)
+	_shoot(dummy, DevRoomScript.KILL, 0.3)
 	ok = await _until(func(): return not dummy.alive, 4.0)
 	_check(ok, "the client killed the dummy")
 
@@ -521,8 +554,8 @@ func _look_at(target: Vector3) -> void:
 
 
 ## Aim at a target's chest and fire through the real gun path (client prediction included).
-func _shoot(target: Node3D, mode: String) -> void:
-	var aim: Vector3 = target.global_position + Vector3.UP * 1.3
+func _shoot(target: Node3D, mode: String, height := 1.3) -> void:
+	var aim: Vector3 = target.global_position + Vector3.UP * height
 	_look_at(aim)
 	var from := me.head.global_position
 	dev.fire(me, from, aim - from, mode)
