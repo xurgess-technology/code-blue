@@ -257,6 +257,8 @@ func physics_tick(delta: float) -> void:
 		_place_mg()
 		if _local_op:
 			_drive(delta)
+		elif game.is_host():
+			_drive_bot_operator(delta)
 		if mg != null:
 			mg.tick(delta)
 		_mg_t += delta
@@ -493,7 +495,48 @@ func _drive(delta: float) -> void:
 		game.send_operator_report({"k": mg_key, "ms": mg.net_state()})
 
 
+## DEV HOOK (scripts/dev): a dev room bot (a Player with is_bot, simulated by the host) operates
+## on the host's own copy of the minigame with its bot_input, reporting as if it were a remote
+## operator. Spectators, including the host, see the tool move as usual.
+var _bot_op_t := 0.0
+var _bot_op_key := ""
+
+
+func _bot_operator() -> Node:
+	if operator_id == 0 or operator_id == Net.my_id():
+		return null
+	var p = game.players.get(operator_id)
+	return p if p != null and is_instance_valid(p) and bool(p.get("is_bot")) else null
+
+
+func _drive_bot_operator(delta: float) -> void:
+	var bot := _bot_operator()
+	if bot == null or mg == null or mg.done:
+		if mg != null and _bot_op_key != "":
+			mg.ctx["operator"] = false
+			_bot_op_key = ""
+		return
+	if _bot_op_key != mg_key:
+		_bot_op_key = mg_key
+		_bot_op_t = 0.0
+	mg.ctx["operator"] = true
+	_bot_op_t += delta
+	var inp: Dictionary = mg.bot_input(_bot_op_t, float(bot.get_meta("bot_skill", 1.0)))
+	var ext: Vector2 = mg.plane_extent()
+	var c: Vector2 = inp.get("cursor", Vector2.ZERO)
+	c = Vector2(clampf(c.x, -ext.x, ext.x), clampf(c.y, -ext.y, ext.y))
+	var key := mg_key
+	mg.handle_cursor(c, int(inp.get("buttons", 0)), delta)
+	if mg != null and key == mg_key and not mg.done:
+		_mg_state = mg.net_state()
+		_mg_state_key = mg_key
+
+
 func _on_botched(amount: float, reason: String) -> void:
+	var bot := _bot_operator() if game.is_host() and not _local_op else null  # DEV HOOK
+	if bot != null and mg != null:
+		receive_operator_report(bot.peer_id, {"k": mg_key, "botches": [[amount, reason]]})
+		return
 	if not _local_op or mg == null:
 		return
 	_audio("surgery_botch", null, -6.0)
@@ -501,6 +544,11 @@ func _on_botched(amount: float, reason: String) -> void:
 
 
 func _on_finished(result: Dictionary) -> void:
+	var bot := _bot_operator() if game.is_host() and not _local_op else null  # DEV HOOK
+	if bot != null and mg != null:
+		mg.ctx["operator"] = false
+		receive_operator_report(bot.peer_id, {"k": mg_key, "finished": result, "ms": mg.net_state()})
+		return
 	if not _local_op or mg == null:
 		return
 	var key := mg_key

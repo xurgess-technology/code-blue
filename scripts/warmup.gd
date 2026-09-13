@@ -16,6 +16,7 @@ const RENDER_FRAMES := 8
 
 const BodyScript := preload("res://scripts/patient_body.gd")
 const MonsterModel := preload("res://scripts/monsters/monster_model.gd")
+const DevGun := preload("res://scripts/dev/dev_gun.gd")  # DEV HOOK
 
 
 ## Run once. Safe to call again; later calls return immediately.
@@ -74,6 +75,9 @@ static func run(game: Node) -> void:
 		model.position = Vector3(mx, -1.6, -2.0)
 		model.scale = Vector3.ONE * 0.5
 		mx += 1.0
+
+	# DEV HOOK (scripts/dev): the dev gun, its tracers and the target dummy.
+	DevGun.warm(shelf)
 
 	# Every surgery minigame, set up on a patient the way the surgery system does it
 	var games := []

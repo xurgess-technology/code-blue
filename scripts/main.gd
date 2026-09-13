@@ -19,6 +19,10 @@ const QUALITY_NAMES := ["LOW", "MEDIUM", "HIGH"]
 
 var _fps_label: Label
 var _look: GDScript = null
+## DEV HOOK: the dev room panel (a CanvasLayer, hidden outside the dev room).
+var dev_panel: CanvasLayer = null
+const DevPanelScript := preload("res://scripts/dev/dev_panel.gd")
+const DevRoomScript := preload("res://scripts/dev/dev_room.gd")
 
 
 func _ready() -> void:
@@ -73,6 +77,12 @@ func _ready() -> void:
 	menu.chose_solo.connect(_start_solo)
 	menu.chose_host.connect(_start_host)
 	menu.chose_join.connect(_start_join)
+	# DEV HOOK (scripts/dev): the secret dev room and its panel.
+	menu.chose_dev.connect(start_dev)
+	dev_panel = DevPanelScript.new()
+	dev_panel.name = "DevPanel"
+	add_child(dev_panel)
+	dev_panel.setup(game, self)
 	Net.joined_ok.connect(_on_joined)
 	Net.join_failed.connect(_on_join_failed)
 	Net.host_left.connect(func(): _back_to_menu("The host left the game."))
@@ -169,6 +179,23 @@ func _start_join(player_name: String, address: String) -> void:
 	var err := Net.join(parsed.address, parsed.port)
 	if not err.is_empty():
 		menu.show_menu(err)
+
+
+## DEV HOOK: into the dev room, alone or hosting (friends then join it like any hosted game).
+func start_dev(player_name: String, host: bool) -> void:
+	if host:
+		var err := Net.host(player_name)
+		if not err.is_empty():
+			menu.show_menu(err)
+			return
+		var addresses := Net.local_addresses()
+		hud.host_info = "Friends join at: %s" % ", ".join(addresses.map(func(a): return "%s:%d" % [a, C.DEFAULT_PORT])) \
+			if not addresses.is_empty() else "Hosting on port %d" % C.DEFAULT_PORT
+	else:
+		Net.start_solo(player_name)
+		hud.host_info = ""
+	game.start_session(DevRoomScript.SEED)
+	_enter_game()
 
 
 func _on_joined() -> void:
@@ -281,7 +308,8 @@ func _can_read(me) -> bool:
 func _update_mouse() -> void:
 	var free: bool = menu.visible or game.phase == Game.Phase.MENU or game.paused \
 		or (guide != null and guide.is_open()) \
-		or (game.surgery != null and game.surgery.wants_mouse())
+		or (game.surgery != null and game.surgery.wants_mouse()) \
+		or (dev_panel != null and dev_panel.is_open())  # DEV HOOK
 	var want := Input.MOUSE_MODE_VISIBLE if free else Input.MOUSE_MODE_CAPTURED
 	if Input.mouse_mode != want:
 		Input.set_mouse_mode(want)
