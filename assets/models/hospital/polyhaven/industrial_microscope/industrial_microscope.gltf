@@ -1,0 +1,236 @@
+{
+  "asset": {
+    "generator": "Khronos glTF Blender I/O v5.1.20",
+    "version": "2.0"
+  },
+  "scene": 0,
+  "scenes": [
+    {
+      "name": "Scene",
+      "nodes": [
+        0,
+        1
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "mesh": 0,
+      "name": "industrial_microscope_cable"
+    },
+    {
+      "mesh": 1,
+      "name": "industrial_microscope"
+    }
+  ],
+  "materials": [
+    {
+      "doubleSided": true,
+      "name": "industrial_microscope",
+      "normalTexture": {
+        "index": 0
+      },
+      "pbrMetallicRoughness": {
+        "baseColorTexture": {
+          "index": 1
+        },
+        "metallicRoughnessTexture": {
+          "index": 2
+        }
+      }
+    }
+  ],
+  "meshes": [
+    {
+      "name": "Cube.048",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 0,
+            "NORMAL": 1,
+            "TEXCOORD_0": 2
+          },
+          "indices": 3,
+          "material": 0
+        }
+      ]
+    },
+    {
+      "name": "Cube.045",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 4,
+            "NORMAL": 5,
+            "TEXCOORD_0": 6
+          },
+          "indices": 7,
+          "material": 0
+        }
+      ]
+    }
+  ],
+  "textures": [
+    {
+      "sampler": 0,
+      "source": 0
+    },
+    {
+      "sampler": 0,
+      "source": 1
+    },
+    {
+      "sampler": 0,
+      "source": 2
+    }
+  ],
+  "images": [
+    {
+      "mimeType": "image/jpeg",
+      "name": "industrial_microscope_nor_gl",
+      "uri": "textures/industrial_microscope_nor_gl_1k.jpg"
+    },
+    {
+      "mimeType": "image/jpeg",
+      "name": "industrial_microscope_diff",
+      "uri": "textures/industrial_microscope_diff_1k.jpg"
+    },
+    {
+      "mimeType": "image/jpeg",
+      "name": "industrial_microscope_metal-industrial_microscope_rough",
+      "uri": "textures/industrial_microscope_arm_1k.jpg"
+    }
+  ],
+  "accessors": [
+    {
+      "bufferView": 0,
+      "componentType": 5126,
+      "count": 1645,
+      "max": [
+        0.09915204346179962,
+        0.08737564086914062,
+        -0.19724036753177643
+      ],
+      "min": [
+        -0.05049024149775505,
+        -0.0016222792910411954,
+        -0.33148518204689026
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 1,
+      "componentType": 5126,
+      "count": 1645,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 2,
+      "componentType": 5126,
+      "count": 1645,
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 3,
+      "componentType": 5123,
+      "count": 6090,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 4,
+      "componentType": 5126,
+      "count": 14068,
+      "max": [
+        0.12077084183692932,
+        0.460121750831604,
+        0.16660547256469727
+      ],
+      "min": [
+        -0.09376397728919983,
+        0,
+        -0.27999407052993774
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 5,
+      "componentType": 5126,
+      "count": 14068,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 6,
+      "componentType": 5126,
+      "count": 14068,
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 7,
+      "componentType": 5123,
+      "count": 43704,
+      "type": "SCALAR"
+    }
+  ],
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteLength": 19740,
+      "byteOffset": 0,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 19740,
+      "byteOffset": 19740,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 13160,
+      "byteOffset": 39480,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 12180,
+      "byteOffset": 52640,
+      "target": 34963
+    },
+    {
+      "buffer": 0,
+      "byteLength": 168816,
+      "byteOffset": 64820,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 168816,
+      "byteOffset": 233636,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 112544,
+      "byteOffset": 402452,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 87408,
+      "byteOffset": 514996,
+      "target": 34963
+    }
+  ],
+  "samplers": [
+    {
+      "magFilter": 9729,
+      "minFilter": 9987
+    }
+  ],
+  "buffers": [
+    {
+      "byteLength": 602404,
+      "uri": "industrial_microscope.bin"
+    }
+  ]
+}

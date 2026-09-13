@@ -1,0 +1,159 @@
+{
+  "asset": {
+    "generator": "Khronos glTF Blender I/O v5.1.20",
+    "version": "2.0"
+  },
+  "scene": 0,
+  "scenes": [
+    {
+      "name": "Scene",
+      "nodes": [
+        0
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "mesh": 0,
+      "name": "tool_cart"
+    }
+  ],
+  "materials": [
+    {
+      "doubleSided": true,
+      "name": "tool_cart",
+      "normalTexture": {
+        "index": 0
+      },
+      "pbrMetallicRoughness": {
+        "baseColorTexture": {
+          "index": 1
+        },
+        "metallicRoughnessTexture": {
+          "index": 2
+        }
+      }
+    }
+  ],
+  "meshes": [
+    {
+      "name": "Cylinder_009",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 0,
+            "NORMAL": 1,
+            "TEXCOORD_0": 2
+          },
+          "indices": 3,
+          "material": 0
+        }
+      ]
+    }
+  ],
+  "textures": [
+    {
+      "sampler": 0,
+      "source": 0
+    },
+    {
+      "sampler": 0,
+      "source": 1
+    },
+    {
+      "sampler": 0,
+      "source": 2
+    }
+  ],
+  "images": [
+    {
+      "mimeType": "image/jpeg",
+      "name": "tool_cart_nor_gl",
+      "uri": "textures/tool_cart_nor_gl_1k.jpg"
+    },
+    {
+      "mimeType": "image/jpeg",
+      "name": "tool_cart_diff",
+      "uri": "textures/tool_cart_diff_1k.jpg"
+    },
+    {
+      "mimeType": "image/jpeg",
+      "name": "tool_cart_metal-tool_cart_rough",
+      "uri": "textures/tool_cart_arm_1k.jpg"
+    }
+  ],
+  "accessors": [
+    {
+      "bufferView": 0,
+      "componentType": 5126,
+      "count": 22478,
+      "max": [
+        0.615820586681366,
+        0.9610847234725952,
+        0.36868804693222046
+      ],
+      "min": [
+        -0.6576048135757446,
+        -0.003560006618499756,
+        -0.38494259119033813
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 1,
+      "componentType": 5126,
+      "count": 22478,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 2,
+      "componentType": 5126,
+      "count": 22478,
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 3,
+      "componentType": 5123,
+      "count": 88182,
+      "type": "SCALAR"
+    }
+  ],
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteLength": 269736,
+      "byteOffset": 0,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 269736,
+      "byteOffset": 269736,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 179824,
+      "byteOffset": 539472,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 176364,
+      "byteOffset": 719296,
+      "target": 34963
+    }
+  ],
+  "samplers": [
+    {
+      "magFilter": 9729,
+      "minFilter": 9987
+    }
+  ],
+  "buffers": [
+    {
+      "byteLength": 895660,
+      "uri": "tool_cart.bin"
+    }
+  ]
+}
