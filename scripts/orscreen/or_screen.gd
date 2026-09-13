@@ -180,8 +180,11 @@ func _mount_on(level: Node) -> void:
 	_unmount()
 	var info: Dictionary = game.get("level_info") if game.get("level_info") is Dictionary else {}
 	var spot := find_spot(level, info)
-	_size = spot.size
-	mount = make_monitor(_size)
+	# On the level's own mount (a dark bezel the hospital builds, face ~0.087 m off the wall) only the
+	# glass is added, just in front of it and inside its frame.
+	var on_level_mount: bool = String(spot.how) == "level_info"
+	_size = spot.size - (Vector2(0.12, 0.12) if on_level_mount else Vector2.ZERO)
+	mount = make_monitor(_size, not on_level_mount, 0.095 if on_level_mount else 0.072)
 	mount.name = "ORScreen"
 	level.add_child(mount)
 	mount.global_position = spot.position
@@ -211,8 +214,9 @@ func find_spot(level: Node, info: Dictionary) -> Dictionary:
 		# A floor-level anchor means "on the wall above here".
 		if pos.y < floor_y + 1.0:
 			pos.y = floor_y + CENTRE_HEIGHT
-		var yaw := float(o.get("yaw", 0.0))
-		# The screen faces its local +Z; if that points away from the table, turn it round.
+		# level_info yaws face -Z into the room (Godot forward); this monitor faces its local +Z.
+		var yaw := float(o.get("yaw", 0.0)) + PI
+		# Whatever the convention, never face the wall: if +Z points away from the table, turn round.
 		var n := Vector3(sin(yaw), 0.0, cos(yaw))
 		var to_table := target - pos
 		to_table.y = 0.0
@@ -328,7 +332,7 @@ func _tint_light() -> void:
 
 ## A monitor on its wall bracket, origin on the wall surface at the display's centre, facing +Z.
 ## Children: "Viewport" (SubViewport with "Canvas"), "Screen" (the glass), "Bezel", "Glow".
-static func make_monitor(size: Vector2) -> Node3D:
+static func make_monitor(size: Vector2, bezel_too := true, glass_z := 0.072) -> Node3D:
 	var root := Node3D.new()
 	var tex_h := int(round(TEX_WIDTH * size.y / size.x))
 	var vp := SubViewport.new()
@@ -357,7 +361,10 @@ static func make_monitor(size: Vector2) -> Node3D:
 	bezel.material_override = bmat
 	bezel.position = Vector3(0, 0, 0.035)
 	bezel.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	root.add_child(bezel)
+	if bezel_too:
+		root.add_child(bezel)
+	else:
+		bezel.free()
 
 	var quad := MeshInstance3D.new()
 	quad.name = "Screen"
@@ -369,7 +376,7 @@ static func make_monitor(size: Vector2) -> Node3D:
 	mat.set_shader_parameter("screen_tex", vp.get_texture())
 	mat.set_shader_parameter("lines", float(tex_h) * 0.5)
 	quad.material_override = mat
-	quad.position = Vector3(0, 0, 0.072)
+	quad.position = Vector3(0, 0, glass_z)
 	quad.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	root.add_child(quad)
 
@@ -382,7 +389,7 @@ static func make_monitor(size: Vector2) -> Node3D:
 	ledm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	ledm.albedo_color = Color(0.4, 1.0, 0.5)
 	led.material_override = ledm
-	led.position = Vector3(size.x * 0.5 - 0.02, -size.y * 0.5 - 0.028, 0.072)
+	led.position = Vector3(size.x * 0.5 - 0.02, -size.y * 0.5 - 0.028, glass_z)
 	led.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	root.add_child(led)
 
