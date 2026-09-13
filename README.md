@@ -34,7 +34,11 @@ While operating, the mouse moves the tool and the mouse buttons use it.
 
 ## Playing with friends
 
-One person chooses **Host a shift**; the lobby shows the address to share. Friends type it into **Join**. On the same network that just works; over the internet, forward UDP port 7777 or put everyone on Tailscale.
+**With Steam** (Steam running on every machine): one person chooses **Host with Steam**. That opens a friends-only lobby. Invite friends with **Invite Steam friends** on the pause screen (Esc) or from the Steam overlay (Shift+Tab); they accept the invite, or pick **Join game** on you in their friends list, and land in your shift. Names come from Steam. The Steam button only appears when Steam is running; the game uses Steam's test app id 480 (`steam_appid.txt`) until it has its own.
+
+**By IP** (LAN, Tailscale, port forwarding, or testing on one machine): one person chooses **Host (IP)**; the lobby shows the address to share. Friends type it next to **Join (IP)**. On the same network that just works; over the internet, forward UDP port 7777 or put everyone on Tailscale.
+
+Built and tested for four surgeons. Someone who joins while a shift is running watches through a teammate's eyes and clocks in with everyone at the next shift. If a friend drops out, whatever they carried falls where they stood, and if they were operating, the step waits for someone else to pick it up where they left off. If the host leaves, everyone goes back to the menu.
 
 ## The loop
 
@@ -50,11 +54,12 @@ One person chooses **Host a shift**; the lobby shows the address to share. Frien
 | Command (from this folder, with the console Godot binary) | What it does |
 | --- | --- |
 | `--headless --fixed-fps 60 --path . tools/playtest.tscn -- --god --seed=4242` | A bot plays a whole shift (`--fixed-fps 60` runs it about 12x faster than real time). `--skill=0.0` plays badly, `--ailment=` / `--patient=` pin the case, drop `--god` for a mortal run |
-| `--headless --path . tools/nettest.tscn -- --role=host` then `--role=client` | Real two-process multiplayer test over ENet |
+| `--headless --path . --script tools/nettest_run.gd` | Every multiplayer scenario as real separate processes (host plus up to three clients) on localhost: names, fetch and deliver, surgery, leaving with items or mid-operation, joining mid-shift, host quitting or crashing, a whole shift under simulated lag. `-- --only=deliver,late_join` picks scenarios, `--lag=150 --loss=0.05` puts every client behind a bad network, `--only=bandwidth` measures bytes per second |
+| `--path . -- --net-lag=120 --net-jitter=40 --net-loss=0.03` | Any joining client plays through a simulated bad connection |
 | `--path . tools/minigame_lab.tscn -- --game=saw --patient=seal --bot=1.0` | Run one surgery minigame, interactively or with its bot |
 | `--path . tools/gameshot.tscn` | Poses the real game and saves screenshots to `tools/game_shots/` |
 | `--path . tools/bench.tscn` | Frame-time benchmark across quality presets |
 | `--headless --path . --script tools/mapcheck.gd` | Validates hundreds of generated hospitals |
 | `node tools/gen_audio.mjs` (and `gen_audio_*.mjs`) | Regenerates the synthesized sounds |
 
-Asset licences are recorded in [ASSETS.md](ASSETS.md).
+Asset licences are recorded in [ASSETS.md](ASSETS.md), third-party code (GodotSteam) in [THIRD_PARTY.md](THIRD_PARTY.md).

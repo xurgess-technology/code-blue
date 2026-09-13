@@ -37,11 +37,15 @@ const SCENARIOS := [
 	{"name": "late_join", "scenario": "late_join", "clients": 2, "timeout": 300, "start_after": {2: "[marker] shift_started"}},
 	{"name": "host_quit", "scenario": "host_quit", "clients": 2, "timeout": 180},
 	{"name": "host_kill", "scenario": "host_kill", "clients": 2, "timeout": 180, "may_die": [0]},
-	{"name": "full_shift_lag", "scenario": "full_shift", "clients": 2, "timeout": 900, "lag": true},
+	# Seed 4247 is the seal with an amputation: four steps, the longest case.
+	{"name": "full_shift_lag", "scenario": "full_shift", "clients": 2, "timeout": 900, "lag": true, "extra": ["--seed=4247"]},
 ]
-## Not part of the default run: the bandwidth measurement (4 players, no lag, --stats).
+## Not part of the default run: bandwidth measurements (4 players, no lag, --stats). `bandwidth`
+## is Bob's gunshot (seed 4242, the case the pre-delta numbers were taken on); `bandwidth_amp`
+## is Bob's amputation (seed 4243), four steps including the saw.
 const EXTRA := [
-	{"name": "bandwidth", "scenario": "full_shift", "clients": 3, "timeout": 900, "extra": ["--stats"]},
+	{"name": "bandwidth", "scenario": "full_shift", "clients": 3, "timeout": 900, "extra": ["--stats", "--seed=4242"]},
+	{"name": "bandwidth_amp", "scenario": "full_shift", "clients": 3, "timeout": 900, "extra": ["--stats", "--seed=4243"]},
 ]
 
 var _only: Array = []

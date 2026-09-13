@@ -254,6 +254,55 @@ The main scene opens the guide when the local player presses R while holding the
 looking at it. While it is open the mouse is visible and the player cannot move; in co-op the
 world keeps running.
 
+## Networking (net worker, sweep 2)
+
+`Net` autoload (`scripts/net.gd`):
+
+```gdscript
+Net.host(player_name, port = C.DEFAULT_PORT) -> String       # "" or an error; ENet, synchronous
+Net.join(address, port = C.DEFAULT_PORT, player_name = "") -> String   # answers via joined_ok / join_failed
+Net.host_steam(player_name = "") -> String   # friends-only lobby; answers via host_ready / host_failed
+Net.join_steam(lobby_id, player_name = "") -> String         # answers via joined_ok / join_failed
+Net.invite_friends() -> bool                 # Steam overlay invite dialog for the current lobby
+Net.steam_available() -> bool                # extension loaded AND Steam client running AND init ok
+Net.leave(); Net.is_host(); Net.my_id(); Net.peer_ids(); Net.name_for(id)
+Net.names       # peer id -> display name (Steam personas on the Steam backend)
+Net.local_name  # survives reset(); the name this machine introduces itself with
+Net.backend     # "solo" | "enet" | "steam"
+Net.bytes_sent / Net.bytes_received          # ENet wire bytes, for measurements
+signal roster_changed, joined_ok, join_failed(reason), host_left, host_ready, host_failed(reason),
+       invite_accepted(lobby_id)             # Steam invite / "Join game" / +connect_lobby
+```
+
+- Never reference a GodotSteam class or the `Steam` singleton directly outside `net.gd`: the
+  extension may be missing, and a direct reference breaks parsing.
+- Steam is not initialised in headless runs (tests); `--steam` forces it, `--no-steam` skips it.
+- Lag simulation for a joining ENet client: `--net-lag=MS --net-jitter=MS --net-loss=0..1`, or
+  `Net.set_lag_simulation()` before `join()`.
+
+Replication (networking section of `scripts/game.gd`):
+
+- Host -> each client, 20 Hz, unreliable: acked deltas of a state made of `g` (global fields,
+  with the surgery state flattened into `sg.*` and `ms.*`), `pl` (Player.report_full per peer),
+  `mo` (Monster.report), `it` (WorldItem.report), `ct` (open containers only). Clients ack in
+  `_player_state(ack, Player.report_state())`. Keyframes on demand and every 10 s.
+- **Reports must be quantized and must not share mutable data with the live object** (return
+  copies of arrays and dictionaries), or unchanged things resend forever or changes go unseen.
+  `apply_remote(d)` / `apply_remote_full(d)` always receive the whole merged report, never a
+  partial one. A report may omit a field (WorldItem omits `p`/`q` inside a container).
+- `Player.report_state() -> Array` (client -> host) is positional; see its comment.
+- Anything new that must reach clients: add it to a report (continuous state) or send a reliable
+  `_event` (one-off). Do not add new full-state RPCs.
+- `game.waiting_peers` (peer id -> true, replicated): peers that joined mid-shift. They exist as
+  not-alive Players, the Re-Gen Pod ignores them, and `start_lobby` spawns them. Anything that
+  counts or revives dead players must skip them.
+- A peer leaving: its hands drop where it stood through `_drop_hands_in_place` (no breakage),
+  `surgery.end()` pauses its operation with progress kept.
+
+Tests: `godot --headless --path . --script tools/nettest_run.gd` runs every multi-process
+scenario (`-- --only=a,b`, `--lag=MS --jitter=MS --loss=P`, `--only=bandwidth`). Add a scenario
+for anything that changes what crosses the wire.
+
 ## Design decisions (locked)
 
 - One patient (Bob or the seal) and one ailment (gunshot or amputation) per shift.

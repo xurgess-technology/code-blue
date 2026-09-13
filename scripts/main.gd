@@ -76,6 +76,12 @@ func _ready() -> void:
 	Net.joined_ok.connect(_on_joined)
 	Net.join_failed.connect(_on_join_failed)
 	Net.host_left.connect(func(): _back_to_menu("The host left the game."))
+	# net hooks: Steam hosting, invites, and the pause-menu invite button.
+	menu.chose_host_steam.connect(_start_host_steam)
+	Net.host_ready.connect(_on_steam_hosted)
+	Net.host_failed.connect(func(reason): menu.show_menu(reason))
+	Net.invite_accepted.connect(_on_steam_invite)
+	_build_invite_button()
 	game.notice.connect(func(_t, _s): pass)
 
 	# The medical guide binder. The guide worker's UI when present, the stub otherwise.
@@ -168,6 +174,54 @@ func _start_join(player_name: String, address: String) -> void:
 	var err := Net.join(parsed.address, parsed.port, player_name)
 	if not err.is_empty():
 		menu.show_menu(err)
+
+
+## Steam: names come from Steam personas, so the typed name is not used.
+func _start_host_steam(_player_name: String) -> void:
+	var err := Net.host_steam()
+	if not err.is_empty():
+		menu.show_menu(err)
+
+
+func _on_steam_hosted() -> void:
+	game.start_session(randi())
+	hud.host_info = "Steam lobby open (friends only). Esc, then Invite friends, or invite from the Steam overlay."
+	_enter_game()
+
+
+## Accepted an invite or clicked "Join game" on a friend: leave whatever we were doing and go.
+func _on_steam_invite(lobby: int) -> void:
+	if game.phase != Game.Phase.MENU:
+		_back_to_menu("")
+	menu.set_enabled(false)
+	menu.set_status("Joining your friend's Steam lobby...")
+	var err := Net.join_steam(lobby)
+	if not err.is_empty():
+		menu.show_menu(err)
+
+
+var _invite_button: Button
+
+
+func _build_invite_button() -> void:
+	var layer := CanvasLayer.new()
+	layer.layer = 6
+	add_child(layer)
+	_invite_button = Button.new()
+	_invite_button.text = "Invite Steam friends"
+	_invite_button.custom_minimum_size = Vector2(240, 44)
+	_invite_button.add_theme_font_size_override("font_size", 17)
+	_invite_button.anchor_left = 0.5
+	_invite_button.anchor_right = 0.5
+	_invite_button.anchor_top = 0.4
+	_invite_button.anchor_bottom = 0.4
+	_invite_button.offset_left = -120
+	_invite_button.offset_right = 120
+	_invite_button.offset_top = 130
+	_invite_button.offset_bottom = 174
+	_invite_button.visible = false
+	_invite_button.pressed.connect(func(): Net.invite_friends())
+	layer.add_child(_invite_button)
 
 
 func _on_joined() -> void:
@@ -304,6 +358,7 @@ func _process(_delta: float) -> void:
 	if _fps_label.visible:
 		_fps_label.text = "%d fps  %s" % [Engine.get_frames_per_second(), QUALITY_NAMES[quality]]
 	_update_mouse()
+	_invite_button.visible = game.paused and Net.backend == "steam" and game.phase != Game.Phase.MENU
 	# While operating, the surgery view's camera wins; otherwise whoever we are watching.
 	var surgery_cam: Camera3D = game.surgery.camera() if game.surgery != null and game.phase != Game.Phase.MENU else null
 	if surgery_cam != null:
