@@ -4,15 +4,18 @@ extends "res://scripts/surgery/minigame.gd"
 ## Work plane = the `limb` site: local X runs along the limb toward the hand / flipper tip,
 ## local +Y out of the skin, local Z across the limb. The infection creeps up from +X.
 ##
-## PLACE: the open strap hangs off the cursor across the limb. Slide it along X and click to
-##   cinch. The strap centre must sit BAND_NEAR..BAND_FAR above (toward -X) the infection's
-##   most proximal visible point. On / below the infection or too close: botch, the strap
-##   slips off, and a faint guide band appears. Further above than the band: allowed, lower q.
+## Nothing to read off a gauge: the limb and the strap show what is right.
+##
+## PLACE: the open strap hangs off the cursor across the limb, with a glow on the skin under it:
+##   green where it will hold (a few cm above the infection), amber further up (holds, but less
+##   well), red on or right next to the infection. Click to cinch. Cinching on red botches and
+##   the strap slips off.
 ## CRANK: circle the cursor around the windlass rod. Clockwise tightens, counter-clockwise
-##   loosens; one cursor circle = a quarter turn of the rod, a ratchet click every eighth of a
-##   circle. Pressure rises nonlinearly with rod turns. Past the good band the limb goes purple
-##   and vitals drain; under it the distal pulse keeps going. Hold in the band ~2 s, then
-##   right-click (or click the red clip) to lock.
+##   loosens; a ratchet click every eighth of a circle. The pulse probe below the strap blinks
+##   red and beeps while blood still gets past; tighten until it stops and glows green. Past
+##   that the limb goes purple, the strap creaks, the probe flashes purple, and vitals drain.
+##   Stop cranking once the probe is green and the windlass locks itself after HOLD_TIME (a
+##   right-click or a click on the red clip locks it at once).
 ##
 ## Result: {"tourniquet": q}, q = placement quality * pressure quality * hold factor.
 
@@ -23,7 +26,7 @@ enum Stage { PLACE, CRANK, LOCKED }
 # -- placement ---------------------------------------------------------------------------
 const STRAP_W := 0.038           # a real CAT strap is 3.8 cm wide
 const BAND_CENTER := 0.05        # ideal strap centre, metres above the infection front
-const BAND_HALF := 0.02          # 3..7 cm at difficulty 1, narrower later
+const BAND_HALF := 0.03          # 2..8 cm at difficulty 1, narrower later
 const BAND_HALF_MIN := 0.008
 const INFECT_FRONT_MIN := 0.03   # infection front sits this far distal of the site marker..
 const INFECT_FRONT_MAX := 0.055  # ..to this (the bodies paint their own infection from ~5 cm on)
@@ -40,9 +43,10 @@ const P_REF := 450.0             # mmHg at P_REF_TURNS
 const P_EXP := 2.4
 const P_GAUGE_MAX := 500.0
 const GOOD_CENTER := 270.0       # mmHg
-const GOOD_HALF := 30.0          # at difficulty 1
+const GOOD_HALF := 45.0          # at difficulty 1
 const GOOD_HALF_MIN := 12.0
-const HOLD_TIME := 2.0
+const HOLD_TIME := 1.2           # seconds in the band, then it locks itself once you stop cranking
+const STILL_TIME := 0.35         # the rod has not moved for this long: you stopped cranking
 const OVER_RATE := 4.0           # vitals per second while over the band
 const OVER_CHUNK := 0.5          # emitted in chunks of this many seconds
 const TOO_LOOSE_MARGIN := 90.0   # locking this far under the band is refused (botch)
@@ -75,6 +79,7 @@ var _crank_wait := 0.0
 var _jolt_t := 0.0
 var _over_acc := 0.0
 var _lock_t := -1.0
+var _still_t := 0.0
 var _last_hint := ""
 var _hint_t := 0.0
 
@@ -108,6 +113,8 @@ var _decal_infect: Decal
 var _decal_blanch: Decal
 var _decal_purple: Decal
 var _decal_guide: Decal
+var _place_glow: Decal
+var _beat_seen := -1
 var _guide_lines: Node3D
 var _guide_mat: StandardMaterial3D
 var _strap_root: Node3D
@@ -239,6 +246,20 @@ func distance_above_infection(x: float) -> float:
 	return infect_front - x
 
 
+const PLACE_GOOD := 0
+const PLACE_BAD := 1
+const PLACE_FAR := 2
+
+## Whether a strap centred at x would hold: on or too near the infection, in the band, or above it.
+func placement_at(x: float) -> int:
+	var d := distance_above_infection(x)
+	if d < band_center - band_half - 0.004:
+		return PLACE_BAD
+	if d <= band_center + band_half:
+		return PLACE_GOOD
+	return PLACE_FAR
+
+
 ## The shake after a stir must not crank the windlass: drop the orbit reference until it passes.
 func on_jolt(_offset: Vector2, _strength: float, duration: float) -> void:
 	_jolt_t = duration
@@ -269,7 +290,7 @@ func handle_cursor(p: Vector2, buttons: int, delta: float) -> void:
 				_orbit_ref = INF
 				return
 			_crank(p, delta)
-			if (pressed & BUTTON_SECONDARY) or ((pressed & BUTTON_PRIMARY) and p.distance_to(Vector2(strap_x + CLIP_OFFSET, 0.0)) <= CLIP_PICK_R):
+			if stage == Stage.CRANK and (pressed & BUTTON_SECONDARY) or stage == Stage.CRANK and ((pressed & BUTTON_PRIMARY) and p.distance_to(Vector2(strap_x + CLIP_OFFSET, 0.0)) <= CLIP_PICK_R):
 				_try_lock()
 		Stage.LOCKED:
 			_lock_t += delta
@@ -314,12 +335,19 @@ func _crank(p: Vector2, delta: float) -> void:
 			var da := wrapf(a - _orbit_ref, -PI, PI)
 			if absf(da) <= MAX_STEP_ANGLE:
 				rod_angle = clampf(rod_angle + da * 0.25, 0.0, TURNS_MAX * TAU)
+				if absf(da) > 0.03:
+					_still_t = 0.0
 		_orbit_ref = a
 	else:
 		_orbit_ref = INF
+	_still_t += delta
 	pressure = pressure_at(rod_angle / TAU)
 	if pressure >= good_min and pressure <= good_max:
 		hold = minf(hold + delta, HOLD_TIME + 1.0)
+		# The pulse is gone and the hand has stopped: the windlass goes into its clip.
+		if hold >= HOLD_TIME and _still_t >= STILL_TIME:
+			_try_lock()
+			return
 	else:
 		hold = 0.0
 	if pressure > good_max:
@@ -378,32 +406,19 @@ func hud_state() -> Dictionary:
 	match stage:
 		Stage.PLACE:
 			if slip > 0.0:
-				hint = "It slipped off. It has to go above the infection, in the green band."
-			elif guide:
-				hint = "Slide the strap into the green band, %d to %d cm above the infection, and click to cinch." % [
-					int(round((band_center - band_half) * 100.0)), int(round((band_center + band_half) * 100.0))]
+				hint = "It slipped off. Put it higher, above the infection."
 			else:
-				hint = "Slide the strap along the limb and click to cinch it a few centimetres above the infection."
+				hint = "Slide the strap to where the skin glows green and click."
 		Stage.CRANK:
-			if _crank_wait > 0.0:
-				hint = "Strap cinched. Now turn the windlass."
-			elif pressure > good_max:
-				hint = "Too tight! The limb is going purple. Circle counter-clockwise to loosen."
+			if pressure > good_max:
+				hint = "Too tight! Circle the other way to loosen."
 			elif pressure >= good_min:
-				if hold < HOLD_TIME:
-					hint = "Good pressure. Hold it there... %.1f s" % maxf(0.0, HOLD_TIME - hold)
-				else:
-					hint = "Pulse gone. Right-click (or click the red clip) to lock the windlass."
-			elif pressure > good_min * 0.35:
-				hint = "Distal pulse still there. Keep circling clockwise around the rod."
+				hint = "The pulse has stopped. Let go of the rod."
 			else:
-				hint = "Circle the cursor clockwise around the red rod to tighten (counter-clockwise loosens)."
+				hint = "Circle clockwise round the red rod until the pulse stops."
 		Stage.LOCKED:
-			hint = "Locked. Tourniquet %d%%." % int(round(quality * 100.0))
-	return {"title": title, "hint": hint, "progress": progress, "gauges": [
-		{"label": "Pressure", "value": pressure, "min": 0.0, "max": P_GAUGE_MAX, "good_min": good_min, "good_max": good_max},
-		{"label": "Distal pulse", "value": pulse_strength(), "min": 0.0, "max": 1.0, "good_min": 0.0, "good_max": 0.1},
-	]}
+			hint = "Locked."
+	return {"title": title, "hint": hint, "progress": progress, "gauges": []}
 
 
 func net_state() -> Dictionary:
@@ -680,6 +695,9 @@ func _build() -> void:
 			red = m.duplicate()
 	model.free()
 	_strap_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	# While it hangs, the strap glows the colour of where it would go: green, amber or red.
+	_strap_mat.emission_enabled = true
+	_strap_mat.emission_energy_multiplier = 0.0
 
 	# The infection, blanching, purple and guide are decals projected down onto the real limb,
 	# so they follow whatever shape the patient's arm or flipper has.
@@ -815,6 +833,10 @@ func _build_decals() -> void:
 	_decal_purple.modulate = Color(0.36, 0.1, 0.46)
 	_decal_guide = _decal(_soft_texture(true), Vector3(band_half * 2.0 + 0.004, h, wz * 0.85), Vector3(infect_front - band_center, 0.03 - h * 0.5, 0), 3)
 	_decal_guide.modulate = Color(0.05, 0.9, 0.3, 0.0)
+	_place_glow = _decal(_soft_texture(false), Vector3(STRAP_W + 0.06, h, wz * 0.95), Vector3(0, 0.03 - h * 0.5, 0), 4)
+	_place_glow.texture_emission = _place_glow.texture_albedo
+	_place_glow.emission_energy = 3.0
+	_place_glow.visible = false
 	_decal_guide.emission_energy = 2.5
 	_decal_guide.texture_emission = _decal_guide.texture_albedo
 	# Plus two unshaded marker lines floating just over the skin, readable under any light.
@@ -1075,50 +1097,64 @@ func _update_visuals(delta: float) -> void:
 	_twist.position = Vector3(0, -lift * 0.5, 0)
 	_twist.visible = _stand > 0.05 or _lock_vis > 0.0
 
-	# Gauge and tube appear once the strap is round the limb.
+	# The pulse probe appears once the strap is round the limb; there is no pressure dial.
 	var show_crank := stage != Stage.PLACE and _wrap > 0.6
-	_gauge.visible = show_crank
-	_tube.visible = show_crank
+	_gauge.visible = false
+	_tube.visible = false
 	_puck.visible = show_crank
 	if show_crank:
-		var gz := _sleeve_side() + 0.055
-		_gauge.position = Vector3(strap_x, -half_up * 0.35, gz)
-		_needle.rotation = Vector3(0, -_gauge_angle(pressure), 0)
-		_gauge_label.text = "%d mmHg" % int(round(pressure))
-		var a := _section_point(PI * 0.5, 0.006)
-		var from := Vector3(strap_x, a.y, a.x)
-		var to := _gauge.position + Vector3(0, 0, -0.028)
-		var mid := (from + to) * 0.5
-		var dir := to - from
-		_tube.transform = Transform3D(Basis(Quaternion(Vector3.UP, dir.normalized())).scaled_local(Vector3(1, dir.length(), 1)), mid)
 		# Pulse probe below the strap, on the near side of the limb.
 		var th := -0.45
 		var sp := _section_point(th, 0.0)
 		var nrm := _section_normal(th)
 		_puck.position = Vector3(strap_x + 0.05, sp.y, sp.x)
 		_puck.rotation = Vector3(atan2(nrm.x, nrm.y), 0, 0)
+		_puck.scale = Vector3.ONE * 1.5
 		var pulse := pulse_strength()
 		var beat := fmod(_t * 1.25, 1.0)
 		var env := exp(-beat * 7.0)
-		var lit := pulse * env
-		_led_mat.albedo_color = Color(0.25, 0.08, 0.08).lerp(Color(1.0, 0.2, 0.15), lit) if pulse > 0.02 else Color(0.22, 0.22, 0.24)
 		var rs := 0.012 + beat * 0.03
 		_ring.scale = Vector3(rs, 0.001, rs)
-		_ring_mat.albedo_color = Color(1.0, 0.3, 0.25, pulse * (1.0 - beat) * 0.8)
+		if pressure > good_max:
+			# Too tight: a fast purple warning.
+			var fl := 0.5 + 0.5 * sin(_t * 16.0)
+			_led_mat.albedo_color = Color(0.3, 0.1, 0.35).lerp(Color(0.85, 0.3, 1.0), fl)
+			_ring_mat.albedo_color = Color(0.8, 0.3, 1.0, 0.6 * fl)
+		elif pulse <= 0.02:
+			# No pulse past the strap: steady green.
+			_led_mat.albedo_color = Color(0.2, 1.0, 0.35)
+			_ring_mat.albedo_color = Color(0.2, 1.0, 0.35, 0.0)
+		else:
+			# Blood still getting past: a red blink and a ring on every beat.
+			_led_mat.albedo_color = Color(0.25, 0.08, 0.08).lerp(Color(1.0, 0.2, 0.15), pulse * env)
+			_ring_mat.albedo_color = Color(1.0, 0.3, 0.25, pulse * (1.0 - beat) * 0.8)
 		# Limb shader: blanch as blood stops, purple past the band.
 		var hx := _decal_blanch.size.x
 		var dpos := Vector3(strap_x + STRAP_W * 0.5 + 0.002 + hx * 0.5, _decal_infect.position.y, 0)
 		_decal_blanch.position = dpos
 		_decal_purple.position = dpos
 		_decal_blanch.modulate.a = 0.6 * smoothstep(good_min * 0.3, good_min, pressure) * we
-		_decal_purple.modulate.a = 0.6 * smoothstep(good_max, good_max + 70.0, pressure) * we
+		_decal_purple.modulate.a = 0.75 * smoothstep(good_max, good_max + 50.0, pressure) * we
 	_decal_blanch.visible = show_crank
 	_decal_purple.visible = show_crank
 	_guide_a = move_toward(_guide_a, 1.0 if (guide and stage == Stage.PLACE) else 0.0, maxf(delta, 0.0) * 2.5)
-	_decal_guide.modulate.a = _guide_a
+	_decal_guide.modulate.a = _guide_a * 0.6
 	_decal_guide.visible = _guide_a > 0.01
 	_guide_mat.albedo_color.a = _guide_a * 0.85
 	_guide_lines.visible = _guide_a > 0.01
+	# The glow under the hanging strap: where it would hold.
+	var placing := stage == Stage.PLACE and slip <= 0.0
+	_place_glow.visible = placing
+	_strap_mat.emission_energy_multiplier = 0.0
+	if placing:
+		var col := Color(0.1, 1.0, 0.3)
+		match placement_at(_vis_x):
+			PLACE_BAD: col = Color(1.0, 0.1, 0.05)
+			PLACE_FAR: col = Color(1.0, 0.7, 0.05)
+		_place_glow.position = Vector3(_vis_x, _decal_guide.position.y, 0)
+		_place_glow.modulate = Color(col.r, col.g, col.b, 0.75 + 0.2 * sin(_t * 5.0))
+		_strap_mat.emission = col
+		_strap_mat.emission_energy_multiplier = 0.55 + 0.25 * sin(_t * 5.0)
 
 	# Crank aids.
 	var orbit_on := stage == Stage.CRANK and _stand > 0.5
@@ -1162,6 +1198,15 @@ func _sounds(delta: float) -> void:
 	if cr > _snd_creak and stage == Stage.CRANK:
 		_audio("surgery_tourniquet_creak", at, -8.0 + 4.0 * clampf(pressure / P_GAUGE_MAX, 0.0, 1.0), 0.08)
 	_snd_creak = cr
+	# The pulse probe beeps with every beat that still gets past the strap, and keeps creaking
+	# when the strap is far too tight.
+	var beat_i := int(floor(_t * 1.25))
+	if beat_i != _beat_seen and stage == Stage.CRANK and _wrap > 0.6:
+		if pulse_strength() > 0.02:
+			_audio("surgery_beep", at, -16.0 + 8.0 * pulse_strength())
+		elif pressure > good_max:
+			_audio("surgery_tourniquet_creak", at, -4.0, 0.1)
+	_beat_seen = beat_i
 
 
 func _audio(cue: String, at, vol := 0.0, jitter := 0.0) -> void:
