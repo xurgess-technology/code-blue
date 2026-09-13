@@ -11,7 +11,8 @@ const PLAYER_HEIGHT := 1.8
 
 const WALK_SPEED := 3.4
 const SPRINT_SPEED := 5.6
-const CARRY_CAP := 2
+## Hand slots (inventory worker, sweep 2): bulky loot takes two of them.
+const CARRY_CAP := 4
 const SURGERY_TABLE_RANGE := 3.2
 const INTERACT_RANGE := 2.2
 const SHOVE_RANGE := 2.6

@@ -18,6 +18,9 @@ var state: int = State.LOOSE
 var container_id: String = ""
 var slot: int = 0
 var anchor: int = -1
+## Sell value of the whole stack in dollars (loot only; 0 for everything else). Rolled by the
+## loot spawner, carried into a hand slot as "v" and back out when dropped.
+var value: int = 0
 
 var _visual: Node3D
 var _shape: CollisionShape3D
@@ -42,7 +45,7 @@ func _build() -> void:
 	freeze = true
 	freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
 	continuous_cd = true
-	mass = 0.4
+	mass = 3.0 if Items.is_bulky(kind) else 0.4
 	gravity_scale = 1.0
 	var mat := PhysicsMaterial.new()
 	mat.friction = 0.9
@@ -62,7 +65,7 @@ func _build() -> void:
 func _rebuild_visual() -> void:
 	if _visual != null:
 		_visual.queue_free()
-	_visual = ItemModels.make(kind, count)
+	_visual = ItemModels.make_tinted(kind, count)
 	add_child(_visual)
 	var fp := ItemModels.footprint(kind)
 	# A slightly generous box so the aim ray finds small things like vials easily.
@@ -152,9 +155,11 @@ func interact_prompt(player) -> String:
 		var ct = g.find_interactable(container_id) if g != null else null
 		if ct != null and ct.has_method("is_open") and not ct.is_open():
 			return ""
-	var label := Items.display_name(kind) if count <= 1 else "%d %s" % [count, Items.def(kind).get("short", Items.display_name(kind))]
+	var label := Items.stack_label(kind, count)
+	if value > 0:
+		label += " ($%d)" % value
 	if player != null and player.has_method("can_take") and not player.can_take(kind):
-		return "!Hands full"
+		return "!Needs two free hands" if Items.is_bulky(kind) else "!Hands full"
 	return "Take %s" % label
 
 
@@ -176,6 +181,8 @@ func interact(player) -> void:
 ## slot on every machine, so their transform is not sent at all.
 func report() -> Dictionary:
 	var d := {"id": item_id, "k": kind, "n": count, "st": state, "ct": container_id, "sl": slot}
+	if value > 0:
+		d["v"] = value
 	if state != State.IN_CONTAINER:
 		var q := global_basis.get_rotation_quaternion()
 		d["p"] = global_position.snappedf(0.005)
@@ -189,6 +196,7 @@ func apply_remote(s: Dictionary) -> void:
 		_container_node = null
 	container_id = String(s.ct)
 	slot = int(s.sl)
+	value = int(s.get("v", 0))
 	set_count(int(s.n))
 	if not s.has("p"):
 		return   # in a container: _physics_process follows the slot

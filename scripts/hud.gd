@@ -43,6 +43,8 @@ func _draw() -> void:
 		_draw_prompt(w, h, me)
 	if me != null and me.alive and not in_surgery:
 		_draw_hands(w, h, me)
+	if me != null and not in_surgery:
+		_draw_money(w, h, me)
 	if me != null and not me.alive:
 		_draw_dead_banner(w)
 	_draw_holds(w, h)
@@ -212,27 +214,111 @@ func _draw_prompt(w: float, h: float, me) -> void:
 		_text(Vector2(0, y), "[R] Read the medical guide", 13, Color("c9d1d9"), HORIZONTAL_ALIGNMENT_CENTER, w)
 
 
+const SLOT_TEAL := Color(0.3, 0.9, 0.82)
+const SLOT_GOLD := Color(1.0, 0.74, 0.28)
+
+
+## The slot bar (inventory, sweep 2): four compact boxes at the bottom centre. A surgical stack
+## has a teal edge, loot a gold one with its value; a bulky stack's second slot is hatched in
+## gold and bridged to its stack. The selected stack (both halves when bulky) is outlined.
 func _draw_hands(w: float, h: float, me) -> void:
-	var box := Vector2(170, 46)
-	var gap := 10.0
-	var x0 := w * 0.5 - box.x - gap * 0.5
-	var y := h - 70.0
-	for i in 2:
-		var s: Dictionary = me.slots[i]
-		var r := Rect2(x0 + i * (box.x + gap), y, box.x, box.y)
-		var sel: bool = i == me.selected
-		draw_rect(r, Color(0, 0, 0, 0.62 if sel else 0.42))
-		draw_rect(r, Color("f0e6c8") if sel else Color(0.5, 0.55, 0.6, 0.6), false, 2.0 if sel else 1.0)
-		_text(r.position + Vector2(8, 16), "%d" % (i + 1), 11, Color("8a9aa0"))
-		if s.kind == "":
-			_text(r.position + Vector2(0, 31), "empty", 13, Color("666666"), HORIZONTAL_ALIGNMENT_CENTER, box.x)
+	var n: int = me.slots.size()
+	var box := Vector2(112, 40)
+	var gap := 6.0
+	var x0 := w * 0.5 - (box.x * n + gap * (n - 1)) * 0.5
+	var y := h - 66.0
+	var sel_head: int = me.selected_head()
+	var rects := []
+	for i in n:
+		rects.append(Rect2(x0 + i * (box.x + gap), y, box.x, box.y))
+	# Bridges between a bulky stack and its second half, drawn under the boxes.
+	for i in n:
+		var t: int = me.tail_of(i)
+		if t < 0 or String(me.slots[i].kind) == "":
+			continue
+		var a: Rect2 = rects[mini(i, t)]
+		var b: Rect2 = rects[maxi(i, t)]
+		if absi(i - t) == 1:
+			draw_rect(Rect2(a.end.x - 2, a.position.y + 12, b.position.x - a.end.x + 4, box.y - 24), Color(SLOT_GOLD, 0.55))
 		else:
-			var label: String = Items.display_name(s.kind)
-			if int(s.count) > 1:
-				label = "%s  x%d" % [label, int(s.count)]
-			_text(r.position + Vector2(0, 31), label, 14, Color("eeeeee"), HORIZONTAL_ALIGNMENT_CENTER, box.x)
-	if me.slots[me.selected].kind != "":
-		_text(Vector2(0, y + box.y + 16), "[G] set down   [1][2] switch hands", 11, Color(0.6, 0.6, 0.6, 0.8), HORIZONTAL_ALIGNMENT_CENTER, w)
+			var ya := a.position.y - 4.0
+			draw_line(Vector2(a.get_center().x, ya), Vector2(b.get_center().x, ya), Color(SLOT_GOLD, 0.75), 2.0)
+			draw_line(Vector2(a.get_center().x, ya), Vector2(a.get_center().x, a.position.y), Color(SLOT_GOLD, 0.75), 2.0)
+			draw_line(Vector2(b.get_center().x, ya), Vector2(b.get_center().x, b.position.y), Color(SLOT_GOLD, 0.75), 2.0)
+	for i in n:
+		var s: Dictionary = me.slots[i]
+		var r: Rect2 = rects[i]
+		var head: int = me.head_of(i)
+		var sel: bool = head == sel_head
+		var kind := String(me.slots[head].kind)
+		draw_rect(r, Color(0, 0, 0, 0.72 if sel else 0.55))
+		var accent := Color(0.5, 0.55, 0.6, 0.55)
+		if kind != "" and Items.is_surgical(kind):
+			accent = SLOT_TEAL
+		elif kind != "" and Items.is_loot(kind):
+			accent = SLOT_GOLD
+		if kind != "":
+			draw_rect(Rect2(r.position.x, r.end.y - 3, r.size.x, 3), Color(accent, 0.85))
+		draw_rect(r, Color("f0e6c8") if sel else Color(0.5, 0.55, 0.6, 0.5), false, 2.0 if sel else 1.0)
+		_text(r.position + Vector2(5, 13), "%d" % (i + 1), 10, Color("8a9aa0"))
+		if s.has("of"):
+			# Second half of a bulky stack: hatched.
+			for k in 6:
+				var x := r.position.x + 12.0 + k * 16.0
+				draw_line(Vector2(x, r.end.y - 5), Vector2(x + 10, r.position.y + 5), Color(SLOT_GOLD, 0.18), 1.5)
+			var head_name := _fit(Items.display_name(kind), 11, box.x - 10)
+			_text(r.position + Vector2(0, 22), head_name, 11, Color(SLOT_GOLD, 0.75), HORIZONTAL_ALIGNMENT_CENTER, box.x)
+			_text(r.position + Vector2(0, 35), "(2nd slot)", 10, Color(0.75, 0.75, 0.75, 0.7), HORIZONTAL_ALIGNMENT_CENTER, box.x)
+			continue
+		if kind == "":
+			continue
+		var label: String = Items.def(kind).get("short", Items.display_name(kind)) if int(s.count) > 1 else Items.display_name(kind)
+		label = _fit(label, 12, box.x - 10)
+		_text(r.position + Vector2(0, 25), label, 12, Color("eeeeee"), HORIZONTAL_ALIGNMENT_CENTER, box.x)
+		if int(s.count) > 1:
+			_text(r.position + Vector2(0, 37), "x%d" % int(s.count), 10, Color("c9d1d9"), HORIZONTAL_ALIGNMENT_CENTER, box.x)
+		elif int(s.get("v", 0)) > 0:
+			_text(r.position + Vector2(0, 37), "$%d" % int(s.v), 10, Color(SLOT_GOLD, 0.95), HORIZONTAL_ALIGNMENT_CENTER, box.x)
+		if int(s.count) > 1 and int(s.get("v", 0)) > 0:
+			_text(r.position + Vector2(box.x - 34, 13), "$%d" % int(s.v), 10, Color(SLOT_GOLD, 0.95))
+
+
+## Shorten a label with an ellipsis until it fits `width` pixels at `size_px`.
+func _fit(s: String, size_px: int, width: float) -> String:
+	if _font.get_string_size(s, HORIZONTAL_ALIGNMENT_LEFT, -1, size_px).x <= width:
+		return s
+	while s.length() > 3 and _font.get_string_size(s + "..", HORIZONTAL_ALIGNMENT_LEFT, -1, size_px).x > width:
+		s = s.substr(0, s.length() - 1)
+	return s + ".."
+
+
+## Team money, small, bottom right: only near the sell bin, the shop or the pile, or for a few
+## seconds after it changed (with the change beside it).
+func _draw_money(w: float, h: float, me) -> void:
+	if game.economy == null or not game.economy.money_visible_for(me):
+		return
+	var text := "$%s" % _grouped(int(game.money))
+	var size_px := 24
+	var tw := _font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size_px).x
+	var x := w - tw - 22.0
+	var y := h - 26.0
+	draw_rect(Rect2(x - 10, y - 25, tw + 20, 34), Color(0, 0, 0, 0.62))
+	_text(Vector2(x, y), text, size_px, SLOT_GOLD)
+	var d: int = int(game.economy.last_delta)
+	if game.economy.flash > 0.0 and d != 0:
+		var a := clampf(game.economy.flash / 1.0, 0.0, 1.0)
+		var dt := ("+$%s" if d > 0 else "-$%s") % _grouped(absi(d))
+		var dw := _font.get_string_size(dt, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
+		_text(Vector2(w - dw - 22.0, y - 34), dt, 16, Color(Color("5cff8a") if d > 0 else Color("ff8a6a"), a))
+
+
+static func _grouped(v: int) -> String:
+	var s := str(absi(v))
+	var out := ""
+	while s.length() > 3:
+		out = "," + s.substr(s.length() - 3) + out
+		s = s.substr(0, s.length() - 3)
+	return ("-" if v < 0 else "") + s + out
 
 
 func _draw_dead_banner(w: float) -> void:
@@ -308,7 +394,7 @@ func _draw_hint(w: float, h: float) -> void:
 	if _hint_timer <= 0.0:
 		return
 	_text(Vector2(0, h - 8),
-		"WASD move   MOUSE look   SHIFT sprint   F light   E use   G set down   1/2 hands   R read guide   Q shove   ESC pause",
+		"WASD move   MOUSE look   SHIFT sprint   F light   E use   G set down   1-4 slots   R read guide   Q shove   ESC pause",
 		12, Color(0.67, 0.67, 0.67, minf(1.0, _hint_timer / 2.0)), HORIZONTAL_ALIGNMENT_CENTER, w)
 
 

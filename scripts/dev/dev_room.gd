@@ -35,6 +35,7 @@ const BotBrain := preload("res://scripts/dev/dev_bot.gd")
 const GunFx := preload("res://scripts/dev/dev_gun.gd")
 const PlayerScript := preload("res://scripts/player.gd")
 const WorldItemScript := preload("res://scripts/world_item.gd")
+const LootTable := preload("res://scripts/economy/loot_table.gd")
 
 var game: Node = null
 
@@ -468,6 +469,12 @@ func _apply_request(sender: int, action: String, a: Dictionary) -> void:
 				remove_bot(id)
 		"order":
 			order_bot(int(a.get("id", 0)), String(a.get("order", "stay")), String(a.get("item", "")), String(a.get("to", "")), sender)
+		"money":
+			# inventory: the panel's money buttons (amount may be negative) and "reset"
+			if bool(a.get("reset", false)):
+				game.reset_money()
+			else:
+				game.add_money(int(a.get("amount", 1000)), "dev:panel")
 		"revive_all":
 			for p in game.players.values():
 				if not p.alive:
@@ -499,30 +506,38 @@ func dispense(p: Node, kind: String, count: int, at: Vector3) -> void:
 		state_changed.emit()
 		return
 	if not p.can_take(kind):
-		game.tell(p, "Your hands are full.")
+		game.tell(p, "That needs two free hands." if Items.is_bulky(kind) else "Your hands are full.")
 		return
 	var it = game._spawn_item(kind, maxi(1, count), Transform3D(Basis(), at), WorldItemScript.State.LOOSE)
+	it.value = loot_value(kind, maxi(1, count))
 	game.pickup_item(p, it)
+
+
+## A dispensed or spawned stack of loot is worth what it would be one wing deep (0 otherwise).
+static func loot_value(kind: String, count: int) -> int:
+	if not Items.is_loot(kind):
+		return 0
+	var v := 0
+	for i in count:
+		v += LootTable.roll_value(kind, 1, 0.5)
+	return v
 
 
 ## A bot hands the stack in `hand` to another player, straight into a free (or matching) hand.
 func hand_over(from: Node, to: Node, hand: int) -> bool:
 	if not is_host():
 		return false
+	hand = from.head_of(hand)  # inventory: a bulky stack hands over from either of its slots
 	var s: Dictionary = from.slots[hand]
 	if s.kind == "":
 		return false
-	var i: int = to.slot_for(s.kind)
-	if i < 0:
+	if to.slot_for(s.kind) < 0:
 		from.selected = hand
 		game.drop_selected(from)
 		game.tell(to, "%s put %s at your feet." % [from.player_name, Items.display_name(s.kind)], 2.5)
 		return true
-	if to.slots[i].kind == s.kind:
-		to.slots[i].count += int(s.count)
-	else:
-		to.slots[i] = {"kind": s.kind, "count": int(s.count)}
-	from.slots[hand] = {"kind": "", "count": 0}
+	to.take_into(String(s.kind), int(s.count), int(s.get("v", 0)))
+	from.clear_slot(hand)
 	game._sound("pickup", to.global_position)
 	game.tell(to, "%s handed you %s." % [from.player_name, Items.display_name(s.kind)], 2.5)
 	return true
@@ -533,6 +548,7 @@ func _spawn_item(who: Node, kind: String, count: int) -> void:
 		return
 	var at := _in_front_of(who, 1.4) + Vector3.UP * 1.2
 	var it = game._spawn_item(kind, clampi(count, 1, 20), Transform3D(Basis(), at), WorldItemScript.State.LOOSE)
+	it.value = loot_value(kind, clampi(count, 1, 20))
 	it.toss(Transform3D(Basis(), at), Vector3.UP * 1.0)
 
 

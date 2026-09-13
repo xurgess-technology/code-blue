@@ -20,6 +20,8 @@ extends Node
 ##   host_quit        the host leaves: clients return to the menu with a message
 ##   host_kill        the host process dies without saying goodbye: same, through the ENet timeout
 ##   full_shift       host + N clients play a whole shift to the win screen (the runner adds lag)
+##   economy          client 1 picks up loot, sells it and buys gold bars; the host and client 2
+##                    see the money and the pile; client 3 joins afterwards and sees the pile too
 ##
 ## Every process exits 0 on success and 1 on failure, printing "PASS:" or "FAIL:" and why.
 ## Coordination between processes travels over the game's own connection (the _msg RPC).
@@ -27,6 +29,7 @@ extends Node
 ## `--stats` prints bandwidth: bytes each process sent per game second while the shift ran.
 
 const NAMES := ["Host", "Álvaro", "Bea O'Neil", "Surgeon Chris"]
+const EconomyScript := preload("res://scripts/economy/economy.gd")
 
 var role := "host"
 var scenario := "deliver"
@@ -103,6 +106,7 @@ func _run() -> void:
 		"late_join": await _sc_late_join()
 		"host_quit", "host_kill": await _sc_host_quit()
 		"full_shift": await _sc_full_shift()
+		"economy": await _sc_economy()
 		_: _end(false, "unknown scenario " + scenario)
 
 
@@ -217,7 +221,7 @@ func _sc_leave_items():
 			return
 		var leaver: int = _peer_of(1)
 		var p = game.players[leaver]
-		p.slots = [{"kind": "gauze", "count": 3}, {"kind": "anesthetic", "count": 2}]
+		p.slots = [{"kind": "gauze", "count": 3}, {"kind": "anesthetic", "count": 2}, {"kind": "", "count": 0}, {"kind": "", "count": 0}]
 		var before := {"gauze": game.supply_count("gauze"), "anesthetic": game.supply_count("anesthetic")}
 		_send("leave", {"peer": leaver})
 		if not await _until(func(): return _count_msgs("standing") > 0, 40.0, "the leaver to take position"):
@@ -443,6 +447,93 @@ func _sc_full_shift():
 	await _finish_together("shift %d won with vitals %.0f" % [game.shift, game.vitals])
 
 
+## Inventory (sweep 2): selling and buying replicate, and a late joiner sees the gold pile.
+func _sc_economy():
+	const SELL := {"laptop": 250, "gold_watch": 300}
+	const BARS := 3
+	if role == "host":
+		if not await _until(func(): return Net.names.size() >= 3 and game.players.size() >= 3 and game.economy.placed(), 90.0, "clients 1 and 2"):
+			return
+		await _wall_wait(1.0)
+		var host_p := _me()
+		var ids := []
+		var k := 0
+		for kind in SELL.keys():
+			var at: Vector3 = game._floor_at(host_p.global_position + Vector3(1.2 + k * 0.8, 0.0, 0.6))
+			var it = game._spawn_item(kind, 1, Transform3D(Basis(), at + Vector3.UP * 0.05), WorldItem.State.LOOSE)
+			it.value = int(SELL[kind])
+			ids.append({"id": it.item_id, "kind": kind})
+			k += 1
+		_send("loot", {"items": ids})
+		var total := 0
+		for kind in SELL.keys():
+			total += int(SELL[kind])
+		var spent := 0
+		for i in BARS:
+			spent += EconomyScript.bar_price(i)
+		var want_money := total - spent
+		if not await _until(func(): return game.gold_bars >= BARS, 120.0, "client 1 to sell and buy"):
+			return
+		await _wall_wait(0.5)
+		if game.money != want_money or game.gold_bars != BARS:
+			return _end(false, "host has $%d and %d bars, expected $%d and %d" % [game.money, game.gold_bars, want_money, BARS])
+		_say("host: $%d, %d bars" % [game.money, game.gold_bars])
+		_send("check", {"money": want_money, "bars": BARS})
+		print("[marker] economy_bought")
+		if not await _until(func(): return _count_msgs("late_seen") > 0, 120.0, "the late joiner to see the pile"):
+			return
+		await _finish_together("client sold $%d of loot and bought %d bars; everyone sees $%d and the pile" % [total, BARS, want_money])
+		return
+	if index == 3:
+		# The late joiner: arrives after the purchase, must see the money and the whole pile.
+		if not await _until(func(): return game.phase != Game.Phase.MENU and _me() != null and game.economy.placed(), 90.0, "the world"):
+			return
+		if not await _until(func(): return _count_msgs("check") > 0 or game.gold_bars > 0, 30.0, "the snapshot"):
+			return
+		if not await _until(func(): return game.gold_bars == BARS and int(game.economy.pile.get("_target")) == BARS and game.money > 0, 30.0, "the pile after joining"):
+			return
+		_send("late_seen", {"bars": game.gold_bars, "money": game.money})
+		await _finish_together("joined late and see $%d and a pile of %d bars" % [game.money, int(game.economy.pile.get("_target"))])
+		return
+	if not await _until(func(): return game.phase != Game.Phase.MENU and _me() != null and game.economy.placed() and _count_msgs("loot") > 0, 90.0, "the loot"):
+		return
+	var me := _me()
+	me.bot_active = true
+	me.bot_invulnerable = true
+	if index == 2:
+		if not await _until(func(): return _count_msgs("check") > 0, 150.0, "the purchase"):
+			return
+		var want: Dictionary = _msgs("check")[0].data
+		if not await _until(func(): return game.money == int(want.money) and game.gold_bars == int(want.bars) and int(game.economy.pile.shown) == int(want.bars), 20.0, "money and the pile on client 2"):
+			return
+		await _finish_together("see $%d and %d bars on the pile" % [game.money, int(game.economy.pile.shown)])
+		return
+	# Client 1 does the selling and the buying, through E like a player.
+	for e in _msgs("loot")[0].data.items:
+		var kind: String = e.kind
+		var item_id := int(e.id)
+		var take := func():
+			var it = game.world_items.get(item_id)
+			if it != null:
+				_press_at(it.global_position, "it_%d" % item_id)
+		if not await _do_until(take, func(): return me.holding(kind), 40.0, "picking up " + kind):
+			return
+	for kind in SELL.keys():
+		var sell := func():
+			var i := _slot_of(kind)
+			if i >= 0:
+				me.selected = i
+			_press_at(game.economy.sell_bin.global_position, "sell_bin")
+		if not await _do_until(sell, func(): return not me.holding(kind), 40.0, "selling " + kind):
+			return
+	_say("sold everything: $%d" % game.money)
+	for i in BARS:
+		if not await _do_until(func(): _press_at(game.economy.shop.global_position, "shop"), func(): return game.gold_bars >= i + 1, 40.0, "buying bar %d" % (i + 1)):
+			return
+	_say("bought %d bars, $%d left" % [game.gold_bars, game.money])
+	await _finish_together("sold loot and bought %d bars through the sell bin and the shop" % game.gold_bars)
+
+
 ## One frame of a simple co-op bot: clock in, bring what the shelf lacks, operate.
 func _shift_bot(st: Dictionary) -> void:
 	var me := _me()
@@ -473,7 +564,7 @@ func _shift_bot(st: Dictionary) -> void:
 		var n: int = int(need[kind]) - game.shelf_count(kind)
 		if n > 0:
 			short[kind] = n
-	for i in 2:
+	for i in me.slots.size():
 		var s: Dictionary = me.slots[i]
 		if s.kind != "" and short.has(s.kind):
 			me.selected = i
@@ -594,7 +685,7 @@ func _nearest_item(kind: String) -> int:
 
 
 func _slot_of(kind: String) -> int:
-	for i in 2:
+	for i in _me().slots.size():
 		if _me().slots[i].kind == kind:
 			return i
 	return -1

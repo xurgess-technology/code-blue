@@ -16,6 +16,7 @@ extends Node
 ##       Windowed screenshots of the room, the panel and the gun into tools/dev_shots/.
 
 const DevRoomScript := preload("res://scripts/dev/dev_room.gd")
+const LootTableScript := preload("res://scripts/economy/loot_table.gd")
 const SHOT_DIR := "res://tools/dev_shots"
 
 var main: Node3D
@@ -223,6 +224,54 @@ func _run_solo() -> void:
 	dev.request("pen", {"open": true})
 	await _frames(2)
 	_check(game.level_info.dev_gate.collision_layer == 0, "the pen gate opens")
+
+	# ---- inventory (sweep 2): loot dispensers, the money panel, the dev room's sell bin and shop
+	dev.request("pen", {"open": false})
+	me.slots = Player.empty_slots()
+	me.selected = 0
+	var cubby = game.find_interactable("dev_disp_defibrillator")
+	_check(cubby != null, "the loot rack has a defibrillator dispenser")
+	var loot_disps := 0
+	for k in LootTableScript.kinds():
+		if game.find_interactable("dev_disp_%s" % k) != null:
+			loot_disps += 1
+	_check(loot_disps == LootTableScript.LOOT.size(), "every loot kind has a dispenser (%d)" % loot_disps)
+	if cubby != null:
+		_stand(cubby.global_position + Vector3(0, 0, -1.2), 0.0)
+		me.bot_aim_id = "dev_disp_defibrillator"
+		await _frames(3)
+		me.bot_press += 1
+		await _frames(4)
+		me.bot_aim_id = ""
+		_check(me.holding("defibrillator") and me.free_slot_count() == 2 and int(me.selected_stack().get("v", 0)) > 0,
+			"the dispenser hands over a defibrillator worth money, in two slots")
+	_check(game.economy.placed() and game.economy.mode == "economy", "the dev room has its sell bin, shop and pile (mode %s)" % game.economy.mode)
+	await _key(KEY_F1)
+	var money_before: int = game.money
+	for b in main.dev_panel.find_children("*", "Button", true, false):
+		if b.text == "+$1000":
+			b.pressed.emit()
+	_check(game.money == money_before + 1000, "the panel's +$1000 button gives money ($%d)" % game.money)
+	await _key(KEY_F1)
+	var bin: Node3D = game.economy.sell_bin
+	_stand(bin.global_position + bin.global_basis.z * 1.2, 0.0)
+	me.bot_aim_id = "sell_bin"
+	await _frames(3)
+	var value: int = int(me.selected_stack().get("v", 0))
+	me.bot_press += 1
+	await _frames(4)
+	_check(not me.holding("defibrillator") and game.money == money_before + 1000 + value, "the dev room's sell bin buys the defibrillator for $%d" % value)
+	var shop: Node3D = game.economy.shop
+	_stand(shop.global_position + shop.global_basis.z * 1.3, 0.0)
+	me.bot_aim_id = "shop"
+	await _frames(3)
+	var bars: int = game.gold_bars
+	me.bot_press += 1
+	await _frames(4)
+	me.bot_aim_id = ""
+	_check(game.gold_bars == bars + 1, "the dev room's shop sells a gold bar")
+	dev.request("money", {"reset": true})
+	_check(game.money == 0 and game.gold_bars == 0, "the panel's money reset clears money and bars")
 
 	# Leaving resets the global state.
 	main._back_to_menu("")

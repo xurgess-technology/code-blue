@@ -27,10 +27,14 @@ var operating: bool = false
 var flashlight_on: bool = true
 var invuln: float = 0.0
 
-## Two hands. Each holds one stack {kind, count}; kind "" is an empty hand.
-## Host authoritative, replicated in the snapshot. `selected` is the hand G, the shelf
-## and the guide act on; the player chooses it locally.
-var slots: Array = [{"kind": "", "count": 0}, {"kind": "", "count": 0}]
+## Four hand slots (C.CARRY_CAP). Each holds one stack {kind, count} plus "v" (sell value in
+## dollars) for loot; kind "" is an empty slot. Bulky loot fills its slot and a second one: that
+## second slot is {kind: "", count: 0, of: <index of the stack>}, so it is not empty but code
+## that walks slots for stacks never sees the bulky item twice. Host authoritative, replicated
+## in the snapshot. `selected` is the slot G, the shelf, the sell bin and the guide act on (a
+## selected second half acts on its stack); the player chooses it locally.
+## Change slots through take_into() / clear_slot(); _fix_links() tidies anything else.
+var slots: Array = empty_slots()
 var selected: int = 0
 
 ## What the camera is pointed at: the interact_id of an interactable in reach, the prompt
@@ -104,7 +108,21 @@ static func new_player(id: int, display_name: String, local: bool) -> CharacterB
 	return p
 
 
+## Keys 1..C.CARRY_CAP select a slot. project.godot ships slot_1 and slot_2; the rest are added
+## here at runtime (idempotent) so no input map edit is needed.
+static func ensure_slot_actions() -> void:
+	for i in C.CARRY_CAP:
+		var action := "slot_%d" % (i + 1)
+		if InputMap.has_action(action):
+			continue
+		InputMap.add_action(action, 0.5)
+		var ev := InputEventKey.new()
+		ev.physical_keycode = KEY_1 + i
+		InputMap.action_add_event(action, ev)
+
+
 func _build() -> void:
+	ensure_slot_actions()
 	collision_layer = C.L_PLAYER
 	collision_mask = C.L_WORLD
 	floor_max_angle = deg_to_rad(50)
@@ -331,6 +349,8 @@ func _physics_process(delta: float) -> void:
 		_remote_step(delta)
 	stun = maxf(0.0, stun - delta)
 	invuln = maxf(0.0, invuln - delta)
+	if game != null and game.is_host():
+		_fix_links()
 	if not alive:
 		dead_time += delta
 
@@ -409,14 +429,15 @@ func _local_step(delta: float) -> void:
 		if Input.is_action_just_pressed("shove") and _shove_cd <= 0.0 and not gun_out:
 			_shove_cd = C.SHOVE_COOLDOWN
 			shove_count += 1
-		if Input.is_action_just_pressed("drop") and slots[selected].kind != "":
+		if Input.is_action_just_pressed("drop") and selected_stack().kind != "":
 			drop_count += 1
-		if Input.is_action_just_pressed("slot_1"):
-			selected = 0
-		if Input.is_action_just_pressed("slot_2"):
-			selected = 1
-		if Input.is_action_just_pressed("slot_next") or Input.is_action_just_pressed("slot_prev"):
-			selected = 1 - selected
+		for i in C.CARRY_CAP:
+			if Input.is_action_just_pressed("slot_%d" % (i + 1)):
+				selected = i
+		if Input.is_action_just_pressed("slot_next"):
+			select_step(1)
+		if Input.is_action_just_pressed("slot_prev"):
+			select_step(-1)
 
 	# Footsteps
 	if moving and is_on_floor():
@@ -504,27 +525,169 @@ func _update_aim() -> void:
 	aim_hold = node.interact_hold()
 
 
-## Which hand a stack of this kind would go into, or -1 when both are busy.
-func slot_for(kind: String) -> int:
-	if Items.stacks(kind):
-		for i in slots.size():
-			if slots[i].kind == kind:
-				return i
-	if slots[selected].kind == "":
-		return selected
+static func empty_slot() -> Dictionary:
+	return {"kind": "", "count": 0}
+
+
+static func empty_slots() -> Array:
+	var out := []
+	for i in C.CARRY_CAP:
+		out.append(empty_slot())
+	return out
+
+
+## Truly free: no stack and not the second half of a bulky one.
+func slot_free(i: int) -> bool:
+	return i >= 0 and i < slots.size() and String(slots[i].kind) == "" and not slots[i].has("of")
+
+
+## The index of the stack occupying slot i (i itself unless it is a bulky second half).
+func head_of(i: int) -> int:
+	if i < 0 or i >= slots.size():
+		return -1
+	return int(slots[i].of) if slots[i].has("of") else i
+
+
+## The second slot a bulky stack at `head` uses, or -1.
+func tail_of(head: int) -> int:
 	for i in slots.size():
-		if slots[i].kind == "":
+		if i != head and slots[i].has("of") and int(slots[i].of) == head:
 			return i
 	return -1
+
+
+func selected_head() -> int:
+	return maxi(0, head_of(clampi(selected, 0, slots.size() - 1)))
+
+
+## The stack the selected slot acts on ({kind: ""} when empty).
+func selected_stack() -> Dictionary:
+	return slots[selected_head()]
+
+
+func free_slot_count() -> int:
+	var n := 0
+	for i in slots.size():
+		if slot_free(i):
+			n += 1
+	return n
+
+
+## Mouse wheel: the next or previous slot, stepping over a bulky stack's second half.
+func select_step(dir: int) -> void:
+	var n := slots.size()
+	var head := selected_head()
+	var i := selected
+	for k in n:
+		i = posmod(i + dir, n)
+		if head_of(i) != head or n == 1:
+			break
+	selected = head_of(i)
+
+
+## Which slot a stack of this kind would go into, or -1 when there is no room. A bulky kind also
+## needs the next free slot after that one (wrapping round), see bulky_pair().
+func slot_for(kind: String) -> int:
+	if Items.stacks(kind) and not Items.is_bulky(kind):
+		for i in slots.size():
+			if String(slots[i].kind) == kind:
+				return i
+	if Items.is_bulky(kind):
+		return bulky_pair()[0]
+	if slot_free(selected):
+		return selected
+	for i in slots.size():
+		if slot_free(i):
+			return i
+	return -1
+
+
+## [head, tail] for a new bulky stack: the selected slot when free (else the first free one) and
+## the next free slot after it. [-1, -1] without two free slots.
+func bulky_pair() -> Array:
+	var n := slots.size()
+	var first := selected if slot_free(selected) else -1
+	if first < 0:
+		for i in n:
+			if slot_free(i):
+				first = i
+				break
+	if first < 0:
+		return [-1, -1]
+	for k in range(1, n):
+		var j := (first + k) % n
+		if slot_free(j):
+			return [first, j]
+	return [-1, -1]
 
 
 func can_take(kind: String) -> bool:
 	return slot_for(kind) >= 0
 
 
+## Host: put a stack in the hands (merging, or filling two slots for bulky loot). Returns the
+## slot it went into, or -1 without room. `value` is the stack's sell value (loot).
+func take_into(kind: String, count: int, value: int = 0) -> int:
+	var i := slot_for(kind)
+	if i < 0:
+		return -1
+	if String(slots[i].kind) == kind:
+		slots[i].count = int(slots[i].count) + count
+		if value > 0 or slots[i].has("v"):
+			slots[i]["v"] = int(slots[i].get("v", 0)) + value
+		return i
+	var s := {"kind": kind, "count": count}
+	if value > 0:
+		s["v"] = value
+	slots[i] = s
+	if Items.is_bulky(kind):
+		var pair := bulky_pair_for(i)
+		if pair >= 0:
+			slots[pair] = {"kind": "", "count": 0, "of": i}
+	return i
+
+
+## The free slot a bulky stack placed at `head` takes as its second half.
+func bulky_pair_for(head: int) -> int:
+	var n := slots.size()
+	for k in range(1, n):
+		var j := (head + k) % n
+		if slot_free(j):
+			return j
+	return -1
+
+
+## Empty a stack's slot and its bulky second half (pass either one).
+func clear_slot(i: int) -> void:
+	var head := head_of(i)
+	if head < 0:
+		return
+	var tail := tail_of(head)
+	slots[head] = empty_slot()
+	if tail >= 0:
+		slots[tail] = empty_slot()
+
+
+## Second halves whose stack is gone become empty again; a bulky stack that lost its second
+## half gets one back if there is room. Cheap; the host runs it every tick.
+func _fix_links() -> void:
+	for i in slots.size():
+		if not slots[i].has("of"):
+			continue
+		var h := int(slots[i].of)
+		if h < 0 or h >= slots.size() or h == i or String(slots[h].kind) == "" or not Items.is_bulky(String(slots[h].kind)) or slots[h].has("of"):
+			slots[i] = empty_slot()
+	for i in slots.size():
+		var k := String(slots[i].kind)
+		if k != "" and Items.is_bulky(k) and tail_of(i) < 0:
+			var j := bulky_pair_for(i)
+			if j >= 0:
+				slots[j] = {"kind": "", "count": 0, "of": i}
+
+
 func hands_empty() -> bool:
 	for s in slots:
-		if s.kind != "":
+		if String(s.kind) != "":
 			return false
 	return true
 
@@ -538,7 +701,7 @@ func holding(kind: String) -> bool:
 
 func _process(_delta: float) -> void:
 	_update_down_pose(_delta)  # DEV HOOK
-	var s: Dictionary = slots[selected]
+	var s: Dictionary = selected_stack()
 	var key := "%s:%d" % [s.kind, s.count]
 	if key == _held_key:
 		return
@@ -547,10 +710,35 @@ func _process(_delta: float) -> void:
 		for c in holder.get_children():
 			c.queue_free()
 		if s.kind != "":
-			holder.add_child(ItemModels.make(s.kind, s.count))
+			holder.add_child(_held_model(String(s.kind), int(s.count), holder == _held_fp))
 	# The flashlight hand hides nothing; the held stack sits in the other hand.
 	_held_fp.visible = is_local
 	_held_tp.visible = not is_local
+
+
+## A held stack, tinted, sized for the hands: bulky loot is carried low in front with both hands
+## and scaled down in first person so it does not fill the screen.
+func _held_model(kind: String, count: int, first_person: bool) -> Node3D:
+	var model := ItemModels.make_tinted(kind, count, first_person)
+	var fp := ItemModels.footprint(kind)
+	var biggest := maxf(fp.x, maxf(fp.y, fp.z))
+	var pivot := Node3D.new()
+	pivot.name = "Held"
+	pivot.add_child(model)
+	if Items.is_bulky(kind):
+		var k := minf(1.0, (0.24 if first_person else 0.55) / maxf(0.01, biggest))
+		model.scale = Vector3.ONE * k
+		if first_person:
+			# Low in the middle of the view, held with both hands: placed in camera space, so
+			# undo HeldFirstPerson's one-handed offset and tilt.
+			var want := Transform3D(Basis.from_euler(Vector3(deg_to_rad(-6.0), deg_to_rad(18.0), 0.0)), Vector3(-0.04, -0.33, -0.58))
+			pivot.transform = _held_fp.transform.affine_inverse() * want
+		else:
+			pivot.position = Vector3(0.25, -0.12, -0.12)
+	elif first_person and Items.is_loot(kind) and biggest > 0.13:
+		# Big-but-not-bulky loot (a laptop, a wheel) would fill the screen at arm's length.
+		model.scale = Vector3.ONE * (0.13 / biggest)
+	return pivot
 
 
 func set_flashlight(on: bool) -> void:
@@ -595,7 +783,7 @@ func revive_full() -> void:
 	dead_time = 0.0
 	invuln = 0.0
 	stamina = 1.0
-	slots = [{"kind": "", "count": 0}, {"kind": "", "count": 0}]
+	slots = empty_slots()
 	selected = 0
 	operating = false
 	_set_visible_alive(true)
@@ -686,7 +874,7 @@ func apply_remote_state(s: Array) -> void:
 	shove_count = int(s[4])
 	drop_count = int(s[5])
 	aim_id = String(s[6])
-	selected = clampi(int(s[8]), 0, 1)
+	selected = clampi(int(s[8]), 0, slots.size() - 1)
 	# Drop before interacting so a count that moved in the same tick uses the right hand.
 	interact_count = int(s[7])
 	_consume_actions()
@@ -715,6 +903,9 @@ func apply_remote_full(s: Dictionary) -> void:
 	else:
 		selected = int(s.get("sel", selected))
 	slots = new_slots.duplicate(true)
+	while slots.size() < C.CARRY_CAP:
+		slots.append(empty_slot())
+	selected = clampi(selected, 0, slots.size() - 1)
 	if alive != s.al:
 		if s.al:
 			revive(s.hp)

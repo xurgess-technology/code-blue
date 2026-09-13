@@ -137,6 +137,46 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 - **`tools/nettest.tscn` is still broken** (net worker); the dev room has its own two-process check
   in `tools/devtest.tscn`. Run the host first; the client waits on real time, not game time.
 
+## Inventory and money (sweep 2 wave 2)
+
+- **Hands are emptied at every new lobby.** `start_lobby` -> `revive_full()` clears the slots, so
+  loot still carried when a shift ends is lost (money and the pile are kept). The loop worker's
+  neutral-area flow should decide whether carried loot survives the walk out.
+- **Loot only spawns in `begin_shift()`**, after the supplies. The new shift loop will want it
+  spawned when the hospital is built or entered (`game.spawn_loot()`).
+- **The neutral-area mode is untested:** the hospital branch was not merged. The sell bin and shop
+  attach an aim box (2.4 x 1.7 x 1.8 m and 1.6 x 1.8 x 1.6 m) and a sign at the spots; if the
+  hospital's dumpster or van is larger than that box, its own collider hides the interactable
+  from the aim ray. The pile is lifted onto whatever is under `gold_pile.position` (the pallet).
+- **Depth for loot rarity is guessed from rects** until real `rooms` / `wings` data lands (tile or
+  world rects are told apart by size); without them it uses distance from the OR table.
+- **Fallback placement near the time clock** checks colliders, floor and line of sight to the
+  clock only. Props without collision can overlap the sell bin or shop, and it can stand in a
+  walking line. On the fallback ward (no `rows`) the result was not checked.
+- **Indoors the pile is capped at 2.6 m** and then grows side columns 1.35 m apart; those can go
+  through nearby walls or furniture in the clock-in room or the dev room.
+- **No new CC0 models were downloaded**; all 21 loot kinds are primitives (`loot_models.gd`) and
+  `ASSETS.md` is unchanged. `Assets` keys `item/<kind>` replace any of them.
+- **Rim overlays cost a draw call each**, now capped at the 5 biggest meshes per model. perfprobe
+  `--ab` at 1600x900 medium: OR 72 fps (1% low 66), without rims 85 (69), loot hidden 89 (75);
+  lobby and corridor within noise. Normal run: OR 63-73, lobby 72-91, corridor 94-119 across runs.
+- **A 500-bar pile in view:** 74 fps (1% low 63) against 81 (67) for the same view with no bars
+  (one run, near the noise). The pile casts shadows; turn `cast_shadow` off on its MultiMesh if the
+  neutral area's lights make that expensive.
+- **Fragile loot only cracks on violent drops** (hit, shove, knock-down), not when set down with
+  G or when it tumbles.
+- **Held bulky loot is scaled down** to 0.24 m in first person (0.55 m for others) so it does not
+  fill the screen; big normal loot to 0.13 m. It reads as a toy-sized defibrillator.
+- **The rim can look flat on big box-shaped loot** (heart monitor, defibrillator) at glancing
+  angles in the dark; tune `TINT_SHADER` exponent or the gold `rim` in `item_models.gd`.
+- **Dev room bots cannot sell**: a carry order with loot delivers to a player, not the sell bin.
+- **`full_shift_lag` failed once** (both lagged clients dropped about 10 s into the shift, the host
+  then passed alone) while two headless playtests ran on the same machine; it passed in the
+  full run before and alone after (20 s). Looks like the lag relay starving under CPU load, not
+  inventory, but worth watching.
+- **Money readout is a corner number** until wave 3's minimal HUD (shown near the sell bin, shop
+  or pile, while aiming at them, or for 4 s after a change).
+
 ## Testing tips
 
 - Add `--fixed-fps 60` to headless runs: the game then steps as fast as the CPU allows (a 250 s

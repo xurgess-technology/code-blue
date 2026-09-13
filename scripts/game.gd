@@ -32,6 +32,11 @@ var end_timer: float = 0.0
 var case: Dictionary = {}
 ## The OR supply shelf: item kind -> count.
 var shelf: Dictionary = {}
+## Team money in dollars (inventory, sweep 2). Host authoritative, replicated, survives shifts;
+## change it through add_money() and reset_money().
+var money: int = 0
+## Gold bars bought at the shop so far this run; the gold pile shows this many. Replicated.
+var gold_bars: int = 0
 
 # ---- local ----
 var level: Node3D = null
@@ -73,6 +78,13 @@ const BodyScript := preload("res://scripts/patient_body.gd")
 const SpawnerScript := preload("res://scripts/item_spawner.gd")
 const SurgeryScript := preload("res://scripts/surgery/surgery_system.gd")
 const DevRoomScript := preload("res://scripts/dev/dev_room.gd")
+const EconomyScript := preload("res://scripts/economy/economy.gd")
+const LootSpawnerScript := preload("res://scripts/economy/loot_spawner.gd")
+## A fragile piece of loot that gets dropped violently keeps this share of its value.
+const LOOT_CRACK_KEEPS := 0.55
+
+## Sell bin, shop and gold pile in the world (scripts/economy/economy.gd), child "Economy".
+var economy: Node = null
 
 
 func _ready() -> void:
@@ -88,6 +100,10 @@ func _ready() -> void:
 	dev.name = "Dev"
 	add_child(dev)
 	dev.setup(self)
+	economy = EconomyScript.new()
+	economy.name = "Economy"
+	add_child(economy)
+	economy.setup(self)
 	Net.roster_changed.connect(_on_roster_changed)
 	Net.host_left.connect(func(): end_session("The host left the game."))
 
@@ -120,6 +136,7 @@ func viewed_player() -> Node:
 func start_session(first_seed: int) -> void:
 	shift = 1
 	spectating = 0
+	reset_money()  # a new run starts broke; clients get the host's value in the snapshot
 	start_lobby(first_seed, 1)
 
 
@@ -193,6 +210,7 @@ func begin_shift() -> void:
 	shelf = {}
 	_apply_case_locally()
 	_spawn_supplies()
+	spawn_loot()
 	_spawn_monsters()
 	_set_phase(Phase.SHIFT)
 	_broadcast("sound", {"cue": "punch"})
@@ -393,6 +411,9 @@ func _add_landmarks() -> void:
 	shelf_node.global_position = spos
 	shelf_node.rotation.y = float(sinfo.get("yaw", 0.0))
 	shelf_node.show_stock(shelf)
+
+	# inventory: the sell bin, the shop and the gold pile (placed once physics has the level).
+	economy.on_level_built(level, level_info)
 
 	_add_proxy("clock", clock_pos() + Vector3.UP * 1.1, 0.7, C.PUNCH_SECONDS,
 		func(p): return "Hold E: clock in" if phase == Phase.LOBBY else "")
@@ -599,25 +620,27 @@ func _spawn_supplies() -> void:
 		_spawn_from_plan(e)
 
 
-func _spawn_from_plan(e: Dictionary) -> void:
+func _spawn_from_plan(e: Dictionary) -> Node:
 	var anchors: Array = level_info.get("loose_anchors", [])
 	var ct_id: String = String(e.get("container_id", ""))
 	if ct_id != "":
 		var ct := find_interactable(ct_id)
 		if ct != null and ct.has_method("slot_transform"):
 			var slot_i := int(e.get("slot", 0))
-			_spawn_item(e.kind, int(e.count), ct.slot_transform(slot_i), WorldItem.State.IN_CONTAINER, ct_id, slot_i)
-			return
+			return _spawn_item(e.kind, int(e.count), ct.slot_transform(slot_i), WorldItem.State.IN_CONTAINER, ct_id, slot_i)
 	var anchor_i := int(e.get("anchor", -1))
 	if anchor_i >= 0 and anchor_i < anchors.size():
 		var a: Dictionary = anchors[anchor_i]
 		var xf := Transform3D(Basis(Vector3.UP, float(a.get("yaw", 0.0))), a.position)
-		_spawn_item(e.kind, int(e.count), xf, WorldItem.State.LOOSE, "", 0, anchor_i)
-		return
+		return _spawn_item(e.kind, int(e.count), xf, WorldItem.State.LOOSE, "", 0, anchor_i)
+	# inventory: a plan entry may carry its own floor position (loot on levels without anchors).
+	if e.has("position"):
+		var p: Vector3 = e.position
+		return _spawn_item(e.kind, int(e.count), Transform3D(Basis(Vector3.UP, float(e.get("yaw", 0.0))), _floor_at(p)), WorldItem.State.LOOSE)
 	# No container or anchor: drop it on the floor at a spawn point well away from the OR.
 	var spots: Array = level_info.get("tool_spawns", [])
 	var pos: Vector3 = spots[_rng.randi_range(0, spots.size() - 1)] if spots.size() > 0 else table_pos() + Vector3(4, 0, 0)
-	_spawn_item(e.kind, int(e.count), Transform3D(Basis(Vector3.UP, _rng.randf() * TAU), _floor_at(pos)), WorldItem.State.LOOSE)
+	return _spawn_item(e.kind, int(e.count), Transform3D(Basis(Vector3.UP, _rng.randf() * TAU), _floor_at(pos)), WorldItem.State.LOOSE)
 
 
 func _spawn_guide() -> void:
@@ -644,14 +667,10 @@ func _spawn_guide() -> void:
 func pickup_item(p: Node, it: Node) -> void:
 	if not is_host() or not is_instance_valid(it) or not world_items.has(it.item_id):
 		return
-	var i: int = p.slot_for(it.kind)
+	var i: int = p.take_into(it.kind, it.count, int(it.value))
 	if i < 0:
-		tell(p, "Your hands are full.")
+		tell(p, "That needs two free hands." if Items.is_bulky(it.kind) else "Your hands are full.")
 		return
-	if p.slots[i].kind == it.kind:
-		p.slots[i].count += it.count
-	else:
-		p.slots[i] = {"kind": it.kind, "count": it.count}
 	p.selected = i
 	var pos: Vector3 = it.global_position
 	world_items.erase(it.item_id)
@@ -664,50 +683,66 @@ func pickup_item(p: Node, it: Node) -> void:
 func drop_selected(p: Node) -> void:
 	if not is_host():
 		return
-	var s: Dictionary = p.slots[p.selected]
+	var head: int = p.selected_head()
+	var s: Dictionary = p.slots[head]
 	if s.kind == "":
 		return
 	var fwd: Vector3 = -p.camera.global_transform.basis.z
 	var from := Transform3D(p.global_basis, p.head.global_position + fwd * 0.5 + Vector3.DOWN * 0.3)
 	var it := _spawn_item(s.kind, s.count, from, WorldItem.State.LOOSE)
+	it.value = int(s.get("v", 0))
 	it.toss(from, fwd * 1.2 + Vector3.UP * 0.6 + p.velocity * 0.5)
-	p.slots[p.selected] = {"kind": "", "count": 0}
+	p.clear_slot(head)
 	_sound("thud", from.origin)
 	emit_noise(from.origin, 0.4, "drop")
 
 
-## Hit, shoved or gone: both hands let go and fragile stacks lose some of their contents.
+## Hit, shoved or gone: every hand lets go and fragile stacks lose some of their contents
+## (fragile loot of one cracks and loses value instead).
 func _drop_hands(p: Node, violent: bool) -> void:
 	var broke := false
+	var cracked := ""
 	for i in p.slots.size():
 		var s: Dictionary = p.slots[i]
 		if s.kind == "":
 			continue
 		var n: int = s.count
+		var v: int = int(s.get("v", 0))
 		if violent:
 			var survivors := Items.survivors_after_drop(s.kind, n)
+			if Items.is_loot(s.kind):
+				if survivors < n:
+					v = roundi(float(v) * float(survivors) / float(maxi(1, n)))
+				elif Items.is_fragile(s.kind) and v > 0:
+					v = maxi(1, roundi(float(v) * LOOT_CRACK_KEEPS))
+					cracked = Items.display_name(s.kind)
 			broke = broke or survivors < n
 			n = survivors
 		var dir := Vector3(randf_range(-1, 1), 0.0, randf_range(-1, 1)).normalized()
 		var from := Transform3D(Basis(), p.global_position + Vector3.UP * 1.1 + dir * 0.3)
 		var it := _spawn_item(s.kind, n, from, WorldItem.State.LOOSE)
+		it.value = v
 		it.toss(from, dir * randf_range(2.0, 3.5) + Vector3.UP * 2.0)
-		p.slots[i] = {"kind": "", "count": 0}
+		p.clear_slot(i)
 		emit_noise(from.origin, 0.4, "drop")
-	if broke:
+	if broke or cracked != "":
 		_sound("items_glass", p.global_position)
 		emit_noise(p.global_position, 0.9, "glass")
+	if broke:
 		say("%s dropped the vials. Some of them smashed." % p.player_name, 3.0)
+	elif cracked != "":
+		say("%s dropped the %s. It cracked: worth less now." % [p.player_name, cracked.to_lower()], 3.0)
 
 
 func shelf_place(p: Node) -> void:
 	if not is_host():
 		return
-	var s: Dictionary = p.slots[p.selected]
+	var head: int = p.selected_head()
+	var s: Dictionary = p.slots[head]
 	if s.kind == "" or not Items.is_surgical(s.kind):
 		return
 	shelf[s.kind] = int(shelf.get(s.kind, 0)) + int(s.count)
-	p.slots[p.selected] = {"kind": "", "count": 0}
+	p.clear_slot(head)
 	if shelf_node != null:
 		shelf_node.show_stock(shelf)
 		_sound("items_clink", shelf_node.global_position)
@@ -757,6 +792,88 @@ func _check_supply() -> void:
 	var plan: Array = SpawnerScript.shortfall_plan(seed_value + shift * 97 + int(world_time), need, have, level_info, occupied, avoid)
 	for e in plan:
 		_spawn_from_plan(e)
+
+
+# =========================================================================
+# loot, money, the sell bin and the shop (inventory, sweep 2)
+# =========================================================================
+
+## Host: scatter sellable loot after the supplies (scripts/economy/loot_spawner.gd). Deterministic
+## from the seed and shift; never on a spot a supply already took.
+func spawn_loot() -> void:
+	if not is_host():
+		return
+	var occupied := {}
+	for it in world_items.values():
+		if it.state == WorldItem.State.IN_CONTAINER:
+			occupied["%s:%d" % [it.container_id, it.slot]] = true
+		elif it.anchor >= 0:
+			occupied["anchor:%d" % it.anchor] = true
+	var plan: Array = LootSpawnerScript.plan(seed_value, shift, level_info, occupied)
+	for e in plan:
+		var it := _spawn_from_plan(e)
+		if it != null:
+			it.value = int(e.get("value", 0))
+
+
+## Host: change the team's money. Later systems call this too (patient pay, penalties); a
+## negative amount can take money below zero only if `reason` starts with "debt:".
+func add_money(amount: int, reason: String) -> void:
+	if not is_host() or amount == 0:
+		return
+	money += amount
+	if money < 0 and not reason.begins_with("debt:"):
+		money = 0
+	economy.on_money_changed(amount, reason)
+
+
+## Host: game over. Money and the gold pile go back to nothing.
+func reset_money() -> void:
+	if not is_host():
+		return
+	money = 0
+	gold_bars = 0
+	if economy != null:
+		economy.on_reset()
+
+
+## What the next gold bar costs (the n-th bar bought costs more than the last).
+func gold_bar_price() -> int:
+	return EconomyScript.bar_price(gold_bars)
+
+
+## Host: the selected loot goes into the sell bin and its value into the team's money.
+func sell_selected(p: Node) -> void:
+	if not is_host() or p == null:
+		return
+	var head: int = p.selected_head()
+	var s: Dictionary = p.slots[head]
+	if s.kind == "" or not Items.is_loot(s.kind):
+		return
+	var value := maxi(0, int(s.get("v", 0)))
+	var label := Items.stack_label(s.kind, int(s.count))
+	p.clear_slot(head)
+	add_money(value, "sell:%s" % s.kind)
+	var at: Vector3 = economy.sell_bin_position()
+	_sound("economy_sell", at)
+	say("%s sold %s for $%d." % [p.player_name, label.to_lower() if int(s.count) > 1 else label, value], 2.5)
+
+
+## Host: buy one gold bar at the shop. False (and a message) without the money.
+func buy_gold_bar(p: Node) -> bool:
+	if not is_host():
+		return false
+	var price := gold_bar_price()
+	if money < price:
+		tell(p, "A gold bar costs $%d. The team has $%d." % [price, money])
+		return false
+	add_money(-price, "shop:gold_bar")
+	gold_bars += 1
+	economy.on_bar_bought()
+	_sound("economy_buy", economy.shop_position())
+	_sound("economy_bar", economy.pile_top())
+	say("%s bought gold bar #%d for $%d." % [p.player_name if p != null else "Someone", gold_bars, price], 2.5)
+	return true
 
 
 func _floor_at(p: Vector3) -> Vector3:
@@ -1381,6 +1498,7 @@ func _global_fields() -> Dictionary:
 		"et": snappedf(end_timer, 0.1), "cs": case.duplicate(true), "sf": shelf.duplicate(),
 		"wp": waiting_peers.keys(),
 		"dv": dev.net_state() if dev_mode else {},  # DEV HOOK
+		"mn": money, "gb": gold_bars,  # inventory: team money and the gold pile
 	}
 	var sg: Dictionary = surgery.net_state()
 	for k in sg.keys():
@@ -1474,6 +1592,13 @@ func _apply_state(state: Dictionary, msg: Dictionary, keyframe: bool) -> void:
 		if shelf_node != null:
 			shelf_node.show_stock(shelf)
 	surgery.apply_net_state(_surgery_state_from(g))
+	# inventory: money and the gold pile (the pile rebuilds itself from the count).
+	var new_money := int(g.get("mn", money))
+	if new_money != money:
+		var delta := new_money - money
+		money = new_money
+		economy.on_money_changed(delta, "")
+	gold_bars = int(g.get("gb", gold_bars))
 	if dev_mode and not (g.get("dv", {}) as Dictionary).is_empty():
 		dev.apply_net_state(g.dv)  # DEV HOOK: creates bot players before their entries apply
 
@@ -1587,8 +1712,9 @@ func _drop_hands_in_place(p: Node) -> bool:
 		var at: Vector3 = p.global_position + Vector3(cos(a) * 0.3, 0.5, sin(a) * 0.3)
 		var xf := Transform3D(Basis(Vector3.UP, randf() * TAU), at)
 		var it := _spawn_item(s.kind, int(s.count), xf, WorldItem.State.LOOSE)
+		it.value = int(s.get("v", 0))  # inventory: loot keeps its value
 		it.toss(xf, Vector3(cos(a), 0.0, sin(a)) * 0.4)
-		p.slots[i] = {"kind": "", "count": 0}
+		p.clear_slot(i)
 	if any:
 		emit_noise(p.global_position, 0.4, "drop")
 	return any

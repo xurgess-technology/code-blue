@@ -87,7 +87,7 @@ func show_stock(stock: Dictionary) -> void:
 			continue
 		var holder := Node3D.new()
 		holder.name = kind
-		holder.add_child(ItemModels.make(kind, n))
+		holder.add_child(ItemModels.make_tinted(kind, n))
 		var shelf_y: float = [0.865, 0.865, 1.365, 1.365, 0.365][i]
 		var x: float = [-0.35, 0.3, -0.35, 0.3, 0.0][i]
 		holder.position = Vector3(x, shelf_y, 0.0)
@@ -99,12 +99,12 @@ func show_stock(stock: Dictionary) -> void:
 func interact_prompt(player) -> String:
 	if player == null:
 		return ""
-	var s: Dictionary = player.slots[player.selected]
+	var s: Dictionary = player.selected_stack() if player.has_method("selected_stack") else player.slots[player.selected]
 	if s.kind == "":
-		return "!Supply shelf: bring surgical items here"
+		return "!Supply shelf: bring surgical items here (the teal glow)"
 	if not Items.is_surgical(s.kind):
-		return "!Only surgical supplies go on the shelf"
-	return "Put %s on the shelf" % (Items.display_name(s.kind) if s.count <= 1 else "%d %s" % [s.count, Items.def(s.kind).short])
+		return "!Loot goes in the sell bin, not on the shelf" if Items.is_loot(s.kind) else "!Only surgical supplies go on the shelf"
+	return "Put %s on the shelf" % Items.stack_label(s.kind, int(s.count))
 
 
 func interact_hold() -> float:

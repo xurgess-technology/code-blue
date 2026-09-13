@@ -158,7 +158,7 @@ func _play_shift(delta: float) -> void:
 		return
 
 	# Carrying something the shelf still needs: deliver it.
-	for i in 2:
+	for i in bot.slots.size():
 		var s: Dictionary = bot.slots[i]
 		if s.kind != "" and short.has(s.kind):
 			bot.selected = i
@@ -172,9 +172,12 @@ func _play_shift(delta: float) -> void:
 		_go_use("table", game.table_pos(), false)
 		return
 
-	# Hands full of things we do not need: set one down.
+	# Hands full of things we do not need: set one down (the first slot holding a stack).
 	if not bot.can_take(short.keys()[0]):
-		bot.selected = 0
+		for i in bot.slots.size():
+			if String(bot.slots[i].kind) != "":
+				bot.selected = i
+				break
 		bot.drop_count += 1
 		return
 
@@ -216,7 +219,7 @@ func _go_use(id: String, pos: Vector3, hold: bool) -> void:
 	if _heartbeat <= 0.0:
 		_heartbeat = 30.0
 		_say("t=%.0f heading for %s at %s, bot at %s, hands %s, aim '%s'" % [elapsed, id, str(pos.snappedf(0.1)),
-			str(bot.global_position.snappedf(0.1)), str([bot.slots[0].kind, bot.slots[1].kind]), bot.aim_id])
+			str(bot.global_position.snappedf(0.1)), str(bot.slots.map(func(s): return s.kind)), bot.aim_id])
 	var flat := Vector3(pos.x, bot.global_position.y, pos.z)
 	var d := bot.global_position.distance_to(flat)
 	bot.bot_aim_id = id
