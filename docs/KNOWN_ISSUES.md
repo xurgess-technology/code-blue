@@ -158,6 +158,10 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 - **The rim can look flat on big box-shaped loot** (heart monitor, defibrillator) at glancing
   angles in the dark; tune `TINT_SHADER` exponent or the gold `rim` in `item_models.gd`.
 - **Dev room bots cannot sell**: a carry order with loot delivers to a player, not the sell bin.
+- **`full_shift_lag` failed once** (both lagged clients dropped about 10 s into the shift, the host
+  then passed alone) while two headless playtests ran on the same machine; it passed in the
+  full run before and alone after (20 s). Looks like the lag relay starving under CPU load, not
+  inventory, but worth watching.
 - **Money readout is a corner number** until wave 3's minimal HUD (shown near the sell bin, shop
   or pile, while aiming at them, or for 4 s after a change).
 
