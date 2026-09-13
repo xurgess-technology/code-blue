@@ -1147,7 +1147,7 @@ func _in_shove_cone(from: Node, target: Vector3, forward: Vector3) -> bool:
 # its operation; the step keeps its progress for whoever operates next.
 
 const KEYFRAME_SECONDS := 10.0
-const HISTORY := 48
+const HISTORY := 100   # 5 s of snapshots: a client that stalls or lags still has a usable base
 const SECTIONS := ["pl", "mo", "it", "ct"]
 
 ## Peers that joined mid-shift and spectate until the next lobby: peer id -> true. Replicated.

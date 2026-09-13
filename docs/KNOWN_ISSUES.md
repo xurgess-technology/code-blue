@@ -40,6 +40,30 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 - **Guide draws on canvas layer 60**, above the post-processing layer (50). Any HUD drawn above
   60 would appear over the book.
 
+## Networking (sweep 2, net worker)
+
+- **The Steam backend is untested end to end.** Steam is not installed on the development
+  machine, so only this was verified: GodotSteam 4.22.1 loads in Godot 4.7.2 and exposes
+  `SteamMultiplayerPeer`; `steamInitEx(480)` without a Steam client fails cleanly and the game
+  falls back to ENet with the Steam button hidden; a missing extension library does not stop
+  the game. Not verified: lobby creation, `host_with_lobby` / `connect_to_lobby` (the code falls
+  back to `create_host` / `create_client`), invites, "Join game", `+connect_lobby` launches,
+  persona names, and how quickly a vanished Steam peer is noticed. Needs two Steam accounts.
+- **Upstream player state is still 20 Hz full state** (a compact array, about 2.5-3.5 KB/s per
+  client with operator reports). Fine for four players; delta it if the player count grows.
+- **Keyframes are one unreliable message** (about 4-8 KB mid-shift), so ENet fragments them and a
+  lossy link loses more of them. Deltas never depend on a keyframe arriving (clients ack what
+  they decoded), so this only delays recovery from a missing base. Splitting keyframes across
+  ticks would fix it.
+- **Monsters are the largest part of a snapshot** (about 2 KB/s per client with two or three
+  moving). Sending their position at a lower rate or as smaller deltas would halve the total.
+- **A killed client takes 5 to 12 seconds to be noticed** (ENet timeout, `Net.TIMEOUT_*_MS`).
+  Until then its surgeon stands frozen, and if it was operating, nobody else can start the step.
+- **`menu.gd` `_save_prefs()` overwrites `user://prefs.cfg`** without loading it first, which drops
+  the saved graphics quality (pre-existing; the settings worker owns preferences now).
+- **Nettest bots teleport** instead of walking, so the multiplayer tests prove replication, not
+  navigation or monster pressure. `tools/playtest.tscn` still covers those solo.
+
 ## Level and tools
 
 - **The OR supply shelf is about 4.2 m from the table** (the OR template has no wall closer that
