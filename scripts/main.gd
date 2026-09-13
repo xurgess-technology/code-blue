@@ -164,9 +164,8 @@ func _start_host(player_name: String) -> void:
 
 func _start_join(player_name: String, address: String) -> void:
 	var parsed := Net.parse_address(address)
-	Net.local_name = player_name
 	menu.set_status("Joining %s:%d..." % [parsed.address, parsed.port])
-	var err := Net.join(parsed.address, parsed.port)
+	var err := Net.join(parsed.address, parsed.port, player_name)
 	if not err.is_empty():
 		menu.show_menu(err)
 

@@ -15,3 +15,6 @@ prototype-web/tmp/
 # OS
 Thumbs.db
 .DS_Store
+
+# Multiplayer test logs (tools/nettest_run.gd)
+tools/nettest_logs/

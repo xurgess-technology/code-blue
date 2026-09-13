@@ -591,44 +591,48 @@ func _set_visible_alive(a: bool) -> void:
 # networking
 # =========================================================================
 
-## Client -> host, 20 Hz: everything about my own surgeon.
-func report_state() -> Dictionary:
-	return {
-		"p": global_position, "y": rotation.y, "pi": head.rotation.x,
-		"fl": flashlight_on, "sp": sprinting, "mv": moving,
-		"ia": wants_interact, "sh": shove_count, "dr": drop_count,
-		"ai": aim_id, "ic": interact_count, "sel": selected,
-	}
+## Client -> host, 20 Hz: everything about my own surgeon. A positional array rather than a
+## dictionary: no key strings on the wire, about a third of the size.
+##   [position, yaw, pitch, flag bits (1 light, 2 sprint, 4 moving, 8 holding E),
+##    shove count, drop count, aim id, interact count, selected hand]
+func report_state() -> Array:
+	var bits := (1 if flashlight_on else 0) | (2 if sprinting else 0) | (4 if moving else 0) | (8 if wants_interact else 0)
+	return [global_position, rotation.y, head.rotation.x, bits, shove_count, drop_count, aim_id, interact_count, selected]
 
 
-func apply_remote_state(s: Dictionary) -> void:
+func apply_remote_state(s: Array) -> void:
+	if s.size() < 9:
+		return
+	var bits := int(s[3])
 	if alive:
-		_target_pos = s.p
-		global_position = s.p
-	_target_yaw = s.y
-	rotation.y = s.y
-	_pitch = s.pi
-	head.rotation.x = s.pi
-	set_flashlight(s.fl)
-	sprinting = s.sp
-	moving = s.mv
-	wants_interact = s.ia
-	shove_count = s.sh
-	drop_count = s.dr
-	aim_id = String(s.get("ai", ""))
-	selected = clampi(int(s.get("sel", selected)), 0, 1)
+		_target_pos = s[0]
+		global_position = s[0]
+	_target_yaw = float(s[1])
+	rotation.y = float(s[1])
+	_pitch = float(s[2])
+	head.rotation.x = float(s[2])
+	set_flashlight(bits & 1 != 0)
+	sprinting = bits & 2 != 0
+	moving = bits & 4 != 0
+	wants_interact = bits & 8 != 0
+	shove_count = int(s[4])
+	drop_count = int(s[5])
+	aim_id = String(s[6])
+	selected = clampi(int(s[8]), 0, 1)
 	# Drop before interacting so a count that moved in the same tick uses the right hand.
-	var ic := int(s.get("ic", interact_count))
-	interact_count = ic
+	interact_count = int(s[7])
 	_consume_actions()
 
 
-## Host -> everyone, 20 Hz: the authoritative view of every surgeon.
+## Host -> everyone, 20 Hz: the authoritative view of every surgeon. Values are quantized
+## (1 cm, ~0.6 degrees) so a surgeon standing still produces no snapshot delta, and `sl` is a
+## deep copy because the host edits hand stacks in place.
 func report_full() -> Dictionary:
 	return {
-		"id": peer_id, "p": global_position, "y": rotation.y, "pi": head.rotation.x,
+		"id": peer_id, "p": global_position.snappedf(0.01), "y": snappedf(rotation.y, 1.0 / 128.0),
+		"pi": snappedf(head.rotation.x, 1.0 / 128.0),
 		"fl": flashlight_on, "sp": sprinting, "mv": moving, "op": operating,
-		"hp": hp, "al": alive, "iv": invuln > 0.0, "sl": slots, "sel": selected,
+		"hp": hp, "al": alive, "iv": invuln > 0.0, "sl": slots.duplicate(true), "sel": selected,
 	}
 
 

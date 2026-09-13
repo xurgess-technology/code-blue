@@ -142,6 +142,12 @@ func start_lobby(new_seed: int, new_shift: int) -> void:
 	end_timer = 0.0
 	world_time = 0.0
 	_noises.clear()
+	# net: a new hospital invalidates every snapshot baseline; late joiners get to play now.
+	waiting_peers.clear()
+	if is_host():
+		_net_reset_history()
+	else:
+		_net_client_reset()
 	_set_phase(Phase.LOBBY)
 	_sync_players()
 	for p in players.values():
@@ -153,7 +159,7 @@ func start_lobby(new_seed: int, new_shift: int) -> void:
 	Warmup.run(self)
 	say("Shift %d. Hold E at the time clock when everyone is ready." % shift, 6.0)
 	if is_host() and Net.active:
-		_rpc_shift.rpc(seed_value, shift, phase)
+		_rpc_shift.rpc(seed_value, shift, phase, _net_seq)
 
 
 ## Host only: the patient arrives, supplies scatter, monsters wake up.
@@ -174,7 +180,7 @@ func begin_shift() -> void:
 	var ail := Procedures.ailment(case.ailment_id)
 	say("Incoming: %s. %s. %s" % [pt.full_name, ail.name, Procedures.blurb(case.patient_id, case.ailment_id)], 8.0)
 	if Net.active:
-		_rpc_shift.rpc(seed_value, shift, phase)
+		_rpc_shift.rpc(seed_value, shift, phase, _net_seq)
 
 
 func _set_phase(p: int) -> void:
@@ -192,7 +198,7 @@ func _end_shift(won: bool, text: String) -> void:
 		patient_body.flatline()
 	say(text, C.END_SCREEN_SECONDS)
 	if Net.active:
-		_rpc_shift.rpc(seed_value, shift, phase)
+		_rpc_shift.rpc(seed_value, shift, phase, _net_seq)
 
 
 func say(text: String, seconds: float = 3.0) -> void:
@@ -406,9 +412,9 @@ func _add_proxy(id: String, pos: Vector3, radius: float, hold: float, prompt_fn:
 func _pod_prompt() -> String:
 	if phase != Phase.SHIFT:
 		return ""
-	for p in players.values():
-		if not p.alive:
-			return "Hold E: revive %s" % _longest_dead().player_name
+	var dead := _longest_dead()   # net: never a peer waiting for the next shift
+	if dead != null:
+		return "Hold E: revive %s" % dead.player_name
 	return "!Re-Gen Pod: nobody to revive"
 
 
@@ -462,14 +468,24 @@ func _sync_players() -> void:
 		players[id] = p
 		_entities.add_child(p)
 		_respawn_at_start(p)
-		if phase != Phase.LOBBY:
-			say("%s clocked in." % Net.name_for(id), 3.0)
+		# net: joining mid-shift means watching until the next lobby.
+		if is_host() and phase != Phase.LOBBY:
+			_hold_until_next_shift(p)
+			say("%s joined. They clock in at the next shift." % Net.name_for(id), 3.0)
+		elif not is_host() and _recv_states.has(_recv_latest) and _recv_states[_recv_latest].pl.has(id):
+			p.apply_remote_full(_recv_states[_recv_latest].pl[id])
 	for id in players.keys():
 		if not ids.has(id):
 			var gone: Node = players[id]
 			if is_host():
-				_drop_hands(gone, true)
+				# net: a leaver's supplies land where they stood; an operation pauses for someone else.
+				var dropped := _drop_hands_in_place(gone)
 				surgery.end(gone)
+				_net_acks.erase(id)
+				_net_keyframe_at.erase(id)
+				waiting_peers.erase(id)
+				if phase == Phase.SHIFT:
+					say("%s left the shift.%s" % [gone.player_name, " What they carried is on the floor." if dropped else ""], 3.0)
 			gone.queue_free()
 			players.erase(id)
 
@@ -492,7 +508,7 @@ func alive_players() -> Array:
 func _longest_dead() -> Node:
 	var best: Node = null
 	for p in players.values():
-		if not p.alive and (best == null or p.dead_time > best.dead_time):
+		if not p.alive and not waiting_peers.has(p.peer_id) and (best == null or p.dead_time > best.dead_time):
 			best = p
 	return best
 
@@ -1109,6 +1125,49 @@ func _in_shove_cone(from: Node, target: Vector3, forward: Vector3) -> bool:
 # =========================================================================
 # networking
 # =========================================================================
+#
+# Snapshots (host -> each client, unreliable, SNAPSHOT_HZ):
+#   The host builds one "state" per tick: sections of entity reports keyed by id
+#     g   the global fields (time, phase, vitals, case, shelf, surgery, waiting peers)
+#     pl  players, mo monsters, it world items: id -> report dictionary
+#     ct  open containers: interact_id -> true (absent means closed)
+#   Each client acks the last snapshot it decoded (field "ak" of its player state). The host
+#   keeps the last HISTORY states and sends each client only what differs from the state that
+#   client acked: new or changed entities (only their changed fields) and removed ids. Loss
+#   costs nothing but a slightly larger next delta, because the base is always something the
+#   client provably has. A full keyframe goes out when the client has acked nothing usable
+#   and every KEYFRAME_SECONDS regardless, so any divergence heals.
+#   Wire format: {s: seq, b: base seq (0 = keyframe), g: {fields}, pl/mo/it/ct: {id: fields},
+#                 x: {section: [removed ids]}}; empty parts are omitted.
+# Discrete one-off things (sounds, messages, hits, phase changes) stay reliable RPCs.
+#
+# Joining mid-shift: a peer that arrives outside the lobby waits as a spectator (not alive,
+# in `waiting_peers`, ignored by the Re-Gen Pod) and spawns with everyone at the next lobby.
+# Leaving: the host drops what the leaver carried where it stood (nothing breaks) and ends
+# its operation; the step keeps its progress for whoever operates next.
+
+const KEYFRAME_SECONDS := 10.0
+const HISTORY := 48
+const SECTIONS := ["pl", "mo", "it", "ct"]
+
+## Peers that joined mid-shift and spectate until the next lobby: peer id -> true. Replicated.
+var waiting_peers: Dictionary = {}
+
+## Test instrumentation: when set, counts the serialized size of every snapshot sent.
+var net_measure := false
+var net_payload_bytes: int = 0
+var net_section_bytes: Dictionary = {}
+
+# host
+var _net_seq: int = 0
+var _net_history: Dictionary = {}     # seq -> state
+var _net_acks: Dictionary = {}        # peer id -> last seq that peer decoded
+var _net_keyframe_at: Dictionary = {} # peer id -> world_time of its last keyframe
+# client
+var _recv_states: Dictionary = {}     # seq -> decoded state
+var _recv_latest: int = 0
+var _recv_floor: int = 0              # snapshots at or below this seq predate the current lobby
+
 
 func _net_tick(delta: float) -> void:
 	if not Net.active:
@@ -1119,111 +1178,336 @@ func _net_tick(delta: float) -> void:
 	_snap_accum = 0.0
 	if is_host():
 		if Net.names.size() > 1:
-			_snapshot.rpc(_build_snapshot())
+			_send_snapshots()
 	else:
 		var me := local_player()
-		if me != null:
-			_player_state.rpc_id(Net.HOST_ID, me.report_state())
+		var ack := _recv_latest if _recv_states.has(_recv_latest) else 0
+		_player_state.rpc_id(Net.HOST_ID, ack, me.report_state() if me != null else [])
 
 
-func _build_snapshot() -> Dictionary:
-	var pl := []
+## Host: build this tick's state and send every client its delta.
+func _send_snapshots() -> void:
+	_net_seq += 1
+	var state := _build_state()
+	_net_history[_net_seq] = state
+	_net_history.erase(_net_seq - HISTORY)
+	var cache := {}   # base seq -> encoded message, shared by clients on the same base
+	for id in Net.peer_ids():
+		if id == Net.HOST_ID:
+			continue
+		var base_seq := int(_net_acks.get(id, 0))
+		if not _net_history.has(base_seq) or world_time - float(_net_keyframe_at.get(id, -INF)) >= KEYFRAME_SECONDS:
+			base_seq = 0
+		if base_seq == 0:
+			_net_keyframe_at[id] = world_time
+		if not cache.has(base_seq):
+			cache[base_seq] = _encode_delta(_net_history.get(base_seq, {}), state, _net_seq, base_seq)
+		var msg: Dictionary = cache[base_seq]
+		if net_measure:
+			net_payload_bytes += var_to_bytes(msg).size()
+			for k in msg.keys():
+				net_section_bytes[k] = int(net_section_bytes.get(k, 0)) + var_to_bytes(msg[k]).size()
+			if base_seq == 0:
+				net_section_bytes["keyframes"] = int(net_section_bytes.get("keyframes", 0)) + var_to_bytes(msg).size()
+				net_section_bytes["keyframe_count"] = int(net_section_bytes.get("keyframe_count", 0)) + 1
+		_snapshot.rpc_id(id, msg)
+
+
+func _build_state() -> Dictionary:
+	var pl := {}
 	for p in players.values():
-		pl.append(p.report_full())
-	var mo := []
+		pl[p.peer_id] = p.report_full()
+	var mo := {}
 	for m in monsters.values():
-		mo.append(m.report())
-	var it := []
+		mo[m.monster_id] = m.report()
+	var it := {}
 	for i in world_items.values():
-		it.append(i.report())
+		it[i.item_id] = i.report()
 	var ct := {}
 	for n in get_tree().get_nodes_in_group("container"):
-		if n.has_meta("interact_id") and n.has_method("is_open"):
-			ct[n.get_meta("interact_id")] = n.is_open()
-	return {
-		"t": world_time, "ph": phase, "sh": shift, "sd": seed_value,
-		"vit": vitals, "pu": punch, "po": pod, "et": end_timer,
-		"cs": case, "sf": shelf, "sg": surgery.net_state(),
-		"pl": pl, "mo": mo, "it": it, "ct": ct,
+		if n.has_meta("interact_id") and n.has_method("is_open") and n.is_open():
+			ct[String(n.get_meta("interact_id"))] = true
+	return {"g": _global_fields(), "pl": pl, "mo": mo, "it": it, "ct": ct}
+
+
+static func _encode_delta(base: Dictionary, state: Dictionary, seq: int, base_seq: int) -> Dictionary:
+	var msg := {"s": seq, "b": base_seq}
+	var gd := _diff_fields(base.get("g", {}), state.g)
+	if not gd.is_empty():
+		msg["g"] = gd
+	var removed := {}
+	for sec in SECTIONS:
+		var old: Dictionary = base.get(sec, {})
+		var cur: Dictionary = state[sec]
+		var changed := {}
+		for id in cur.keys():
+			var v = cur[id]
+			if not old.has(id):
+				changed[id] = v
+			elif v is Dictionary:
+				var d := _diff_fields(old[id], v)
+				if not d.is_empty():
+					changed[id] = d
+			elif _differs(old[id], v):
+				changed[id] = v
+		if not changed.is_empty():
+			msg[sec] = changed
+		var gone := []
+		for id in old.keys():
+			if not cur.has(id):
+				gone.append(id)
+		if not gone.is_empty():
+			removed[sec] = gone
+	if not removed.is_empty():
+		msg["x"] = removed
+	return msg
+
+
+## The fields of `cur` that differ from `old`; fields that disappeared are listed under "~".
+static func _diff_fields(old: Dictionary, cur: Dictionary) -> Dictionary:
+	var d := {}
+	for k in cur.keys():
+		if not old.has(k) or _differs(old[k], cur[k]):
+			d[k] = cur[k]
+	var gone := []
+	for k in old.keys():
+		if not cur.has(k):
+			gone.append(k)
+	if not gone.is_empty():
+		d["~"] = gone
+	return d
+
+
+static func _differs(a, b) -> bool:
+	return typeof(a) != typeof(b) or a != b
+
+
+static func _merge_fields(old: Dictionary, d: Dictionary) -> Dictionary:
+	var out := old.duplicate()
+	for k in d.get("~", []):
+		out.erase(k)
+	out.merge(d, true)
+	out.erase("~")
+	return out
+
+
+## The global fields, flattened one level so a changing tool position does not resend the
+## whole surgery state: {"sg": {"op":.., "ms": {"c":..}}} becomes {"sg.op":.., "ms.c":..}.
+func _global_fields() -> Dictionary:
+	var g := {
+		"t": snappedf(world_time, 0.5), "ph": phase, "sh": shift, "sd": seed_value,
+		"vit": snappedf(vitals, 0.1), "pu": snappedf(punch, 0.01), "po": snappedf(pod, 0.01),
+		"et": snappedf(end_timer, 0.1), "cs": case.duplicate(true), "sf": shelf.duplicate(),
+		"wp": waiting_peers.keys(),
 	}
+	var sg: Dictionary = surgery.net_state()
+	for k in sg.keys():
+		if k == "ms" and sg[k] is Dictionary:
+			for mk in sg.ms.keys():
+				g["ms." + str(mk)] = sg.ms[mk]
+		else:
+			g["sg." + str(k)] = sg[k]
+	return g
+
+
+static func _surgery_state_from(g: Dictionary) -> Dictionary:
+	var sg := {}
+	var ms := {}
+	for k in g.keys():
+		var key := String(k)
+		if key.begins_with("sg."):
+			sg[key.substr(3)] = g[k]
+		elif key.begins_with("ms."):
+			ms[key.substr(3)] = g[k]
+	sg["ms"] = ms
+	return sg
+
+
+## Client: rebuild the full state the host meant from the base we acked plus this delta.
+static func _decode_delta(base: Dictionary, msg: Dictionary) -> Dictionary:
+	var g := _merge_fields(base.get("g", {}), msg.get("g", {}))
+	var state := {"g": g}
+	var removed: Dictionary = msg.get("x", {})
+	for sec in SECTIONS:
+		var sec_state: Dictionary = base.get(sec, {}).duplicate()
+		for id in removed.get(sec, []):
+			sec_state.erase(id)
+		var changed: Dictionary = msg.get(sec, {})
+		for id in changed.keys():
+			var v = changed[id]
+			if v is Dictionary and sec_state.get(id) is Dictionary:
+				sec_state[id] = _merge_fields(sec_state[id], v)
+			else:
+				sec_state[id] = v
+		state[sec] = sec_state
+	return state
 
 
 @rpc("authority", "unreliable_ordered", "call_remote")
-func _snapshot(s: Dictionary) -> void:
-	if s.sd != seed_value or phase == Phase.MENU:
-		start_lobby(s.sd, s.sh)
-	world_time = s.t
-	_set_phase(s.ph)
-	shift = s.sh
-	vitals = s.vit
-	punch = s.pu
-	pod = s.po
-	end_timer = s.et
+func _snapshot(msg: Dictionary) -> void:
+	var seq := int(msg.get("s", 0))
+	var base_seq := int(msg.get("b", 0))
+	if seq <= _recv_floor or seq <= _recv_latest:
+		return
+	var base: Dictionary = {}
+	if base_seq != 0:
+		if not _recv_states.has(base_seq):
+			return   # we no longer have that base; our ack will fall back to a keyframe
+		base = _recv_states[base_seq]
+	var state := _decode_delta(base, msg)
+	var g: Dictionary = state.g
+	if not g.has("sd"):
+		return
+	var keyframe := base_seq == 0
+	if int(g.sd) != seed_value or phase == Phase.MENU:
+		if not keyframe:
+			return
+		start_lobby(int(g.sd), int(g.sh))   # clears _recv_states
+	_recv_states[seq] = state
+	for old in _recv_states.keys():
+		if int(old) <= seq - HISTORY:
+			_recv_states.erase(old)
+	_recv_latest = seq
+	_apply_state(state, msg, keyframe)
 
-	case = s.cs
+
+func _apply_state(state: Dictionary, msg: Dictionary, keyframe: bool) -> void:
+	var g: Dictionary = state.g
+	# The clock runs locally; the host's (sent in half-second steps) only corrects drift.
+	if absf(world_time - float(g.t)) > 1.0:
+		world_time = float(g.t)
+	_set_phase(int(g.ph))
+	shift = int(g.sh)
+	vitals = float(g.vit)
+	punch = float(g.pu)
+	pod = float(g.po)
+	end_timer = float(g.et)
+	waiting_peers.clear()
+	for id in g.get("wp", []):
+		waiting_peers[id] = true
+	case = (g.cs as Dictionary).duplicate(true)
 	_apply_case_locally()
-	if str(shelf) != str(s.sf):
-		shelf = s.sf
+	if str(shelf) != str(g.sf):
+		shelf = (g.sf as Dictionary).duplicate()
 		if shelf_node != null:
 			shelf_node.show_stock(shelf)
-	surgery.apply_net_state(s.sg)
+	surgery.apply_net_state(_surgery_state_from(g))
 
-	for entry in s.pl:
-		var p = players.get(entry.id)
-		if p != null:
-			p.apply_remote_full(entry)
+	var removed: Dictionary = msg.get("x", {})
+	# Players: nodes come from the roster; apply what changed (everything on a keyframe).
+	var pl_ids: Array = state.pl.keys() if keyframe else msg.get("pl", {}).keys()
+	for id in pl_ids:
+		var p = players.get(id)
+		if p != null and state.pl.has(id):
+			p.apply_remote_full(state.pl[id])
 
-	# Monsters and items are created and destroyed to match the host's lists.
-	var seen := {}
-	for entry in s.mo:
-		seen[entry.id] = true
-		var m = monsters.get(entry.id)
-		if m == null:
-			m = MonsterScript.new_monster(entry.id, entry.kind, entry.pos)
-			monsters[entry.id] = m
-			_entities.add_child(m)
-		m.apply_remote(entry)
-	for id in monsters.keys():
-		if not seen.has(id):
-			monsters[id].queue_free()
-			monsters.erase(id)
+	# Monsters and items are created and destroyed to match the host.
+	_apply_entities(monsters, state.mo, msg.get("mo", {}), removed.get("mo", []), keyframe,
+		func(id, e): return MonsterScript.new_monster(id, String(e.kind), e.pos))
+	_apply_entities(world_items, state.it, msg.get("it", {}), removed.get("it", []), keyframe,
+		func(id, e): return WorldItemScript.new_item(id, String(e.k), int(e.n)))
 
-	var seen_i := {}
-	for entry in s.it:
-		seen_i[entry.id] = true
-		var item = world_items.get(entry.id)
-		if item == null:
-			item = WorldItemScript.new_item(entry.id, entry.k, entry.n)
-			world_items[entry.id] = item
-			_entities.add_child(item)
-		item.apply_remote(entry)
-	for id in world_items.keys():
-		if not seen_i.has(id):
-			world_items[id].queue_free()
-			world_items.erase(id)
+	if keyframe:
+		for n in get_tree().get_nodes_in_group("container"):
+			if n.has_meta("interact_id") and n.has_method("is_open"):
+				var want: bool = state.ct.has(String(n.get_meta("interact_id")))
+				if n.is_open() != want:
+					n.set_open(want, true)
+	else:
+		for id in msg.get("ct", {}).keys():
+			_set_container_open(id, true)
+		for id in removed.get("ct", []):
+			_set_container_open(id, false)
 
-	for id in s.ct.keys():
-		var node := find_interactable(id)
-		if node != null and node.has_method("is_open") and node.is_open() != bool(s.ct[id]):
-			node.set_open(bool(s.ct[id]), true)
+
+func _apply_entities(nodes: Dictionary, entities: Dictionary, changed: Dictionary, removed: Array, keyframe: bool, make: Callable) -> void:
+	for id in removed:
+		if nodes.has(id):
+			nodes[id].queue_free()
+			nodes.erase(id)
+	var ids: Array = entities.keys() if keyframe else changed.keys()
+	for id in ids:
+		var e: Dictionary = entities.get(id, {})
+		if e.is_empty():
+			continue
+		var node = nodes.get(id)
+		if node == null or not is_instance_valid(node):
+			node = make.call(id, e)
+			nodes[id] = node
+			_entities.add_child(node)
+		node.apply_remote(e)
+	if keyframe:
+		for id in nodes.keys():
+			if not entities.has(id):
+				nodes[id].queue_free()
+				nodes.erase(id)
+
+
+func _set_container_open(id: String, open: bool) -> void:
+	var node := find_interactable(id)
+	if node != null and node.has_method("is_open") and node.is_open() != open:
+		node.set_open(open, true)
+
+
+## Host: forget what clients have, so the next snapshot to everyone is a keyframe.
+func _net_reset_history() -> void:
+	_net_history.clear()
+	_net_keyframe_at.clear()
 
 
 @rpc("any_peer", "unreliable_ordered", "call_remote")
-func _player_state(s: Dictionary) -> void:
+func _player_state(ack: int, s: Array) -> void:
 	if not is_host():
 		return
 	var id := multiplayer.get_remote_sender_id()
+	# The newest base this client can decode. Unreliable-ordered, so it never goes backwards,
+	# except to 0 after the client dropped its states for a new lobby.
+	_net_acks[id] = ack
 	var p = players.get(id)
-	if p != null:
+	if p != null and not s.is_empty():
 		p.apply_remote_state(s)
 
 
 @rpc("authority", "reliable", "call_remote")
-func _rpc_shift(new_seed: int, new_shift: int, new_phase: int) -> void:
+func _rpc_shift(new_seed: int, new_shift: int, new_phase: int, net_seq: int = 0) -> void:
 	if new_seed != seed_value:
 		start_lobby(new_seed, new_shift)
+		_recv_floor = maxi(_recv_floor, net_seq)
 	shift = new_shift
 	_set_phase(new_phase)
+
+
+## Client side of a new lobby: every decoded state belongs to the old hospital.
+func _net_client_reset() -> void:
+	_recv_states.clear()
+	_recv_latest = 0
+
+
+## Host: a peer joined outside the lobby. It watches until the next shift.
+func _hold_until_next_shift(p: Node) -> void:
+	waiting_peers[p.peer_id] = true
+	p.alive = false
+	p.dead_time = 0.0
+	p._set_visible_alive(false)
+
+
+## Host: someone left. What they carried lands where they stood, gently: nothing smashes.
+func _drop_hands_in_place(p: Node) -> bool:
+	var any := false
+	for i in p.slots.size():
+		var s: Dictionary = p.slots[i]
+		if s.kind == "":
+			continue
+		any = true
+		var a := TAU * float(i) / float(maxi(1, p.slots.size())) + randf() * 0.5
+		var at: Vector3 = p.global_position + Vector3(cos(a) * 0.3, 0.5, sin(a) * 0.3)
+		var xf := Transform3D(Basis(Vector3.UP, randf() * TAU), at)
+		var it := _spawn_item(s.kind, int(s.count), xf, WorldItem.State.LOOSE)
+		it.toss(xf, Vector3(cos(a), 0.0, sin(a)) * 0.4)
+		p.slots[i] = {"kind": "", "count": 0}
+	if any:
+		emit_noise(p.global_position, 0.4, "drop")
+	return any
 
 
 ## Discrete one-off things the host wants everyone to see or hear.

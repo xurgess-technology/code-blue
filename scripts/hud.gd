@@ -237,11 +237,13 @@ func _draw_hands(w: float, h: float, me) -> void:
 
 func _draw_dead_banner(w: float) -> void:
 	draw_rect(Rect2(w * 0.5 - 230, 60, 460, 50), Color(0, 0, 0, 0.6))
-	_text(Vector2(0, 82), "YOU ARE DEAD", 17, Color("ff6a6a"), HORIZONTAL_ALIGNMENT_CENTER, w)
+	# net hook: someone who joined mid-shift watches until the next shift starts.
+	var waiting: bool = game.waiting_peers.has(Net.my_id())
+	_text(Vector2(0, 82), "SHIFT IN PROGRESS" if waiting else "YOU ARE DEAD", 17, Color("ffd35c") if waiting else Color("ff6a6a"), HORIZONTAL_ALIGNMENT_CENTER, w)
 	var watching = game.viewed_player()
 	var text := "Nobody left to watch."
 	if watching != null and watching != game.local_player():
-		text = "Watching %s. A teammate can revive you at the Re-Gen Pod." % watching.player_name
+		text = ("Watching %s. You clock in at the next shift." if waiting else "Watching %s. A teammate can revive you at the Re-Gen Pod.") % watching.player_name
 	_text(Vector2(0, 102), text, 13, Color("c9d1d9"), HORIZONTAL_ALIGNMENT_CENTER, w)
 
 
