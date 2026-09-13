@@ -59,6 +59,14 @@ var bot_aim_id: String = ""
 ## Bump to press E once on whatever the bot aims at.
 var bot_press: int = 0
 
+## DEV HOOK (scripts/dev): a dev room bot or target dummy. The host simulates it like a local
+## player through the bot_* seam; everyone else sees it like a remote player.
+var is_bot: bool = false
+## DEV HOOK: seconds left knocked down (no moving). Wave 3's downed state replaces this.
+var stun: float = 0.0
+## DEV HOOK: flying through walls (dev panel).
+var noclip: bool = false
+
 var _shove_seen: int = 0
 var _drop_seen: int = 0
 var _interact_seen: int = 0
@@ -316,10 +324,12 @@ func _input(event: InputEvent) -> void:
 
 
 func _physics_process(delta: float) -> void:
-	if is_local:
+	# DEV HOOK: the host drives dev room bots as if they were its own players.
+	if is_local or (is_bot and game != null and game.is_host()):
 		_local_step(delta)
 	else:
 		_remote_step(delta)
+	stun = maxf(0.0, stun - delta)
 	invuln = maxf(0.0, invuln - delta)
 	if not alive:
 		dead_time += delta
@@ -329,7 +339,7 @@ func _local_step(delta: float) -> void:
 	var g: Node = game
 	# The mouse is only free while a menu, the guide or the surgery view has it,
 	# and then the surgeon stands still.
-	var can_move: bool = alive and (g == null or not g.paused) \
+	var can_move: bool = alive and (g == null or not g.paused) and stun <= 0.0 \
 		and (bot_active or Input.mouse_mode == Input.MOUSE_MODE_CAPTURED)
 
 	var input_dir := Vector2.ZERO
@@ -360,6 +370,13 @@ func _local_step(delta: float) -> void:
 	rotation.y = _yaw
 	head.rotation.x = _pitch
 
+	# DEV HOOK (scripts/dev): noclip flies through walls; nothing below applies.
+	if noclip and g != null and g.dev != null:
+		g.dev.noclip_move(self, input_dir, want_sprint, delta)
+		if g.is_host():
+			_consume_actions()
+		return
+
 	moving = input_dir.length() > 0.1 and not operating
 	sprinting = moving and can_move and want_sprint and stamina > 0.0
 	stamina = clampf(stamina + (-delta / 4.5 if sprinting else delta / 5.0), 0.0, 1.0)
@@ -387,7 +404,9 @@ func _local_step(delta: float) -> void:
 			set_flashlight(not flashlight_on)
 			Audio.play("click")
 		_shove_cd = maxf(0.0, _shove_cd - delta)
-		if Input.is_action_just_pressed("shove") and _shove_cd <= 0.0:
+		# DEV HOOK: with the dev gun out, the left mouse button fires instead of shoving.
+		var gun_out: bool = g != null and g.dev_mode and g.dev.has_gun(peer_id) and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+		if Input.is_action_just_pressed("shove") and _shove_cd <= 0.0 and not gun_out:
 			_shove_cd = C.SHOVE_COOLDOWN
 			shove_count += 1
 		if Input.is_action_just_pressed("drop") and slots[selected].kind != "":
@@ -518,6 +537,7 @@ func holding(kind: String) -> bool:
 
 
 func _process(_delta: float) -> void:
+	_update_down_pose(_delta)  # DEV HOOK
 	var s: Dictionary = slots[selected]
 	var key := "%s:%d" % [s.kind, s.count]
 	if key == _held_key:
@@ -615,9 +635,24 @@ func flinch() -> void:
 
 func _set_visible_alive(a: bool) -> void:
 	if not is_local:
-		body_visual.visible = a
+		body_visual.visible = a or is_bot  # DEV HOOK: dead bots stay, lying where they fell
 		name_tag.visible = a
 	collision_layer = C.L_PLAYER if a else 0
+
+
+## DEV HOOK (scripts/dev): knocked down (stun) you see the floor; everyone else sees you lying
+## on it. Dead bots lie there too. Wave 3's downed state replaces this.
+func _update_down_pose(delta: float) -> void:
+	var down := stun > 0.0 or (is_bot and not alive)
+	if is_local and not is_bot:
+		var eye := 0.45 if down and alive else C.EYE_H
+		if not is_equal_approx(head.position.y, eye):
+			head.position.y = move_toward(head.position.y, eye, delta * 6.0)
+		return
+	var tilt := -PI * 0.47 if down else 0.0
+	if not is_equal_approx(body_visual.rotation.x, tilt):
+		body_visual.rotation.x = move_toward(body_visual.rotation.x, tilt, delta * 6.0)
+		body_visual.position.y = 0.3 * (body_visual.rotation.x / (-PI * 0.47))
 
 
 # =========================================================================

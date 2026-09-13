@@ -299,6 +299,51 @@ static func slider_to_db(v) -> float     # 0..1 slider to dB (squared amplitude,
 - Tests: `tools/settingstest.tscn` (headless), `tools/settingsshot.tscn` (windowed screenshots to
   `tools/settings_shots/`, plus the mouse-look sensitivity check that needs a captured mouse).
 
+## Dev room (dev worker, sweep 2 wave 1)
+
+A secret level mode (`scripts/dev/**`). The session seed `SEED` (-4077, in
+`scripts/dev/dev_room.gd`) *is* the dev room: `game.start_lobby` sets `game.dev_mode` from the
+seed, so a client that joins builds the same room from the snapshot with no extra protocol.
+The way in is deliberately not written down here.
+
+Game API (host only; wave 3 `downed` changes what these do, not their signatures):
+
+```gdscript
+game.dev_mode: bool                      # every machine; true inside the dev room
+game.dev: Node                           # scripts/dev/dev_room.gd, child "Dev" of Game, always present
+game.damage_player(p, amount: int, source: String, knock := Vector3.ZERO)
+    # every hurt goes here; monster_hit_player calls it. source: "monster:<kind>", "dev_gun:<name>"
+game.knock_down_player(p, source: String, knock := Vector3.ZERO, seconds := 3.0)
+    # stand-in until wave 3: damage down to 1 HP plus p.stun seconds; replace the body, keep the call
+game.kill_monster(m)                     # removes it for good; everyone sees it fall ("monster_killed" event)
+game.knock_down_monster(m, dir := Vector3.ZERO, seconds := 4.0)   # Discharged stunned, Night Nurse calmed
+```
+
+Player fields added: `is_bot` (a dev bot or target dummy: a real Player the host simulates
+through the `bot_*` seam, remote on clients, not in `Net.names`, negative id), `stun` (seconds
+knocked down, no movement; a `"stun"` event plus the dev snapshot block), `noclip`.
+
+- Bots live in `game.players` like everyone else. Code that iterates players must not assume
+  every id is in `Net.peer_ids()` (the HUD party list uses the roster, so bots are not listed).
+  `_sync_players` never removes an `is_bot` player.
+- Snapshot key `"dv"` carries the dev state (`dev.net_state()` / `dev.apply_net_state()`), empty
+  outside the dev room. Clients apply it before the player list so bot nodes exist.
+- `game._event` passes kinds it does not know to `dev.on_event(kind, data)`.
+- The room fills the level_info keys the game reads today (player/tool/monster spawns, table,
+  table_yaw, shelf, lectern, lights, containers, nav_region) plus `dev_room: true`, `dev_gate`,
+  `dummy_spots`. It has none of the wave 1 hospital keys (tables, or_screen, phone, entrance,
+  neutral, wings): code using those must check for them.
+- The room is always in `Phase.SHIFT` (no clock-in). A saved or lost patient clears the table
+  instead of starting a lobby. Wave 2's phone call: add `game.dev_phone_call()` and the panel's
+  button calls it (until then `dev.phone_call_requested` is emitted).
+- `surgery_system.gd` lets an `is_bot` operator operate on the host with the minigame's
+  `bot_input(t, skill)` (skill from the bot's meta `bot_skill`). Minigames must keep
+  `bot_input` finishing their step.
+- Interactables: `dev_disp_<item kind>` dispensers (endless stacks) and `dev_disp_dev_gun`.
+- World changes from the panel or tests: `game.dev.request(action, args)`; the host applies,
+  a client sends. Shots: `game.dev.fire(shooter, from, dir, "kill" | "knock")`.
+- Sounds `dev_zap`, `dev_thump`, `dev_defib` from `tools/gen_audio_dev.mjs`.
+
 ## Design decisions (locked)
 
 - One patient (Bob or the seal) and one ailment (gunshot or amputation) per shift.

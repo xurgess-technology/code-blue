@@ -78,6 +78,29 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 - **Headless runs log "Parameter m is null" from the gauze warmup.** It comes from the dummy
   renderer used by `--headless` and does not happen in a window.
 
+## Dev room (sweep 2 wave 1)
+
+- **Knock-down is a stand-in.** Until the downed system (wave 3) it is damage to 1 HP plus a
+  3 s stun (you see the floor, others see you lying down). `game.knock_down_player` is the one
+  place to replace.
+- **The HUD still shows the case panel and "operate / bring to the shelf"** in the dev room while
+  a patient is on the table. Harmless; the HUD becomes minimal in wave 3.
+- **Bots are simple.** They path on the navmesh without avoiding each other or monsters, never
+  flee, and keep their flashlight off. Their cameras count as watchers for the Night Nurse, and
+  bots and dummies count as living players for monsters and the "everyone is dead" check.
+- **A bot operates with the minigame's own `bot_input`.** If a reworked minigame's bot input stops
+  finishing, bots stop finishing that step. The devtest covers only the anesthetic step.
+- **Noclip skips the rest of the movement step**, so F, Q and G do nothing while flying.
+- **Humans who die vanish** (as in a shift) and auto-revive at the spawn after 4 s; dead bots and
+  dummies lie where they fell until revived or removed.
+- **Time scale is `Engine.time_scale` on every machine** (replicated), so it also slows a client's
+  own walking.
+- **The room is bright and a little hazy**: the global volumetric fog from `look.gd` still
+  applies; the fixtures' fog energy is only turned down.
+- **Monsters killed right against the barrier fall out of sight** behind it.
+- **`tools/nettest.tscn` is still broken** (net worker); the dev room has its own two-process check
+  in `tools/devtest.tscn`. Run the host first; the client waits on real time, not game time.
+
 ## Testing tips
 
 - Add `--fixed-fps 60` to headless runs: the game then steps as fast as the CPU allows (a 250 s

@@ -8,6 +8,12 @@ signal chose_join(player_name: String, address: String)
 ## Settings hook: the Settings button; main.gd opens the settings screen.
 signal chose_settings
 
+## DEV HOOK (scripts/dev): Solo or Host while the secret code is armed. host = true to host.
+signal chose_dev(player_name: String, host: bool)
+
+const DevCodeScript := preload("res://scripts/dev/dev_code.gd")
+
+var dev_code: Node = null
 var _name_edit: LineEdit
 var _addr_edit: LineEdit
 var _status: Label
@@ -49,6 +55,12 @@ func _build() -> void:
 	title.add_theme_font_size_override("font_size", 64)
 	title.add_theme_color_override("font_color", Color("d71e28"))
 	col.add_child(title)
+	# DEV HOOK: the dev room's secret code listens here; armed, the title turns blue.
+	dev_code = DevCodeScript.new()
+	dev_code.name = "DevCode"
+	add_child(dev_code)
+	dev_code.armed_changed.connect(func(on): title.add_theme_color_override("font_color", Color("2f7bff") if on else Color("d71e28")))
+	bg.gui_input.connect(_on_background_input)
 
 	var tag := Label.new()
 	tag.text = "Clock in. Find the tools. Save the patient.\nTry not to shove each other into the monsters."
@@ -168,13 +180,32 @@ func set_enabled(on: bool) -> void:
 func _on_solo() -> void:
 	_save_prefs()
 	set_enabled(false)
+	if _dev_start(false):  # DEV HOOK
+		return
 	chose_solo.emit(player_name())
 
 
 func _on_host() -> void:
 	_save_prefs()
 	set_enabled(false)
+	if _dev_start(true):  # DEV HOOK
+		return
 	chose_host.emit(player_name())
+
+
+## DEV HOOK: armed by the secret code, Solo and Host open the dev room (once; it disarms).
+func _dev_start(host: bool) -> bool:
+	if dev_code == null or not dev_code.armed:
+		return false
+	dev_code.set_armed(false, false)
+	chose_dev.emit(player_name(), host)
+	return true
+
+
+## Clicking the empty background lets go of a text field (so typing reaches the menu again).
+func _on_background_input(e: InputEvent) -> void:
+	if e is InputEventMouseButton and e.pressed:
+		get_viewport().gui_release_focus()
 
 
 func _on_join() -> void:

@@ -47,6 +47,10 @@ var message_timer: float = 0.0
 var danger: float = 0.0
 var spectating: int = 0
 var paused: bool = false
+## DEV HOOK (scripts/dev): true while the session is in the secret dev room (seed DevRoom.SEED).
+var dev_mode: bool = false
+## DEV HOOK: the dev room controller (scripts/dev/dev_room.gd), idle outside the dev room.
+var dev: Node = null
 
 var _entities: Node3D
 var _snap_accum: float = 0.0
@@ -68,6 +72,7 @@ const ShelfScript := preload("res://scripts/supply_shelf.gd")
 const BodyScript := preload("res://scripts/patient_body.gd")
 const SpawnerScript := preload("res://scripts/item_spawner.gd")
 const SurgeryScript := preload("res://scripts/surgery/surgery_system.gd")
+const DevRoomScript := preload("res://scripts/dev/dev_room.gd")
 
 
 func _ready() -> void:
@@ -78,6 +83,11 @@ func _ready() -> void:
 	surgery.name = "Surgery"
 	add_child(surgery)
 	surgery.setup(self)
+	# DEV HOOK: the dev room lives on every machine at the same path so its RPCs line up.
+	dev = DevRoomScript.new()
+	dev.name = "Dev"
+	add_child(dev)
+	dev.setup(self)
 	Net.roster_changed.connect(_on_roster_changed)
 	Net.host_left.connect(func(): end_session("The host left the game."))
 
@@ -121,6 +131,8 @@ func end_session(reason: String) -> void:
 	for p in players.values():
 		p.queue_free()
 	players.clear()
+	dev.reset_state()  # DEV HOOK: bots are gone with the players; time scale back to 1
+	dev_mode = false
 	phase = Phase.MENU
 	phase_changed.emit(phase)
 	if not reason.is_empty():
@@ -132,6 +144,12 @@ func start_lobby(new_seed: int, new_shift: int) -> void:
 	seed_value = new_seed
 	shift = new_shift
 	_rng.seed = hash(str(new_seed) + "|" + str(new_shift))
+	# DEV HOOK: the dev room is the session seed DevRoomScript.SEED, so a joining client builds
+	# the same room from the snapshot without any extra protocol.
+	var was_dev := dev_mode
+	dev_mode = new_seed == DevRoomScript.SEED
+	if was_dev and not dev_mode:
+		dev.reset_state()
 	_clear_case()
 	_clear_items()
 	_clear_monsters()
@@ -151,7 +169,10 @@ func start_lobby(new_seed: int, new_shift: int) -> void:
 	# First lobby of the session: build and draw one of everything behind a short cover so
 	# nothing hitches the first time it appears later.
 	Warmup.run(self)
-	say("Shift %d. Hold E at the time clock when everyone is ready." % shift, 6.0)
+	if dev_mode:
+		dev.on_enter()  # DEV HOOK: no clock-in; the room is always "on shift"
+	else:
+		say("Shift %d. Hold E at the time clock when everyone is ready." % shift, 6.0)
 	if is_host() and Net.active:
 		_rpc_shift.rpc(seed_value, shift, phase)
 
@@ -236,13 +257,15 @@ func _build_level(for_seed: int) -> void:
 	var gen: Dictionary = {}
 	var mapgen_path := "res://scripts/mapgen.gd"
 	var builder_path := "res://scripts/hospital_builder.gd"
-	if ResourceLoader.exists(mapgen_path) and ResourceLoader.exists(builder_path):
+	if dev_mode:
+		level = dev.build_level(level_info)  # DEV HOOK: the dev room instead of a hospital
+	elif ResourceLoader.exists(mapgen_path) and ResourceLoader.exists(builder_path):
 		var MapGenScript: GDScript = load(mapgen_path)
 		var BuilderScript: GDScript = load(builder_path)
 		gen = MapGenScript.generate(for_seed)
 		level = BuilderScript.build(gen, level_info)
 	# A level missing its landmarks is worse than no level; fall back rather than ship a broken shift.
-	if level == null or not _level_info_usable():
+	if not dev_mode and (level == null or not _level_info_usable()):
 		if level != null:
 			push_warning("Generated level for seed %d was incomplete; using the fallback ward." % for_seed)
 			level.queue_free()
@@ -465,7 +488,7 @@ func _sync_players() -> void:
 		if phase != Phase.LOBBY:
 			say("%s clocked in." % Net.name_for(id), 3.0)
 	for id in players.keys():
-		if not ids.has(id):
+		if not ids.has(id) and not players[id].is_bot:  # DEV HOOK: bots are not in the Net roster
 			var gone: Node = players[id]
 			if is_host():
 				_drop_hands(gone, true)
@@ -950,7 +973,10 @@ func _simulate(delta: float) -> void:
 			end_timer -= delta
 			if end_timer <= 0.0:
 				var won := phase == Phase.WON
-				start_lobby(seed_value + 1, shift + 1 if won else shift)
+				if dev_mode:
+					dev.on_case_over(won)  # DEV HOOK: stay in the dev room
+				else:
+					start_lobby(seed_value + 1, shift + 1 if won else shift)
 
 
 func _sim_lobby(delta: float) -> void:
@@ -1058,18 +1084,73 @@ func _update_danger() -> void:
 func monster_hit_player(m: Node, p: Node) -> void:
 	if not is_host() or not p.alive or p.invuln > 0.0:
 		return
-	var dmg: int = m.damage
+	if dev_mode and dev.is_god(p):
+		return  # DEV HOOK: god mode
 	var knock: Vector3 = (p.global_position - m.global_position).normalized() * m.knockback
-	p.take_hit(dmg, knock)
+	damage_player(p, m.damage, "monster:%s" % m.kind, knock)
+	m.recoil_after_hit()
+
+
+## Host only. Every hurt a player takes goes through here (monsters, the dev gun). `source` is
+## free text for logs and messages ("monster:discharged", "dev_gun:<name>").
+## Wave 3 (downed players) changes what reaching 0 HP means; callers stay the same.
+func damage_player(p: Node, amount: int, source: String, knock: Vector3 = Vector3.ZERO) -> void:
+	if not is_host() or p == null or not is_instance_valid(p) or not p.alive or amount <= 0:
+		return
+	p.take_hit(amount, knock)
 	_broadcast("hit", {"id": p.peer_id, "hp": p.hp, "knock": knock})
 	Audio.play("hurt", p.global_position)
 	surgery.end(p)
 	_drop_hands(p, true)
-	m.recoil_after_hit()
 	if not p.alive:
 		Audio.play("flatline", p.global_position)
-		say("%s is down. The Re-Gen Pod can bring them back." % p.player_name if players.size() > 1
-			else "You are down.", 4.0)
+		if source.begins_with("dev_gun"):
+			say("%s was deleted by %s." % [p.player_name, source.get_slice(":", 1)], 3.0)
+		else:
+			say("%s is down. The Re-Gen Pod can bring them back." % p.player_name if players.size() > 1
+				else "You are down.", 4.0)
+
+
+## Host only. Knock a player down without killing them. Until the downed system exists (wave 3)
+## this is heavy damage that leaves 1 HP plus a stun during which they cannot move; wave 3 swaps
+## the body of this function for its downed state and keeps the signature.
+func knock_down_player(p: Node, source: String, knock: Vector3 = Vector3.ZERO, seconds: float = 3.0) -> void:
+	if not is_host() or p == null or not is_instance_valid(p) or not p.alive:
+		return
+	if p.hp > 1:
+		damage_player(p, p.hp - 1, source, knock)
+	else:
+		p.apply_knock(knock)
+		_broadcast("shoved", {"id": p.peer_id, "knock": knock})
+		surgery.end(p)
+		_drop_hands(p, true)
+		Audio.play("hurt", p.global_position)
+	p.stun = seconds
+	_broadcast("stun", {"id": p.peer_id, "t": seconds})
+
+
+## Host only. Remove a monster for good (the dev gun). Everyone sees it fall.
+func kill_monster(m: Node) -> void:
+	if not is_host() or m == null or not is_instance_valid(m) or not monsters.has(m.monster_id):
+		return
+	monsters.erase(m.monster_id)
+	var data := {"kind": m.kind, "pos": m.global_position, "y": m.rotation.y}
+	m.queue_free()
+	dev.monster_died_fx(data)
+	_broadcast("monster_killed", data)
+
+
+## Host only. Put a monster out of action for a while without killing it.
+func knock_down_monster(m: Node, dir: Vector3 = Vector3.ZERO, seconds: float = 4.0) -> void:
+	if not is_host() or m == null or not is_instance_valid(m):
+		return
+	m.shoved(dir)
+	m.lunge_t = 0.0
+	if m.brain != null and "timer" in m.brain and m.kind == MonsterScript.DISCHARGED:
+		m.brain.timer = seconds   # the Discharged's shove stun, lengthened
+	else:
+		m.calm = maxf(m.calm, seconds)   # the Night Nurse ignores shoves: make it stand down
+	_sound("thud", m.global_position)
 
 
 ## Host only. Someone pressed Q.
@@ -1145,6 +1226,7 @@ func _build_snapshot() -> Dictionary:
 		"vit": vitals, "pu": punch, "po": pod, "et": end_timer,
 		"cs": case, "sf": shelf, "sg": surgery.net_state(),
 		"pl": pl, "mo": mo, "it": it, "ct": ct,
+		"dv": dev.net_state() if dev_mode else {},  # DEV HOOK
 	}
 
 
@@ -1167,6 +1249,8 @@ func _snapshot(s: Dictionary) -> void:
 		if shelf_node != null:
 			shelf_node.show_stock(shelf)
 	surgery.apply_net_state(s.sg)
+	if dev_mode and not s.get("dv", {}).is_empty():
+		dev.apply_net_state(s.dv)  # DEV HOOK: creates bot players before their entries apply
 
 	for entry in s.pl:
 		var p = players.get(entry.id)
@@ -1254,6 +1338,12 @@ func _event(kind: String, data: Dictionary) -> void:
 				r.teleport(data.pos)
 				r.revive(2)
 			Audio.play("revive", data.pos)
+		"stun":
+			var st = players.get(data.id)
+			if st != null:
+				st.stun = float(data.t)
+		_:
+			dev.on_event(kind, data)  # DEV HOOK: monster_killed and other dev room events
 
 
 static func _shuffle(a: Array, rng: RandomNumberGenerator) -> void:
