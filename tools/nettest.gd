@@ -591,12 +591,7 @@ func _sc_downed():
 		me.teleport(game._floor_at(_msgs("stand")[0].data.pos))
 		await _wall_wait(1.0)
 		_send("standing", {})
-		var dbg := {"t": 0}
-		if not await _do_until(func():
-				dbg.t += 1
-				if dbg.t % 120 == 0:
-					_say("DBG downed=%s hp=%d recv=%d pos=%s" % [str(me.downed), me.hp, game._recv_latest, str(me.global_position)]),
-				func(): return me.downed, 30.0, "going down"):
+		if not await _until(func(): return me.downed, 30.0, "going down"):
 			return
 		if not await _until(func(): return game.downed_view._layer.visible, 5.0, "the bleed-out overlay"):
 			return
