@@ -130,7 +130,6 @@ All static (no AnimationPlayer).
 | `prop/curtain` | `curtain.glb` | "Curtains Double" | Poly Pizza <https://poly.pizza/m/kkeII96j9N> | Quaternius | CC0 1.0 | 1.92 × 2.40 × 0.26 | scale 0.553, yaw 180, x +0.022, y +0.003, z −0.069 |
 | `prop/table_op` | `table_op.glb` | `table.glb` | Kenney Space Station Kit | Kenney | CC0 1.0 | 2.00 × 0.73 × 1.09 | scale 1.820, yaw 180, colormap embedded |
 | `prop/clock` | `clock.glb` | "Alarm Clock" | Poly Pizza <https://poly.pizza/m/y5f363OS9C> | CreativeTrio | CC0 1.0 | 0.20 × 0.30 × 0.10 | scale 1.580, yaw 180 |
-| `prop/pod` | `pod.glb` | `table-display.glb` | Kenney Space Station Kit | Kenney | CC0 1.0 | 1.86 × 0.90 × 1.22 | scale 1.500, yaw 180, y +0.450, colormap embedded |
 
 Honest notes on the stand-ins:
 
@@ -141,8 +140,6 @@ Honest notes on the stand-ins:
   at correct height would have been 2.1 m wide, so it is scaled by footprint.
 - `prop/locker` is a two-door wooden closet, not a dented steel staff locker.
 - `prop/clock` is a desk alarm clock, not a wall clock. Mount it on a shelf.
-- `prop/pod` is a domed display plinth. It reads as the Re-Gen Pod lying down,
-  not as an upright regeneration capsule.
 - `prop/table_op` is a plain sci-fi table at operating-table proportions.
 
 ---

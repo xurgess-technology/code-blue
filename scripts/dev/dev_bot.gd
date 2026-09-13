@@ -72,6 +72,12 @@ func tick(delta: float) -> void:
 		_halt()
 		status = "dead"
 		return
+	# downed hook: a downed bot lies there (carried, on the table, or bleeding on the floor).
+	if p.downed:
+		_halt()
+		p.bot_interact = false
+		status = "on the table" if p.on_table else ("being carried" if p.carried_by != 0 else "downed")
+		return
 	if p.stun > 0.0:
 		_halt()
 		status = "knocked down"
@@ -80,10 +86,16 @@ func tick(delta: float) -> void:
 		"follow":
 			_follow(delta)
 		"carry":
-			if _carry(delta, item, to):
+			if to == "table":
+				_carry_downed(delta)
+			elif _carry(delta, item, to):
 				_done("delivered %s" % Items.display_name(item))
 		"operate":
-			_operate(delta)
+			# downed hook: a teammate on the player table comes before the patient.
+			if game.player_surgery.patient() != null:
+				_operate_player_table(delta)
+			else:
+				_operate(delta)
 		_:
 			_halt()
 			status = "staying"
@@ -219,6 +231,80 @@ func _operate(delta: float) -> void:
 	status = "walking to the table"
 	p.set_meta("bot_skill", skill)
 	_go_use("table", game.table_pos(), delta)
+
+
+## downed hook: find a downed player, hold E to lift them, walk to the player table and lay them on it.
+func _carry_downed(delta: float) -> void:
+	if p.carrying != 0:
+		var who = game.players.get(p.carrying)
+		status = "carrying %s to the table" % (who.player_name if who != null else "someone")
+		if game.player_table.is_empty():
+			_halt()
+			return
+		_go_use("player_table", game.player_table.position, delta)
+		return
+	for other in game.players.values():
+		if other.on_table and _was_carrying == other.peer_id:
+			_was_carrying = 0
+			_done("put %s on the table" % other.player_name)
+			return
+	var target: Node = null
+	var best := INF
+	for other in game.players.values():
+		if game.can_pick_up(p, other, false):
+			var d: float = other.global_position.distance_to(p.global_position)
+			if d < best:
+				best = d
+				target = other
+	if target == null:
+		_halt()
+		p.bot_interact = false
+		status = "nobody downed to carry"
+		return
+	if not p.hands_empty():
+		for i in p.slots.size():
+			if String(p.slots[i].kind) != "":
+				p.selected = i
+				break
+		p.drop_count += 1
+		return
+	status = "lifting %s" % target.player_name
+	p.bot_aim_id = "pl_%d" % target.peer_id
+	var d2: float = _flat(target.global_position).distance_to(_flat(p.global_position))
+	if d2 > REACH:
+		p.bot_interact = false
+		_walk_to(target.global_position, delta)
+		return
+	_halt()
+	_face(target.global_position)
+	p.bot_interact = true
+	_was_carrying = target.peer_id
+
+
+var _was_carrying := 0
+
+
+## downed hook: stock a suture kit on the shelf, then stitch up whoever lies on the player table.
+func _operate_player_table(delta: float) -> void:
+	var patient = game.player_surgery.patient()
+	if patient == null:
+		_done("finished at the player table")
+		return
+	if p.operating:
+		_halt()
+		status = "stitching up %s" % patient.player_name
+		return
+	var step := Procedures.step("stitches", int(game.player_surgery.case.get("step_index", 0)))
+	if step.is_empty():
+		_done("stitched up %s" % patient.player_name)
+		return
+	if game.shelf_count(String(step.item)) < maxi(1, int(step.get("uses", 0))):
+		if _carry(delta, String(step.item), "shelf"):
+			_delivering = false
+		return
+	status = "walking to the player table"
+	p.set_meta("bot_skill", skill)
+	_go_use("player_table", game.player_table.position, delta)
 
 
 # ---------------------------------------------------------------------------

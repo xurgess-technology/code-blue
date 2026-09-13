@@ -293,7 +293,7 @@ class Runner extends Node:
 			_fail("%s: only %d tool spawns" % [tag, info.tool_spawns.size()])
 		if info.monster_spawns.size() < MG.MIN_MONSTERS:
 			_fail("%s: only %d monster spawns" % [tag, info.monster_spawns.size()])
-		for key in ["table", "clock", "pod"]:
+		for key in ["table", "clock"]:
 			if not info.has(key) or info[key] == Vector3.ZERO:
 				_fail("%s: '%s' was never placed" % [tag, key])
 		# Every key of the sweep 2 hospital contract, with the right shape.

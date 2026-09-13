@@ -28,7 +28,7 @@ const CORRIDOR_FLOOR_ANCHORS := 8
 ## so those two are always the primitive versions.
 const ASSET_KEYS := {
 	"bed": "prop/bed", "cabinet": "prop/cabinet", "operating_table": "prop/table_op",
-	"time_clock": "prop/clock", "regen_pod": "prop/pod", "gurney": "prop/gurney",
+	"time_clock": "prop/clock", "gurney": "prop/gurney",
 	"wheelchair": "prop/wheelchair", "vending": "prop/vending", "bin": "prop/bin",
 	"locker": "prop/locker", "screen": "prop/screen",
 	"floor": "mat/floor", "wall": "mat/wall", "ceiling": "mat/ceiling",
@@ -56,7 +56,7 @@ const DEPARTMENTS := [
 
 ## Build the level. `info` is filled with:
 ##   player_spawns / tool_spawns / monster_spawns : Array[Vector3]
-##   table / clock / pod : Vector3
+##   table / clock : Vector3
 ##   lights : Array[Dictionary] ({tile, position, mode, node})
 ##   size : Vector2i, rows : PackedStringArray, nav_region : NavigationRegion3D
 ##   containers : Array[{id, type, room_kind, node, position, slots}]
@@ -80,7 +80,6 @@ static func build(gen: Dictionary, info: Dictionary) -> Node3D:
 	var table_tiles: Array[Vector2i] = []
 	info["table"] = Vector3.ZERO
 	info["clock"] = Vector3.ZERO
-	info["pod"] = Vector3.ZERO
 
 	# ---- floor / ceiling -------------------------------------------------
 	var floor_st := SurfaceTool.new()
@@ -178,9 +177,8 @@ static func build(gen: Dictionary, info: Dictionary) -> Node3D:
 					info["clock"] = pk
 					_add_piece(furniture, _make_time_clock(), pk, _wall_facing(rows, tx, ty))
 				"C":
-					var pc := C.tile_to_world(tx, ty)
-					info["pod"] = pc
-					_add_piece(furniture, _make_regen_pod(), pc, _wall_facing(rows, tx, ty))
+					# downed (sweep 2 wave 3): the Re-Gen Pod is gone; its tile holds a locker.
+					_add_piece(furniture, _make_locker(), C.tile_to_world(tx, ty), _wall_facing(rows, tx, ty))
 				"O":
 					table_tiles.append(Vector2i(tx, ty))
 	if table_tiles.size() >= 2:
@@ -545,27 +543,6 @@ static func _make_time_clock() -> Node3D:
 	face.material_override = _mat(Color(0.05, 0.10, 0.07), 0.2, Color(0.2, 1.0, 0.5), 1.6)
 	n.add_child(face)
 	n.add_child(_box(Vector3(0.30, 0.06, 0.10), Vector3(0.0, 1.18, -0.16), Color(0.6, 0.6, 0.6), 0.4))
-	return n
-
-
-static func _make_regen_pod() -> Node3D:
-	var a := _asset_piece("prop/pod", "RegenPod")
-	if a != null:
-		return a
-	var n := _piece("RegenPod", Vector3(1.0, 2.1, 1.0))
-	n.add_child(_cyl(0.48, 0.15, Vector3(0, 0.07, 0), Color(0.28, 0.30, 0.33)))
-	var glass := MeshInstance3D.new()
-	var cap := CapsuleMesh.new()
-	cap.radius = 0.42
-	cap.height = 1.9
-	cap.radial_segments = 12
-	glass.mesh = cap
-	glass.position = Vector3(0, 1.05, 0)
-	var gm := _mat(Color(0.35, 0.75, 0.70, 0.45), 0.15, Color(0.2, 0.9, 0.8), 0.9)
-	gm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	glass.material_override = gm
-	n.add_child(glass)
-	n.add_child(_cyl(0.5, 0.1, Vector3(0, 2.05, 0), Color(0.28, 0.30, 0.33)))
 	return n
 
 

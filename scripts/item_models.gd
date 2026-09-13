@@ -50,6 +50,7 @@ static func make(kind: String, count: int = 1) -> Node3D:
 		"tourniquet": _tourniquet(root)
 		"bone_saw": _bone_saw(root)
 		"guide": _guide(root)
+		"suture_kit": _suture_kits(root, clampi(count, 1, 4))
 		_:
 			if LootTable.has(kind):
 				LootModels.build(root, kind, count)
@@ -129,6 +130,7 @@ static func footprint(kind: String) -> Vector3:
 		"tourniquet": return Vector3(0.28, 0.05, 0.1)
 		"bone_saw": return Vector3(0.52, 0.05, 0.16)
 		"guide": return Vector3(0.24, 0.06, 0.31)
+		"suture_kit": return Vector3(0.16, 0.05, 0.11)
 	if LootTable.has(kind):
 		return LootModels.footprint(kind)
 	return Vector3(0.15, 0.1, 0.15)
@@ -265,6 +267,42 @@ static func _bone_saw(root: Node3D) -> void:
 	_add(root, handle, Vector3(-0.17, 0.016, 0))
 	var hole := _cyl(0.012, 0.032, _mat(Color(0.05, 0.05, 0.05)))
 	_add(root, hole, Vector3(-0.17, 0.016, 0))
+
+
+## downed (sweep 2 wave 3): sterile suture packs, a stack of flat peel pouches. Each shows the curved
+## needle and a coil of dark thread through its clear window.
+static func _suture_kits(root: Node3D, n: int) -> void:
+	var paper := _mat(Color(0.93, 0.94, 0.95), 0.85)
+	var band := _mat(Color(0.2, 0.45, 0.75), 0.6)
+	var window := _mat(Color(0.8, 0.88, 0.92), 0.2)
+	var steel := _mat(Color(0.82, 0.85, 0.88), 0.3, 0.5)
+	var thread := _mat(Color(0.12, 0.1, 0.18), 0.7)
+	for i in n:
+		var pack := Node3D.new()
+		var y := 0.006 + i * 0.013
+		_add(pack, _box(Vector3(0.14, 0.012, 0.095), Color.WHITE), Vector3.ZERO).material_override = paper
+		_add(pack, _box(Vector3(0.022, 0.0125, 0.096), Color.WHITE), Vector3(-0.055, 0, 0)).material_override = band
+		_add(pack, _box(Vector3(0.075, 0.0128, 0.06), Color.WHITE), Vector3(0.018, 0, 0)).material_override = window
+		if i == n - 1:
+			var needle := MeshInstance3D.new()
+			var t := TorusMesh.new()
+			t.inner_radius = 0.016
+			t.outer_radius = 0.0185
+			t.rings = 12
+			t.ring_segments = 4
+			needle.mesh = t
+			needle.material_override = steel
+			_add(pack, needle, Vector3(0.012, 0.0075, 0.004)).scale = Vector3(1, 0.3, 1)
+			var coil := MeshInstance3D.new()
+			var ct := TorusMesh.new()
+			ct.inner_radius = 0.008
+			ct.outer_radius = 0.011
+			ct.rings = 10
+			ct.ring_segments = 4
+			coil.mesh = ct
+			coil.material_override = thread
+			_add(pack, coil, Vector3(0.035, 0.0072, -0.012)).scale = Vector3(1, 0.25, 1)
+		_add(root, pack, Vector3(i * 0.004, y, i * 0.003), Vector3(0, (i * 11) % 14 - 7, 0))
 
 
 static func _guide(root: Node3D) -> void:

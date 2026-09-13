@@ -26,7 +26,6 @@ var shift: int = 1
 var world_time: float = 0.0
 var vitals: float = 100.0
 var punch: float = 0.0
-var pod: float = 0.0
 var end_timer: float = 0.0
 ## The patient and ailment on the table this shift: {patient_id, ailment_id, step_index, flags}.
 var case: Dictionary = {}
@@ -89,6 +88,28 @@ var economy: Node = null
 const OrScreenScript := preload("res://scripts/orscreen/or_screen.gd")
 var or_screen: Node = null
 
+## Downed players (sweep 2 wave 3; docs/CONTRACTS.md "Downed players").
+const PlayerSurgeryScript := preload("res://scripts/downed/player_surgery.gd")
+const DownedViewScript := preload("res://scripts/downed/downed_view.gd")
+const PlayerTableScript := preload("res://scripts/downed/player_table.gd")
+## Seconds a downed player takes to bleed out (then dead until the next shift).
+const BLEED_SECONDS := 300.0
+## Lying on the player table slows the bleeding to this share.
+const TABLE_BLEED_K := 0.5
+## Hold E this long on a downed teammate to pick them up.
+const CARRY_HOLD := 1.0
+## What a stitched-up player gets back.
+const REVIVE_HP := 2
+const CALL_COOLDOWN := 4.0
+const SUTURE_KITS_PER_SHIFT := 3
+## scripts/downed/player_surgery.gd, child "PlayerSurgery": the stitches operation.
+var player_surgery: Node = null
+## scripts/downed/downed_view.gd, child "DownedView": blood trails and the downed overlay.
+var downed_view: Node = null
+## The player table: {position: Vector3 (floor), yaw: float, top: float (table top height)}.
+var player_table: Dictionary = {}
+var _call_at: Dictionary = {}   # peer id -> world_time of their last call for help
+
 
 func _ready() -> void:
 	_entities = Node3D.new()
@@ -107,6 +128,15 @@ func _ready() -> void:
 	economy.name = "Economy"
 	add_child(economy)
 	economy.setup(self)
+	# downed: the player table's operation and the downed visuals, at the same path everywhere.
+	player_surgery = PlayerSurgeryScript.new()
+	player_surgery.name = "PlayerSurgery"
+	add_child(player_surgery)
+	player_surgery.setup(self)
+	downed_view = DownedViewScript.new()
+	downed_view.name = "DownedView"
+	add_child(downed_view)
+	downed_view.setup(self)
 	# ORSCREEN HOOK: the OR wall monitor; it mounts itself on every new level (scripts/orscreen).
 	or_screen = OrScreenScript.new()
 	or_screen.name = "ORScreen"
@@ -181,7 +211,6 @@ func start_lobby(new_seed: int, new_shift: int) -> void:
 	_build_level(new_seed)
 	vitals = 100.0
 	punch = 0.0
-	pod = 0.0
 	end_timer = 0.0
 	world_time = 0.0
 	_noises.clear()
@@ -218,6 +247,7 @@ func begin_shift() -> void:
 	shelf = {}
 	_apply_case_locally()
 	_spawn_supplies()
+	spawn_suture_kits()  # downed
 	spawn_loot()
 	_spawn_monsters()
 	_set_phase(Phase.SHIFT)
@@ -315,7 +345,7 @@ func _level_info_usable() -> bool:
 	return level_info.get("player_spawns", []).size() >= 1 \
 		and level_info.get("tool_spawns", []).size() >= Items.SURGICAL.size() \
 		and level_info.get("monster_spawns", []).size() >= 1 \
-		and level_info.has("table") and level_info.has("clock") and level_info.has("pod")
+		and level_info.has("table") and level_info.has("clock")
 
 
 ## Ceiling fixtures flicker, buzz and die. The behaviour lives in the look pass;
@@ -392,6 +422,9 @@ func _clear_level() -> void:
 		level.queue_free()
 	level = null
 	shelf_node = null
+	player_table = {}
+	if downed_view != null:
+		downed_view.reset()
 
 
 func spawn_points() -> Array:
@@ -406,11 +439,7 @@ func clock_pos() -> Vector3:
 	return level_info.get("clock", Vector3.ZERO)
 
 
-func pod_pos() -> Vector3:
-	return level_info.get("pod", Vector3.ZERO)
-
-
-## The OR supply shelf and the aimable spots for the time clock, the pod and the table.
+## The OR supply shelf and the aimable spots for the time clock, the table and the player table.
 func _add_landmarks() -> void:
 	var sinfo: Dictionary = level_info.get("shelf", {})
 	var spos: Vector3 = sinfo.get("position", table_pos() + Vector3(2.2, 0.0, 1.4))
@@ -425,10 +454,9 @@ func _add_landmarks() -> void:
 
 	_add_proxy("clock", clock_pos() + Vector3.UP * 1.1, 0.7, C.PUNCH_SECONDS,
 		func(p): return "Hold E: clock in" if phase == Phase.LOBBY else "")
-	_add_proxy("pod", pod_pos() + Vector3.UP * 1.1, 0.8, C.POD_SECONDS,
-		func(p): return _pod_prompt())
 	_add_proxy("table", table_pos() + Vector3.UP * 1.1, 1.2, 0.0,
 		func(p): return _table_prompt(p))
+	_add_player_table()  # downed: the OR's player table
 
 
 class Proxy extends Area3D:
@@ -461,15 +489,6 @@ func _add_proxy(id: String, pos: Vector3, radius: float, hold: float, prompt_fn:
 	a.global_position = pos
 
 
-func _pod_prompt() -> String:
-	if phase != Phase.SHIFT:
-		return ""
-	var dead := _longest_dead()   # net: never a peer waiting for the next shift
-	if dead != null:
-		return "Hold E: revive %s" % dead.player_name
-	return "!Re-Gen Pod: nobody to revive"
-
-
 func _table_prompt(p) -> String:
 	if phase != Phase.SHIFT or case.is_empty():
 		return ""
@@ -483,6 +502,9 @@ func _table_prompt(p) -> String:
 
 
 func _proxy_used(id: String, p: Node) -> void:
+	if id == "player_table":
+		_player_table_used(p)   # downed
+		return
 	if id == "table" and phase == Phase.SHIFT:
 		var why: String = surgery.can_begin(p)
 		if why == "":
@@ -533,6 +555,7 @@ func _sync_players() -> void:
 				# net: a leaver's supplies land where they stood; an operation pauses for someone else.
 				var dropped := _drop_hands_in_place(gone)
 				surgery.end(gone)
+				_release_downed_links(gone)  # downed: whoever they carried lands; their carrier lets go
 				_net_acks.erase(id)
 				_net_keyframe_at.erase(id)
 				waiting_peers.erase(id)
@@ -549,20 +572,14 @@ func _respawn_at_start(p: Node) -> void:
 	p.revive_full()
 
 
+## Players on their feet: alive and not downed. Monsters, footsteps, perception and holds only
+## consider these (monsters ignore downed players; see "Downed players" in docs/CONTRACTS.md).
 func alive_players() -> Array:
 	var out := []
 	for p in players.values():
-		if p.alive:
+		if p.alive and not p.downed:
 			out.append(p)
 	return out
-
-
-func _longest_dead() -> Node:
-	var best: Node = null
-	for p in players.values():
-		if not p.alive and not waiting_peers.has(p.peer_id) and (best == null or p.dead_time > best.dead_time):
-			best = p
-	return best
 
 
 # =========================================================================
@@ -577,7 +594,7 @@ func player_pressed_interact(p: Node, target_id: String) -> void:
 	if node == null or not _within_reach(p, node):
 		return
 	if node.interact_hold() > 0.0:
-		return  # holds are simulated every frame (clock, pod)
+		return  # holds are simulated every frame (the clock, picking up a downed teammate)
 	if node.interact_prompt(p).begins_with("!") or node.interact_prompt(p) == "":
 		return
 	node.interact(p)
@@ -936,6 +953,9 @@ func _clear_case() -> void:
 	case = {}
 	shelf = {}
 	_apply_case_locally()
+	if player_surgery != null:
+		player_surgery.reset()   # downed: nobody on the player table either
+	_call_at.clear()
 	if shelf_node != null and is_instance_valid(shelf_node):
 		shelf_node.show_stock(shelf)
 
@@ -1090,6 +1110,7 @@ func _physics_process(delta: float) -> void:
 	if is_host():
 		_simulate(delta)
 	surgery.physics_tick(delta)
+	player_surgery.physics_tick(delta)  # downed
 	if patient_body != null and is_instance_valid(patient_body):
 		if patient_body.has_method("set_vitals"):
 			patient_body.set_vitals(vitals)
@@ -1103,8 +1124,12 @@ func _physics_process(delta: float) -> void:
 func _simulate(delta: float) -> void:
 	_tick_noise(delta)
 	var op: int = surgery.operator_peer() if surgery.has_method("operator_peer") else 0
+	var pop: int = player_surgery.operator_peer()   # downed: operating on the player table counts too
 	for p in players.values():
-		p.operating = p.peer_id == op
+		p.operating = p.peer_id == op or (pop != 0 and p.peer_id == pop)
+	if phase != Phase.MENU:
+		_tick_downed(delta)
+		_tick_carry_holds(delta)
 	match phase:
 		Phase.LOBBY:
 			_sim_lobby(delta)
@@ -1131,13 +1156,9 @@ func _sim_lobby(delta: float) -> void:
 
 
 func _sim_shift(delta: float) -> void:
-	var living := alive_players()
-
 	# The patient is always dying.
 	var drain: float = C.VITALS_DRAIN_SECONDS * pow(0.85, shift - 1)
 	vitals -= delta * 100.0 / drain
-
-	_sim_pod(delta, living)
 
 	_supply_timer -= delta
 	if _supply_timer <= 0.0:
@@ -1147,27 +1168,9 @@ func _sim_shift(delta: float) -> void:
 	if vitals <= 0.0:
 		vitals = 0.0
 		_end_shift(false, "The patient flatlined.")
-	elif living.is_empty():
-		_end_shift(false, "Everyone is dead. The patient is next.")
-
-
-func _sim_pod(delta: float, _living: Array) -> void:
-	var dead := _longest_dead()
-	if dead == null:
-		pod = 0.0
-		return
-	if not _holding_aim("pod"):
-		pod = maxf(0.0, pod - delta)
-		return
-	pod = minf(1.0, pod + delta / C.POD_SECONDS)
-	if pod >= 1.0:
-		pod = 0.0
-		var spot := _scatter_spot(pod_pos())
-		dead.teleport(spot)
-		dead.revive(2)
-		_broadcast("revive", {"id": dead.peer_id, "pos": spot})
-		Audio.play("revive", spot)
-		say("%s crawled out of the Re-Gen Pod. Mostly intact." % dead.player_name, 4.0)
+	elif all_players_out() and not dev_mode:
+		# downed: nobody left standing fails the shift (the loop worker turns this into game over).
+		_end_shift(false, "Everyone is down. Nobody is left to save the patient.")
 
 
 func _scatter_spot(from: Vector3) -> Vector3:
@@ -1223,7 +1226,7 @@ func _update_danger() -> void:
 
 ## Host only. A monster connected with a surgeon.
 func monster_hit_player(m: Node, p: Node) -> void:
-	if not is_host() or not p.alive or p.invuln > 0.0:
+	if not is_host() or not p.alive or p.downed or p.invuln > 0.0:
 		return
 	if dev_mode and dev.is_god(p):
 		return  # DEV HOOK: god mode
@@ -1234,40 +1237,33 @@ func monster_hit_player(m: Node, p: Node) -> void:
 
 ## Host only. Every hurt a player takes goes through here (monsters, the dev gun). `source` is
 ## free text for logs and messages ("monster:discharged", "dev_gun:<name>").
-## Wave 3 (downed players) changes what reaching 0 HP means; callers stay the same.
+## Reaching 0 HP downs the player (down_player); nothing a hit does kills outright.
 func damage_player(p: Node, amount: int, source: String, knock: Vector3 = Vector3.ZERO) -> void:
-	if not is_host() or p == null or not is_instance_valid(p) or not p.alive or amount <= 0:
+	if not is_host() or p == null or not is_instance_valid(p) or not p.alive or p.downed or amount <= 0:
 		return
 	p.take_hit(amount, knock)
 	_broadcast("hit", {"id": p.peer_id, "hp": p.hp, "knock": knock})
 	Audio.play("hurt", p.global_position)
-	surgery.end(p)
+	_end_operations(p)
 	_drop_hands(p, true)
-	if not p.alive:
-		Audio.play("flatline", p.global_position)
-		if source.begins_with("dev_gun"):
-			say("%s was deleted by %s." % [p.player_name, source.get_slice(":", 1)], 3.0)
-		else:
-			say("%s is down. The Re-Gen Pod can bring them back." % p.player_name if players.size() > 1
-				else "You are down.", 4.0)
+	if p.carrying != 0:
+		drop_carried(p)   # downed: getting hit drops whoever you carry
+	if p.hp <= 0:
+		down_player(p, source, knock)
 
 
-## Host only. Knock a player down without killing them. Until the downed system exists (wave 3)
-## this is heavy damage that leaves 1 HP plus a stun during which they cannot move; wave 3 swaps
-## the body of this function for its downed state and keeps the signature.
-func knock_down_player(p: Node, source: String, knock: Vector3 = Vector3.ZERO, seconds: float = 3.0) -> void:
-	if not is_host() or p == null or not is_instance_valid(p) or not p.alive:
+## Host only. Down a player at once, whatever their HP (the dev gun's secondary fire).
+## `seconds` is ignored (kept from the dev room's stand-in signature).
+func knock_down_player(p: Node, source: String, knock: Vector3 = Vector3.ZERO, _seconds: float = 3.0) -> void:
+	if not is_host() or p == null or not is_instance_valid(p) or not p.alive or p.downed:
 		return
-	if p.hp > 1:
-		damage_player(p, p.hp - 1, source, knock)
-	else:
-		p.apply_knock(knock)
-		_broadcast("shoved", {"id": p.peer_id, "knock": knock})
-		surgery.end(p)
-		_drop_hands(p, true)
-		Audio.play("hurt", p.global_position)
-	p.stun = seconds
-	_broadcast("stun", {"id": p.peer_id, "t": seconds})
+	p.hp = 0
+	p.apply_knock(knock)
+	_broadcast("hit", {"id": p.peer_id, "hp": 0, "knock": knock})
+	Audio.play("hurt", p.global_position)
+	_end_operations(p)
+	_drop_hands(p, true)
+	down_player(p, source, knock)
 
 
 ## Host only. Remove a monster for good (the dev gun). Everyone sees it fall.
@@ -1294,6 +1290,407 @@ func knock_down_monster(m: Node, dir: Vector3 = Vector3.ZERO, seconds: float = 4
 	_sound("thud", m.global_position)
 
 
+# =========================================================================
+# downed players, carrying and the player table (sweep 2 wave 3)
+# =========================================================================
+#
+# 0 HP downs a player (never kills). Downed: alive but not standing, lying on the floor, crawling,
+# bleeding out over BLEED_SECONDS, then dead until the next shift. Teammates hold E on them to carry
+# them over the shoulder to the OR's player table, where the `stitches` step (a suture kit on the
+# shelf) revives them with REVIVE_HP. Monsters ignore downed players. Everyone down or dead fails
+# the shift (all_players_out). All host authoritative; state rides in Player.report_full.
+
+## Host: end whatever operation p is doing, on either table.
+func _end_operations(p: Node) -> void:
+	surgery.end(p)
+	if player_surgery != null:
+		player_surgery.end(p)
+
+
+## True when nobody is left on their feet: every player (not waiting to join) is downed or dead.
+func all_players_out() -> bool:
+	var any := false
+	for p in players.values():
+		if waiting_peers.has(p.peer_id):
+			continue
+		any = true
+		if p.alive and not p.downed:
+			return false
+	return any
+
+
+## Host: p is down (0 HP). They keep living for BLEED_SECONDS unless someone stitches them up.
+func down_player(p: Node, source: String, _knock: Vector3 = Vector3.ZERO) -> void:
+	if not is_host() or p == null or not is_instance_valid(p) or not p.alive or p.downed:
+		return
+	if p.carrying != 0:
+		drop_carried(p)
+	p.hp = 0
+	p.downed = true
+	p.bleed = BLEED_SECONDS
+	p.stun = 0.0
+	p.carry_hold = 0.0
+	p.operating = false
+	_end_operations(p)
+	_drop_hands(p, true)
+	p.refresh_downed_visuals()
+	_sound("downed_fall", p.global_position)
+	if source.begins_with("dev_gun"):
+		say("%s knocked %s down." % [source.get_slice(":", 1), p.player_name], 3.0)
+	elif players.size() > 1:
+		say("%s is down! Carry them to the OR table and stitch them up." % p.player_name, 4.0)
+	else:
+		say("You are down. Nobody is coming.", 4.0)
+
+
+## Host: dead until the next shift (bled out, or the dev gun's primary fire).
+func kill_player(p: Node, source: String) -> void:
+	if not is_host() or p == null or not is_instance_valid(p) or not p.alive:
+		return
+	_release_downed_links(p)
+	_end_operations(p)
+	_drop_hands(p, true)
+	p.hp = 0
+	p.alive = false
+	p.dead_time = 0.0
+	p.operating = false
+	p._clear_downed()
+	p._set_visible_alive(false)
+	p.refresh_downed_visuals()
+	_broadcast("hit", {"id": p.peer_id, "hp": 0, "knock": Vector3.ZERO})
+	_sound("flatline", p.global_position)
+	if source.begins_with("dev_gun"):
+		say("%s was deleted by %s." % [p.player_name, source.get_slice(":", 1)], 3.0)
+	elif source == "bleed":
+		say("%s bled out. They are back next shift." % p.player_name, 4.0)
+	else:
+		say("%s is dead." % p.player_name, 3.0)
+
+
+## Host: a downed player is back on their feet with REVIVE_HP, standing beside the player table.
+func revive_player(p: Node, _source: String = "stitches") -> void:
+	if not is_host() or p == null or not is_instance_valid(p) or not p.alive or not p.downed:
+		return
+	var from: Vector3 = p.global_position
+	if p.on_table and not player_table.is_empty():
+		var b := Basis(Vector3.UP, player_table_yaw())
+		from = player_table.position + b * Vector3(0.0, 0.0, 1.1)
+	_release_downed_links(p)
+	var spot := _scatter_spot(from)
+	p.teleport(spot)
+	p.revive(REVIVE_HP)
+	p.refresh_downed_visuals()
+	_broadcast("revive", {"id": p.peer_id, "pos": spot, "hp": REVIVE_HP})
+	_sound("revive", spot)
+	say("%s is stitched up and back on their feet." % p.player_name, 4.0)
+
+
+## Host: undo carrying and the table around p (it is dying, leaving, or getting up).
+func _release_downed_links(p: Node) -> void:
+	if p.carrying != 0:
+		drop_carried(p)
+	if p.carried_by != 0:
+		var c = players.get(p.carried_by)
+		if c != null and c.carrying == p.peer_id:
+			drop_carried(c)
+		p.carried_by = 0
+	if p.on_table:
+		p.on_table = false
+		if player_surgery.patient() == p:
+			player_surgery.clear()
+		p.refresh_downed_visuals()
+
+
+## How fast p's bleed clock runs (every machine): slower lying on the table.
+func bleed_rate(p: Node) -> float:
+	return TABLE_BLEED_K if p.on_table else 1.0
+
+
+## Host: bleeding out.
+func _tick_downed(_delta: float) -> void:
+	for p in players.values():
+		if not p.alive or not p.downed or p.bleed > 0.0:
+			continue
+		if dev_mode and dev.is_god(p):
+			p.bleed = BLEED_SECONDS   # DEV HOOK: god mode never bleeds out
+			continue
+		kill_player(p, "bleed")
+
+
+## Whether q may pick p up right now (hands aside when check_hands is false).
+func can_pick_up(q: Node, p: Node, check_hands: bool = true) -> bool:
+	if q == null or p == null or q == p or phase != Phase.SHIFT:
+		return false
+	if not q.alive or q.downed or q.carrying != 0 or q.carried_by != 0:
+		return false
+	if not p.alive or not p.downed or p.carried_by != 0 or p.on_table:
+		return false
+	return not check_hands or q.hands_empty()
+
+
+## Host: holding E on a downed teammate picks them up after CARRY_HOLD seconds.
+func _tick_carry_holds(delta: float) -> void:
+	for q in players.values():
+		var target = null
+		if q.wants_interact and q.aim_id.begins_with("pl_"):
+			target = players.get(int(q.aim_id.substr(3)))
+		if target != null and can_pick_up(q, target) and _within_reach(q, target.downed_aim):
+			q.carry_hold += delta
+			if q.carry_hold >= CARRY_HOLD:
+				q.carry_hold = 0.0
+				start_carry(q, target)
+		else:
+			q.carry_hold = 0.0
+
+
+## Host: q hoists p over the shoulder.
+func start_carry(q: Node, p: Node) -> void:
+	if not is_host() or not can_pick_up(q, p):
+		return
+	q.carrying = p.peer_id
+	p.carried_by = q.peer_id
+	_end_operations(q)
+	q.refresh_downed_visuals()
+	p.refresh_downed_visuals()
+	_sound("downed_lift", q.global_position)
+	say("%s picked up %s." % [q.player_name, p.player_name], 2.5)
+
+
+## Host: q puts down whoever they carry, on the floor in front of them.
+func drop_carried(q: Node) -> void:
+	if not is_host() or q == null:
+		return
+	var p = players.get(q.carrying)
+	q.carrying = 0
+	q.refresh_downed_visuals()
+	if p == null or p.carried_by != q.peer_id:
+		return
+	p.carried_by = 0
+	var fwd: Vector3 = -q.global_transform.basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized() if fwd.length() > 0.01 else Vector3.FORWARD
+	var spot: Vector3 = q.global_position + fwd * 0.8
+	if not _point_is_clear(spot):
+		spot = q.global_position
+	spot = _floor_at(spot)
+	p.teleport(spot)
+	p.refresh_downed_visuals()
+	_sound("thud", spot)
+	# The downed player's machine owns its position: tell it where it landed.
+	_broadcast("placed", {"id": p.peer_id, "pos": spot})
+
+
+## Host: a carrier pressed E. On the player table it lays them there, anywhere else it puts them down.
+func carrier_pressed_interact(q: Node, aim: String) -> void:
+	if not is_host() or q.carrying == 0:
+		return
+	if aim == "player_table":
+		var node := find_interactable("player_table")
+		if node != null and _within_reach(q, node) and player_table_prompt(q).begins_with("Place"):
+			place_on_player_table(q)
+			return
+	drop_carried(q)
+
+
+## Host: a downed player bangs on the floor for help (teammates hear it; monsters do not care).
+func downed_call_out(p: Node) -> void:
+	if not is_host() or not p.downed:
+		return
+	if world_time - float(_call_at.get(p.peer_id, -99.0)) < CALL_COOLDOWN:
+		return
+	_call_at[p.peer_id] = world_time
+	_sound("downed_call", p.global_position)
+	for q in players.values():
+		if q != p and q.alive and not q.downed:
+			tell(q, "%s is calling for help." % p.player_name, 2.5)
+
+
+## Host: put a few suture kits around the hospital (containers where they belong, else the floor).
+func spawn_suture_kits() -> void:
+	if not is_host():
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash("%d|suture|%d" % [seed_value, shift])
+	var used := {}
+	for it in world_items.values():
+		if it.state == WorldItem.State.IN_CONTAINER:
+			used["%s:%d" % [it.container_id, it.slot]] = true
+		elif it.anchor >= 0:
+			used["anchor:%d" % it.anchor] = true
+	var locs: Array = []
+	for loc in SpawnerScript._locations(level_info):
+		if SpawnerScript._legal("suture_kit", loc, used):
+			locs.append(loc)
+	var units := {}
+	for i in SUTURE_KITS_PER_SHIFT:
+		var count := rng.randi_range(1, 2)
+		var pick := {}
+		for tries in 12:
+			if locs.is_empty():
+				break
+			var loc: Dictionary = locs[rng.randi_range(0, locs.size() - 1)]
+			if not units.has(loc.unit):
+				pick = loc
+				break
+		if pick.is_empty():
+			_spawn_from_plan({"kind": "suture_kit", "count": count, "container_id": "", "slot": 0, "anchor": -1})
+			continue
+		units[pick.unit] = true
+		locs.erase(pick)
+		_spawn_from_plan(SpawnerScript._entry("suture_kit", count, pick))
+
+
+# ---- the player table ----
+
+## Find (or build) the player table: level_info.tables' "player" entry, else a spot beside the OR
+## table. Needs the level's collision in the physics space, so it lands two physics frames later
+## (the same on every machine: the level is identical).
+func _add_player_table() -> void:
+	player_table = {}
+	_place_player_table.call_deferred(level)
+
+
+func _place_player_table(for_level: Node) -> void:
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	if level != for_level or level == null or not is_instance_valid(level):
+		return
+	var pos := Vector3.INF
+	var yaw := _table_yaw()
+	for t in level_info.get("tables", []):
+		if t is Dictionary and String(t.get("kind", "")) == "player":
+			pos = t.get("position", Vector3.ZERO)
+			yaw = float(t.get("yaw", 0.0))
+			break
+	if pos == Vector3.INF:
+		pos = _fallback_player_table_spot(yaw)
+	# A level that already has a table there keeps it; otherwise build one.
+	var top_hit := _surface_below(pos + Vector3.UP * 2.0, pos)
+	var top_y: float = top_hit.y
+	if top_hit.y - pos.y < 0.5 or top_hit.y - pos.y > 1.4:
+		var model := PlayerTableScript.make()
+		level.add_child(model)
+		model.global_position = pos
+		model.rotation.y = yaw
+		top_y = pos.y + PlayerTableScript.TOP_Y
+	player_table = {"position": pos, "yaw": yaw, "top": top_y}
+	_add_proxy("player_table", Vector3(pos.x, top_y + 0.3, pos.z), 0.95, 0.0,
+		func(q): return player_table_prompt(q))
+
+
+func _fallback_player_table_spot(yaw: float) -> Vector3:
+	var t := table_pos()
+	var b := Basis(Vector3.UP, yaw)
+	var shelf_pos: Vector3 = level_info.get("shelf", {}).get("position", t + Vector3(2.2, 0.0, 1.4))
+	var space := get_world_3d().direct_space_state
+	var q := PhysicsShapeQueryParameters3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(2.3, 0.8, 1.1)
+	q.shape = box
+	q.collision_mask = C.L_WORLD
+	for off in [Vector3(0, 0, 2.7), Vector3(0, 0, -2.7), Vector3(0, 0, 3.4), Vector3(0, 0, -3.4),
+			Vector3(3.2, 0, 0), Vector3(-3.2, 0, 0), Vector3(2.8, 0, 2.6), Vector3(-2.8, 0, 2.6),
+			Vector3(2.8, 0, -2.6), Vector3(-2.8, 0, -2.6)]:
+		var c: Vector3 = t + b * off
+		if Vector2(c.x - shelf_pos.x, c.z - shelf_pos.z).length() < 1.6:
+			continue
+		q.transform = Transform3D(b, c + Vector3.UP * 0.55)
+		if space.intersect_shape(q, 1).is_empty():
+			return c
+	return t + b * Vector3(0, 0, 2.7)
+
+
+func player_table_top() -> Vector3:
+	if player_table.is_empty():
+		return table_pos() + Vector3(0.0, 0.95, 2.7)
+	var pos: Vector3 = player_table.position
+	return Vector3(pos.x, float(player_table.top), pos.z)
+
+
+func player_table_yaw() -> float:
+	return float(player_table.get("yaw", _table_yaw()))
+
+
+## What aiming at the player table offers q: lay down who you carry, or operate on who lies there.
+func player_table_prompt(q: Node) -> String:
+	if player_table.is_empty() or phase != Phase.SHIFT or q == null or not q.alive or q.downed:
+		return ""
+	if q.carrying != 0:
+		var p = players.get(q.carrying)
+		for other in players.values():
+			if other.on_table:
+				return "!The table is taken."
+		return "Place %s on the table" % (p.player_name if p != null else "them")
+	return player_surgery.operate_prompt(q)
+
+
+func _player_table_used(q: Node) -> void:
+	if q.carrying != 0:
+		carrier_pressed_interact(q, "player_table")
+	else:
+		player_surgery.begin(q)
+
+
+## Host: the carrier lays their downed teammate on the player table; the stitches case starts.
+func place_on_player_table(q: Node) -> void:
+	if not is_host():
+		return
+	var p = players.get(q.carrying)
+	q.carrying = 0
+	q.refresh_downed_visuals()
+	if p == null or p.carried_by != q.peer_id:
+		return
+	p.carried_by = 0
+	p.on_table = true
+	p.teleport(pinned_pose(p).origin)
+	if p.is_local or p.is_bot:
+		p.look_up_from_table()
+	p.refresh_downed_visuals()
+	start_player_surgery(p)
+	_sound("thud", player_table_top())
+	say("%s is on the table. A suture kit on the shelf, then stitch them up." % p.player_name, 4.0)
+
+
+## Host: the stitches operation on the player on the table (docs/SWEEP2.md: the integration wave
+## rewires this onto game.add_case / game.cases).
+func start_player_surgery(p: Node) -> void:
+	if not is_host() or p == null or not p.on_table:
+		return
+	player_surgery.start(p)
+
+
+## Where a carried or tabled player's body goes (every machine, every frame).
+func pinned_pose(p: Node) -> Transform3D:
+	if p.on_table:
+		var b := Basis(Vector3.UP, player_table_yaw())
+		return Transform3D(b, player_table_top() + b * Vector3(-0.8, 0.0, 0.0))
+	if p.carried_by != 0:
+		var c = players.get(p.carried_by)
+		if c != null and is_instance_valid(c):
+			var cb := Basis(Vector3.UP, c.rotation.y)
+			return Transform3D(cb, c.global_position + cb * Vector3(0.55, 1.3, 0.0))
+	return p.global_transform
+
+
+## One camera and mouse decision for both surgeries (main.gd reads these).
+func surgery_camera() -> Camera3D:
+	var cam: Camera3D = surgery.camera() if surgery != null else null
+	if cam == null and player_surgery != null:
+		cam = player_surgery.surgery.camera()
+	return cam
+
+
+func surgery_wants_mouse() -> bool:
+	return (surgery != null and surgery.wants_mouse()) or (player_surgery != null and player_surgery.surgery.wants_mouse())
+
+
+func surgery_local_exit() -> void:
+	if surgery != null and surgery.wants_mouse():
+		surgery.local_operator_exit()
+	if player_surgery != null and player_surgery.surgery.wants_mouse():
+		player_surgery.surgery.local_operator_exit()
+
+
 ## Host only. Someone pressed Q.
 func player_shoved(p: Node) -> void:
 	if not is_host():
@@ -1307,13 +1704,17 @@ func player_shoved(p: Node) -> void:
 		m.shoved(forward)
 		_sound("thud", m.global_position)
 	for q in players.values():
-		if q == p or not q.alive or not _in_shove_cone(p, q.global_position, forward):
+		if q == p or not q.alive or q.downed or not _in_shove_cone(p, q.global_position, forward):
 			continue
 		var knock := forward * 11.0 + Vector3.UP * 2.0
 		q.apply_knock(knock)
 		_broadcast("shoved", {"id": q.peer_id, "knock": knock})
-		surgery.end(q)
-		if q.hands_empty():
+		_end_operations(q)
+		if q.carrying != 0:
+			var carried = players.get(q.carrying)
+			drop_carried(q)
+			say("%s shoved %s, who dropped %s." % [p.player_name, q.player_name, carried.player_name if carried != null else "someone"], 3.0)
+		elif q.hands_empty():
 			say("%s shoved %s. Very professional." % [p.player_name, q.player_name], 3.0)
 		else:
 			_drop_hands(q, true)
@@ -1348,7 +1749,7 @@ func _in_shove_cone(from: Node, target: Vector3, forward: Vector3) -> bool:
 # Discrete one-off things (sounds, messages, hits, phase changes) stay reliable RPCs.
 #
 # Joining mid-shift: a peer that arrives outside the lobby waits as a spectator (not alive,
-# in `waiting_peers`, ignored by the Re-Gen Pod) and spawns with everyone at the next lobby.
+# in `waiting_peers`, not counted by all_players_out) and spawns with everyone at the next lobby.
 # Leaving: the host drops what the leaver carried where it stood (nothing breaks) and ends
 # its operation; the step keeps its progress for whoever operates next.
 
@@ -1502,7 +1903,8 @@ static func _merge_fields(old: Dictionary, d: Dictionary) -> Dictionary:
 func _global_fields() -> Dictionary:
 	var g := {
 		"t": snappedf(world_time, 0.5), "ph": phase, "sh": shift, "sd": seed_value,
-		"vit": snappedf(vitals, 0.1), "pu": snappedf(punch, 0.01), "po": snappedf(pod, 0.01),
+		"vit": snappedf(vitals, 0.1), "pu": snappedf(punch, 0.01),
+		"pt": player_surgery.net_state(),  # downed: the player table's case and its surgery
 		"et": snappedf(end_timer, 0.1), "cs": case.duplicate(true), "sf": shelf.duplicate(),
 		"wp": waiting_peers.keys(),
 		"dv": dev.net_state() if dev_mode else {},  # DEV HOOK
@@ -1588,7 +1990,6 @@ func _apply_state(state: Dictionary, msg: Dictionary, keyframe: bool) -> void:
 	shift = int(g.sh)
 	vitals = float(g.vit)
 	punch = float(g.pu)
-	pod = float(g.po)
 	end_timer = float(g.et)
 	waiting_peers.clear()
 	for id in g.get("wp", []):
@@ -1617,6 +2018,9 @@ func _apply_state(state: Dictionary, msg: Dictionary, keyframe: bool) -> void:
 		var p = players.get(id)
 		if p != null and state.pl.has(id):
 			p.apply_remote_full(state.pl[id])
+	# downed: the player table's case, after the players so its patient's colour is known.
+	var pt = g.get("pt", {})
+	player_surgery.apply_net_state(pt if pt is Dictionary else {})
 
 	# Monsters and items are created and destroyed to match the host.
 	_apply_entities(monsters, state.mo, msg.get("mo", {}), removed.get("mo", []), keyframe,
@@ -1754,8 +2158,16 @@ func _event(kind: String, data: Dictionary) -> void:
 			var r = players.get(data.id)
 			if r != null:
 				r.teleport(data.pos)
-				r.revive(2)
+				r.revive(int(data.get("hp", 2)))
+				r.refresh_downed_visuals()
 			Audio.play("revive", data.pos)
+		"placed":
+			# downed: put down by a carrier; this machine owns its own position.
+			var pd = players.get(data.id)
+			if pd != null:
+				pd.carried_by = 0   # the snapshot agrees a moment later
+				pd.teleport(data.pos)
+				pd.refresh_downed_visuals()
 		"stun":
 			var st = players.get(data.id)
 			if st != null:

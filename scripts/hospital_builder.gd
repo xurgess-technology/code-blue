@@ -60,7 +60,7 @@ static var _mat_cache := {}
 
 ## Build the level. `info` is filled with (world units, metres, +Y up):
 ##   player_spawns / tool_spawns / monster_spawns : Array[Vector3]
-##   table (first patient table) / table_yaw / clock / pod : Vector3 / float
+##   table (first patient table) / table_yaw / clock : Vector3 / float
 ##   lights : Array[{tile, position, mode, node}]
 ##   size : Vector2i, rows : PackedStringArray, nav_region : NavigationRegion3D
 ##   containers : Array[{id, type, room_kind, wing, depth, node, position, slots}]
@@ -809,7 +809,7 @@ static func _add_floor_anchors(gen: Dictionary, info: Dictionary) -> void:
 
 
 # ---------------------------------------------------------------------------
-# Landmarks: clock, pod, lectern, tables, shelf and markers
+# Landmarks: clock, lectern, tables, shelf and markers
 # ---------------------------------------------------------------------------
 
 static func _build_landmarks(root: Node3D, gen: Dictionary, info: Dictionary) -> void:
@@ -841,7 +841,6 @@ static func _build_landmarks(root: Node3D, gen: Dictionary, info: Dictionary) ->
 			info["table_yaw"] = t.yaw
 			break
 	info["clock"] = _w(spots.clock.pos) if spots.has("clock") else Vector3.ZERO
-	info["pod"] = _w(spots.pod.pos) if spots.has("pod") else Vector3.ZERO
 	if spots.has("shelf"):
 		info["shelf"] = {"position": _w(spots.shelf.pos), "yaw": float(spots.shelf.yaw)}
 	if spots.has("lectern"):

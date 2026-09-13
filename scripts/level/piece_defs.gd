@@ -105,7 +105,6 @@ const P := {
 	"extinguisher": {"size": Vector3(0.28, 0.66, 0.37), "mount": 0.55},
 	"security_camera": {"size": Vector3(0.17, 0.29, 0.55), "mount": 2.55},
 	"time_clock": {"size": Vector3(0.8, 1.35, 0.4)},
-	"regen_pod": {"size": Vector3(1.0, 2.1, 1.0), "block": true},
 	"doormat": {"size": Vector3(1.5, 0.04, 0.83), "collide": false},
 	"directory_board": {"size": Vector3(1.4, 1.1, 0.06), "mount": 0.9},
 	# ---- operating room --------------------------------------------------------

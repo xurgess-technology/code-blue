@@ -24,7 +24,7 @@ const ASSET := {
 	"washer": "hosp/washer", "cafeteria_table": "hosp/table", "register": "hosp/register",
 	"fridge_kitchen": "hosp/fridge_kitchen", "sofa": "hosp/sofa", "armchair": "hosp/armchair",
 	"break_table": "hosp/table", "wall_phone": "hosp/wall_phone", "wall_clock": "hosp/wall_clock",
-	"extinguisher": "hosp/extinguisher", "security_camera": "hosp/security_camera", "regen_pod": "prop/pod",
+	"extinguisher": "hosp/extinguisher", "security_camera": "hosp/security_camera",
 	"doormat": "hosp/doormat", "scrub_sink": "hosp/sink_cabinet", "ambulance": "hosp/ambulance",
 	"van": "hosp/van", "sedan": "hosp/sedan", "suv": "hosp/suv", "hatchback": "hosp/hatchback",
 	"covered_car": "hosp/covered_car", "street_light": "hosp/street_light", "dumpster": "hosp/dumpster",
@@ -686,11 +686,6 @@ static func _primitive(kind: String) -> ArrayMesh:
 				g.box(Vector3(0.14, 0.7, 0.06), Vector3(sx, 1.0, 0.14), DARK_STEEL)
 				for i in 5:
 					g.box(Vector3(0.1, 0.09, 0.01), Vector3(sx, 0.75 + i * 0.13, 0.105), Color(0.85, 0.83, 0.72))
-		"regen_pod":
-			g.cyl(0.48, 0.15, Vector3(0, 0.075, 0), DARK_STEEL, "y", 16)
-			g.cyl(0.42, 1.8, Vector3(0, 1.05, 0), Color(0.35, 0.75, 0.7, 0.4), "y", 16, 2)
-			g.cyl(0.5, 0.12, Vector3(0, 2.0, 0), DARK_STEEL, "y", 16)
-			g.cyl(0.3, 0.02, Vector3(0, 1.93, 0), Color(0.3, 0.9, 0.8), "y", 12, 1)
 		"doormat":
 			g.box(Vector3(1.5, 0.02, 0.83), Vector3(0, 0.01, 0), Color(0.15, 0.15, 0.14))
 		"or_table":

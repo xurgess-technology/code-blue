@@ -3,7 +3,7 @@ extends RefCounted
 ##
 ##   row 0      north wall, doorways to the north wing(s)
 ##   rows 1-2   main hall, doorways to the west and east wings at either end
-##   rows 4-8   break room (time clock, phone, lectern, pod, player spawns) | spine | OR | scrub room
+##   rows 4-8   break room (time clock, phone, lectern, player spawns) | spine | OR | scrub room
 ##   rows 10-12 locker room                                                 | spine | OR | scrub room
 ##   rows 14-18 lobby, reception, waiting chairs
 ##   row 19     south wall with the main doors (cols 12-15) onto the neutral area
@@ -107,8 +107,6 @@ static func build(st: S, ox: int, oy: int, north_wings: int) -> void:
 	put.call("wall_phone", 1.0, 7.9, E, break_room)
 	st.spots["phone"] = {"pos": Vector2(ox + 1.0, oy + 7.9), "yaw": Defs.yaw_facing(E),
 			"height": Defs.mount_height("wall_phone") + Defs.size("wall_phone").y * 0.5}
-	put.call("regen_pod", 8.3, 4.7, SOUTH, break_room)
-	st.spots["pod"] = {"pos": Vector2(ox + 8.3, oy + 4.7), "yaw": Defs.yaw_facing(SOUTH)}
 	put.call("sofa", 6.4, 4.0 + depth.call("sofa"), SOUTH, break_room)
 	put.call("wall_clock", 2.6, 4.0, SOUTH, break_room)
 	put.call("fridge_kitchen", 1.4, 9.0 - depth.call("fridge_kitchen"), N, break_room)

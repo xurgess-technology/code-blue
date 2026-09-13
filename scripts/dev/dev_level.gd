@@ -31,6 +31,7 @@ const LIGHT_RANGE := 6.0
 const LIGHT_ENERGY := 1.05
 
 const TABLE := Vector3(8.5, 0.0, 11.5)
+const PLAYER_TABLE := Vector3(8.5, 0.0, 14.3)
 const SHELF := Vector3(5.2, 0.0, 11.5)
 const LECTERN := Vector3(13.0, 0.0, 17.3)
 ## inventory (sweep 2): the loot rack's first cubby x, and the economy spots.
@@ -110,6 +111,9 @@ static func build(info: Dictionary) -> Node3D:
 	_obstacles.append([TABLE, Vector3(2.3, 0, 1.0)])
 	info["table"] = TABLE
 	info["table_yaw"] = 0.0
+	# downed (sweep 2 wave 3): the player table south of the OR table; game.gd builds its model.
+	info["tables"] = [{"position": TABLE, "yaw": 0.0, "kind": "patient"}, {"position": PLAYER_TABLE, "yaw": 0.0, "kind": "player"}]
+	_obstacles.append([PLAYER_TABLE, Vector3(2.1, 0, 0.9)])
 	# Faces the table (+X), so the label reads from where the surgeon stands.
 	info["shelf"] = {"position": SHELF, "yaw": PI / 2.0}
 	_obstacles.append([SHELF, Vector3(0.5, 0, 1.35)])
@@ -248,9 +252,8 @@ static func build(info: Dictionary) -> Node3D:
 	info["tool_spawns"] = tool_spawns
 	info["monster_spawns"] = [Vector3(4.0, 0, 3.2), Vector3(12.0, 0, 2.6), Vector3(20.0, 0, 3.4), Vector3(8.0, 0, 5.0), Vector3(16.0, 0, 5.0)]
 	info["dummy_spots"] = [Vector3(15.5, 0, 10.2), Vector3(17.0, 0, 10.2), Vector3(18.5, 0, 10.2), Vector3(20.0, 0, 10.2), Vector3(15.5, 0, 11.8), Vector3(17.0, 0, 11.8), Vector3(18.5, 0, 11.8), Vector3(20.0, 0, 11.8)]
-	# No time clock or pod here: park their aim spots under the floor where nobody can aim.
+	# No time clock here: park its aim spot under the floor where nobody can aim.
 	info["clock"] = Vector3(1.0, -40.0, 1.0)
-	info["pod"] = Vector3(2.0, -40.0, 1.0)
 	info["loose_anchors"] = []
 	info["size"] = Vector2i(int(W / C.TILE), int(D / C.TILE))
 	info["dev_room"] = true

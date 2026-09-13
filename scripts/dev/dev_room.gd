@@ -233,7 +233,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED or game.paused:
 		return
 	var me = game.local_player()
-	if me == null or not me.alive or me.operating or not has_gun(me.peer_id):
+	if me == null or not me.alive or me.downed or me.operating or not has_gun(me.peer_id):
 		return
 	fire_local(KILL if event.button_index == MOUSE_BUTTON_LEFT else KNOCK)
 	get_viewport().set_input_as_handled()
@@ -272,7 +272,7 @@ func _rpc_fire(from: Vector3, dir: Vector3, mode: String) -> void:
 
 
 func _host_fire(shooter: Node, from: Vector3, dir: Vector3, mode: String) -> Dictionary:
-	if not shooter.alive or not has_gun(shooter.peer_id) or (mode != KILL and mode != KNOCK):
+	if not shooter.alive or shooter.downed or not has_gun(shooter.peer_id) or (mode != KILL and mode != KNOCK):
 		return {}
 	var now: float = game.world_time
 	if now - float(_fire_at.get(shooter.peer_id, -99.0)) < GUN_COOLDOWN * 0.8:
@@ -305,7 +305,17 @@ func _cast(shooter: Node, from: Vector3, dir: Vector3) -> Dictionary:
 	var q := PhysicsRayQueryParameters3D.create(from, from + dir * GUN_RANGE)
 	q.collision_mask = C.L_WORLD | C.L_PLAYER | C.L_MONSTER
 	q.exclude = [shooter.get_rid()]
-	var hit: Dictionary = shooter.get_world_3d().direct_space_state.intersect_ray(q)
+	var space: PhysicsDirectSpaceState3D = shooter.get_world_3d().direct_space_state
+	var hit: Dictionary = space.intersect_ray(q)
+	# downed hook: a downed player has no body collision; shots find them through their aim area.
+	var aq := PhysicsRayQueryParameters3D.create(from, hit.get("position", from + dir * GUN_RANGE))
+	aq.collision_mask = C.L_INTERACT
+	aq.collide_with_areas = true
+	aq.collide_with_bodies = false
+	var ahit: Dictionary = space.intersect_ray(aq)
+	if not ahit.is_empty() and ahit.collider is Area3D and ahit.collider.get_parent() is CharacterBody3D \
+			and "peer_id" in ahit.collider.get_parent() and ahit.collider.get_parent() != shooter:
+		return {"position": ahit.position, "target": ahit.collider.get_parent()}
 	if hit.is_empty():
 		return {}
 	var node: Node = hit.collider
@@ -328,9 +338,12 @@ func _apply_hit(shooter: Node, target: Node, mode: String, dir: Vector3) -> void
 		return
 	if not target.alive:
 		return
+	# downed hook: primary kills outright (dev only), secondary downs for real.
 	if mode == KILL:
-		game.damage_player(target, maxi(1, target.hp), "dev_gun:%s" % shooter.player_name, knock)
-	else:
+		if not target.downed:
+			target.apply_knock(knock)
+		game.kill_player(target, "dev_gun:%s" % shooter.player_name)
+	elif not target.downed:
 		game.knock_down_player(target, "dev_gun:%s" % shooter.player_name, knock)
 
 
@@ -352,7 +365,7 @@ func _shot_fx(shooter_id: int, from: Vector3, to: Vector3, mode: String, hit: bo
 
 ## First-person gun on your camera (hands hidden), third-person gun on everyone else's body.
 func _update_gun_visual(p: Node, delta: float) -> void:
-	var want: bool = game.dev_mode and gun.has(p.peer_id) and p.alive
+	var want: bool = game.dev_mode and gun.has(p.peer_id) and p.alive and not p.downed
 	var fp: Node3D = p.camera.get_node_or_null("DevGunFP")
 	var tp: Node3D = p.body_visual.get_node_or_null("DevGunTP")
 	if not want:
@@ -362,7 +375,7 @@ func _update_gun_visual(p: Node, delta: float) -> void:
 					n.name = "DevGunGone"
 					n.queue_free()
 			if p.is_local:
-				p.hands.visible = true
+				p.hands.visible = not p.downed
 		return
 	if fp == null:
 		fp = Node3D.new()
@@ -477,8 +490,13 @@ func _apply_request(sender: int, action: String, a: Dictionary) -> void:
 				game.add_money(int(a.get("amount", 1000)), "dev:panel")
 		"revive_all":
 			for p in game.players.values():
-				if not p.alive:
+				if not p.alive or p.downed:
 					_revive(p)
+		"down_me":
+			# downed hook: the panel's "Down me" button (or {id} for a bot or dummy).
+			var target = game.players.get(int(a.get("id", sender)))
+			if target != null:
+				game.knock_down_player(target, "dev:panel")
 	state_changed.emit()
 
 
@@ -567,7 +585,8 @@ func spawn_monster(kind: String, where: String, who: Node = null) -> Node:
 
 
 func set_patient(patient_id: String, ailment_id: String) -> void:
-	if not is_host() or Procedures.patient(patient_id).is_empty() or Procedures.ailment(ailment_id).is_empty():
+	if not is_host() or Procedures.patient(patient_id).is_empty() or Procedures.ailment(ailment_id).is_empty() \
+			or Procedures.is_player_only(ailment_id):
 		return
 	if not game.case.is_empty():
 		game.case = {}
@@ -580,7 +599,7 @@ func set_patient(patient_id: String, ailment_id: String) -> void:
 
 
 func stock_shelf() -> void:
-	for kind in Items.SURGICAL:
+	for kind in Items.SURGICAL + ["suture_kit"]:  # downed hook: suture kits too
 		game.shelf[kind] = maxi(int(game.shelf.get(kind, 0)), 6 if Items.is_consumable(kind) else 1)
 	if game.shelf_node != null:
 		game.shelf_node.show_stock(game.shelf)
@@ -681,10 +700,12 @@ func _free_bot(id: int) -> void:
 func _revive(p: Node) -> void:
 	var spots: Array = game.spawn_points()
 	var at: Vector3 = p.global_position if p.get("is_bot") else spots[randi() % spots.size()]
+	game._release_downed_links(p)   # downed hook
 	p.teleport(at)
 	p.revive_full()
 	p.stun = 0.0
-	game._broadcast("revive", {"id": p.peer_id, "pos": at})
+	p.refresh_downed_visuals()
+	game._broadcast("revive", {"id": p.peer_id, "pos": at, "hp": p.max_hp})
 
 
 func _in_front_of(who: Node, dist: float) -> Vector3:

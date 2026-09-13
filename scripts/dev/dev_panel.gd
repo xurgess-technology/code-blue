@@ -117,7 +117,9 @@ func _build() -> void:
 	_c["god"] = _check(you, "God mode", func(on): _req("god", {"on": on}))
 	_c["noclip"] = _check(you, "Noclip", func(on): _req("noclip", {"on": on}))
 	_c["gun"] = _check(you, "Dev gun", func(on): _req("gun", {"on": on}))
-	_label(col, "Gun: left click kills, right click knocks down. Noclip: Space up, Ctrl down.", 11, DIM)
+	var you2 := _row(col)
+	_button(you2, "Down me", func(): _req("down_me"))   # downed hook
+	_label(col, "Gun: left click kills, right click downs. Noclip: Space up, Ctrl down.", 11, DIM)
 
 	# ---- world
 	_section(col, "World")
@@ -197,7 +199,7 @@ func _build() -> void:
 	_section(col, "Patient")
 	var p1 := _row(col)
 	var pids: Array = Procedures.PATIENTS.keys()
-	var aids: Array = Procedures.AILMENTS.keys()
+	var aids: Array = Procedures.patient_ailments()  # downed hook: stitches is for players only
 	var patients := _option(p1, pids.map(func(k): return Procedures.patient(k).name))
 	var ailments := _option(p1, aids.map(func(k): return Procedures.ailment(k).name))
 	patients.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -383,7 +385,7 @@ func _refresh_bots(dev: Node) -> void:
 		var p = game.players.get(id)
 		var hp := ""
 		if p != null:
-			hp = "dead" if not p.alive else ("down" if p.stun > 0.0 else "%d hp" % p.hp)
+			hp = "dead" if not p.alive else ("down %ds" % int(p.bleed) if p.downed else ("stunned" if p.stun > 0.0 else "%d hp" % p.hp))
 		(row.status as Label).text = "%s  |  %s" % [hp, String(e.get("status", ""))]
 
 
@@ -396,6 +398,7 @@ func _make_bot_row(id: int, e: Dictionary) -> Dictionary:
 	var name_l := _label(top, String(e.get("name", "?")), 14, Color(1.0, 0.85, 0.35) if dummy else ACCENT)
 	name_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var status := _label(top, "", 12, DIM)
+	_button(top, "Down", func(): _req("down_me", {"id": id}))   # downed hook
 	_button(top, "X", func(): _req("remove_bot", {"id": id}))
 	var out := {"status": status}
 	if dummy:
@@ -406,11 +409,13 @@ func _make_bot_row(id: int, e: Dictionary) -> Dictionary:
 	var kinds: Array = Items.ITEMS.keys()
 	var item := _option(ctl, kinds.map(func(k): return Items.display_name(k)))
 	item.select(maxi(0, kinds.find(String(e.get("item", "gauze")))))
-	var to := _option(ctl, ["to shelf", "to me"])
-	to.select(1 if String(e.get("to", "shelf")) == "player" else 0)
+	# downed hook: "downed to table" makes carry pick up a downed player and lay them on the table.
+	var targets := ["shelf", "player", "table"]
+	var to := _option(ctl, ["to shelf", "to me", "downed to table"])
+	to.select(maxi(0, targets.find(String(e.get("to", "shelf")))))
 	_button(ctl, "Go", func():
 		_req("order", {"id": id, "order": game.dev.ORDERS[order.selected], "item": kinds[item.selected],
-			"to": "player" if to.selected == 1 else "shelf"}))
+			"to": targets[to.selected]}))
 	out["order"] = order
 	out["item"] = item
 	out["to"] = to

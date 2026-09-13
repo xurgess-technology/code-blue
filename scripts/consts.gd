@@ -24,7 +24,6 @@ const CONE_DEG := 26.0
 
 ## Shift pacing
 const PUNCH_SECONDS := 2.0
-const POD_SECONDS := 5.0
 const END_SCREEN_SECONDS := 7.0
 ## Seconds for a patient to bleed out from 100 on shift 1, before step bonuses.
 const VITALS_DRAIN_SECONDS := 840.0

@@ -44,10 +44,13 @@ Design brief: `DESIGN.md`, plus the "Design decisions" section at the bottom of 
 - `Items` (`scripts/items.gd`): `ITEMS[kind]` with name, consumable, batch `[min,max]`, fragile,
   `found` weights by container type or `"loose"`, `loose_surfaces`, `real_use`, `where`,
   `handling`. `CONTAINER_TYPES[type]` with `rooms`. `LOCKED` placeholder tab names.
-  Surgical kinds: `anesthetic`, `gauze`, `forceps`, `tourniquet`, `bone_saw`. Plus `guide`.
+  Surgical kinds: `anesthetic`, `gauze`, `forceps`, `tourniquet`, `bone_saw` (`Items.SURGICAL`,
+  what a patient case can need), plus `suture_kit` (surgical and consumable, not in `SURGICAL`;
+  see "Downed players"). Plus `guide`.
 - `Procedures` (`scripts/procedures.gd`): `PATIENTS` (`bob`, `seal`, with weight and limb
-  radius), `AILMENTS` (`gunshot`, `amputation`) with steps `{id, label, item, uses, game,
-  variant?, site}`, `roll(seed, shift)`, `requirements(ailment)`,
+  radius), `AILMENTS` (`gunshot`, `amputation`, and `stitches` with `player_only: true`) with
+  steps `{id, label, item, uses, game, variant?, site}`, `roll(seed, shift)` (never a
+  player-only ailment), `patient_ailments()`, `is_player_only(id)`, `requirements(ailment)`,
   `remaining_requirements(ailment, from_step)`, `difficulty(shift)`, `MINIGAME_SCRIPTS`.
 - `ItemModels.make(kind: String, count: int = 1) -> Node3D` (`scripts/item_models.gd`): the
   visual for a stack, origin at its base, no collision. Checks `Assets` for `item/<kind>` first.
@@ -318,7 +321,7 @@ player_spawns: Array[Vector3]   # 4, in the break room (the current loop starts 
 tool_spawns, monster_spawns     # monster spawns: wing hallways only, never inside entrance_rect or the neutral area
 table: Vector3                  # == tables[0].position, the first patient table; table_pos() still returns it
 table_yaw: float                # the tables' long axis runs along X (0.0)
-clock, pod: Vector3             # break room; clock_pos() / pod_pos() unchanged
+clock: Vector3                  # break room; clock_pos() unchanged (downed removed the Re-Gen Pod)
 shelf, lectern: {position, yaw}; lectern_node
 lights: [{tile, position, mode, node}]   # node's child OmniLight3D "Bulb"; street lamps and canopy lights are
                                          # included (mode 0) but are not in group "fixture" and never flicker
@@ -421,7 +424,8 @@ game.dev: Node                           # scripts/dev/dev_room.gd, child "Dev" 
 game.damage_player(p, amount: int, source: String, knock := Vector3.ZERO)
     # every hurt goes here; monster_hit_player calls it. source: "monster:<kind>", "dev_gun:<name>"
 game.knock_down_player(p, source: String, knock := Vector3.ZERO, seconds := 3.0)
-    # stand-in until wave 3: damage down to 1 HP plus p.stun seconds; replace the body, keep the call
+    # downs the player at once (seconds is ignored); see "Downed players". The dev gun's secondary.
+game.kill_player(p, source: String)      # dead until the next shift, downed or not; the dev gun's primary
 game.kill_monster(m)                     # removes it for good; everyone sees it fall ("monster_killed" event)
 game.knock_down_monster(m, dir := Vector3.ZERO, seconds := 4.0)   # Discharged stunned, Night Nurse calmed
 ```
@@ -576,6 +580,77 @@ OrScreenModel.build(game) -> Dictionary # scripts/orscreen/or_screen_model.gd, p
   `tools/perfprobe.tscn -- --orscreen` (OR view and close-up with the monitor on and off) and the
   perfprobe `--ab` row `no OR screen`.
 
+## Downed players (downed worker, sweep 2 wave 3)
+
+0 HP downs a player; nothing a hit does kills. The Re-Gen Pod is gone (no `pod`, `pod_pos()`,
+`C.POD_SECONDS`, `level_info.pod` or `regen_pod` piece). All host authoritative; the Player fields
+ride in `report_full` (`dn bl cb ca ot ch`).
+
+```gdscript
+# Player (scripts/player.gd)
+p.downed: bool            # alive but not standing: lies down, crawls (CRAWL_SPEED), no sprint, E only calls for help
+p.bleed: float            # seconds left; every machine runs it (game.bleed_rate), the host's is the truth
+p.carried_by: int         # carrier's peer id, 0 = nobody; the body is pinned to game.pinned_pose(p)
+p.carrying: int           # carried player's peer id; carrier moves at CARRY_SPEED_K, cannot shove, drop or use things
+p.on_table: bool          # lying on the player table, pinned there, looking up
+p.carry_hold: float       # seconds this player has held E on a downed teammate (HUD "LIFTING")
+p.downed_aim              # Area3D "DownedAim", interact_id "pl_<peer id>", on C.L_INTERACT only while lying free
+p.refresh_downed_visuals() / p.look_up_from_table()
+
+# Game (scripts/game.gd)
+game.BLEED_SECONDS (300)  game.TABLE_BLEED_K (0.5)  game.CARRY_HOLD (1.0 s)  game.REVIVE_HP (2)
+game.alive_players()      # standing players only (alive and not downed): monsters, footsteps, perception, holds
+game.all_players_out() -> bool     # every player not waiting to join is downed or dead; fails the shift outside the dev room
+game.down_player(p, source, knock := Vector3.ZERO)   # host; damage_player calls it at 0 HP
+game.kill_player(p, source)        # host; "bleed" when the clock runs out
+game.revive_player(p, source := "stitches")   # host; REVIVE_HP, standing beside the player table
+game.can_pick_up(q, p, check_hands := true) -> bool
+game.start_carry(q, p) / game.drop_carried(q) / game.place_on_player_table(q)   # host
+game.carrier_pressed_interact(q, aim_id) / game.downed_call_out(p)             # host, from Player._consume_actions
+game.player_table          # {position (floor), yaw, top}; {} until placed two physics frames after the level
+game.player_table_top() -> Vector3 / game.player_table_yaw() -> float / game.pinned_pose(p) -> Transform3D
+game.start_player_surgery(p)       # host: the stitches case on the player on the table
+game.player_surgery        # scripts/downed/player_surgery.gd, child "PlayerSurgery" (case, patient(), surgery, operate_prompt(q))
+game.surgery_camera() / surgery_wants_mouse() / surgery_local_exit()   # either table; main.gd and hud.gd use these
+game.spawn_suture_kits()   # host, in begin_shift after the supplies: SUTURE_KITS_PER_SHIFT stacks of 1-2
+game.downed_view           # scripts/downed/downed_view.gd: blood trails, the local vignette and bleed clock
+```
+
+- Damage: `damage_player` ends operations, drops hands, drops whoever the victim carries, and at 0 HP
+  calls `down_player`. Shoving a carrier drops the carried player. Monsters never hit a downed player.
+- Carrying: aim at a downed teammate (`pl_<id>`) with empty hands and hold E for `CARRY_HOLD`
+  (simulated by the host from `wants_interact` + `aim_id`). E again puts them down in front (a
+  reliable `placed` event tells the downed machine where, since it owns its position); E aimed at
+  the `player_table` proxy lays them on it. The carried body rides the right shoulder; the carried
+  player's camera hangs a metre behind that point.
+- Player table: `level_info.tables` entry with `kind == "player"` (the hospital's), else a clear spot
+  2.7-3.4 m from the OR table; a table model (`scripts/downed/player_table.gd`) is built only when
+  nothing is under the spot. Aim proxy `player_table` (prompt "Place X on the table", or the stitches
+  operation's prompt).
+- Stitches: `Procedures.AILMENTS.stitches`, one step `{id: "stitch", item: "suture_kit", uses: 1,
+  game: "stitches", site: "gash"}`, needing a kit on the shared shelf. The case
+  `{patient_id: "player", player_id, ailment_id: "stitches", step_index, flags}` and the operation's
+  net state ride in the global snapshot field `pt`. Its vitals are the patient's bleed clock
+  (100 = five minutes); a botch costs `BOTCH_BLEED_SECONDS` (4) per point. The finished step revives
+  the patient 1.2 s later. Replace with `game.add_case` in the integration wave.
+- Player body (`scripts/downed/player_body.gd`, `create(peer_id, colour)`): lying along X, head toward
+  -X, origin at the table top; site `gash`; `site_transform`, `has_site`, `site_section("gash") ->
+  {half_len, half_gap}`, `set_bleeding`, `stir`, `set_vitals`, `apply_flags` (`stitched` shows the
+  scar), `show_gash(on)` (the minigame hides the painted gash while it draws its own), plus
+  `infection_start` (INF) and `make_severed_limb` (null) for the patient-body surface.
+- Stitches minigame (`scripts/surgery/games/stitches.gd`): six stitches, each a click on the green ring
+  outside one edge then on the ring across; amber = loose (closes less, oozes), red = torn skin
+  (1.5) or a stab into the open wound (2.5). Net state `s h fq q c pu b bt be st p`. Self-test
+  `--selftest=stitches`; the lab runs it on a player body with `--game=stitches`.
+- Dev room: `game.dev.request("down_me", {id?})` (the panel's "Down me" and each bot row's "Down"),
+  a carry order with `to: "table"` ("downed to table") lifts the nearest downed player and lays them
+  on the player table, and the operate order stitches up whoever lies there first (stocking a kit).
+  `dev_level` adds a player table south of the OR table.
+- Sounds `downed_fall`, `downed_call`, `downed_lift`, `downed_stitch`, `downed_tug`
+  (`tools/gen_audio_downed.mjs`).
+- Tests: `tools/downedtest.tscn` (headless), `tools/downedshot.tscn` (windowed shots into
+  `tools/downed_shots/`), nettest scenario `downed`, devtest downed checks.
+
 ## Networking (net worker, sweep 2)
 
 `Net` autoload (`scripts/net.gd`):
@@ -616,7 +691,7 @@ Replication (networking section of `scripts/game.gd`):
 - Anything new that must reach clients: add it to a report (continuous state) or send a reliable
   `_event` (one-off). Do not add new full-state RPCs.
 - `game.waiting_peers` (peer id -> true, replicated): peers that joined mid-shift. They exist as
-  not-alive Players, the Re-Gen Pod ignores them, and `start_lobby` spawns them. Anything that
+  not-alive Players, `all_players_out()` skips them, and `start_lobby` spawns them. Anything that
   counts or revives dead players must skip them.
 - A peer leaving: its hands drop where it stood through `_drop_hands_in_place` (no breakage),
   `surgery.end()` pauses its operation with progress kept.

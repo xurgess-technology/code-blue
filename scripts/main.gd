@@ -333,8 +333,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	# Esc while operating leaves the operation instead of pausing.
-	if event.is_action_pressed("pause") and game.surgery != null and game.surgery.wants_mouse():
-		game.surgery.local_operator_exit()
+	if event.is_action_pressed("pause") and game.surgery_wants_mouse():  # downed hook: either table
+		game.surgery_local_exit()
 		get_viewport().set_input_as_handled()
 		return
 
@@ -384,7 +384,7 @@ func _can_read(me) -> bool:
 func _update_mouse() -> void:
 	var free: bool = menu.visible or game.phase == Game.Phase.MENU or game.paused \
 		or (guide != null and guide.is_open()) \
-		or (game.surgery != null and game.surgery.wants_mouse()) \
+		or game.surgery_wants_mouse() \
 		or (dev_panel != null and dev_panel.is_open())  # DEV HOOK
 	var want := Input.MOUSE_MODE_VISIBLE if free else Input.MOUSE_MODE_CAPTURED
 	if Input.mouse_mode != want:
@@ -411,7 +411,7 @@ func _process(_delta: float) -> void:
 	_update_mouse()
 	_invite_button.visible = game.paused and Net.backend == "steam" and game.phase != Game.Phase.MENU
 	# While operating, the surgery view's camera wins; otherwise whoever we are watching.
-	var surgery_cam: Camera3D = game.surgery.camera() if game.surgery != null and game.phase != Game.Phase.MENU else null
+	var surgery_cam: Camera3D = game.surgery_camera() if game.phase != Game.Phase.MENU else null  # downed hook: either table
 	if surgery_cam != null:
 		if not surgery_cam.current:
 			surgery_cam.make_current()
