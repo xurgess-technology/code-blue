@@ -19,9 +19,17 @@ extends Node
 ##   late_join        client 2 joins mid-shift: spectates, then spawns when the next shift's lobby starts
 ##   host_quit        the host leaves: clients return to the menu with a message
 ##   host_kill        the host process dies without saying goodbye: same, through the ENet timeout
-##   full_shift       host + N clients play a whole shift to the win screen (the runner adds lag)
+##   full_shift       host + N clients play a whole shift of the loop: clock in, grace, answer the
+##                    phone, paramedics deliver, fetch, operate, clock out and get paid (the runner
+##                    adds lag)
 ##   economy          client 1 picks up loot, sells it and buys gold bars; the host and client 2
-##                    see the money and the pile; client 3 joins afterwards and sees the pile too
+##                    see the money and the pile; client 1 keeps one piece of loot through a whole
+##                    shift change; client 3 joins afterwards and sees the pile too
+##   two_patients     host + 2 clients: two patients on two tables; client 1 and client 2 operate
+##                    on different tables at the same time and each watches the other
+##
+## Shifts start the way the loop does (sweep 2): the host clocks in, skips the grace period,
+## answers the phone, and the paramedics wheel the patient onto a table.
 ##
 ## Every process exits 0 on success and 1 on failure, printing "PASS:" or "FAIL:" and why.
 ## Coordination between processes travels over the game's own connection (the _msg RPC).
@@ -107,6 +115,7 @@ func _run() -> void:
 		"host_quit", "host_kill": await _sc_host_quit()
 		"full_shift": await _sc_full_shift()
 		"economy": await _sc_economy()
+		"two_patients": await _sc_two_patients()
 		_: _end(false, "unknown scenario " + scenario)
 
 
@@ -176,7 +185,7 @@ func _sc_surgery():
 		_send("operate", {"peer": op_id})
 		var seen := {"op": false}
 		var watch := func():
-			if game.surgery.operator_id == op_id:
+			if game.surgery_for_table(int(game.case.table)).operator_id == op_id:
 				seen.op = true
 		if not await _do_until(watch, func(): return int(game.case.step_index) >= 1, 120.0, "the step to finish"):
 			return
@@ -324,7 +333,7 @@ func _sc_late_join():
 		if not await _until(func(): return Net.names.size() >= 2 and game.players.size() >= 2, 60.0, "client 1"):
 			return
 		await _wall_wait(1.0)
-		game.begin_shift()
+		game.clock_in()   # the real loop: the grace period is running when the late joiner arrives
 		print("[marker] shift_started")
 		if not await _until(func(): return Net.names.size() >= 3 and game.players.size() >= 3, 90.0, "the late joiner"):
 			return
@@ -337,22 +346,28 @@ func _sc_late_join():
 			return _end(false, "the Re-Gen Pod offers to revive the late joiner: %s" % game._pod_prompt())
 		if not await _until(func(): return _count_msgs("spectating") > 0, 40.0, "the late joiner to spectate"):
 			return
-		game._end_shift(true, "Test: shift over.")
+		var seed_before: int = game.seed_value
+		game._end_shift(true, "Test: shift over.")   # clocks out: paycheck screen, then the next lobby
 		if not await _until(func(): return game.phase == Game.Phase.LOBBY and game.shift == 2, 60.0, "the next lobby"):
 			return
 		await _wall_wait(1.0)
 		if not lp.alive:
 			return _end(false, "the late joiner is still not alive in the next lobby")
+		if game.seed_value != seed_before:
+			return _end(false, "the next shift rebuilt the hospital (seed %d -> %d)" % [seed_before, game.seed_value])
 		if not await _until(func(): return _count_msgs("spawned") > 0, 40.0, "the late joiner to spawn"):
 			return
 		await _finish_together("late joiner spectated and spawned at the next shift")
 		return
 	if index == 1:
-		if not await _wait_shift_as_client():
+		if not await _until(func(): return game.phase == Game.Phase.SHIFT and _me() != null and game.shelf_node != null, 90.0, "the shift"):
 			return
+		var seed_then: int = game.seed_value
 		if not await _until(func(): return game.phase == Game.Phase.LOBBY and game.shift == 2, 150.0, "the next lobby"):
 			return
-		await _finish_together("saw the next lobby")
+		if game.seed_value != seed_then or game.level == null:
+			return _end(false, "the next lobby is not the same hospital on client 1")
+		await _finish_together("saw the next lobby in the same hospital")
 		return
 	# The late joiner
 	if not await _until(func(): return game.phase != Game.Phase.MENU and _me() != null and not game.level_info.is_empty(), 60.0, "the world"):
@@ -423,12 +438,18 @@ func _sc_full_shift():
 	me.bot_active = true
 	me.bot_invulnerable = true
 	game.surgery.bot_skill = 1.0
-	var st := {"target": -1, "shift_t": -1.0, "sent": 0, "recv": 0, "last_step": -1}
+	var st := {"target": -1, "shift_t": -1.0, "sent": 0, "recv": 0, "last_step": -1, "crew": false, "money": game.money, "stable": false}
 	var ok := await _do_until(func(): _shift_bot(st), func(): return game.phase == Game.Phase.WON or game.phase == Game.Phase.LOST, 900.0, "the shift to end")
 	if not ok:
 		return
 	if game.phase == Game.Phase.LOST:
 		return _end(false, "the shift was lost: %s" % game.message)
+	if not st.crew:
+		return _end(false, "never saw the paramedics bring the patient")
+	if not st.stable:
+		return _end(false, "clocked out without seeing the patient stable")
+	if not await _until(func(): return game.money > int(st.money), 20.0, "the paycheck"):
+		return
 	if stats and st.shift_t >= 0.0:
 		var secs: float = maxf(0.001, game.world_time - st.shift_t)
 		var sent: int = Net.bytes_sent - int(st.sent)
@@ -444,12 +465,13 @@ func _sc_full_shift():
 				parts.append("%s=%.0f" % [k, float(game.net_section_bytes[k]) / secs / float(maxi(1, clients))])
 			print("[stats] host snapshot payload by part, bytes/s per client: %s" % " ".join(parts))
 	_me().bot_interact = false
-	await _finish_together("shift %d won with vitals %.0f" % [game.shift, game.vitals])
+	await _finish_together("shift %d clocked out, paid: $%d (%s)" % [game.shift, game.money, game.loop.pay_note])
 
 
 ## Inventory (sweep 2): selling and buying replicate, and a late joiner sees the gold pile.
 func _sc_economy():
 	const SELL := {"laptop": 250, "gold_watch": 300}
+	const KEEP := "stethoscope"
 	const BARS := 3
 	if role == "host":
 		if not await _until(func(): return Net.names.size() >= 3 and game.players.size() >= 3 and game.economy.placed(), 90.0, "clients 1 and 2"):
@@ -458,10 +480,10 @@ func _sc_economy():
 		var host_p := _me()
 		var ids := []
 		var k := 0
-		for kind in SELL.keys():
+		for kind in SELL.keys() + [KEEP]:
 			var at: Vector3 = game._floor_at(host_p.global_position + Vector3(1.2 + k * 0.8, 0.0, 0.6))
 			var it = game._spawn_item(kind, 1, Transform3D(Basis(), at + Vector3.UP * 0.05), WorldItem.State.LOOSE)
-			it.value = int(SELL[kind])
+			it.value = int(SELL.get(kind, 55))
 			ids.append({"id": it.item_id, "kind": kind})
 			k += 1
 		_send("loot", {"items": ids})
@@ -478,6 +500,19 @@ func _sc_economy():
 		if game.money != want_money or game.gold_bars != BARS:
 			return _end(false, "host has $%d and %d bars, expected $%d and %d" % [game.money, game.gold_bars, want_money, BARS])
 		_say("host: $%d, %d bars" % [game.money, game.gold_bars])
+		# loop: a whole shift goes by; client 1's loot must still be in its hands afterwards.
+		if not await _until(func(): return _count_msgs("kept") > 0, 60.0, "client 1 to be holding its loot"):
+			return
+		if not await _host_clock_in_and_deliver():
+			return
+		game._end_shift(true, "Test: shift over.")
+		if not await _until(func(): return game.phase == Game.Phase.LOBBY and game.shift == 2, 60.0, "the next lobby"):
+			return
+		var c1 = game.players.get(_peer_of(1))
+		if not await _until(func(): return c1 != null and c1.holding(KEEP), 20.0, "client 1's loot on the host after the shift"):
+			return
+		if game.money != want_money:
+			return _end(false, "an unfinished forced clock-out changed the money: $%d, expected $%d" % [game.money, want_money])
 		_send("check", {"money": want_money, "bars": BARS})
 		print("[marker] economy_bought")
 		if not await _until(func(): return _count_msgs("late_seen") > 0, 120.0, "the late joiner to see the pile"):
@@ -531,10 +566,89 @@ func _sc_economy():
 		if not await _do_until(func(): _press_at(game.economy.shop.global_position, "shop"), func(): return game.gold_bars >= i + 1, 40.0, "buying bar %d" % (i + 1)):
 			return
 	_say("bought %d bars, $%d left" % [game.gold_bars, game.money])
-	await _finish_together("sold loot and bought %d bars through the sell bin and the shop" % game.gold_bars)
+	if not me.holding(KEEP):
+		return _end(false, "lost the %s before the shift even started" % KEEP)
+	_send("kept", {})
+	if not await _until(func(): return _count_msgs("check") > 0, 200.0, "the shift to go by"):
+		return
+	if not await _until(func(): return game.phase == Game.Phase.LOBBY and game.shift == 2, 20.0, "the next lobby"):
+		return
+	if not me.holding(KEEP):
+		return _end(false, "the %s did not survive the shift change: %s" % [KEEP, str(me.slots)])
+	await _finish_together("sold loot, bought %d bars, and kept the %s through a whole shift" % [game.gold_bars, KEEP])
 
 
-## One frame of a simple co-op bot: clock in, bring what the shelf lacks, operate.
+## loop (sweep 2): two patients on two tables, two clients operating on different tables at once.
+func _sc_two_patients():
+	if role == "host":
+		if not await _start_shift_when_full():
+			return
+		var first: Dictionary = game.case
+		game.loop.force_extra = {"patient_id": "seal" if String(first.patient_id) == "bob" else "bob", "ailment_id": "gunshot"}
+		game.dev_extra_patient()   # the extra call rings now
+		if not await _until(func(): return game.loop.call_state == "ringing" and game.loop.call_kind == "extra", 20.0, "the extra call"):
+			return
+		game.loop.answer(_me())
+		if not await _until(func(): return game.cases.size() == 2 and String(game.cases[1].state) == "on_table", 120.0, "the extra patient on a table"):
+			return
+		var tables := [int(game.cases[0].table), int(game.cases[1].table)]
+		if tables[0] == tables[1]:
+			return _end(false, "both patients on table %d" % tables[0])
+		_stock_shelf()
+		var ops := {_peer_of(1): tables[0], _peer_of(2): tables[1]}
+		_send("operate_tables", {"ops": ops})
+		var seen := {"both": false}
+		var watch := func():
+			var a = game.surgery_for_table(tables[0])
+			var b = game.surgery_for_table(tables[1])
+			if a.operator_id == _peer_of(1) and b.operator_id == _peer_of(2):
+				seen.both = true
+		if not await _do_until(watch, func(): return int(game.cases[0].step_index) >= 1 and int(game.cases[1].step_index) >= 1, 150.0, "both first steps"):
+			return
+		if not seen.both:
+			return _end(false, "never saw both clients operating at the same time")
+		for c in game.cases:
+			if not (c.flags as Dictionary).has("sedation"):
+				return _end(false, "a step finished without its flags: %s" % str(c))
+		_say("both tables advanced: %s" % str(game.cases.map(func(c): return "%s t%d step %d vit %.0f" % [c.patient_id, c.table, c.step_index, c.vitals])))
+		if not await _until(func(): return _count_msgs("watched_other") >= 2, 40.0, "both clients' reports"):
+			return
+		await _finish_together("two clients operated on two tables at once")
+		return
+	if not await _wait_shift_as_client():
+		return
+	if not await _until(func(): return _count_msgs("operate_tables") > 0 and game.cases.size() == 2 and String(game.cases[1].get("state", "")) == "on_table", 150.0, "the second patient and the order"):
+		return
+	var ops: Dictionary = _msgs("operate_tables")[0].data.ops
+	var mine := int(ops.get(Net.my_id(), -1))
+	var other := -1
+	for id in ops.keys():
+		if int(id) != Net.my_id():
+			other = int(ops[id])
+	if mine < 0 or other < 0:
+		return _end(false, "no table for me in %s" % str(ops))
+	if game.body_for_table(mine) == null or game.body_for_table(other) == null:
+		return _end(false, "missing a patient body: mine %s other %s" % [str(game.body_for_table(mine)), str(game.body_for_table(other))])
+	var sys = game.surgery_for_table(mine)
+	var other_sys = game.surgery_for_table(other)
+	game.surgery_bot_skill = 1.0
+	if not await _do_until(func(): _press_at(game.table_position(mine), game.table_interact_id(mine)),
+			func(): return sys.is_local_operating(), 40.0, "the host to let me operate on table %d" % mine):
+		return
+	var st := {"states": {}}
+	var watch := func():
+		if other_sys.mg != null and other_sys.operator_id != 0 and other_sys.operator_id != Net.my_id():
+			st.states[str(other_sys.mg.net_state())] = true
+	if not await _do_until(watch, func(): return int(game.case_on_table(mine).get("step_index", 0)) >= 1 and int(game.case_on_table(other).get("step_index", 0)) >= 1, 150.0, "both steps"):
+		return
+	if st.states.size() < 3:
+		return _end(false, "watched only %d distinct tool states at the other table" % st.states.size())
+	_send("watched_other", {"n": st.states.size()})
+	await _finish_together("operated table %d while watching %d tool states at table %d" % [mine, st.states.size(), other])
+
+
+## One frame of a simple co-op bot through the loop: clock in, answer the phone, bring what the
+## shelf lacks, operate, clock out.
 func _shift_bot(st: Dictionary) -> void:
 	var me := _me()
 	if me == null:
@@ -544,7 +658,22 @@ func _shift_bot(st: Dictionary) -> void:
 		if index == mini(1, clients):   # one client clocks everyone in, as a player would
 			_press_at(game.clock_pos(), "clock", true)
 		return
-	if game.phase != Game.Phase.SHIFT or game.case.is_empty():
+	if game.phase != Game.Phase.SHIFT:
+		return
+	if not game.loop.crews.is_empty():
+		st.crew = true
+	for c in game.cases:
+		if String(c.state) == "stable":
+			st.stable = true
+	# The phone: the last client answers the first call (the extra one is left to ring out).
+	if game.loop.call_state == "ringing" and game.loop.call_kind == "first" and index == mini(2, clients) and game.loop.phone != null:
+		_press_at(game.loop.phone.global_position, "phone")
+		return
+	if game.loop.can_clock_out():
+		if index == mini(1, clients):
+			_press_at(game.clock_pos(), "clock", true)
+		return
+	if game.case.is_empty() or String(game.case.get("state", "")) != "on_table":
 		return
 	if st.shift_t < 0.0:
 		st.shift_t = game.world_time
@@ -552,7 +681,7 @@ func _shift_bot(st: Dictionary) -> void:
 		st.recv = Net.bytes_received
 		st.payload = game.net_payload_bytes
 		game.net_section_bytes = {}
-		_say("shift began: %s/%s" % [game.case.patient_id, game.case.ailment_id])
+		_say("patient on the table: %s/%s" % [game.case.patient_id, game.case.ailment_id])
 	if int(game.case.step_index) != int(st.last_step):
 		st.last_step = int(game.case.step_index)
 		_say("step %d, vitals %.0f, shelf %s, operator %d" % [st.last_step, game.vitals, str(game.shelf), game.surgery.operator_id])
@@ -576,7 +705,7 @@ func _shift_bot(st: Dictionary) -> void:
 			return
 	if short.is_empty():
 		if game.surgery.operator_id == 0:
-			_press_at(game.table_pos(), "table")
+			_press_at(game.table_position(int(game.case.table)), game.table_interact_id(int(game.case.table)))
 		return
 	var kinds := short.keys()
 	kinds.sort()
@@ -598,28 +727,55 @@ func _me() -> Player:
 	return game.local_player() as Player
 
 
+## Client: wait until the patient is on a table (the loop brings them); also require having seen
+## the paramedics' crew and the phone call's subtitles replicate on the way.
 func _wait_shift_as_client() -> bool:
-	var ok := await _until(func(): return game.phase == Game.Phase.SHIFT and _me() != null and not game.case.is_empty() and game.world_items.size() > 0 and game.shelf_node != null, 90.0, "the shift")
+	var seen := {"crew": false, "sub": false}
+	var watch := func():
+		if not game.loop.crews.is_empty() and game.get_node("Entities").find_child("ParamedicCrew_*", false, false) != null:
+			seen.crew = true
+		if game.loop.subtitle != "":
+			seen.sub = true
+	var ok := await _do_until(watch, func(): return game.phase == Game.Phase.SHIFT and _me() != null and not game.case.is_empty() \
+		and String(game.case.get("state", "")) == "on_table" and game.body_for_table(int(game.case.table)) != null \
+		and game.world_items.size() > 0 and game.shelf_node != null, 120.0, "the patient on a table")
 	if ok:
 		_me().bot_active = true
 		_me().bot_invulnerable = true
-		_say("in shift: case=%s/%s items=%d players=%d" % [game.case.patient_id, game.case.ailment_id, game.world_items.size(), game.players.size()])
+		if not seen.crew or not seen.sub:
+			_end(false, "the patient arrived but I saw crew=%s subtitles=%s" % [str(seen.crew), str(seen.sub)])
+			return false
+		_say("in shift: case=%s/%s on table %d, items=%d players=%d, saw the paramedics and the call" % [game.case.patient_id, game.case.ailment_id, int(game.case.table), game.world_items.size(), game.players.size()])
 	return ok
 
 
+## Host: the loop's start of a shift: clock in, skip the grace period, answer the phone, wait for
+## the paramedics to put the patient on a table.
 func _start_shift_when_full() -> bool:
 	if not await _until(func(): return Net.names.size() == clients + 1 and game.players.size() == clients + 1, 90.0, "all %d clients" % clients):
 		return false
 	await _wall_wait(1.0)
-	game.begin_shift()
-	_say("shift begun: case=%s/%s items=%d monsters=%d" % [game.case.patient_id, game.case.ailment_id, game.world_items.size(), game.monsters.size()])
+	return await _host_clock_in_and_deliver()
+
+
+func _host_clock_in_and_deliver() -> bool:
+	game.clock_in()
+	game.dev_skip_grace()
+	if not await _until(func(): return game.loop.call_state == "ringing", 30.0, "the phone to ring"):
+		return false
+	game.loop.answer(_me())
+	if not await _until(func(): return String(game.case.get("state", "")) == "on_table", 120.0, "the paramedics to deliver"):
+		return false
+	# Let the subtitles run on so every client sees some.
+	await _wall_wait(0.5)
+	_say("shift begun: case=%s/%s on table %d items=%d monsters=%d" % [game.case.patient_id, game.case.ailment_id, int(game.case.table), game.world_items.size(), game.monsters.size()])
 	return true
 
 
 func _stock_shelf() -> void:
-	var need := Procedures.requirements(game.case.ailment_id)
+	var need: Dictionary = game._live_requirements()
 	for kind in need.keys():
-		game.shelf[kind] = int(need[kind])
+		game.shelf[kind] = maxi(int(game.shelf.get(kind, 0)), int(need[kind]))
 	game.shelf_node.show_stock(game.shelf)
 
 
