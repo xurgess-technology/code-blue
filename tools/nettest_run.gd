@@ -15,6 +15,7 @@ extends SceneTree
 ##   --realtime         run the game processes in real time instead of --fixed-fps 60
 ##   --speed=N          with --fixed-fps, cap each process at N times real time (default 4)
 ##   --verbose          echo every line the processes print, not just the test's own
+##   --port=N           first port to use (default 7790; one more per scenario)
 ##
 ## Full logs of each process go to tools/nettest_logs/<scenario>_<role>.log.
 ##
@@ -57,6 +58,7 @@ var _realtime := false
 var _speed := 4
 var _verbose := false
 var _log_dir := ""
+var _port_base := 7790
 
 
 func _initialize() -> void:
@@ -71,6 +73,7 @@ func _initialize() -> void:
 			"realtime": _realtime = true
 			"speed": _speed = maxi(1, int(v))
 			"verbose": _verbose = true
+			"port": _port_base = int(v)   # first port (parallel worktrees must not share one)
 	_log_dir = ProjectSettings.globalize_path("res://tools/nettest_logs")
 	DirAccess.make_dir_recursive_absolute(_log_dir)
 	_main.call_deferred()
@@ -86,7 +89,7 @@ func _main() -> void:
 		quit(1)
 		return
 	var results := []
-	var port := 7790
+	var port := _port_base
 	for s in todo:
 		var started := Time.get_ticks_msec()
 		var r: Dictionary = await _run_scenario(s, port)

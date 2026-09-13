@@ -199,16 +199,26 @@ func local_operator_exit() -> void    # local player pressed Esc/E to stop opera
 func hud_state() -> Dictionary        # what the HUD draws for the step being watched, or {}
 ```
 
+Sweep 2 (loop): there is one surgery system per patient table (`game.surgeries`), each with
+`var table_index: int` (index into `level_info.tables`) and `end_current()` (the case finished:
+the operator steps back). A player operates at one table at a time. `bot_skill` is shared by all
+of them (stored as `game.surgery_bot_skill`). `hud_state()` also carries `table`, `step_index`,
+`steps`, `vitals`.
+
 Game-side API the surgery system uses:
 
-- `game.case` `{patient_id, ailment_id, step_index, flags}` (host authoritative, replicated)
-- `game.patient_body` (the PatientBody on the table, or null)
+- `game.case_on_table(table_index)` (the case it operates on while its state is `on_table`) and
+  `game.body_for_table(table_index)`; see "Shift loop and patients". `game.case` /
+  `game.patient_body` remain as aliases of the first patient case.
 - `game.shelf_count(kind)`, `game.is_host()`, `game.world_time`, `game.shift`, `game.players`
-- `game.surgery_botch(amount: float, reason: String)` host: costs vitals, says why
-- `game.surgery_step_done(result: Dictionary)` host: consumes the step's items from the shelf,
-  merges `result` into `case.flags`, gives vitals back, advances or wins the shift
-- `game.send_operator_report(report: Dictionary)` client operator -> host (the game routes it
-  to `receive_operator_report` on the host; on the host it calls it directly)
+- `game.surgery_botch(amount: float, reason: String, table_index := -1)` host: costs that case's
+  vitals, says why (-1: the first patient case)
+- `game.surgery_step_done(result: Dictionary, table_index := -1)` host: consumes the step's items
+  from the shelf, merges `result` into the case's flags, gives vitals back, advances; the last step
+  makes the case stable (`game.finish_case`)
+- `game.send_operator_report(report: Dictionary)` client operator -> host. Every report carries
+  `"tb": table_index`; the game routes it to that table's `receive_operator_report` (on the host
+  it calls it directly)
 - `game.emit_noise(pos, loudness, kind)` host
 
 Minigames extend `scripts/surgery/minigame.gd`; read that file, it is the contract. Parts of it that
@@ -441,8 +451,9 @@ knocked down, no movement; a `"stun"` event plus the dev snapshot block), `nocli
   `dummy_spots`. It has none of the wave 1 hospital keys (tables, or_screen, phone, entrance,
   neutral, wings): code using those must check for them.
 - The room is always in `Phase.SHIFT` (no clock-in). A saved or lost patient clears the table
-  instead of starting a lobby. Wave 2's phone call: add `game.dev_phone_call()` and the panel's
-  button calls it (until then `dev.phone_call_requested` is emitted).
+  a few seconds later (loop). The panel's "Phone call" calls `game.dev_phone_call()`; "Extra
+  patient" and "Skip grace" call `game.dev_extra_patient()` / `game.dev_skip_grace()` (requests
+  `phone`, `extra_patient`, `skip_grace`). "Put on the table" uses the first free patient table.
 - `surgery_system.gd` lets an `is_bot` operator operate on the host with the minigame's
   `bot_input(t, skill)` (skill from the bot's meta `bot_skill`). Minigames must keep
   `bot_input` finishing their step.
@@ -486,8 +497,8 @@ Loot (`scripts/economy/`):
   `level_info.rooms` or `level_info.wings` rect (tiles, or world metres when the rect is wider than
   the map in tiles, or `space: "world"`), else distance from the table. Safe rooms: `or`,
   `anteroom`, `clockin`, `break_room`, `entrance`, `lobby`, `neutral`, `outdoor`, `dev`.
-- `game.spawn_loot()` (host) runs in `begin_shift()` right after `_spawn_supplies()`. The loop
-  worker may call it wherever the new flow spawns supplies.
+- `game.spawn_loot()` (host) runs at clock-in (`game.clock_in()` and the `begin_shift()`
+  shortcut), with the monsters; supplies come later, with each accepted patient.
 
 Colour coding (`scripts/item_models.gd`): `ItemModels.make_tinted(kind, count, soft := false)`,
 `apply_tint(node, kind, soft)`, `tint_material(kind, soft) -> Material` (teal for surgical, gold for
@@ -524,6 +535,85 @@ true)`), `game.dev.request("money", {amount})` / `{reset: true}` (panel "Money" 
 (windowed shots to `tools/inventory_shots/`), nettest scenario `economy`, devtest inventory checks,
 perfprobe `gold pile, 0 / 500 bars` and `--ab` rows `no item rims` / `loot hidden`.
 
+## Shift loop and patients (loop worker, sweep 2 wave 2)
+
+Cases (`scripts/game.gd`, host authoritative, replicated):
+
+```gdscript
+game.cases: Array          # each: {id, table (index into level_info.tables, -1 on the gurney),
+                           #  patient_id ("bob"|"seal"|"player"), player_id (player cases), ailment_id,
+                           #  step_index, flags, vitals, state ("incoming"|"on_table"|"stable"|"dead"),
+                           #  optional (true for the extra patient)}
+game.case_on_table(table_index) -> Dictionary   # any state but incoming; {} when free; the live dictionary
+game.case_by_id(id) -> Dictionary
+game.add_case(c) -> int         # host; defaults step 0, flags {}, vitals 100, state on_table with a table
+                                # else incoming; -1 if that table holds a live case (a finished one is replaced)
+game.finish_case(id, won)       # host; stable (stays on its table) or dead (flatlines, vitals 0)
+game.remove_case(id)            # host
+signal cases_changed            # every machine: added, removed, onto a table, step, state (not vitals)
+game.case / game.vitals / game.patient_body   # aliases of the first non-player case
+game.patient_tables: [{index, position, yaw}] # the kind "patient" tables
+game.surgeries                  # one surgery system per patient table, same order
+game.surgery                    # the one the local player operates at (or is blending back from), else the first case's
+game.surgery_for_table(i) / body_for_table(i) / table_position(i) / table_yaw_of(i)
+game.table_interact_id(i)       # "table" for the first patient table, "table_<index>" for the others
+game.free_patient_table() -> int   # no case and no paramedics heading there, or -1
+game.end_operations(p)          # host: p steps back from every table
+game.spawn_supplies_for(c)      # host: the first case gets ItemSpawner.plan; later ones a shortfall top-up
+```
+
+- Vitals drain only while `on_table`. Player cases (`patient_id "player"`) get no PatientBody, no
+  surgery system, no drain and no pay from this code: the `downed` worker owns them.
+- Levels without `level_info.tables` (the dev room, the fallback ward, old tile maps) get the
+  level's `table` plus a second table built beside it (`scripts/loop/tables.gd`, deterministic);
+  `level_info.tables` is then filled with both and `tables_fallback` set.
+
+The loop (`scripts/loop/shift_loop.gd`, `game.loop`, child "Loop"):
+
+```gdscript
+game.clock_in()                 # host: LOBBY -> SHIFT: loot, monsters, grace period (the clock's hold calls it)
+game.begin_shift()              # host, tools: clock in and put the first patient straight on a table
+game.finish_shift(text, secs)   # host: the paycheck screen (Phase.WON), then the next shift's lobby
+game.game_over(text)            # host: Phase.LOST, then game.reset_money() and a new run (new seed, shift 1)
+game._end_shift(won, text)      # tests: won = forced clock-out, else game over
+game.dev_phone_call() / dev_extra_patient() / dev_skip_grace()
+game.monster_may_wander_to(p) -> bool   # false inside the entrance building or the neutral area (zone_of)
+loop.grace_left, call_kind ("first"|"extra"), call_state ("ringing"|"talking"), subtitle, first_called,
+  crews {case id: {p, y, ph "in"|"hand"|"out", pt, ai, tb}}, pay_note     # replicated as g "lp.*"
+loop.start_call(kind) / answer(p) / clock_out(force) / can_clock_out() / skip_grace()
+loop.objective_text() / missing_supplies() / clock_prompt(p) / phone_prompt()
+loop.force_first / force_extra = {patient_id, ailment_id}   # tests pin what the calls bring
+loop.pay_for(case, shift) -> int   # stable 200 (+25/shift), extra stable 300 (+40/shift), dead -150
+```
+
+- Players start a run at `level_info.neutral.spawn_points` (else `player_spawns`): `game.spawn_points()`.
+- Clock in, `GRACE_SECONDS` (60), then the phone rings. E on interactable `phone` answers (subtitles
+  for everyone); after `AUTO_ANSWER_SECONDS` (8) the answering machine takes it. Taking the call
+  adds the case (`incoming`) and spawns its supplies; `DISPATCH_DELAY` (3 s) later a crew leaves
+  `level_info.ambulance` (else `entrance`, else the spawn farthest from the table), walks the
+  navmesh to a free patient table, hands over (state `on_table`) and walks back.
+- 45 to 150 s after the first patient is on a table the phone rings with the optional extra patient
+  (a different patient); answering accepts, `EXTRA_DECLINE_SECONDS` (20) of ringing declines.
+- The clock allows clocking out once the first call was taken and no case is incoming or on a
+  table (a ringing extra call is declined by clocking out). Pay goes through `game.add_money`
+  (a dead patient's penalty clamps at $0). Monsters are removed at clock-out.
+- **Next shift: same hospital.** The seed stays for the whole run; `shift` goes up. At the next
+  clock-in the items the spawners left and nobody touched are removed, containers close, and loot,
+  monsters and (per case) supplies spawn fresh from `seed + shift`. Nobody is moved and hands are
+  kept at the next lobby; the dead and late joiners get up at the start. Game over builds a new
+  hospital (`seed + 7919`). Clients learn the phase from `_rpc_shift`/snapshots and move themselves.
+- Game over: during a shift, every non-waiting, non-bot player is `alive == false` or has
+  `downed == true` (read with `p.get("downed")`, so it works before the downed worker lands).
+  Never in the dev room.
+- The phone: on a level with `level_info.phone` at wall height the loop adds the aim target, a
+  blinking lamp and a glow to the hospital's wall phone; otherwise it builds a desk phone on a side
+  table near the clock. Sounds `loop_ring`, `loop_pickup`, `loop_hangup`, `loop_gurney`,
+  `loop_siren`, `loop_clockout` (`tools/gen_audio_loop.mjs`).
+- Tests: `tools/looptest.tscn` (headless, the whole loop), `tools/playtest.tscn` (the loop,
+  `--extra`, `--skip-grace`), `tools/loopshot.tscn` (windowed shots to `tools/loop_shots/`),
+  devtest's loop hooks, nettest `deliver`, `surgery`, `late_join`, `full_shift_lag`, `economy`
+  (loot kept through a shift) and `two_patients`.
+
 ## Networking (net worker, sweep 2)
 
 `Net` autoload (`scripts/net.gd`):
@@ -553,7 +643,9 @@ signal roster_changed, joined_ok, join_failed(reason), host_left, host_ready, ho
 Replication (networking section of `scripts/game.gd`):
 
 - Host -> each client, 20 Hz, unreliable: acked deltas of a state made of `g` (global fields,
-  with the surgery state flattened into `sg.*` and `ms.*`), `pl` (Player.report_full per peer),
+  with each table's surgery state flattened into `sg<table>.*` and `ms<table>.*`, the cases as
+  `cs` (ids), `c.<id>` (the case without vitals) and `v.<id>` (its vitals), and the shift loop
+  as `lp.*`), `pl` (Player.report_full per peer),
   `mo` (Monster.report), `it` (WorldItem.report), `ct` (open containers only). Clients ack in
   `_player_state(ack, Player.report_state())`. Keyframes on demand and every 10 s.
 - **Reports must be quantized and must not share mutable data with the live object** (return
@@ -575,7 +667,8 @@ for anything that changes what crosses the wire.
 
 ## Design decisions (locked)
 
-- One patient (Bob or the seal) and one ailment (gunshot or amputation) per shift.
+- Each patient is Bob or the seal with one ailment (gunshot or amputation). Sweep 2: one patient
+  per shift plus an optional extra one on the second table (see "Shift loop and patients").
 - Items are always physical 3D models: in containers that visibly open, or loose. Aim + E.
 - Consumables come in batches; a batch is one hand slot; stacks merge; each use consumes one;
   fragile stacks lose about a third when dropped, never all of it. Getting hit or shoved drops
