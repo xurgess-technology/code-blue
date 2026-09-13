@@ -120,18 +120,23 @@ sizes; deterministic from the seed. The game instantiates `WorldItem`s from the 
 
 `scripts/world_item.gd`, a `RigidBody3D` on layer `C.L_PICKUP`, group `"interactable"`,
 meta `interact_id` `"it_<n>"`. Fields: `item_id`, `kind`, `count`, `state` (`IN_CONTAINER`,
-`LOOSE`, `ON_LECTERN`), `container_id`, `slot`. Host-simulated physics when dropped; clients
-lerp to the snapshot transform. Picking up removes the node and fills a hand slot.
+`LOOSE`, `ON_LECTERN`), `container_id`, `slot`, `value` (loot only: dollars for the whole stack,
+reported as `v` when above 0). Host-simulated physics when dropped; clients lerp to the snapshot
+transform. Picking up removes the node and fills a hand slot (value included).
 
 ## Hands (main session)
 
-`Player.slots` is an `Array` of two dictionaries `{kind: String, count: int}` (`kind` `""` when
-empty), `Player.selected` is 0 or 1. Consumable stacks of the same kind merge. Host authoritative,
-replicated in the snapshot.
+`Player.slots` is an `Array` of `C.CARRY_CAP` (4) dictionaries `{kind: String, count: int}` plus
+`v: int` (sell value) on loot; `kind` `""` when empty. `Player.selected` is 0..3 (keys 1-4, the
+wheel). Stacks of the same kind merge when `Items.stacks(kind)` (consumables, stackable loot).
+Bulky loot takes its slot and a second one, stored as `{kind: "", count: 0, of: <head index>}`:
+not free, but invisible to code that walks slots looking for stacks. Host authoritative,
+replicated in the snapshot. See "Inventory and money" for the helpers; do not assign slots by hand.
 
 ## The OR supply shelf (main session)
 
-`game.shelf` is a `Dictionary` kind -> count. Pressing E on the shelf places the selected stack.
+`game.shelf` is a `Dictionary` kind -> count. Pressing E on the shelf places the selected stack
+(surgical kinds only; loot is refused).
 `game.shelf_count(kind) -> int`.
 
 ## Patient body (patients worker)
@@ -343,6 +348,79 @@ knocked down, no movement; a `"stun"` event plus the dev snapshot block), `nocli
 - World changes from the panel or tests: `game.dev.request(action, args)`; the host applies,
   a client sends. Shots: `game.dev.fire(shooter, from, dir, "kill" | "knock")`.
 - Sounds `dev_zap`, `dev_thump`, `dev_defib` from `tools/gen_audio_dev.mjs`.
+
+## Inventory and money (inventory worker, sweep 2 wave 2)
+
+Hands (`scripts/player.gd`; all host side except the reads):
+
+```gdscript
+Player.empty_slot() / Player.empty_slots()      # static: {kind:"",count:0} / C.CARRY_CAP of them
+p.slot_free(i) -> bool                          # no stack and not a bulky second half
+p.head_of(i) -> int / p.tail_of(head) -> int    # the stack a slot belongs to / a bulky stack's 2nd slot (-1)
+p.selected_head() -> int / p.selected_stack()   # what G, the shelf, the sell bin act on
+p.slot_for(kind) -> int / p.can_take(kind)      # bulky needs two free slots (bulky_pair())
+p.take_into(kind, count, value := 0) -> int     # merge or place (both halves for bulky); -1 without room
+p.clear_slot(i)                                 # empties a stack and its second half (pass either)
+p.free_slot_count() / p.hands_empty() / p.holding(kind) / p.select_step(dir)
+```
+
+Anything that empties a slot must use `clear_slot` (or the host's `_fix_links()` tidies an orphaned
+second half on the next tick). Code that spawns items out of hands must carry `s.v` into
+`WorldItem.value`. Every hit, shove and knock-down still drops every stack through `_drop_hands`;
+fragile loot of one cracks there instead (keeps `Game.LOOT_CRACK_KEEPS` of its value).
+
+Items (`scripts/items.gd`): `Items.def(kind)` also answers loot kinds from
+`scripts/economy/loot_table.gd` (kept out of `Items.ITEMS`, so the guide, the supply spawner and the
+dev panel's supply lists do not list loot). New helpers: `is_loot`, `is_bulky`, `slots_needed`,
+`stack_label(kind, count)`; `stacks()` now includes stackable loot.
+
+Loot (`scripts/economy/`):
+
+- `loot_table.gd`: `LOOT[kind]` `{name, short, value [min,max], tier 0..3, bulky, fragile, stack,
+  batch, rooms {room_kind: weight, "*": any}, surfaces [...], containers {type: weight}}`, 21 kinds;
+  `weight(kind, room_kind, depth)`, `roll_value(kind, depth, roll)` (+20% per depth).
+- `loot_spawner.gd`: `plan(seed, shift, level_info, occupied) -> [{kind, count, value, container_id,
+  slot, anchor, position?}]`, deterministic. Depth per location from the entry's `depth`, then a
+  `level_info.rooms` or `level_info.wings` rect (tiles, or world metres when the rect is wider than
+  the map in tiles, or `space: "world"`), else distance from the table. Safe rooms: `or`,
+  `anteroom`, `clockin`, `break_room`, `entrance`, `lobby`, `neutral`, `outdoor`, `dev`.
+- `game.spawn_loot()` (host) runs in `begin_shift()` right after `_spawn_supplies()`. The loop
+  worker may call it wherever the new flow spawns supplies.
+
+Colour coding (`scripts/item_models.gd`): `ItemModels.make_tinted(kind, count, soft := false)`,
+`apply_tint(node, kind, soft)`, `tint_material(kind, soft) -> Material` (teal for surgical, gold for
+loot, null otherwise; one cached shader, applied as `material_overlay` on a model's 5 biggest
+meshes). Use it for anything that shows an item in the world, in hands or on a shelf; minigames
+keep the plain `make()`. `soft` is the fainter rim for first-person held stacks.
+
+Money (host authoritative, replicated as `g.mn` / `g.gb`, survives `start_lobby`):
+
+```gdscript
+game.money: int                               # team money
+game.gold_bars: int                           # bars bought this run
+game.add_money(amount: int, reason: String)   # host; clamps at 0 unless reason starts with "debt:"
+game.reset_money()                            # host; money and bars to 0 (game over; start_session calls it)
+game.gold_bar_price() -> int                  # next bar: 100 + 5 * bars, rounded to $5
+game.sell_selected(p) / game.buy_gold_bar(p) -> bool   # host; what the sell bin and shop call
+game.economy                                  # scripts/economy/economy.gd, child "Economy"
+game.economy.sell_bin / .shop / .pile         # nodes once placed (placed() true); positions helpers
+game.economy.money_visible_for(p) -> bool     # HUD: near an economy spot, aiming at one, or just changed
+```
+
+Interactables `sell_bin` (sells the selected loot stack) and `shop` (buys one gold bar).
+Placement, first match: `level_info.neutral {sell_bin, shop, gold_pile}` (attach: an aim box and a
+sign around the level's own dumpster and van; the pile is lifted onto whatever is under
+`gold_pile.position`), `level_info.economy` (same shape, built models; the dev room), else a
+deterministic search for free floor around the time clock. Placement runs two physics frames after
+`_add_landmarks`. The gold pile (`gold_pile.gd`) is a MultiMesh whose layout is a pure function of
+the count and a height cap (indoors 2.6 m, then side columns). Sounds `economy_sell`,
+`economy_buy`, `economy_bar` (`tools/gen_audio_economy.mjs`).
+
+Dev room: `dev_disp_<loot kind>` cubbies (a rack on the south wall, `DispenserScript.create(kind,
+true)`), `game.dev.request("money", {amount})` / `{reset: true}` (panel "Money" section), and
+`level_info.economy` spots. Tests: `tools/inventorytest.tscn` (headless), `tools/inventoryshot.tscn`
+(windowed shots to `tools/inventory_shots/`), nettest scenario `economy`, devtest inventory checks,
+perfprobe `gold pile, 0 / 500 bars` and `--ab` rows `no item rims` / `loot hidden`.
 
 ## Networking (net worker, sweep 2)
 
