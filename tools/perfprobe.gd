@@ -87,6 +87,7 @@ func _ready() -> void:
 		# INVENTORY HOOK: the same view of the gold pile empty and with 500 bars.
 		{"name": "gold pile, 0 bars", "setup": func(): await _pile_view(0)},
 		{"name": "gold pile, 500 bars", "setup": func(): await _pile_view(500)},
+		{"name": "neutral area outside", "setup": _neutral},  # HOSPITAL HOOK: sweep 2 neutral area
 	]
 	for q in _qualities:
 		main.set_quality(q, false)
@@ -189,6 +190,19 @@ func _pile_view(n: int) -> void:
 	to_clock.y = 0.0
 	var from := game._floor_at(p + to_clock.normalized() * minf(3.5, to_clock.length()))
 	_look(from, p + Vector3.UP * 1.6)
+
+
+## HOSPITAL HOOK: the parking lot outside the main doors, looking back at the building across
+## the lot (street lights, cars, the van). Skipped on levels without a neutral area.
+func _neutral() -> void:
+	var n: Dictionary = game.level_info.get("neutral", {})
+	if n.is_empty():
+		return
+	if game.surgery.camera() != null:
+		game.surgery.end(bot)
+	var gold: Vector3 = n.gold_pile.position
+	var ent: Vector3 = game.level_info.entrance.position
+	_look(gold + (gold - ent).normalized() * 8.0 + Vector3(-5.0, 0, 0), ent + Vector3(0, 2.0, 0))
 
 
 ## The heaviest thing surgery does: the saw with a weak tourniquet (blood decals, particles),
