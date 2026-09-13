@@ -265,6 +265,9 @@ func random_nav_point(near: Vector3, min_d: float, max_d: float) -> Vector3:
 		else:
 			var a := _rng.randf() * TAU
 			p = near + Vector3(cos(a), 0, sin(a)) * _rng.randf_range(min_d, max_d)
+		# LOOP HOOK: no wandering into the entrance building or the neutral area (noise still draws them).
+		if game != null and game.has_method("monster_may_wander_to") and not game.monster_may_wander_to(p):
+			continue
 		var d := p.distance_to(near)
 		if d >= min_d and d <= max_d:
 			return p

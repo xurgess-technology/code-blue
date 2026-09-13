@@ -117,7 +117,7 @@ func on_level_built(level: Node3D, info: Dictionary) -> void:
 	var spot := _phone_spot(info)
 	if spot.is_empty():
 		return
-	phone = PhoneScript.create()
+	phone = PhoneScript.create(bool(spot.get("wall", false)))
 	level.add_child(phone)
 	phone.global_position = spot.position
 	phone.rotation.y = float(spot.yaw)
@@ -277,7 +277,7 @@ func _send_crew(id: int, c: Dictionary, table: int) -> void:
 	var from := arrival_point()
 	var stand := _stand_spot(table, from)
 	var pts := _nav_path(from, stand)
-	pts = _trim_path(pts, MAX_WALK)
+	pts = _trim_path(pts, _max_walk())
 	_paths[id] = {"pts": pts, "i": 1, "t": 0.0, "age": 0.0}
 	var yaw := _yaw_along(pts[0], pts[1] if pts.size() > 1 else stand)
 	crews[id] = {"p": pts[0], "y": yaw, "ph": "in", "pt": String(c.patient_id), "ai": String(c.ailment_id), "tb": table}
@@ -344,7 +344,7 @@ func _turn_back(id) -> void:
 	var cr: Dictionary = crews[id]
 	cr.ph = "out"
 	var back := _nav_path(cr.p, arrival_point())
-	_paths[id] = {"pts": _trim_path_front(back, MAX_WALK), "i": 1, "t": 0.0, "age": 0.0}
+	_paths[id] = {"pts": _trim_path_front(back, _max_walk()), "i": 1, "t": 0.0, "age": 0.0}
 
 
 func _hand_over(id: int, cr: Dictionary, c: Dictionary) -> void:
@@ -757,6 +757,12 @@ static func _trim_path_front(pts: PackedVector3Array, max_len: float) -> PackedV
 	return t
 
 
+## With a real ambulance bay the crew walks the whole way; fallback start points can be deep in
+## the hospital, so those walks start part of the way in.
+func _max_walk() -> float:
+	return 250.0 if game.level_info.has("ambulance") else MAX_WALK
+
+
 static func _yaw_along(a: Vector3, b: Vector3) -> float:
 	var d := b - a
 	if Vector2(d.x, d.z).length() < 0.01:
@@ -768,7 +774,8 @@ static func _yaw_along(a: Vector3, b: Vector3) -> float:
 func _phone_spot(info: Dictionary) -> Dictionary:
 	var given = info.get("phone")
 	if given is Dictionary and given.has("position"):
-		return {"position": given.position, "yaw": float(given.get("yaw", 0.0))}
+		# The hospital builds a wall phone there (position at its centre): add to it, no desk phone.
+		return {"position": given.position, "yaw": float(given.get("yaw", 0.0)), "wall": (given.position as Vector3).y > 0.5}
 	if not info.has("clock"):
 		return {}
 	var clock: Vector3 = info.clock

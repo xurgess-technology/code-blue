@@ -1,22 +1,68 @@
 extends Node3D
-## The break-room phone (loop, sweep 2): a beige desk phone on a small side table. Interactable
-## `phone`: while it rings, E answers it (the shift loop decides what answering means). The red
-## line lamp blinks and the handset shivers while it rings, on every machine.
+## The break-room phone (loop, sweep 2). Interactable `phone`: while it rings, E answers it (the
+## shift loop decides what answering means). A red line lamp blinks (and lights the wall a
+## little) while it rings, on every machine.
+##
+## Two builds: `create(true)` for levels that already have a wall phone model at
+## level_info.phone (the hospital): only the aim target, the lamp and its glow, origin at the
+## phone's centre, -Z facing into the room. `create()`: a beige desk phone on a small side table,
+## origin on the floor, for levels without one; its handset shivers while it rings.
 
 const RING_SHAKE := 0.012
 
 var ringing := false
+var wall := false
 var _t := 0.0
 var _lamp_mat: StandardMaterial3D
-var _handset: Node3D
+var _glow: OmniLight3D
+var _handset: Node3D = null
 var _handset_rest := Vector3.ZERO
 
 
-static func create() -> Node3D:
+static func create(on_wall: bool = false) -> Node3D:
 	var n: Node3D = (load("res://scripts/loop/phone.gd") as GDScript).new()
 	n.name = "BreakRoomPhone"
-	n._build()
+	n.wall = on_wall
+	if on_wall:
+		n._build_wall()
+	else:
+		n._build()
 	return n
+
+
+func _build_wall() -> void:
+	add_to_group("interactable")
+	set_meta("interact_id", "phone")
+	_lamp_mat = _mat(Color(0.25, 0.04, 0.03), 0.3)
+	_lamp_mat.emission_enabled = true
+	_lamp_mat.emission = Color(1.0, 0.12, 0.08)
+	_lamp_mat.emission_energy_multiplier = 0.0
+	add_child(_box(Vector3(0.05, 0.03, 0.03), Vector3(0.1, 0.19, -0.115), _lamp_mat))
+	_add_glow(Vector3(0.1, 0.19, -0.3))
+	var area := Area3D.new()
+	area.name = "Aim"
+	area.collision_layer = C.L_INTERACT
+	area.collision_mask = 0
+	area.monitoring = false
+	var acs := CollisionShape3D.new()
+	var sph := SphereShape3D.new()
+	sph.radius = 0.36
+	acs.shape = sph
+	area.add_child(acs)
+	add_child(area)
+
+
+func _add_glow(at: Vector3) -> void:
+	_glow = OmniLight3D.new()
+	_glow.name = "RingGlow"
+	_glow.light_color = Color(1.0, 0.18, 0.1)
+	_glow.light_energy = 0.0
+	_glow.omni_range = 1.4
+	_glow.shadow_enabled = false
+	_glow.light_volumetric_fog_energy = 0.0
+	_glow.position = at
+	_glow.visible = false
+	add_child(_glow)
 
 
 func _build() -> void:
@@ -82,6 +128,7 @@ func _build() -> void:
 	_lamp_mat.emission = Color(1.0, 0.12, 0.08)
 	_lamp_mat.emission_energy_multiplier = 0.0
 	add_child(_box(Vector3(0.025, 0.012, 0.018), Vector3(0.085, 0.878, 0.09), _lamp_mat))
+	_add_glow(Vector3(0.0, 1.05, 0.15))
 
 	# The aim target for E.
 	var area := Area3D.new()
@@ -106,14 +153,20 @@ func _process(delta: float) -> void:
 	_t += delta
 	if ringing:
 		var trill := fmod(_t, 2.6) < 1.9
-		_lamp_mat.emission_energy_multiplier = 3.0 if fmod(_t, 0.5) < 0.25 else 0.4
-		if trill:
-			_handset.position = _handset_rest + Vector3(sin(_t * 140.0) * RING_SHAKE * 0.3, absf(sin(_t * 70.0)) * RING_SHAKE, 0)
-		else:
-			_handset.position = _handset_rest
+		var blink := fmod(_t, 0.5) < 0.25
+		_lamp_mat.emission_energy_multiplier = 3.0 if blink else 0.4
+		_glow.visible = true
+		_glow.light_energy = 0.9 if blink else 0.15
+		if _handset != null:
+			if trill:
+				_handset.position = _handset_rest + Vector3(sin(_t * 140.0) * RING_SHAKE * 0.3, absf(sin(_t * 70.0)) * RING_SHAKE, 0)
+			else:
+				_handset.position = _handset_rest
 	else:
 		_lamp_mat.emission_energy_multiplier = 0.0
-		_handset.position = _handset_rest
+		_glow.visible = false
+		if _handset != null:
+			_handset.position = _handset_rest
 
 
 # ---- interactable contract ----

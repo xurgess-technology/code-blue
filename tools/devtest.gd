@@ -181,6 +181,9 @@ func _run_solo() -> void:
 	_check(ok, "a bot stocks the shelf and operates the first step (step %d, status '%s')" % [int(game.case.get("step_index", 0)), brain.status])
 	_check(brain.completed >= 3 and brain.order == "stay", "the operate order completes")
 
+	# ---- the shift loop's patient hooks (loop, sweep 2): phone call, extra patient, two tables
+	await _loop_hooks()
+
 	_stand(bot.global_position + Vector3(0, 0, 3.0))
 	await _frames(2)
 	_shoot(bot, DevRoomScript.KILL)
@@ -278,6 +281,50 @@ func _run_solo() -> void:
 	await _frames(3)
 	_check(not game.dev_mode and is_equal_approx(Engine.time_scale, 1.0), "leaving the dev room resets it")
 	_finish()
+
+
+func _loop_hooks() -> void:
+	_check(game.patient_tables.size() >= 2, "the dev room has two patient tables (%d)" % game.patient_tables.size())
+	_press_panel("Clear tables")
+	await _frames(3)
+	_check(game.cases.is_empty() and game.patient_body == null, "the panel's Clear tables empties both tables")
+	_press_panel("Phone call")
+	await _frames(2)
+	_check(game.cases.size() == 1 and String(game.cases[0].state) == "incoming", "the panel's Phone call sends an incoming patient")
+	var ok := await _until(func(): return not game.loop.crews.is_empty(), 5.0)
+	_check(ok, "paramedics come at once")
+	ok = await _until(func(): return not game.cases.is_empty() and String(game.cases[0].state) == "on_table", 90.0)
+	_check(ok, "the paramedics put the patient on a table")
+	_press_panel("Extra patient")
+	await _frames(2)
+	ok = await _until(func(): return game.cases.size() == 2 and String(game.cases[1].state) == "on_table", 90.0)
+	_check(ok, "the panel's Extra patient brings a second patient")
+	if ok:
+		var t0 := int(game.cases[0].table)
+		var t1 := int(game.cases[1].table)
+		_check(t0 != t1 and game.body_for_table(t0) != null and game.body_for_table(t1) != null, "two patients on two tables (%d, %d)" % [t0, t1])
+		_check(bool(game.cases[1].get("optional", false)), "the extra patient is optional")
+	_press_panel("Skip grace")   # no grace in the dev room: must do nothing harmful
+	await _frames(2)
+	_check(game.phase == Game.Phase.SHIFT and game.cases.size() == 2, "Skip grace in the dev room changes nothing")
+	# A third call with both tables full makes room (the dev room keeps taking patients).
+	game.finish_case(int(game.cases[0].id), true)
+	_press_panel("Phone call")
+	await _frames(2)
+	ok = await _until(func(): return game.cases.filter(func(c): return String(c.state) == "on_table").size() == 2, 90.0)
+	_check(ok, "another call with a stable patient on a table replaces them")
+	_press_panel("Clear tables")
+	await _frames(3)
+	ok = await _until(func(): return game.loop.crews.is_empty(), 60.0)
+	_check(game.cases.is_empty() and ok, "cleared again")
+
+
+func _press_panel(text: String) -> void:
+	for b in main.dev_panel.find_children("*", "Button", true, false):
+		if b.text == text:
+			b.pressed.emit()
+			return
+	_check(false, "the dev panel has a '%s' button" % text)
 
 
 # =========================================================================

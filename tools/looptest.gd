@@ -22,6 +22,7 @@ extends Node
 
 const REACH := 1.9
 const TIMEOUT := 3000.0
+const Zones := preload("res://scripts/hospital_builder.gd")
 
 var main: Node3D
 var game: Game
@@ -85,6 +86,10 @@ func _run() -> void:
 	var ok := await _do_until(func(): _go_use("clock", game.clock_pos(), true), func(): return game.phase == Game.Phase.SHIFT, 120.0)
 	_check(ok, "walking to the time clock and holding E clocks in")
 	_check(bot.global_position.distance_to(start) > 1.0 or start.distance_to(game.clock_pos()) < 3.0, "the bot walked to the clock")
+	if game.level_info.has("zones"):
+		_check(Zones.zone_of(game.level_info, start) == "neutral" and Zones.zone_of(game.level_info, bot.global_position) == "entrance",
+			"it walked in from the neutral area (%s) to the entrance building (%s)" % [Zones.zone_of(game.level_info, start), Zones.zone_of(game.level_info, bot.global_position)])
+		_check(not game.monster_may_wander_to(game.clock_pos()) and not game.monster_may_wander_to(start), "monsters may not wander into the entrance building or the neutral area")
 	_check(game.loop.grace_left > game.loop.GRACE_SECONDS - 3.0, "the grace period started (%.0f s)" % game.loop.grace_left)
 	_check(game.cases.is_empty() and game.monsters.size() > 0, "no patient yet, monsters are awake")
 	var loot_count := 0
@@ -121,6 +126,9 @@ func _run() -> void:
 	_check(ok, "paramedics set off")
 	var crew_node: Node3D = game.get_node("Entities").get_node_or_null("ParamedicCrew_%d" % first_id)
 	_check(crew_node != null and crew_node.get_node_or_null("Gurney") != null, "a crew with a gurney exists in the world")
+	if game.level_info.has("ambulance"):
+		var amb: Vector3 = game.level_info.ambulance.position
+		_check((game.loop.crews[first_id].p as Vector3).distance_to(amb) < 4.0, "the crew starts at the ambulance bay (%.1f m away)" % (game.loop.crews[first_id].p as Vector3).distance_to(amb))
 	var path: Dictionary = game.loop._paths.get(first_id, {})
 	_check(path.has("pts") and (path.pts as PackedVector3Array).size() >= 2, "the crew follows a navmesh path (%d points)" % ((path.pts as PackedVector3Array).size() if path.has("pts") else 0))
 	var p0: Vector3 = game.loop.crews[first_id].p
@@ -183,6 +191,8 @@ func _run() -> void:
 		bot.selected = maxi(0, _slot_of(loot_kind))
 		_go_use("sell_bin", game.economy.sell_bin.global_position, false), func(): return not bot.holding(loot_kind), 90.0)
 	_check(ok and game.money == m0 + value, "the bot walked to the sell bin and sold the loot for $%d" % value)
+	if game.level_info.has("zones"):
+		_check(Zones.zone_of(game.level_info, bot.global_position) == "neutral", "selling happened outside, in the neutral area (%s)" % Zones.zone_of(game.level_info, bot.global_position))
 	var bars: int = game.gold_bars
 	ok = await _do_until(func(): _go_use("shop", game.economy.shop.global_position, false), func(): return game.gold_bars > bars, 60.0)
 	_check(ok, "and bought a gold bar")

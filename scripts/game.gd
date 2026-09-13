@@ -129,6 +129,7 @@ const EconomyScript := preload("res://scripts/economy/economy.gd")
 const LootSpawnerScript := preload("res://scripts/economy/loot_spawner.gd")
 const LoopScript := preload("res://scripts/loop/shift_loop.gd")
 const TablesScript := preload("res://scripts/loop/tables.gd")
+const HospitalZones := preload("res://scripts/hospital_builder.gd")
 ## A fragile piece of loot that gets dropped violently keeps this share of its value.
 const LOOT_CRACK_KEEPS := 0.55
 
@@ -1582,6 +1583,15 @@ func _spawn_monsters() -> void:
 	for i in roster.size():
 		var pos: Vector3 = spots[i % maxi(1, spots.size())] if spots.size() > 0 else Vector3.ZERO
 		_add_monster(roster[i], pos)
+
+
+## loop: may a wandering monster pick this point? Not inside the entrance building or the neutral
+## area outside (HospitalBuilder.zone_of); noise and chases still lead them anywhere.
+func monster_may_wander_to(p: Vector3) -> bool:
+	if not level_info.has("zones"):
+		return true
+	var zone := HospitalZones.zone_of(level_info, p)
+	return zone != "entrance" and zone != "neutral"
 
 
 func _add_monster(kind: String, pos: Vector3) -> Node:
