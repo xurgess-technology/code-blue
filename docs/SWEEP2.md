@@ -130,6 +130,34 @@ kit, stitches minigame, pod removal) and `orscreen` (OR wall monitor, minimal HU
 
 **Wave 4:** integration, test bot updates, performance pass, docs.
 
+## Faster schedule (from 2026-09-13 afternoon)
+
+Waves 2 and 3 now run in parallel against the contracts below instead of waiting on each
+other. Code defensively: when a key or method from another in-flight worker does not exist yet,
+fall back to today's behaviour. Keep tests focused on what you built (its own headless test,
+the `--god` playtest for both ailments, the net scenarios you touch, one screenshot pass of new
+visuals); the full perf and matrix runs happen in the integration wave.
+
+### Patients and tables (owned by `loop`, consumed by `downed` and `orscreen`)
+
+```gdscript
+game.cases: Array          # replicated; each case is a Dictionary:
+#   {id: int, table: int (index into level_info.tables, -1 while on the gurney),
+#    patient_id: String ("bob" | "seal" | "player"), player_id: int (player cases only),
+#    ailment_id: String, step_index: int, flags: Dictionary, vitals: float,
+#    state: "incoming" | "on_table" | "stable" | "dead"}
+game.case_on_table(table_index: int) -> Dictionary   # {} when free
+game.add_case(c: Dictionary) -> int                  # host; returns id
+game.finish_case(id: int, won: bool)                 # host
+signal cases_changed
+```
+`game.case` stays as an alias of the first patient case so existing code keeps working until
+it is migrated. Each table gets its own surgery system and patient body. The `downed` worker
+builds the player table flow (carry onto `tables[kind == "player"]`, `stitches` ailment, suture
+kit, minigame) and, if `game.add_case` does not exist yet on its branch, keeps the stitches
+operation self-contained behind one function `game.start_player_surgery(player)` that the
+integration wave rewires onto cases.
+
 ## Contracts wave 1 introduces (so later waves can rely on them)
 
 - `hospital` adds to `level_info` (keep every existing key working, `table_pos()` still means
