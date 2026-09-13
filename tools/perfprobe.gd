@@ -20,6 +20,7 @@ var _rows: Array = []
 var _ab := false
 var _tune := false
 var _hitch := false
+var _orscreen := false
 var _spikes: Array = []
 var _phase_label := ""
 var _phase_stats := {}
@@ -36,6 +37,7 @@ func _ready() -> void:
 			"ab": _ab = true
 			"tune": _tune = true
 			"hitch": _hitch = true
+			"orscreen": _orscreen = true
 			"quality":
 				_qualities = []
 				for q in v.split(","):
@@ -72,6 +74,9 @@ func _ready() -> void:
 		return
 	if _hitch:
 		await _run_hitch()
+		return
+	if _orscreen:
+		await _run_orscreen()
 		return
 	var scenarios := [
 		{"name": "lobby clock-in room", "setup": _lobby},
@@ -267,6 +272,8 @@ func _run_ab() -> void:
 		# INVENTORY HOOK: what the teal / gold rims and the loot cost.
 		{"name": "no item rims", "on": func(): _rims(false), "off": func(): _rims(true)},
 		{"name": "loot hidden", "on": func(): _loot(false), "off": func(): _loot(true)},
+		# ORSCREEN HOOK: what the OR wall monitor costs (hidden and not refreshing).
+		{"name": "no OR screen", "on": func(): game.or_screen.set_enabled(false), "off": func(): game.or_screen.set_enabled(true)},
 	]
 	for scen in [{"name": "OR", "setup": _or_view}, {"name": "lobby", "setup": _lobby}, {"name": "corridor", "setup": _corridor}]:
 		await scen.setup.call()
@@ -278,6 +285,36 @@ func _run_ab() -> void:
 	for r in _rows:
 		print("[perf] %-40s avg %4.0f fps  1%%low %4.0f  draws %d" % [r.name, r.fps, r.low_fps, r.draws])
 	get_tree().quit(0)
+
+
+## ORSCREEN HOOK (--orscreen): the OR from across the room and the monitor close up, each with the
+## monitor on and off, at the chosen qualities (default medium).
+func _run_orscreen() -> void:
+	var qs: Array = _qualities if _qualities != [1, 0, 2] else [1]
+	for q in qs:
+		main.set_quality(q, false)
+		for scen in [{"name": "OR view", "setup": _or_view}, {"name": "OR screen close", "setup": _screen_close}]:
+			await scen.setup.call()
+			game.or_screen.set_enabled(true)
+			await _measure("%s, screen on" % scen.name, q)
+			game.or_screen.set_enabled(false)
+			await _measure("%s, screen off" % scen.name, q)
+			game.or_screen.set_enabled(true)
+	print("[perf] ============================================================================")
+	for r in _rows:
+		print("[perf] q%d %-32s avg %4.0f fps  1%%low %4.0f  worst %.1f ms  draws %d" % [r.q, r.name, r.fps, r.low_fps, r.worst, r.draws])
+	get_tree().quit(0)
+
+
+func _screen_close() -> void:
+	await _ensure_shift()
+	var s = game.or_screen
+	if not s.mounted():
+		return
+	var c: Vector3 = s.screen_centre()
+	var feet: Vector3 = c + s.screen_normal() * 2.5
+	feet.y = game.table_pos().y
+	_look(feet, c)
 
 
 ## INVENTORY HOOK: strip / restore the item rim overlays; hide / show loot world items.

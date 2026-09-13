@@ -21,6 +21,7 @@ const LootTable := preload("res://scripts/economy/loot_table.gd")  # INVENTORY H
 const EconomyScript := preload("res://scripts/economy/economy.gd")  # INVENTORY HOOK
 const PlayerBodyScript := preload("res://scripts/downed/player_body.gd")  # DOWNED HOOK
 const PlayerTableScript := preload("res://scripts/downed/player_table.gd")  # DOWNED HOOK
+const OrScreenScript := preload("res://scripts/orscreen/or_screen.gd")  # ORSCREEN HOOK
 
 
 ## Run once. Safe to call again; later calls return immediately.
@@ -60,6 +61,7 @@ static func run(game: Node) -> void:
 		tm.position = Vector3(x, 0.05, 0.3)
 		x += 0.2
 	EconomyScript.warm(shelf)
+	OrScreenScript.warm(shelf)  # ORSCREEN HOOK: the wall monitor's glass shader and viewport
 
 	# Patients, each showing every visual state a case can reach
 	var bodies := {}

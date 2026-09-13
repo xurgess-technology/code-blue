@@ -151,13 +151,8 @@ func _ready() -> void:
 	cam.current = true
 	if look == "or":
 		# The surgery system's work lamp (scripts/surgery/surgery_system.gd), riding on the camera.
-		var work := SpotLight3D.new()
-		work.light_color = Color(1.0, 0.97, 0.9)
-		work.light_energy = 2.2
-		work.spot_range = 2.5
-		work.spot_angle = 32.0
-		work.spot_attenuation = 0.6
-		work.shadow_enabled = false
+		# ORSCREEN HOOK: the real lamp, so tuning it in surgery_system.gd shows up here.
+		var work: SpotLight3D = (load("res://scripts/surgery/surgery_system.gd") as GDScript).make_work_lamp()
 		cam.add_child(work)
 
 	var layer := CanvasLayer.new()

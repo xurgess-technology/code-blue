@@ -1,57 +1,73 @@
 class_name Hud
 extends Control
 ## Everything drawn over the 3D view. One immediate-mode Control keeps it in one
-## readable place instead of a pile of nodes. The surgery view draws its own panel
-## (scripts/surgery/surgery_hud.gd) when that exists.
+## readable place instead of a pile of nodes.
+##
+## MINIMAL HUD (sweep 2, orscreen). The patient, vitals, step checklist and supplies live on the OR
+## wall monitor (scripts/orscreen/), so the HUD keeps only:
+##   hands     the four slots (inventory's slot bar)
+##   prompt    crosshair dot, the interact prompt and hold-E progress
+##   health    the player's own hearts (and stamina while it is not full), bottom left
+##   message   short messages / subtitles, the dead / spectating banner
+##   money     the money readout (hides itself away from the economy spots)
+##   hint      the controls line for the first seconds of a session
+##   overlay   pause, flatline and shift-won overlays; the host's join address in the lobby
+## The surgery step's title and one-line hint are drawn by scripts/surgery/surgery_hud.gd; the FPS
+## counter (F3) by main.gd; settings and the dev panel are their own layers.
+## Removed: the party list, the objective banner, the case panel, the flashlight label and the
+## surgery gauges fallback. `drawn` lists what the last frame drew (tools/orscreentest.gd reads it).
 
 var game: Game = null
 var host_info: String = ""
+## Element ids drawn in the last _draw(), for tests.
+var drawn: PackedStringArray = []
 
 var _t: float = 0.0
 var _hint_timer: float = 45.0
 var _font: Font
-var _surgery_has_hud: bool = false
+var _stamina_show: float = 0.0
 
 
 func _ready() -> void:
 	_font = ThemeDB.fallback_font
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_surgery_has_hud = ResourceLoader.exists("res://scripts/surgery/surgery_hud.gd")
 
 
 func _process(delta: float) -> void:
 	_t += delta
 	if _hint_timer > 0.0:
 		_hint_timer -= delta
+	var me = game.local_player() if game != null else null
+	var tired: bool = me != null and me.stamina < 0.995
+	_stamina_show = clampf(_stamina_show + (delta * 4.0 if tired else -delta * 1.5), 0.0, 1.0)
 	queue_redraw()
 
 
 func _draw() -> void:
+	drawn = PackedStringArray()
 	if game == null or game.phase == Game.Phase.MENU:
 		return
 	var w := size.x
 	var h := size.y
 	var in_surgery: bool = game.surgery_camera() != null  # downed hook: either table
 	_draw_vignette(w, h)
-	_draw_party()
-	_draw_objective(w)
-	_draw_case_panel(w)
 	var me = game.local_player()
 	if me != null and me.alive and not game.paused and not in_surgery:
 		_draw_crosshair(w, h)
 		_draw_prompt(w, h, me)
 	if me != null and me.alive and not in_surgery:
 		_draw_hands(w, h, me)
+		_draw_health(h, me)
 	if me != null and not in_surgery:
 		_draw_money(w, h, me)
 	if me != null and not me.alive:
 		_draw_dead_banner(w)
 	_draw_holds(w, h)
-	if not _surgery_has_hud:
-		_draw_surgery_fallback(w, h)
+	_draw_host_info(w)
 	_draw_message(w, h, in_surgery)
-	_draw_hint(w, h)
+	if not in_surgery:
+		_draw_hint(w, h)
 	if game.paused:
 		_overlay(w, h, "PAUSED", "Esc to resume, Q to walk out." if not Net.solo else "The night shift waits for no one.", "", Color("c9d1d9"))
 	elif game.phase == Game.Phase.LOST:
@@ -71,122 +87,45 @@ func _draw_vignette(w: float, h: float) -> void:
 		draw_rect(Rect2(0, 0, w, h), Color(0.55, 0.0, 0.0, red * 0.45))
 
 
-func _draw_party() -> void:
-	var y := 18.0
-	var ids := Net.peer_ids()
-	var mine := Net.my_id()
-	ids.sort_custom(func(a, b): return a == mine or (b != mine and a < b))
-	for id in ids:
-		var p = game.players.get(id)
-		if p == null:
-			continue
-		draw_rect(Rect2(12, y - 4, 230, 24), Color(0, 0, 0, 0.5))
-		draw_rect(Rect2(12, y - 4, 4, 24), p.colour)
-		var label: String = ("> " if id == mine else "  ") + p.player_name.substr(0, 12)
-		_text(Vector2(24, y + 13), label, 15, Color("eeeeee") if p.alive else Color("777777"))
-		if p.operating:
-			_text(Vector2(150, y + 13), "OPERATING", 11, Color("5cff8a"))
-		elif p.alive and p.downed:
-			_text(Vector2(160, y + 13), "DOWN", 14, Color("ffb05c"))   # downed hook
-		elif p.alive:
-			for i in p.max_hp:
-				_heart(Vector2(160 + i * 18, y + 8), Color("e02a2a") if i < p.hp else Color("3a1414"))
-		else:
-			_text(Vector2(160, y + 13), "DEAD", 14, Color("ff6a6a"))
-		y += 26.0
+## Your own hearts, bottom left, with a thin stamina bar under them while it is not full.
+func _draw_health(h: float, me) -> void:
+	drawn.append("health")
+	var x := 24.0
+	var y := h - 46.0
+	var n: int = me.max_hp
+	var step := 30.0
+	draw_rect(Rect2(x - 12, y - 20, 16 + n * step, 38), Color(0, 0, 0, 0.5))
+	var hurt: bool = me.hp <= 1 and n > 1
+	for i in n:
+		var full: bool = i < me.hp
+		var col := Color("e8322e") if full else Color(0.3, 0.1, 0.1, 0.9)
+		if full and hurt:
+			col = col.lerp(Color("ff9a9a"), 0.35 + 0.35 * sin(_t * 7.0))
+		_heart(Vector2(x + 10 + i * step, y - 2), col, 1.45)
+	if _stamina_show > 0.01:
+		drawn.append("stamina")
+		var bw := n * step - 8.0
+		draw_rect(Rect2(x, y + 22, bw, 4), Color(0, 0, 0, 0.55 * _stamina_show))
+		var sc := Color("e0a020") if me.stamina < 0.25 else Color("7ad0c0")
+		draw_rect(Rect2(x, y + 22, bw * clampf(me.stamina, 0.0, 1.0), 4), Color(sc, 0.9 * _stamina_show))
 
-	var me = game.local_player()
-	if me == null:
+
+func _heart(at: Vector2, col: Color, k := 1.0) -> void:
+	draw_circle(at + Vector2(-3.5, -2) * k, 4.0 * k, col)
+	draw_circle(at + Vector2(3.5, -2) * k, 4.0 * k, col)
+	draw_colored_polygon(PackedVector2Array([at + Vector2(-7.4, -0.4) * k, at + Vector2(7.4, -0.4) * k, at + Vector2(0, 8) * k]), col)
+
+
+## Hosting: where friends join, small, while everyone is still in the lobby.
+func _draw_host_info(w: float) -> void:
+	if game.phase != Game.Phase.LOBBY or host_info == "":
 		return
-	draw_rect(Rect2(12, y, 108, 10), Color(0, 0, 0, 0.55))
-	draw_rect(Rect2(14, y + 2, 104 * me.stamina, 6), Color("e0a020") if me.stamina < 0.25 else Color("7ad0c0"))
-	_text(Vector2(14, y + 30), "LIGHT ON  [F]" if me.flashlight_on else "LIGHT OFF [F]", 14,
-		Color("ffe9a8") if me.flashlight_on else Color("777777"))
-
-
-func _heart(at: Vector2, col: Color) -> void:
-	draw_circle(at + Vector2(-3.5, -2), 4.0, col)
-	draw_circle(at + Vector2(3.5, -2), 4.0, col)
-	draw_colored_polygon(PackedVector2Array([at + Vector2(-7.4, -0.4), at + Vector2(7.4, -0.4), at + Vector2(0, 8)]), col)
-
-
-## What the team still has to do, in one line.
-func _draw_objective(w: float) -> void:
-	var text := ""
-	match game.phase:
-		Game.Phase.LOBBY:
-			text = "SHIFT %d. AIM AT THE TIME CLOCK AND HOLD E TO CLOCK IN." % game.shift
-		Game.Phase.SHIFT:
-			if game.case.is_empty():
-				return
-			var missing := _missing_supplies()
-			if not missing.is_empty():
-				text = "BRING TO THE OR SHELF: " + ", ".join(missing)
-			else:
-				var step := Procedures.step(game.case.ailment_id, int(game.case.step_index))
-				var op_id: int = game.surgery.operator_id if game.surgery != null else 0
-				if step.is_empty() or game.surgery.is_local_operating():
-					pass   # the surgery HUD carries the step while operating
-				elif op_id != 0:
-					var op = game.players.get(op_id)
-					text = "%s IS OPERATING: %s." % [(op.player_name if op != null else "SOMEONE").to_upper(), step.label.to_upper()]
-				else:
-					text = "OPERATE: %s. AIM AT THE TABLE AND PRESS E." % step.label.to_upper()
-	if text != "":
-		_text(Vector2(0, 24), text, 15, Color("ff6a6a"), HORIZONTAL_ALIGNMENT_CENTER, w)
-	if game.phase == Game.Phase.LOBBY and host_info != "":
-		_text(Vector2(0, 46), host_info, 14, Color("5ce0d0"), HORIZONTAL_ALIGNMENT_CENTER, w)
-
-
-## Items the remaining steps need that are not on the shelf yet, as "Anesthetic x1" labels.
-func _missing_supplies() -> Array:
-	var need := Procedures.remaining_requirements(game.case.ailment_id, int(game.case.step_index))
-	var out := []
-	for kind in Items.SURGICAL:
-		if not need.has(kind):
-			continue
-		var short: int = int(need[kind]) - game.shelf_count(kind)
-		if short <= 0:
-			continue
-		out.append(Items.display_name(kind) + (" x%d" % short if Items.is_consumable(kind) else ""))
-	return out
-
-
-func _draw_case_panel(w: float) -> void:
-	if game.phase != Game.Phase.SHIFT or game.case.is_empty():
-		return
-	var pt := Procedures.patient(game.case.patient_id)
-	var ail := Procedures.ailment(game.case.ailment_id)
-	var steps := Procedures.steps(game.case.ailment_id)
-	var cur := int(game.case.step_index)
-	var x := w - 318.0
-	var panel_h := 124.0 + steps.size() * 22.0
-	draw_rect(Rect2(x - 12, 12, 318, panel_h), Color(0, 0, 0, 0.58))
-	_text(Vector2(x, 32), String(pt.full_name).to_upper().substr(0, 30), 15, Color("dddddd"))
-	_text(Vector2(x, 50), "%s (%s)" % [ail.name, ail.code], 13, Color("ff8a6a"))
-	_text(Vector2(x, 67), Procedures.blurb(game.case.patient_id, game.case.ailment_id).substr(0, 44), 11, Color("8a9aa0"))
-	var v: float = maxf(0.0, game.vitals)
-	var pulse: float = 1.0 if v > 30.0 else 0.7 + 0.3 * sin(_t * 10.0)
-	draw_rect(Rect2(x, 76, 290, 12), Color("2a2f36"))
-	var vcol := Color("5cff8a") if v > 50.0 else (Color("ffd35c") if v > 25.0 else Color(1, 0.16, 0.16, pulse))
-	draw_rect(Rect2(x, 76, 290 * v / 100.0, 12), vcol)
-	_text(Vector2(x, 104), "VITALS %d%%    %d BPM" % [ceili(v), roundi(40 + v * 0.6 + sin(_t * 8.0) * 2.0)], 13, Color("eeeeee"))
-	var y := 128.0
-	for i in steps.size():
-		var s: Dictionary = steps[i]
-		var needed: int = maxi(1, int(s.uses))
-		var on_shelf := game.shelf_count(s.item)
-		var col := Color("5cff8a") if i < cur else (Color("f0e6c8") if i == cur else Color("8a9aa0"))
-		var mark := "[x]" if i < cur else ("[>]" if i == cur else "[ ]")
-		_text(Vector2(x, y), "%s %s" % [mark, s.label], 13, col)
-		if i >= cur:
-			var have_col := Color("5cff8a") if on_shelf >= needed else Color("ff6a6a")
-			var item_text := "%s %d/%d" % [Items.display_name(s.item), mini(on_shelf, needed), needed]
-			_text(Vector2(x + 190, y), item_text, 11, have_col)
-		y += 22.0
+	drawn.append("host_info")
+	_text(Vector2(0, 24), host_info, 14, Color("5ce0d0"), HORIZONTAL_ALIGNMENT_CENTER, w)
 
 
 func _draw_crosshair(w: float, h: float) -> void:
+	drawn.append("crosshair")
 	var c := Vector2(w, h) * 0.5
 	var me = game.local_player()
 	var spread: float = 9.0 if me.sprinting else (6.0 if me.moving else 4.0)
@@ -201,6 +140,7 @@ func _draw_crosshair(w: float, h: float) -> void:
 func _draw_prompt(w: float, h: float, me) -> void:
 	var y := h * 0.5 + 34.0
 	if me.aim_prompt != "":
+		drawn.append("prompt")
 		if me.aim_prompt.begins_with("!"):
 			_text(Vector2(0, y), me.aim_prompt.substr(1), 14, Color("e0a020"), HORIZONTAL_ALIGNMENT_CENTER, w)
 		else:
@@ -224,6 +164,7 @@ const SLOT_GOLD := Color(1.0, 0.74, 0.28)
 ## has a teal edge, loot a gold one with its value; a bulky stack's second slot is hatched in
 ## gold and bridged to its stack. The selected stack (both halves when bulky) is outlined.
 func _draw_hands(w: float, h: float, me) -> void:
+	drawn.append("hands")
 	var n: int = me.slots.size()
 	var box := Vector2(112, 40)
 	var gap := 6.0
@@ -299,6 +240,7 @@ func _fit(s: String, size_px: int, width: float) -> String:
 func _draw_money(w: float, h: float, me) -> void:
 	if game.economy == null or not game.economy.money_visible_for(me):
 		return
+	drawn.append("money")
 	var text := "$%s" % _grouped(int(game.money))
 	var size_px := 24
 	var tw := _font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size_px).x
@@ -324,6 +266,7 @@ static func _grouped(v: int) -> String:
 
 
 func _draw_dead_banner(w: float) -> void:
+	drawn.append("dead_banner")
 	draw_rect(Rect2(w * 0.5 - 230, 60, 460, 50), Color(0, 0, 0, 0.6))
 	# net hook: someone who joined mid-shift watches until the next shift starts.
 	var waiting: bool = game.waiting_peers.has(Net.my_id())
@@ -335,7 +278,7 @@ func _draw_dead_banner(w: float) -> void:
 	_text(Vector2(0, 102), text, 13, Color("c9d1d9"), HORIZONTAL_ALIGNMENT_CENTER, w)
 
 
-## Hold-E progress for the time clock and for picking up a downed teammate.
+## Hold-E progress for the time clock and for lifting a downed teammate.
 func _draw_holds(w: float, h: float) -> void:
 	var progress := 0.0
 	var label := ""
@@ -348,6 +291,7 @@ func _draw_holds(w: float, h: float) -> void:
 		label = "LIFTING"
 	if progress <= 0.0:
 		return
+	drawn.append("hold")
 	var cx := w * 0.5
 	var y := h * 0.5 + 78.0
 	draw_rect(Rect2(cx - 112, y - 8, 224, 16), Color(0, 0, 0, 0.7))
@@ -355,37 +299,10 @@ func _draw_holds(w: float, h: float) -> void:
 	_text(Vector2(0, y - 16), "%s..." % label, 14, Color("ffffff"), HORIZONTAL_ALIGNMENT_CENTER, w)
 
 
-## Only used while the surgery system is still the stub (no surgery_hud.gd of its own).
-func _draw_surgery_fallback(w: float, h: float) -> void:
-	if game.phase != Game.Phase.SHIFT or game.surgery == null:
-		return
-	var st: Dictionary = game.surgery.hud_state()
-	if st.is_empty():
-		return
-	var cx := w * 0.5
-	var y := h * 0.5 + 130.0
-	draw_rect(Rect2(cx - 180, y - 46, 360, 96), Color(0, 0, 0, 0.7))
-	_text(Vector2(0, y - 26), String(st.get("title", "")).to_upper(), 15, Color("f0e6c8"), HORIZONTAL_ALIGNMENT_CENTER, w)
-	_text(Vector2(0, y - 6), String(st.get("hint", "")), 12, Color("c9d1d9"), HORIZONTAL_ALIGNMENT_CENTER, w)
-	var bw := 320.0
-	var bx := cx - bw * 0.5
-	var by := y + 10.0
-	for g in st.get("gauges", []):
-		draw_rect(Rect2(bx, by, bw, 14), Color("2a2f36"))
-		var span: float = maxf(0.001, float(g.max) - float(g.min))
-		var gx0: float = bx + (float(g.good_min) - float(g.min)) / span * bw
-		var gx1: float = bx + (float(g.good_max) - float(g.min)) / span * bw
-		draw_rect(Rect2(gx0, by, gx1 - gx0, 14), Color(0.36, 1.0, 0.54, 0.55))
-		var vx: float = bx + (float(g.value) - float(g.min)) / span * bw
-		var ok: bool = float(g.value) >= float(g.good_min) and float(g.value) <= float(g.good_max)
-		draw_rect(Rect2(vx - 2, by - 3, 4, 20), Color("ffffff") if ok else Color("ff6a6a"))
-		by += 20.0
-	draw_rect(Rect2(bx, by + 4, bw * float(st.get("progress", 0.0)), 4), Color("c9d1d9"))
-
-
 func _draw_message(w: float, h: float, in_surgery: bool) -> void:
 	if game.message_timer <= 0.0:
 		return
+	drawn.append("message")
 	var text := game.message
 	var y := h - 150.0 if not in_surgery else 90.0
 	var tw := _font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
@@ -396,12 +313,14 @@ func _draw_message(w: float, h: float, in_surgery: bool) -> void:
 func _draw_hint(w: float, h: float) -> void:
 	if _hint_timer <= 0.0:
 		return
+	drawn.append("hint")
 	_text(Vector2(0, h - 8),
 		"WASD move   MOUSE look   SHIFT sprint   F light   E use   G set down   1-4 slots   R read guide   Q shove   ESC pause",
 		12, Color(0.67, 0.67, 0.67, minf(1.0, _hint_timer / 2.0)), HORIZONTAL_ALIGNMENT_CENTER, w)
 
 
 func _overlay(w: float, h: float, title: String, sub: String, prompt: String, col: Color) -> void:
+	drawn.append("overlay")
 	draw_rect(Rect2(0, 0, w, h), Color(0, 0, 0, 0.72))
 	_text(Vector2(0, h * 0.4), title, maxi(18, int(minf(72, w / 12.0))), col, HORIZONTAL_ALIGNMENT_CENTER, w)
 	_text(Vector2(0, h * 0.4 + 46), sub, 16, Color("cccccc"), HORIZONTAL_ALIGNMENT_CENTER, w)
