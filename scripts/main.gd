@@ -19,6 +19,8 @@ const QUALITY_NAMES := ["LOW", "MEDIUM", "HIGH"]
 
 var _fps_label: Label
 var _look: GDScript = null
+## Settings hook: the settings screen (menu and pause), scripts/settings_screen.gd.
+var settings_ui: CanvasLayer = null
 
 
 func _ready() -> void:
@@ -42,6 +44,10 @@ func _ready() -> void:
 		add_child(_basic_environment())
 	quality = _load_quality()
 	set_quality(quality, false)
+	# Settings hook: brightness now, and quality / brightness whenever they change.
+	if _look != null and _look.has_method("apply_brightness"):
+		_look.apply_brightness(self, float(Settings.get_value("brightness")))
+	Settings.changed.connect(_on_setting_changed)
 
 	var fps_layer := CanvasLayer.new()
 	fps_layer.layer = 10
@@ -84,6 +90,13 @@ func _ready() -> void:
 	guide.name = "Guide"
 	add_child(guide)
 
+	# Settings hook: the settings screen, opened from the title menu and the pause overlay.
+	settings_ui = load("res://scripts/settings_screen.gd").new()
+	settings_ui.name = "SettingsUI"
+	settings_ui.menu = menu
+	add_child(settings_ui)
+	menu.chose_settings.connect(settings_ui.open)
+
 	Audio.set_ambience(true)
 	_set_mouse(false)
 
@@ -101,10 +114,8 @@ func set_quality(q: int, save: bool = true) -> void:
 	# Test tools change presets constantly; only a player's own choice is remembered.
 	if not save:
 		return
-	var cfg := ConfigFile.new()
-	cfg.load("user://prefs.cfg")
-	cfg.set_value("video", "quality", quality)
-	cfg.save("user://prefs.cfg")
+	# Settings hook: the preset is saved by the Settings autoload (user://settings.cfg).
+	Settings.set_value("quality", quality)
 
 
 ## The player's saved choice, otherwise MEDIUM.
@@ -112,10 +123,19 @@ func set_quality(q: int, save: bool = true) -> void:
 ## MEDIUM holds 75+ fps (1% low) in the heaviest rooms, LOW about 80-130, HIGH is for
 ## dedicated GPUs.
 func _load_quality() -> int:
-	var cfg := ConfigFile.new()
-	if cfg.load("user://prefs.cfg") == OK and cfg.has_section_key("video", "quality"):
-		return int(cfg.get_value("video", "quality"))
-	return 1
+	# Settings hook: Settings migrated the old prefs.cfg video/quality on first run.
+	return int(Settings.get_value("quality"))
+
+
+## Settings hook: apply what main owns when the player changes it (settings screen, F2).
+func _on_setting_changed(key: String, value) -> void:
+	match key:
+		"quality":
+			if int(value) != quality:
+				set_quality(int(value), false)
+		"brightness":
+			if _look != null and _look.has_method("apply_brightness"):
+				_look.apply_brightness(self, float(value))
 
 
 ## A plain environment so the game is playable before the look pass lands.
@@ -217,8 +237,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 
 	if event.is_action_pressed("fullscreen"):
-		var full := DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN
-		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED if full else DisplayServer.WINDOW_MODE_FULLSCREEN)
+		# Settings hook: F11 flips the saved window mode (windowed <-> fullscreen).
+		var full: bool = Settings.get_value("window_mode") != "windowed"
+		Settings.set_value("window_mode", "windowed" if full else "fullscreen")
 		get_viewport().set_input_as_handled()
 		return
 

@@ -5,6 +5,8 @@ extends Control
 signal chose_solo(player_name: String)
 signal chose_host(player_name: String)
 signal chose_join(player_name: String, address: String)
+## Settings hook: the Settings button; main.gd opens the settings screen.
+signal chose_settings
 
 var _name_edit: LineEdit
 var _addr_edit: LineEdit
@@ -69,6 +71,11 @@ func _build() -> void:
 	var host := _button("Host a shift")
 	row.add_child(solo)
 	row.add_child(host)
+	# Settings hook: not in _buttons, so it stays usable while a join is pending.
+	var settings := _button("Settings")
+	settings.name = "SettingsButton"
+	settings.pressed.connect(func(): chose_settings.emit())
+	row.add_child(settings)
 
 	var row2 := HBoxContainer.new()
 	row2.add_theme_constant_override("separation", 10)

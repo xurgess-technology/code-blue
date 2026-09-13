@@ -5,6 +5,8 @@ extends CharacterBody3D
 
 const GLOW_RANGE := 3.6
 const MOUSE_SENS := 0.0022
+## The field of view the first-person hands and held item were placed for.
+const BASE_FOV := 78.0
 const ACCEL := 14.0
 const AIR_ACCEL := 3.0
 const JUMP_FORCE := 0.0  # no jumping: this is a hospital
@@ -137,7 +139,7 @@ func _build() -> void:
 
 	camera = Camera3D.new()
 	camera.name = "Camera"
-	camera.fov = 78.0
+	camera.fov = BASE_FOV
 	camera.near = 0.05
 	camera.far = 120.0
 	camera.current = is_local
@@ -197,8 +199,37 @@ func _ready() -> void:
 		body_visual.visible = false
 		name_tag.visible = false
 		hands.visible = true
+		# Settings hook: the local camera follows the field of view setting, live.
+		apply_fov(float(Settings.get_value("fov")))
+		Settings.changed.connect(_on_setting_changed)
 	else:
 		hands.visible = false
+
+
+## Settings hook.
+func _on_setting_changed(key: String, value) -> void:
+	if key == "fov":
+		apply_fov(float(value))
+
+
+## Settings hook: set the resting field of view (the sprint kick in CameraFX adds on top),
+## and move the first-person hands and held stack so they keep their place on screen:
+## their x/y offsets scale with tan(fov / 2), their depth stays.
+func apply_fov(fov_deg: float) -> void:
+	if camera == null:
+		return
+	camera.fov = fov_deg
+	if fx != null and "_base_fov" in fx:
+		fx.set("_base_fov", fov_deg)
+	var k := tan(deg_to_rad(fov_deg) * 0.5) / tan(deg_to_rad(BASE_FOV) * 0.5)
+	var placed: Array = hands.get_children() if hands != null else []
+	if _held_fp != null:
+		placed.append(_held_fp)
+	for n in placed:
+		if not n.has_meta("fov_base_pos"):
+			n.set_meta("fov_base_pos", n.position)
+		var b: Vector3 = n.get_meta("fov_base_pos")
+		n.position = Vector3(b.x * k, b.y * k, b.z)
 
 
 func _make_body() -> Node3D:
@@ -278,8 +309,10 @@ func _input(event: InputEvent) -> void:
 	if not is_local or not alive:
 		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-		_yaw -= event.relative.x * MOUSE_SENS
-		_pitch = clampf(_pitch - event.relative.y * MOUSE_SENS, -1.3, 1.3)
+		# Settings hook: "sensitivity" multiplies the base look speed.
+		var sens: float = MOUSE_SENS * float(Settings.get_value("sensitivity"))
+		_yaw -= event.relative.x * sens
+		_pitch = clampf(_pitch - event.relative.y * sens, -1.3, 1.3)
 
 
 func _physics_process(delta: float) -> void:

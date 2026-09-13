@@ -78,6 +78,10 @@ var _duck_hold := 0.0
 var _rng := RandomNumberGenerator.new()
 var _warned: Dictionary = {}
 
+## Settings hook: the player's music volume in dB, set by the Settings autoload
+## (Settings.slider_to_db of "music_volume"). Added on top of MUSIC_BASE_DB and the duck.
+var music_volume_db := 0.0
+
 ## True when there is no real audio output (headless CI, dummy driver). Everything
 ## still runs; this only exists so callers and probes can tell.
 var silent := false
@@ -106,9 +110,9 @@ func _detect_silent() -> bool:
 # ------------------------------------------------------------------ buses
 
 ## Master -> SFX / Music / Ambience, with Hall (reverb) sitting between the music and
-## Master. Created here rather than shipped as default_bus_layout.tres because the
-## project file belongs to another engineer; if a layout ever appears, the existing
-## buses are reused and only missing ones are added.
+## Master. res://default_bus_layout.tres ships the same buses (Ambience sends to SFX there,
+## so the effects volume setting covers it); the existing buses are reused and only
+## missing ones are added, so this still works without the layout.
 func _setup_buses() -> void:
 	var hall := _ensure_bus(BUS_HALL, "Master")
 	if hall > 0 and AudioServer.get_bus_effect_count(hall) == 0:
@@ -450,7 +454,9 @@ func _update_music(delta: float) -> void:
 			_duck = 0.0
 	var idx := AudioServer.get_bus_index(BUS_MUSIC)
 	if idx >= 0:
-		AudioServer.set_bus_volume_db(idx, MUSIC_BASE_DB + DUCK_DB * _duck)
+		# Settings hook: music_volume_db is the player's music slider (-80 dB means off).
+		AudioServer.set_bus_volume_db(idx, maxf(-80.0, MUSIC_BASE_DB + DUCK_DB * _duck + music_volume_db))
+		AudioServer.set_bus_mute(idx, music_volume_db <= -79.9)
 
 
 func _update_heartbeat(delta: float) -> void:
