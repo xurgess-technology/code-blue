@@ -6,19 +6,24 @@ extends "res://scripts/surgery/minigame.gd"
 ## x = 0 and the saw lies along it, so the operator strokes the cursor along Z (screen
 ## up/down) while holding primary.
 ##
+## Everything reads in the world; the HUD needs one short hint and no gauges.
+##
 ## Rules
-##   - A "stroke" is one push plus one pull. Every pass (half stroke) between two turn-arounds
-##     is judged on its own: LENGTH (blade travel, full credit from GOOD_LEN), TEMPO (strokes
-##     per second vs TEMPO_TARGET, inside a band that narrows with difficulty and in bone) and
-##     STEADINESS (sudden tempo change from the previous pass).
-##   - Each pass advances the depth by k / layer_resistance * (FLOOR + (1 - FLOOR) * good) *
-##     (1 - 0.7 * off_line). Short, rushed or erratic passes still cut a little (no softlock)
-##     but add tearing.
-##   - OFF LINE: the blade follows the cursor across the line with lag. Beyond LINE_TOL from
-##     the marked line it cuts slower, scores the skin beside the kerf, makes the kerf jagged
-##     and botches at a rate.
-##   - LAYERS: skin (fast) -> muscle -> bone (slow, tighter tempo band, grinding, bone dust)
-##     -> far soft tissue. Total passes scale with limb_radius_m and difficulty.
+##   - A PASS is the blade's travel between two turn-arounds. Each one is judged on LENGTH
+##     (full credit from GOOD_LEN) and SPEED (blade metres per second). There is no tempo to
+##     match: anything from a slow drag to a brisk stroke bites; only rushing is punished.
+##   - Each pass advances the depth by k / layer_resistance * (FLOOR + (1 - FLOOR) * length) *
+##     (1 - 0.5 * rushed) * (1 - 0.6 * off_line). Short passes still cut a little.
+##   - RUSHED: faster than the layer allows (bone allows less) and the saw jumps in the kerf:
+##     blood and chips spray, the kerf goes ragged and the guide flashes red; enough of it
+##     botches ("The saw jumped and tore the muscle").
+##   - OFF LINE: the blade follows the cursor across the line, but once the kerf is started it
+##     holds the blade (KERF_GRIP). Beyond the tolerance it scores the skin beside the cut, the
+##     guide turns red, and it botches at a rate.
+##   - The GUIDE: a glowing line on the limb along the cut, and a glow along the saw's teeth.
+##     It flashes green on a good biting pass, amber on a short one, red when rushed or off line.
+##   - LAYERS: skin (fast) -> muscle -> bone (slow, grinding, bone dust) -> far soft tissue. The
+##     kerf shows the colour of the layer, and the sound changes from a rasp to a grind.
 ##   - TOURNIQUET (ctx.flags.tourniquet, missing = 0.5): a weak one makes every pass spurt,
 ##     splatter the work area, pool blood over the cut line and drip off the saw, and a
 ##     heavy flow botches a little. A strong one gives a clean, dark cut.
@@ -27,35 +32,45 @@ extends "res://scripts/surgery/minigame.gd"
 
 const ItemModelsScript := preload("res://scripts/item_models.gd")
 
-const TEMPO_TARGET := 1.55        # strokes (push + pull) per second
-const TEMPO_BAND := 0.25          # half width of the good band at difficulty 1
-const BONE_BAND_K := 0.7          # the band is this much narrower in bone
-const GOOD_LEN := 0.19            # metres of blade travel per pass for full credit (half the blade)
-const MIN_LEN := 0.05             # passes shorter than this cut almost nothing
+enum Verdict { NONE, GOOD, SHORT, RUSHED, OFF }
+
+const GOOD_LEN := 0.12            # metres of blade travel per pass for full credit
+const MIN_LEN := 0.03             # passes shorter than this cut almost nothing
 const TURN_HYST := 0.018          # the blade must come back this far to count a turn-around
-const IGNORE_LEN := 0.03          # a "pass" shorter than this is jitter or a jolt, ignored
-const STALL_TIME := 1.5           # a pass slower than this is not a stroke
-const LINE_TOL := 0.008           # metres off the marked line before it counts
-const LINE_SPAN := 0.025          # metres beyond the tolerance to be fully off the line
-const K_BASE := 0.034             # depth per perfect pass at resistance 1, Bob, difficulty 1
-const FLOOR := 0.45               # fraction of a pass's cut you get even when it is awful (0.25 made a sloppy saw take a minute)
-const OFF_BOTCH_RATE := 0.2      # botch units per second fully off the line while sawing
-const TEAR_BOTCH_RATE := 0.083   # botch units per fully torn pass, times the layer factor (scaled with FLOOR so a sloppy cut costs the same)
-const BLEED_BOTCH_RATE := 0.05    # botch units per unit of spurt
+const IGNORE_LEN := 0.025         # a "pass" shorter than this is jitter or a jolt, ignored
+const STALL_TIME := 2.0           # a pass slower than this is not a stroke
+const V_FAST := 0.72              # m/s of blade travel before soft tissue tears
+const V_FAST_BONE := 0.56         # and before the teeth skip on bone
+const LINE_TOL := 0.012           # metres off the line before it counts
+const LINE_SPAN := 0.03           # metres beyond the tolerance to be fully off the line
+const KERF_GRIP := 0.65           # once started, how strongly the kerf holds the blade on it
+const KERF_FROM := 0.05           # depth at which the kerf starts guiding the blade
+const K_BASE := 0.036             # depth per full-length pass at resistance 1, Bob, difficulty 1
+const FLOOR := 0.45               # fraction of a pass's cut you get even when it is short
+const OFF_BOTCH_RATE := 0.35      # botch units per second fully off the line while sawing
+const TEAR_BOTCH_RATE := 0.14     # botch units per fully rushed pass, times the layer factor
+const BLEED_BOTCH_RATE := 0.08    # botch units per unit of spurt
 const OFF_BOTCH := 2.0
-const TEAR_BOTCH := 1.5
+const TEAR_BOTCH := 3.0
 const BLEED_BOTCH := 1.0
 const SAW_LAYER := OWN_LAYER      # visual layer for the saw so blood decals do not paint it
 
 ## name, depth fraction where the layer ends, resistance, tearing factor, bleed factor, colour
 const LAYERS := [
-	{"name": "Skin", "to": 0.08, "res": 0.45, "tear": 0.35, "bleed": 0.3, "col": Color(0.86, 0.6, 0.42)},
-	{"name": "Muscle", "to": 0.36, "res": 1.0, "tear": 0.7, "bleed": 1.0, "col": Color(0.6, 0.06, 0.06)},
-	{"name": "Bone", "to": 0.64, "res": 2.4, "tear": 1.35, "bleed": 0.55, "col": Color(0.82, 0.76, 0.62)},
-	{"name": "Far side", "to": 1.0, "res": 0.9, "tear": 0.7, "bleed": 1.0, "col": Color(0.55, 0.05, 0.06)},
+	{"name": "Skin", "to": 0.08, "res": 0.45, "tear": 0.5, "bleed": 0.3, "col": Color(0.86, 0.6, 0.42)},
+	{"name": "Muscle", "to": 0.36, "res": 1.0, "tear": 0.8, "bleed": 1.0, "col": Color(0.6, 0.06, 0.06)},
+	{"name": "Bone", "to": 0.64, "res": 2.2, "tear": 1.2, "bleed": 0.55, "col": Color(0.82, 0.76, 0.62)},
+	{"name": "Far side", "to": 1.0, "res": 0.9, "tear": 0.8, "bleed": 1.0, "col": Color(0.55, 0.05, 0.06)},
 ]
 const MAX_SPLATS := 28
 const MAX_SCORES := 10
+const GUIDE_COLORS := {
+	Verdict.NONE: Color(0.75, 0.9, 1.0),
+	Verdict.GOOD: Color(0.15, 1.0, 0.35),
+	Verdict.SHORT: Color(1.0, 0.72, 0.1),
+	Verdict.RUSHED: Color(1.0, 0.12, 0.08),
+	Verdict.OFF: Color(1.0, 0.12, 0.08),
+}
 
 # -- tuning from ctx -----------------------------------------------------------------------------
 var diff := 1.0
@@ -80,9 +95,9 @@ var held := false
 var strokes := 0                  # passes that counted
 var splats := 0
 var scores := 0
-var tear := 0.0                   # 0..1 current tearing (gauge)
-var tempo := 0.0                  # last measured strokes per second (gauge)
-var verdict := ""                 # last pass: good / short / fast / slow / erratic / off
+var tear := 0.0                   # 0..1 recent tearing (the kerf's rawness)
+var verdict: int = Verdict.NONE   # the last pass, for the guide's colour
+var off_now := 0.0                # 0..1 how far off the line the blade is right now
 
 # -- operator simulation --------------------------------------------------------------------------
 var _t := 0.0
@@ -93,11 +108,9 @@ var _seg_t := 0.0
 var _ext := 0.0
 var _ext_t := 0.0
 var _first_seg := true
-var _prev_tempo := -1.0
 var _seg_off := 0.0
 var _seg_time := 0.0
 var _seg_bx := 0.0
-var _off_now := 0.0
 var _off_acc := 0.0
 var _tear_acc := 0.0
 var _bleed_acc := 0.0
@@ -105,20 +118,18 @@ var _adv_total := 0.0
 var _sum_tear := 0.0
 var _sum_off := 0.0
 var _n_judged := 0
-var _last_stroke_t := -10.0
 var _rng := RandomNumberGenerator.new()
 
 # -- visuals --------------------------------------------------------------------------------------
 var _built := false
 var _saw: Node3D
 var _saw_model: Node3D
-var _metro_mat: StandardMaterial3D
-var _metro_light: OmniLight3D
+var _teeth_mat: StandardMaterial3D
 var _drips: Array[MeshInstance3D] = []
 var _smear: MeshInstance3D
 var _smear_mat: StandardMaterial3D
 var _marker: Decal
-var _guides: Array[Decal] = []
+var _guide: Decal
 var _bruise: Decal
 var _opening: Decal
 var _jagged: Decal
@@ -130,15 +141,20 @@ var _splat_decals: Array[Decal] = []
 var _splat_born: Array[float] = []
 var _score_decals: Array[Decal] = []
 var _dust: CPUParticles3D
+var _chips: CPUParticles3D
 var _spurt: CPUParticles3D
 var _vis_bz := 0.0
 var _vis_bx := 0.0
 var _vis_lift := 0.02
+var _hop := 0.0
+var _flash := 0.0
+var _flash_col := Color.WHITE
 var _seen_strokes := 0
 var _seen_splats := 0
 var _seen_scores := 0
+var _seen_layer := 0
 var _finale := false
-var _metro_t := 0.0
+var _vt := 0.0
 var _severed: Node3D
 
 # -- bot ------------------------------------------------------------------------------------------
@@ -159,7 +175,7 @@ func setup(context: Dictionary) -> void:
 	var tq = flags.get("tourniquet", 0.5)
 	tourniquet = (1.0 if tq else 0.0) if tq is bool else clampf(float(tq), 0.0, 1.0)
 	bleed = clampf((0.85 - tourniquet) / 0.6, 0.0, 1.0)
-	k_cut = K_BASE * pow(0.05 / maxf(0.02, limb_r), 1.1) / pow(diff, 0.8)
+	k_cut = K_BASE * pow(0.05 / maxf(0.02, limb_r), 0.75) / pow(diff, 0.8)
 	line_tol = LINE_TOL / sqrt(diff)
 	size_k = 0.05 / maxf(0.02, limb_r)
 	_rng.seed = int(ctx.get("seed", 1)) ^ 0x5a3
@@ -174,8 +190,10 @@ func _probe_limb() -> void:
 	var sec: Dictionary = body.site_section(String(ctx.get("step", {}).get("site", "limb_cut")))
 	if sec.is_empty():
 		return
-	hu = clampf(float(sec.half_up), 0.01, 0.3)
 	hs = clampf(float(sec.half_side), 0.01, 0.3)
+	# Bob's section reports 7 mm up and 64 mm across; the arm is much rounder than that, and a
+	# sliver would keep the blade and the kerf from sinking in.
+	hu = clampf(maxf(float(sec.half_up), hs * 0.75), 0.01, 0.3)
 
 
 func plane_extent() -> Vector2:
@@ -195,10 +213,11 @@ func layer_index(f: float = -1.0) -> int:
 	return LAYERS.size() - 1
 
 
-func tempo_band(li: int = -1) -> float:
+## Blade speed (m/s) above which this layer tears.
+func fast_speed(li: int = -1) -> float:
 	if li < 0:
 		li = layer_index()
-	return TEMPO_BAND / sqrt(diff) * (BONE_BAND_K if LAYERS[li].name == "Bone" else 1.0)
+	return (V_FAST_BONE if LAYERS[li].name == "Bone" else V_FAST) / sqrt(diff)
 
 
 func _update_progress() -> void:
@@ -213,11 +232,15 @@ func handle_cursor(p: Vector2, buttons: int, delta: float) -> void:
 	delta = clampf(delta, 0.0, 0.1)
 	_t += delta
 	var primary := (buttons & BUTTON_PRIMARY) != 0
-	# The blade is heavy: a damped spring along the line, a slower follow across it.
+	# The blade is heavy: a damped spring along the line, a slower follow across it. Once the
+	# kerf is started it holds the blade in it.
 	var w := 22.0
 	_bv += ((p.y - bz) * w * w - _bv * 2.0 * 0.8 * w) * delta
 	bz += _bv * delta
-	bx += (p.x - bx) * (1.0 - exp(-10.0 * delta))
+	var want_x := p.x
+	if held and depth > KERF_FROM:
+		want_x = lerpf(p.x, kx, KERF_GRIP)
+	bx += (want_x - bx) * (1.0 - exp(-10.0 * delta))
 
 	if primary and not held:
 		_dir = 0
@@ -229,19 +252,18 @@ func handle_cursor(p: Vector2, buttons: int, delta: float) -> void:
 		_seg_reset_acc()
 	held = primary
 	tear = maxf(0.0, tear - delta * 0.3)
-	if _t - _last_stroke_t > 0.9:
-		tempo = move_toward(tempo, 0.0, delta * 2.0)
 	if not held:
-		_off_now = 0.0
+		off_now = 0.0
 		return
 
 	var moving := absf(_bv) > 0.05
-	_off_now = clampf((absf(bx) - line_tol) / LINE_SPAN, 0.0, 1.0)
+	var line := kx if depth > KERF_FROM else 0.0
+	off_now = clampf((absf(bx - line) - line_tol) / LINE_SPAN, 0.0, 1.0)
 	if moving:
-		_seg_off += _off_now * delta
+		_seg_off += off_now * delta
 		_seg_time += delta
 		_seg_bx += bx * delta
-		_off_acc += _off_now * delta * OFF_BOTCH_RATE * size_k
+		_off_acc += off_now * delta * OFF_BOTCH_RATE * size_k
 		if _off_acc >= 1.0:
 			_off_acc -= 1.0
 			botch(OFF_BOTCH, "The saw wandered off the line")
@@ -285,63 +307,50 @@ func _seg_reset_acc() -> void:
 func _judge_pass(length: float, dur: float) -> void:
 	var li := layer_index()
 	var layer: Dictionary = LAYERS[li]
-	var t_now := 0.5 / dur
-	var band := tempo_band(li)
-	var dev := absf(t_now - TEMPO_TARGET)
-	var tempo_q := 1.0 if dev <= band else clampf(1.0 - (dev - band) / (band * 2.0), 0.0, 1.0)
-	var erratic := 0.0
-	if _prev_tempo > 0.0:
-		erratic = clampf((absf(log(t_now / _prev_tempo)) - 0.22) / 0.4, 0.0, 1.0)
-		tempo_q *= 1.0 - erratic * (0.75 if layer.name == "Bone" else 0.4)
-	_prev_tempo = t_now
-	tempo = t_now
-	_last_stroke_t = _t
+	var speed := length / dur
+	var vf := fast_speed(li)
+	var rushed := clampf((speed - vf) / (vf * 0.4), 0.0, 1.0)
 	var len_q := clampf((length - MIN_LEN) / (GOOD_LEN - MIN_LEN), 0.0, 1.0)
-	var off := _seg_off / _seg_time if _seg_time > 0.0 else _off_now
+	var off := _seg_off / _seg_time if _seg_time > 0.0 else off_now
 	var seg_bx := _seg_bx / _seg_time if _seg_time > 0.0 else bx
-	var good := len_q * tempo_q
 
-	var adv := k_cut / float(layer.res) * (FLOOR + (1.0 - FLOOR) * good) * (1.0 - 0.7 * off)
+	var adv := k_cut / float(layer.res) * (FLOOR + (1.0 - FLOOR) * len_q) * (1.0 - 0.85 * rushed) * (1.0 - 0.6 * off)
 	depth = minf(1.0, depth + adv)
 	strokes += 1
 
 	# Kerf record: where the metal went and how ragged it is.
-	var badness := clampf(1.0 - good + erratic * 0.3, 0.0, 1.0)
-	var rag := clampf(absf(seg_bx - kx) / 0.02 + off * 0.8 + badness * 0.5, 0.0, 1.0)
+	var badness := clampf(rushed + 0.3 * (1.0 - len_q), 0.0, 1.0)
+	var rag := clampf(absf(seg_bx - kx) / 0.02 + off * 0.8 + rushed * 0.7, 0.0, 1.0)
 	kx = (kx * _adv_total + seg_bx * adv) / (_adv_total + adv)
 	jag = (jag * _adv_total + rag * adv) / (_adv_total + adv)
 	_adv_total += adv
 	if off > 0.35:
 		scores += 1
 
-	tear = minf(1.0, tear + badness * 0.4)
+	tear = minf(1.0, tear + rushed * 0.5)
 	_sum_tear += badness
 	_sum_off += off
 	_n_judged += 1
-	_tear_acc += badness * badness * float(layer.tear) * TEAR_BOTCH_RATE * size_k
+	_tear_acc += rushed * float(layer.tear) * TEAR_BOTCH_RATE * size_k
 	if _tear_acc >= 1.0:
 		_tear_acc -= 1.0
-		botch(TEAR_BOTCH, "Tearing through the %s" % String(layer.name).to_lower())
+		botch(TEAR_BOTCH, "The saw jumped and tore the %s" % String(layer.name).to_lower())
 
-	if length < MIN_LEN + 0.04:
-		verdict = "short"
-	elif off > 0.35:
-		verdict = "off"
-	elif erratic > 0.5:
-		verdict = "erratic"
-	elif t_now > TEMPO_TARGET + band:
-		verdict = "fast"
-	elif t_now < TEMPO_TARGET - band:
-		verdict = "slow"
+	if off > 0.35:
+		verdict = Verdict.OFF
+	elif rushed > 0.15:
+		verdict = Verdict.RUSHED
+	elif len_q < 0.5:
+		verdict = Verdict.SHORT
 	else:
-		verdict = "good"
+		verdict = Verdict.GOOD
 
-	# Bleeding: the weaker the tourniquet, the more every pass spurts.
+	# Bleeding: the weaker the tourniquet, the more every pass spurts, and rushing makes it worse.
 	if depth > float(LAYERS[0].to) * 0.5:
 		var spurt := bleed * float(layer.bleed) * (0.6 + 0.4 * badness)
 		blood = minf(1.0, blood + spurt * 0.03)
-		if spurt > 0.2:
-			splats += 1 + (1 if spurt > 0.6 and _rng.randf() < 0.5 else 0)
+		if spurt > 0.2 or rushed > 0.5:
+			splats += 1 + (1 if (spurt > 0.6 or rushed > 0.8) and _rng.randf() < 0.5 else 0)
 		_bleed_acc += spurt * BLEED_BOTCH_RATE * size_k
 		if _bleed_acc >= 1.0:
 			_bleed_acc -= 1.0
@@ -378,55 +387,35 @@ func tick(delta: float) -> void:
 		_build()
 	if not _built:
 		return
-	_metro_t += delta
+	_vt += delta
 	_update_visuals(delta)
 
 
 # ---------------------------------------------------------------------------- HUD / net
 
 func hud_state() -> Dictionary:
-	var li := layer_index()
-	var layer: Dictionary = LAYERS[li]
 	var title := String(ctx.get("step", {}).get("label", "Saw through the limb"))
-	var hint := ""
+	var hint := "Hold left click and saw back and forth along the line."
 	if done or depth >= 1.0:
 		hint = "It's off."
-	elif not held:
-		hint = "Hold left click and saw back and forth along the marked line."
-	elif _off_now > 0.35:
-		hint = "You're off the line! Steer back onto the marks."
-	else:
-		match verdict:
-			"short": hint = "Longer strokes. Use the whole blade."
-			"fast": hint = "Too fast, you're tearing. Match the ticking light."
-			"slow": hint = "Too slow. Keep up with the ticking light."
-			"erratic": hint = "Keep the rhythm even."
-			_:
-				match String(layer.name):
-					"Skin": hint = "Long, even strokes on the line. Match the ticking light on the handle."
-					"Muscle": hint = "Through the muscle. Keep the length and the rhythm."
-					"Bone": hint = "Bone. Slow and steady, don't rush it."
-					_: hint = "Almost through. Keep it straight, don't tear the far side."
-	var band := tempo_band(li)
-	var gauges := [
-		{"label": "Tempo", "value": tempo, "min": 0.0, "max": 3.2, "good_min": TEMPO_TARGET - band, "good_max": TEMPO_TARGET + band},
-		{"label": "Off line (cm)", "value": absf(bx) * 100.0, "min": 0.0, "max": 4.0, "good_min": 0.0, "good_max": line_tol * 100.0},
-		{"label": "Tearing", "value": tear, "min": 0.0, "max": 1.0, "good_min": 0.0, "good_max": 0.35},
-	]
-	# Depth through the layers is drawn by the surgery HUD's cross-section strip.
-	var xs := []
-	var from := 0.0
-	for l in LAYERS:
-		xs.append({"name": l.name, "from": from, "to": l.to, "color": l.col})
-		from = l.to
-	return {"title": title, "hint": hint, "progress": progress, "gauges": gauges,
-		"cross_section": {"layers": xs, "depth": depth, "layer": li}}
+	elif held:
+		if off_now > 0.35 or verdict == Verdict.OFF:
+			hint = "Off the line! Steer back onto the cut."
+		elif verdict == Verdict.RUSHED:
+			hint = "Too fast, the saw is jumping. Ease off."
+		elif verdict == Verdict.SHORT:
+			hint = "Longer strokes. Use the whole blade."
+		elif LAYERS[layer_index()].name == "Bone":
+			hint = "Bone. Steady strokes, don't rush it."
+		else:
+			hint = "That's biting. Keep going."
+	return {"title": title, "hint": hint, "progress": progress, "gauges": []}
 
 
 func net_state() -> Dictionary:
 	return {"z": snappedf(bz, 0.0005), "x": snappedf(bx, 0.0005), "d": snappedf(depth, 0.001),
 		"b": snappedf(blood, 0.005), "k": snappedf(kx, 0.0005), "j": snappedf(jag, 0.01), "h": held,
-		"g": strokes, "n": splats, "c": scores, "t": snappedf(tear, 0.01), "tp": snappedf(tempo, 0.01)}
+		"g": strokes, "n": splats, "c": scores, "t": snappedf(tear, 0.01), "v": verdict, "o": snappedf(off_now, 0.02)}
 
 
 func apply_net_state(s: Dictionary) -> void:
@@ -441,7 +430,8 @@ func apply_net_state(s: Dictionary) -> void:
 	splats = int(s.get("n", splats))
 	scores = int(s.get("c", scores))
 	tear = float(s.get("t", tear))
-	tempo = float(s.get("tp", tempo))
+	verdict = int(s.get("v", verdict))
+	off_now = float(s.get("o", off_now))
 	_update_progress()
 
 
@@ -454,59 +444,38 @@ func bot_input(t: float, skill: float) -> Dictionary:
 	var sl := 1.0 - skill
 	if t < 0.25:
 		return {"cursor": Vector2(0.0, 0.0), "buttons": 0}
-	# Strokes per second: on tempo when competent, rushing and lurching when sloppy.
-	var f := TEMPO_TARGET + sl * (0.85 + 0.55 * sin(t * 0.9) + 0.35 * sin(t * 2.3 + 0.7))
+	# Strokes per second: calm when competent, frantic and lurching when sloppy.
+	var f := 1.3 + sl * (2.1 + 0.9 * sin(t * 0.9) + 0.5 * sin(t * 2.3 + 0.7))
 	_bphase += f * dt
-	var amp := 0.118 - sl * (0.045 + 0.03 * sin(t * 1.3 + 1.0))
+	var amp := 0.1 - sl * (0.01 + 0.02 * sin(t * 1.3 + 1.0))
 	var z := amp * sin(TAU * _bphase)
-	var x := sl * (0.03 * sin(t * 0.7 + 0.4) + 0.012 * sin(t * 2.9)) + 0.0015 * sin(t * 5.3)
+	var x := sl * (0.045 * sin(t * 0.7 + 0.4) + 0.012 * sin(t * 2.9)) + 0.0015 * sin(t * 5.3)
 	return {"cursor": Vector2(x, z), "buttons": BUTTON_PRIMARY}
 
 
 ## Headless check: plays the bot through the simulation (no scene tree) for 20 cases and
-## prints strokes, time, botches and quality. Run from a throwaway SceneTree script:
-##   load("res://scripts/surgery/games/saw.gd").self_test()
+## prints strokes, time, botches and quality. Run: `tools/minigame_lab.tscn -- --selftest=saw`.
 static func self_test() -> Array:
 	var script: GDScript = load("res://scripts/surgery/games/saw.gd")
 	var out := []
-	for cond in [{"tq": 0.95, "sed": 1.0}, {"tq": 0.3, "sed": 0.6}]:
+	for cond in [{"tq": 0.95, "sed": 1.0}, {"tq": 0.5, "sed": 0.4}]:
 		for pid in ["bob", "seal"]:
 			for skill in [1.0, 0.75, 0.5, 0.25, 0.0]:
 				var g = script.new()
-				var tally := {"n": 0, "v": 0.0, "done": false, "q": 0.0}
-				g.botched.connect(func(a, _r): tally.n += 1; tally.v += a)
+				var tally := {"n": 0, "v": 0.0, "done": false, "q": 0.0, "reasons": {}}
+				g.botched.connect(func(a, r): tally.n += 1; tally.v += a; tally.reasons[r] = int(tally.reasons.get(r, 0)) + 1)
 				g.finished.connect(func(r): tally.done = true; tally.q = float(r.get("cut_quality", 0.0)))
 				g.setup({"patient_id": pid, "patient": Procedures.patient(pid), "ailment_id": "amputation",
 					"step": Procedures.step("amputation", 2), "variant": "", "shift": 1,
 					"difficulty": Procedures.difficulty(1), "flags": {"tourniquet": cond.tq, "sedation": cond.sed},
 					"seed": hash("saw" + pid), "body": null, "operator": true})
-				var rng := RandomNumberGenerator.new()
-				rng.seed = hash(pid) + int(skill * 100)
-				var t := 0.0
-				var dt := 1.0 / 60.0
-				var jolt := Vector2.ZERO
-				var next_jolt := rng.randf_range(1.5, 4.0)
-				var ext: Vector2 = g.plane_extent()
-				while t < 120.0 and not tally.done:
-					t += dt
-					var inp: Dictionary = g.bot_input(t, skill)
-					# Mimic the framework's sedation jolts below 0.75.
-					if cond.sed < 0.75:
-						next_jolt -= dt
-						if next_jolt <= 0.0:
-							next_jolt = rng.randf_range(2.0, 4.5)
-							jolt = Vector2(rng.randf_range(-1, 1), rng.randf_range(-1, 1)).normalized() * rng.randf_range(0.03, 0.06) * (0.75 - cond.sed) / 0.15
-						jolt *= exp(-dt * 6.0)
-					var c: Vector2 = inp.cursor + jolt
-					c = Vector2(clampf(c.x, -ext.x, ext.x), clampf(c.y, -ext.y, ext.y))
-					g.handle_cursor(c, int(inp.buttons), dt)
-				var line := "[saw self-test] %-4s skill=%.2f tq=%.2f sed=%.1f  %s  strokes=%3d (passes %3d)  time=%5.1fs  botches=%2d vitals=%5.1f  q=%.2f" % [
-					pid, skill, cond.tq, cond.sed, "DONE" if tally.done else "UNFINISHED", g.strokes / 2, g.strokes, t, tally.n, tally.v, tally.q]
+				var t: float = load("res://scripts/surgery/games/gauze.gd")._run_bot(g, skill, float(cond.sed), hash(pid) + int(skill * 100))
+				var line := "[saw self-test] %-4s skill=%.2f tq=%.2f sed=%.1f  %s  passes=%3d  time=%5.1fs  botches=%2d vitals=%5.1f  q=%.2f  %s" % [
+					pid, skill, cond.tq, cond.sed, "DONE" if tally.done else "UNFINISHED", g.strokes, t, tally.n, tally.v, tally.q, str(tally.reasons)]
 				print(line)
 				out.append({"patient": pid, "skill": skill, "tq": cond.tq, "done": tally.done, "time": t, "botches": tally.n, "vitals": tally.v, "q": tally.q})
 				g.free()
 	return out
-
 
 # ---------------------------------------------------------------------------- visuals
 
@@ -538,9 +507,11 @@ func _build() -> void:
 	var proj_h := hu * 2.0 + 0.06
 	var proj_y := -hu + 0.03
 	_marker = _decal(_texture("marker"), Vector3(0.006, proj_h, hs * 3.0 + 0.04), Vector3(0, proj_y, 0), 1)
-	# Two fainter guide lines either side, so the line still reads while the blade sits on it.
-	for side in [-1.0, 1.0]:
-		_guides.append(_decal(_texture("marker"), Vector3(0.005, proj_h, hs * 2.6 + 0.03), Vector3(side * 0.03, proj_y, 0), 1))
+	# The glowing guide along the cut: it flashes green, amber or red with each pass.
+	_guide = _decal(_texture("glow_line"), Vector3(0.09, proj_h, hs * 3.2 + 0.05), Vector3(0, proj_y, 0), 10)
+	_guide.texture_emission = _guide.texture_albedo
+	_guide.emission_energy = 6.0
+	_guide.modulate = GUIDE_COLORS[Verdict.NONE]
 	_bruise = _decal(_texture("bruise"), Vector3(0.05, proj_h, 0.05), Vector3(0, proj_y, 0), 2)
 	_dust_decal = _decal(_texture("dust"), Vector3(0.08, proj_h, 0.1), Vector3(0, proj_y, 0), 3)
 	_opening = _decal(_texture("slit"), Vector3(0.02, proj_h, 0.05), Vector3(0, proj_y, 0), 4)
@@ -569,24 +540,19 @@ func _build() -> void:
 	var basis := tilt * Basis(Vector3.UP, PI * 0.5) * Basis(Vector3.RIGHT, PI * 0.5)
 	_saw_model.transform = Transform3D(basis, -(basis * Vector3(0.07, 0.012, 0.044)))
 	_saw.add_child(_saw_model)
-	# Metronome on the grip: a small lamp that pulses at the target tempo.
-	var lamp := MeshInstance3D.new()
-	var sm := SphereMesh.new()
-	sm.radius = 0.008
-	sm.height = 0.016
-	lamp.mesh = sm
-	_metro_mat = _mat(Color(0.2, 1.0, 0.35), 0.3)
-	_metro_mat.emission_enabled = true
-	_metro_mat.emission = Color(0.2, 1.0, 0.35)
-	lamp.material_override = _metro_mat
-	lamp.position = Vector3(-0.15, 0.036, 0.0)
-	_saw_model.add_child(lamp)
-	_metro_light = OmniLight3D.new()
-	_metro_light.light_color = Color(0.3, 1.0, 0.4)
-	_metro_light.omni_range = 0.14
-	_metro_light.light_energy = 0.0
-	_metro_light.position = Vector3(-0.15, 0.05, 0.0)
-	_saw_model.add_child(_metro_light)
+	# A glow along the teeth, the same colour as the guide on the limb.
+	var teeth := MeshInstance3D.new()
+	var tb := BoxMesh.new()
+	tb.size = Vector3(0.02, 0.002, 0.27)
+	teeth.mesh = tb
+	_teeth_mat = StandardMaterial3D.new()
+	_teeth_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_teeth_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_teeth_mat.albedo_color = Color(GUIDE_COLORS[Verdict.NONE], 0.0)
+	teeth.material_override = _teeth_mat
+	teeth.position = Vector3(0.0, 0.003, -0.02)
+	teeth.name = "TeethGlow"
+	_saw.add_child(teeth)
 	# Blood on the blade: a smear along the teeth and drops hanging off it.
 	_smear_mat = _mat(Color(0.32, 0.0, 0.01, 0.0), 0.15)
 	_smear_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -623,6 +589,14 @@ func _build() -> void:
 	_spurt.initial_velocity_min = 0.5
 	_spurt.initial_velocity_max = 1.3
 	_spurt.gravity = Vector3(0, -6.0, 0)
+	# Chips of whatever the teeth are biting into, thrown out of the kerf on a good pass.
+	_chips = _particles(Color(1, 1, 1), 0.0022, 14, 0.5)
+	(_chips.material_override as StandardMaterial3D).vertex_color_use_as_albedo = true
+	_chips.direction = Vector3(0, 1, 0)
+	_chips.spread = 55.0
+	_chips.initial_velocity_min = 0.25
+	_chips.initial_velocity_max = 0.6
+	_chips.gravity = Vector3(0, -4.0, 0)
 
 	_vis_bz = bz
 	_vis_bx = bx
@@ -712,8 +686,21 @@ func _update_visuals(delta: float) -> void:
 	_pool.position.x = kx + 0.01 * distal
 	_pool.modulate = Color(1, 1, 1, clampf(blood * 2.5, 0.0, 0.95))
 	_marker.modulate = Color(1, 1, 1, clampf(1.0 - blood * 1.1, 0.15, 1.0))
-	for g in _guides:
-		g.modulate = Color(1, 1, 1, clampf(0.75 - blood * 1.1, 0.1, 0.75))
+	# The guide: a calm glow until the saw is working, then the colour of the last pass, brightest
+	# right after it; red at once while the blade is off the line.
+	_flash = maxf(0.0, _flash - delta * 1.6)
+	var gcol: Color = GUIDE_COLORS[Verdict.NONE]
+	var glow := 0.45
+	if held and off_now > 0.35:
+		gcol = GUIDE_COLORS[Verdict.OFF]
+		glow = 0.9
+	elif held and verdict != Verdict.NONE:
+		gcol = _flash_col
+		glow = 0.55 + 0.45 * _flash
+	_guide.visible = not _finale
+	_guide.position.x = kx if depth > KERF_FROM else 0.0
+	_guide.modulate = Color(gcol.r, gcol.g, gcol.b, glow)
+	_teeth_mat.albedo_color = Color(gcol.r, gcol.g, gcol.b, (0.25 + 0.6 * _flash) if held else 0.0)
 
 	# Splatter from each spurt, placed from the seed so every machine agrees.
 	if splats != _seen_splats:
@@ -727,7 +714,7 @@ func _update_visuals(delta: float) -> void:
 	for i in MAX_SPLATS:
 		var sd := _splat_decals[i]
 		if sd.visible:
-			var age := _metro_t - _splat_born[i]
+			var age := _vt - _splat_born[i]
 			var grow := clampf(age / 0.12, 0.2, 1.0)
 			var base: float = sd.get_meta("s", 0.05)
 			sd.size = Vector3(base * grow, sd.size.y, base * grow * float(sd.get_meta("a", 1.0)))
@@ -745,36 +732,53 @@ func _update_visuals(delta: float) -> void:
 	if _finale:
 		lift_target = 0.07
 	_vis_lift = lerpf(_vis_lift, lift_target, 1.0 - exp(-12.0 * delta))
-	var sink := minf(d_m, 0.04)
-	_saw.position = Vector3(_vis_bx - sin(deg_to_rad(8.0)) * (0.05 - sink * 0.5), _vis_lift - sink, _vis_bz)
+	# The blade sinks with the cut; a rushed pass makes it hop out of the kerf.
+	var sink := minf(d_m * 1.4, 0.05)
+	_hop = maxf(0.0, _hop - delta * 5.0)
+	var hop := _hop * _hop * 0.012 * absf(sin(_vt * 60.0))
+	_saw.position = Vector3(_vis_bx - sin(deg_to_rad(8.0)) * (0.05 - sink * 0.5), _vis_lift - sink + hop, _vis_bz)
 	_saw.rotation.y = clampf((_vis_bx - kx) * 3.0, -0.25, 0.25)
-	var ph := fmod(_metro_t * TEMPO_TARGET * 2.0, 2.0)
-	var beat := fmod(ph, 1.0) / (TEMPO_TARGET * 2.0)
-	var pulse := exp(-beat * 16.0) * (1.0 if ph < 1.0 else 0.55)
-	_metro_mat.emission_energy_multiplier = 0.3 + 5.0 * pulse
-	_metro_light.light_energy = 1.4 * pulse
 	_smear_mat.albedo_color.a = clampf(0.25 * f + blood * 1.5, 0.0, 0.92)
 	var nd := int(clampf(blood * 9.0, 0.0, 6.0))
 	for i in _drips.size():
 		var dr := _drips[i]
 		dr.visible = i < nd
 		if dr.visible:
-			var fall := fmod(_metro_t * (0.7 + 0.13 * i) + i * 0.37, 1.0)
+			var fall := fmod(_vt * (0.7 + 0.13 * i) + i * 0.37, 1.0)
 			dr.position = Vector3(-0.08 + i * 0.05, 0.012, 0.045 + fall * 0.018)
 			dr.scale = Vector3(1, 1, 1.0 + fall)
 
-	# A new pass: sound, dust in bone.
+	# A new pass: the guide flashes its verdict, the teeth bite (chips and a rasp or a grind), or
+	# skip and hop when rushed.
 	if strokes != _seen_strokes:
+		var fresh := strokes > _seen_strokes
 		_seen_strokes = strokes
 		var at := global_position
-		if LAYERS[li].name == "Bone":
-			_audio("surgery_saw_grind", at, -3.0, 0.08)
-			_dust.position = Vector3(kx, 0.004, open_half * (1.0 if strokes % 2 == 0 else -1.0))
+		if fresh:
+			_flash = 1.0
+			_flash_col = GUIDE_COLORS.get(verdict, GUIDE_COLORS[Verdict.NONE])
+		var side := open_half * (1.0 if strokes % 2 == 0 else -1.0)
+		if verdict == Verdict.RUSHED:
+			_hop = 1.0
+			_audio("surgery_saw_grind", at, 0.0, 0.25)
+			_audio("surgery_saw_squelch", at, -6.0, 0.15)
+		elif LAYERS[li].name == "Bone":
+			_audio("surgery_saw_grind", at, -3.0 if verdict == Verdict.GOOD else -8.0, 0.08)
+			_dust.position = Vector3(kx, 0.004, side)
 			_dust.restart()
 		else:
-			_audio("surgery_saw_rasp", at, -4.0, 0.1)
+			_audio("surgery_saw_rasp", at, -3.0 if verdict == Verdict.GOOD else -9.0, 0.1)
 			if blood > 0.25 and strokes % 3 == 0:
 				_audio("surgery_saw_squelch", at, -9.0, 0.1)
+		if verdict == Verdict.GOOD or verdict == Verdict.RUSHED:
+			_chips.color = LAYERS[li].col.lightened(0.1)
+			_chips.position = Vector3(kx, 0.006, side * 0.6)
+			_chips.restart()
+	if li != _seen_layer:
+		# Into the next layer: a clunk as the teeth meet bone, a softer give past it.
+		if li > _seen_layer and _built and not _finale:
+			_audio("surgery_saw_thunk" if LAYERS[li].name == "Bone" else "surgery_saw_squelch", global_position, -12.0 if LAYERS[li].name == "Bone" else -8.0, 0.1)
+		_seen_layer = li
 
 	if body != null and is_instance_valid(body) and body.has_method("set_bleeding") and not _finale:
 		body.set_bleeding(String(ctx.get("step", {}).get("site", "limb_cut")), clampf(blood * 1.3 + 0.08 * f * bleed, 0.0, 1.0))
@@ -798,7 +802,7 @@ func _place_splat(i: int) -> void:
 	d.size = Vector3(s * 0.2, 0.5, s * 0.2)
 	d.modulate = Color(1, 1, 1, r.randf_range(0.75, 1.0))
 	d.visible = true
-	_splat_born[i % MAX_SPLATS] = _metro_t
+	_splat_born[i % MAX_SPLATS] = _vt
 
 
 func _start_finale(body) -> void:
@@ -812,7 +816,7 @@ func _start_finale(body) -> void:
 	_audio("surgery_saw_squelch", at, -4.0, 0.05)
 	_spurt.position = Vector3(kx, 0.0, 0.0)
 	_spurt.restart()
-	for d in [_marker, _pool] + _guides:
+	for d in [_marker, _pool, _guide]:
 		(d as Decal).visible = false
 	if _severed != null:
 		var start := _severed.transform
@@ -850,6 +854,7 @@ static func _texture(key: String) -> Texture2D:
 	var img: Image
 	match key:
 		"marker": img = _img_marker()
+		"glow_line": img = _img_glow_line()
 		"bruise": img = _img_soft(Color(0.45, 0.08, 0.12), 0.7, 1.4)
 		"dust": img = _img_dust()
 		"slit": img = _img_slit(false)
@@ -876,6 +881,23 @@ static func _img_marker() -> Image:
 			var u := absf((x + 0.5) / w * 2.0 - 1.0 + wob)
 			var a := clampf((1.0 - u) * 2.2, 0.0, 1.0) if on else 0.0
 			img.set_pixel(x, y, Color(0.22, 0.06, 0.4, a * 0.95))
+	return img
+
+
+## A soft glowing band along the image's long axis (decal Z): a bright core, a wide halo, and
+## faded ends. Tinted by the decal's modulate.
+static func _img_glow_line() -> Image:
+	var w := 32
+	var h := 128
+	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
+	for y in h:
+		var v := absf((y + 0.5) / h * 2.0 - 1.0)
+		var ends := 1.0 - smoothstep(0.8, 1.0, v)
+		for x in w:
+			var u := absf((x + 0.5) / w * 2.0 - 1.0)
+			var core := 1.0 - smoothstep(0.06, 0.16, u)
+			var halo := pow(clampf(1.0 - u, 0.0, 1.0), 3.0) * 0.45
+			img.set_pixel(x, y, Color(1, 1, 1, clampf(core + halo, 0.0, 1.0) * ends))
 	return img
 
 
