@@ -224,7 +224,17 @@ static func make_grade_gradient(gamma := 1.0) -> GradientTexture1D:
 			# Denser samples near black, where the gamma bend is steepest.
 			var x := pow(float(i) / N, 2.0)
 			offs.append(x)
-			cols.append(g.sample(pow(x, gamma)))
+			# Take the brightness from x^gamma but keep the shipped hue for x, so lifted
+			# shadows stay the grade's teal instead of sliding into its saturated green.
+			var base := g.sample(x)
+			var bent_c := g.sample(pow(x, gamma))
+			var l0 := base.get_luminance()
+			var l1 := bent_c.get_luminance()
+			if l0 > 0.02:
+				var r := l1 / l0
+				cols.append(Color(minf(base.r * r, 1.0), minf(base.g * r, 1.0), minf(base.b * r, 1.0)))
+			else:
+				cols.append(bent_c)
 		var bent := Gradient.new()
 		bent.offsets = offs
 		bent.colors = cols
@@ -278,12 +288,12 @@ static func apply_brightness(target: Object, value: float) -> void:
 		env.adjustment_color_correction = make_grade_gradient()
 		env.tonemap_exposure = 1.0
 		return
-	# Gamma on the ramp input: 0.5 at the top of the slider (shadows lifted hard), about
-	# 1.6 at the bottom (a darker, crushed look). 1.0 in the middle.
-	var p := pow(2.0, -d * 2.0) if d > 0.0 else pow(2.0, -d * 1.4)
+	# Gamma on the ramp input: 0.6 at the top of the slider (shadows lifted), about 1.5 at
+	# the bottom (a darker, crushed look). 1.0 in the middle.
+	var p := pow(2.0, -d * 1.47) if d > 0.0 else pow(2.0, -d * 1.17)
 	env.adjustment_color_correction = make_grade_gradient(p)
-	# +/- half a stop at the ends.
-	env.tonemap_exposure = pow(2.0, d)
+	# +/- a quarter stop at the ends; more than that washes out the lit areas.
+	env.tonemap_exposure = pow(2.0, d * 0.5)
 
 
 ## Physical-ish camera attributes. Auto exposure is deliberately OFF: in a game

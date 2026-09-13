@@ -116,11 +116,11 @@ func _run() -> void:
 	_check(not AudioServer.is_bus_mute(AudioServer.get_bus_index("Music")) and _near(music_db, Audio.MUSIC_BASE_DB - 12.04, 0.2),
 		"Music bus at base -12 dB for 0.5 (%.2f)" % music_db)
 
-	_check(_near(env.tonemap_exposure, pow(2.0, 0.3), 0.001), "brightness 0.8 raises exposure (%.3f)" % env.tonemap_exposure)
+	_check(_near(env.tonemap_exposure, pow(2.0, 0.15), 0.001), "brightness 0.8 raises exposure (%.3f)" % env.tonemap_exposure)
 	_check(env.adjustment_color_correction != shipped_grade, "brightness 0.8 bends the grade ramp")
 	var bent := env.adjustment_color_correction as GradientTexture1D
 	var shipped := Look.make_grade_gradient()
-	_check(bent.gradient.sample(0.2).g > shipped.gradient.sample(0.2).g + 0.02, "bent ramp lifts the shadows")
+	_check(bent.gradient.sample(0.2).get_luminance() > shipped.gradient.sample(0.2).get_luminance() + 0.02, "bent ramp lifts the shadows")
 	_check(_near(bent.gradient.sample(0.0).r, 0.0, 0.001) and _near(bent.gradient.sample(1.0).r, 1.0, 0.001), "bent ramp keeps black and white")
 
 	_check(_near(me.camera.fov, 95.0, 0.05), "player camera fov follows (%.2f)" % me.camera.fov)
@@ -225,7 +225,7 @@ func _run() -> void:
 	_check(_near(me.camera.fov, 95.0, 0.2), "reload re-applies fov to the camera")
 	_check(main.quality == 2, "reload re-applies quality")
 	_check(_near(AudioServer.get_bus_volume_db(AudioServer.get_bus_index("Master")), -12.04), "reload re-applies Master volume")
-	_check(_near(env.tonemap_exposure, pow(2.0, 0.15), 0.001), "reload re-applies brightness")
+	_check(_near(env.tonemap_exposure, pow(2.0, 0.075), 0.001), "reload re-applies brightness")
 
 	# --- clean up, leave the player's settings untouched ---------------------------------------
 	Settings.changed.disconnect(on_changed)

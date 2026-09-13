@@ -102,7 +102,7 @@ func _build() -> void:
 	add_child(_root)
 
 	var dim := ColorRect.new()
-	dim.color = Color(0.012, 0.016, 0.024, 0.78)
+	dim.color = Color(0.012, 0.016, 0.024, 0.86)
 	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	_root.add_child(dim)
@@ -114,6 +114,14 @@ func _build() -> void:
 
 	var panel := PanelContainer.new()
 	panel.custom_minimum_size = Vector2(620, 0)
+	# The menu's dark panel, but nearly opaque: whatever is underneath (the title, the pause
+	# text) must not read through the options.
+	var box := StyleBoxFlat.new()
+	box.bg_color = Color(0.055, 0.062, 0.075, 0.97)
+	box.border_color = Color(1, 1, 1, 0.07)
+	box.set_border_width_all(1)
+	box.set_corner_radius_all(3)
+	panel.add_theme_stylebox_override("panel", box)
 	center.add_child(panel)
 
 	var margin := MarginContainer.new()
@@ -150,8 +158,8 @@ func _build() -> void:
 
 	var hint := Label.new()
 	hint.text = "Changes apply right away.  F2 cycles graphics, F11 toggles fullscreen."
-	hint.add_theme_font_size_override("font_size", 12)
-	hint.add_theme_color_override("font_color", COL_DIM)
+	hint.add_theme_font_size_override("font_size", 14)
+	hint.add_theme_color_override("font_color", COL_SECTION)
 	col.add_child(_spacer(2))
 	col.add_child(hint)
 
@@ -191,12 +199,13 @@ func _section(text: String) -> Control:
 	box.add_child(_spacer(6))
 	var l := Label.new()
 	l.text = text
-	l.add_theme_font_size_override("font_size", 12)
+	l.add_theme_font_size_override("font_size", 14)
 	l.add_theme_color_override("font_color", COL_SECTION)
 	box.add_child(l)
 	var line := ColorRect.new()
-	line.color = Color(COL_TITLE, 0.45)
-	line.custom_minimum_size = Vector2(0, 1)
+	line.color = Color(COL_TITLE, 0.5)
+	# 2 px: the canvas is scaled down below 1600x900 and a 1 px line drops out.
+	line.custom_minimum_size = Vector2(0, 2)
 	box.add_child(line)
 	return box
 
@@ -257,6 +266,7 @@ func _choice_row(key: String, text: String, options: Array) -> Control:
 		b.add_theme_font_size_override("font_size", 15)
 		b.add_theme_color_override("font_pressed_color", COL_VALUE)
 		b.add_theme_color_override("font_hover_pressed_color", COL_VALUE)
+		_style_button(b)
 		b.add_theme_stylebox_override("pressed", _pressed_box())
 		b.add_theme_stylebox_override("hover_pressed", _pressed_box())
 		var value = opt[0]
@@ -286,7 +296,29 @@ func _button(text: String) -> Button:
 	b.custom_minimum_size = Vector2(160, 42)
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	b.add_theme_font_size_override("font_size", 17)
+	_style_button(b)
 	return b
+
+
+## Dark boxes that stay visible on the dark panel and over the game.
+func _style_button(b: Button) -> void:
+	var states := {
+		"normal": [Color(0.13, 0.145, 0.17, 0.95), Color(1, 1, 1, 0.10)],
+		"hover": [Color(0.18, 0.2, 0.235, 0.98), Color(1, 1, 1, 0.22)],
+		"pressed": [Color(0.09, 0.1, 0.12, 0.98), Color(COL_TITLE, 0.7)],
+		"focus": [Color(0, 0, 0, 0), Color(COL_HINT, 0.55)],
+	}
+	for state in states.keys():
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = states[state][0]
+		sb.border_color = states[state][1]
+		sb.set_border_width_all(1)
+		sb.set_corner_radius_all(3)
+		sb.content_margin_left = 8
+		sb.content_margin_right = 8
+		if state == "focus":
+			sb.draw_center = false
+		b.add_theme_stylebox_override(state, sb)
 
 
 func _spacer(h: int) -> Control:

@@ -254,6 +254,51 @@ The main scene opens the guide when the local player presses R while holding the
 looking at it. While it is open the mouse is visible and the player cannot move; in co-op the
 world keeps running.
 
+## Settings (settings worker, sweep 2)
+
+`Settings` autoload (`scripts/settings.gd`, registered after `Audio`), persisted to
+`user://settings.cfg` (section `settings`):
+
+```gdscript
+Settings.get_value(key)          # current value (defaults when unset)
+Settings.set_value(key, v)       # clamps / validates, applies, emits, saves ~0.4 s later
+signal changed(key: String, value)   # only when the value really changed
+Settings.save_now()  Settings.reset_to_defaults()
+Settings.use_path(p)  Settings.reload()   # test seams: point at a scratch file, re-read it
+static func slider_to_db(v) -> float     # 0..1 slider to dB (squared amplitude, 0 = -80)
+```
+
+| Key | Type, range | Default | Applied by |
+| --- | --- | --- | --- |
+| `master_volume` | float 0..1 | 1.0 | Settings: `Master` bus |
+| `music_volume` | float 0..1 | 1.0 | Settings -> `Audio.music_volume_db` (Audio drives the `Music` bus each frame) |
+| `sfx_volume` | float 0..1 | 1.0 | Settings: `SFX` bus (`Ambience` sends into it) |
+| `window_mode` | `"fullscreen"` (exclusive), `"borderless"`, `"windowed"` | `"windowed"` | Settings; skipped headless and when launched with a `.tscn` or window flags |
+| `brightness` | float 0..1 | 0.5 | `main.gd` -> `Look.apply_brightness(root, v)` |
+| `sensitivity` | float 0.2..3.0, multiplier | 1.0 | `player.gd` mouse look (`MOUSE_SENS * v`) |
+| `fov` | float 60..100, vertical degrees | 78.0 | `player.gd` `apply_fov()`, local player camera only |
+| `quality` | int 0..2 | 1 | `main.gd` `set_quality()`; migrated once from `prefs.cfg` `video/quality` |
+
+- Anything new that should follow a setting reads `get_value()` when built and connects
+  `changed`; do not write the config file yourself.
+- Buses (`default_bus_layout.tres`): `Master`, `Hall` (reverb, -> Master), `Music` (-> Hall),
+  `SFX` (-> Master), `Ambience` (-> SFX). New sounds go through `Audio.play()` (SFX bus); a
+  player of your own must use bus `"SFX"` (or `"Music"`) so the volume settings reach it.
+- `Look.apply_brightness(target, v)` bends the colour-grade ramp (a gamma on its input, keeping
+  the shipped hue) and moves tonemap exposure by up to a quarter stop. 0.5 restores the shipped
+  ramp and exposure 1.0 exactly. Code that replaces `adjustment_color_correction` or
+  `tonemap_exposure` must re-apply brightness afterwards.
+- `Player.apply_fov(deg)` sets the camera fov and CameraFX's `_base_fov` (the sprint kick adds on
+  top) and moves the first-person `Hands` children and `HeldFirstPerson` so their x/y scale with
+  `tan(fov/2)`. Anything new parented to the first-person camera should do the same (store its
+  base position in meta `fov_base_pos`, or add it under `Hands`).
+- `SettingsUI` (`scripts/settings_screen.gd`, a CanvasLayer at layer 6, child of Main):
+  `open()`, `close()`, `is_open()`, `signal closed`. `Menu.chose_settings` opens it; while
+  `game.paused` it shows its own "Settings" button under the HUD's PAUSED text. While open it
+  eats keys and clicks except F2 / F3 / F11; Esc closes it (back to menu or pause).
+- Tests: `tools/settingstest.tscn` (headless), `tools/settingsshot.tscn` (windowed screenshots to
+  `tools/settings_shots/`, plus the mouse-look sensitivity check that needs a captured mouse).
+
 ## Design decisions (locked)
 
 - One patient (Bob or the seal) and one ailment (gunshot or amputation) per shift.
