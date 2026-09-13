@@ -1,26 +1,31 @@
 extends RefCounted
-## One procedurally generated wing: long liminal hallways grown from the entrance doorway,
-## then real rooms packed along both sides of them, then furniture, lights and hallway dressing.
+## One procedurally generated wing: long liminal hallways first, then rows of real rooms packed
+## between them, then (after the map decides which room is which) furniture, hallway dressing
+## and lights.
 ##
-## Corridors first: a long spine leaves the entrance and turns into the wing, branches split
-## off it (some very long, some dead ends, some rejoining another hallway), a few stretches
-## widen into open halls, and a coverage pass reaches whatever corner is still far from any
-## hallway. Rooms second: every wall tile beside a hallway is a possible door; a room of the
-## wanted kind is fitted behind it when the whole rectangle (walls included) is still solid.
+## Hallways: the wing's entry hallway runs straight from the entrance building's doorway across
+## the whole wing. Every region it leaves is split again by hallways that start on an existing
+## hallway and run until they reach another one or the wing's outer wall (a dead end), until each
+## region can hold one row of rooms (facing one hallway) or two rows back to back (facing two).
+## A few regions become open halls instead: wide, empty spaces, some with pillars.
+##
+## Rooms: `slots` lists every room rectangle with the hallway side its door goes in. The map
+## assigns a kind to each slot (see mapgen.gd), then `place_rooms()` carves them and
+## `finish()` furnishes, dresses the hallways and adds the ceiling fixtures.
 
 const S := preload("res://scripts/level/level_state.gd")
 const Defs := preload("res://scripts/level/piece_defs.gd")
 const Rng := preload("res://scripts/level/rng.gd")
 const Rooms := preload("res://scripts/level/room_furnish.gd")
 
-## Perpendicular tiles a hallway keeps free of other parallel hallways, so rooms fit between.
-const CLEAR := 5
-## Share of the wing interior that may become hallway.
-const CORRIDOR_BUDGET := 0.23
-## Coverage: no interior tile further than this (tiles) from a hallway, where possible.
-const COVER_DIST := 8
+## Deepest room row (tiles, away from its hallway).
+const MAX_ROW_DEPTH := 8
+const MIN_ROW_DEPTH := 3
+## Narrowest region a split may leave on either side of a new hallway.
+const MIN_CHILD := 4
+const MAX_ROOM_W := 13
 
-## Hallway clutter along walls: kind, chance per stretch.
+## Hallway clutter along walls: kind, weight.
 const CLUTTER := [["gurney", 3.0], ["wheelchair", 3.0], ["bench", 2.5], ["vending", 1.2], ["bin", 1.5],
 		["wet_floor", 0.8], ["plant", 0.6], ["gurney_body", 0.4]]
 
@@ -32,7 +37,6 @@ class Seg extends RefCounted:
 	var width: int
 	var length := 0
 	var cells: Array[Vector2i] = []
-	var spine := false
 
 	func _init(s: Vector2i, d: Vector2i, sd: Vector2i, wd: int) -> void:
 		start = s
@@ -50,528 +54,377 @@ var wing: Dictionary
 var rect: Rect2i
 var z: int
 var segs: Array = []
-var corridor_cells := 0
-var interior := 0
-var wishlist: Array = []
-var placed_kinds := {}
-var map_counts: Dictionary
+## Open halls: Rect2i each.
+var halls: Array = []
+## Room slots: {rect: Rect2i (interior), front: Vector2i (room -> hallway), kind: String, wing: String}
+var slots: Array = []
 
 
-static func generate(state: S, wing_def: Dictionary, r: Rng, mandatory: Array, counts: Dictionary) -> Dictionary:
+static func carve(state: S, wing_def: Dictionary, r: Rng) -> RefCounted:
 	var g := new()
 	g.st = state
 	g.rng = r
 	g.wing = wing_def
 	g.rect = wing_def.rect
 	g.z = wing_def.zone
-	g.map_counts = counts
-	g.interior = (g.rect.size.x - 2) * (g.rect.size.y - 2)
-	var big: Array = []
-	var rest: Array = []
-	for k in mandatory:
-		if g._min_area(k) >= 36:
-			big.append(k)
-		else:
-			rest.append(k)
-	var pending_big := g._corridors(big)
-	var pending := g._rooms(rest + pending_big)
-	g._furnish()
-	g._dress_corridors()
-	g._lights()
-	return {"pending": pending, "segments": g.segs.size(), "corridor_cells": g.corridor_cells}
+	g._carve_all()
+	return g
 
 
-func inside(p: Vector2i) -> bool:
-	return p.x > rect.position.x and p.y > rect.position.y and p.x < rect.end.x - 1 and p.y < rect.end.y - 1
+func inner() -> Rect2i:
+	return rect.grow(-1)
 
 
 func is_corr(p: Vector2i) -> bool:
-	return st.in_bounds(p.x, p.y) and st.zone_at(p.x, p.y) == z and st.get_c(p.x, p.y) == S.CH_FLOOR and st.room_index(p.x, p.y) < 0
+	return st.in_bounds(p.x, p.y) and st.zone_at(p.x, p.y) == z and st.get_c(p.x, p.y) == S.CH_FLOOR \
+			and st.room_index(p.x, p.y) < 0
 
 
 # ---------------------------------------------------------------------------
-# Corridors
+# Hallways and regions
 # ---------------------------------------------------------------------------
 
-func _corridors(big: Array) -> Array:
+func _sides(n: bool, s: bool, w: bool, e: bool) -> Dictionary:
+	return {"n": n, "s": s, "w": w, "e": e}
+
+
+func _carve_all() -> void:
+	var r := inner()
 	var entry: Array = wing.entry
 	var d: Vector2i = wing.dir
-	var sd := Vector2i(absi(d.y), absi(d.x))
-	var first: Vector2i = entry[0] + d
-	var spine := Seg.new(first, d, sd, 2)
-	spine.spine = true
-	# How far the spine can run before it has to turn.
-	var room_ahead := _run_room(first, d)
-	var q: Array = []
-	_grow(spine, clampi(int(room_ahead * rng.rangef(0.45, 0.85)), 6, 60))
-	q.append(spine)
-	var turned := 0
-	var plus0 := _run_room(spine.cell(spine.length - 1, 1) + spine.side, spine.side) > _run_room(spine.cell(spine.length - 1, 0) - spine.side, -spine.side)
-	var t0 := _turn(spine, plus0, true)
-	if t0 != null:
-		turned = 1
-		q.append(t0)
-	# The big rooms claim their space along the first hallways, before branches fill the wing.
-	var pending_big: Array = _rooms(big) if not big.is_empty() else []
-	var qi := 0
-	while qi < q.size():
-		var s: Seg = q[qi]
-		qi += 1
-		if s.length < 2:
-			continue
-		# Children along the sides.
-		var i := rng.rint(3, 6)
-		while i < s.length - 2:
-			if corridor_cells < interior * CORRIDOR_BUDGET and rng.chance(0.5 if not s.spine else 0.6):
-				var plus := rng.chance(0.5)
-				var cw := 2
-				var roll := rng.nextf()
-				if roll < 0.07 and i + 4 < s.length:
-					cw = 4
-				elif roll < 0.18 and i + 3 < s.length:
-					cw = 3
-				var c := _child(s, i, plus, cw)
-				if c != null:
-					q.append(c)
-				i += cw
-			i += rng.rint(6, 11)
-		# The end: turn, split, carry on through an open hall, or stop dead.
-		if corridor_cells >= interior * CORRIDOR_BUDGET:
-			continue
-		if s == spine and t0 != null:
-			continue
-		var end_roll := rng.nextf()
-		if s.spine and turned == 0:
-			end_roll = 0.0
-		if end_roll < 0.42:
-			var plus := rng.chance(0.5)
-			if s.spine:
-				plus = _run_room(s.cell(s.length - 1, 1) + s.side, s.side) > _run_room(s.cell(s.length - 1, 0) - s.side, -s.side)
-			var t := _turn(s, plus, s.spine)
-			if t != null:
-				turned += 1
-				q.append(t)
-		elif end_roll < 0.62:
-			for plus in [true, false]:
-				var t := _turn(s, plus, false)
-				if t != null:
-					q.append(t)
-		elif end_roll < 0.72:
-			var t := _hall(s)
-			if t != null:
-				q.append(t)
-	_cover()
-	return pending_big
+	if d.x != 0:
+		# Horizontal entry hallway across the whole wing.
+		var y0: int = mini(entry[0].y, entry[1].y)
+		var cw := 2
+		_hallway(Rect2i(r.position.x, y0, r.size.x, cw), Vector2i(-d.x, 0))
+		_split(Rect2i(r.position.x, r.position.y, r.size.x, y0 - r.position.y), _sides(false, true, false, false))
+		_split(Rect2i(r.position.x, y0 + cw, r.size.x, r.end.y - y0 - cw), _sides(true, false, false, false))
+	else:
+		var x0: int = mini(entry[0].x, entry[1].x)
+		var cw := 2
+		_hallway(Rect2i(x0, r.position.y, cw, r.size.y), Vector2i(0, -d.y))
+		_split(Rect2i(r.position.x, r.position.y, x0 - r.position.x, r.size.y), _sides(false, false, false, true))
+		_split(Rect2i(x0 + cw, r.position.y, r.end.x - x0 - cw, r.size.y), _sides(false, false, true, false))
 
 
-## Tiles of solid interior from `p` (inclusive) in direction `d`.
-func _run_room(p: Vector2i, d: Vector2i) -> int:
-	var n := 0
-	while inside(p + d * n):
-		n += 1
-	return n
+## Carve a straight hallway covering `hr`. `along` is the direction it runs (only its axis matters).
+func _hallway(hr: Rect2i, along: Vector2i) -> void:
+	var vertical := along.x == 0
+	var sg: Seg
+	if vertical:
+		sg = Seg.new(hr.position, Vector2i(0, 1), Vector2i(1, 0), hr.size.x)
+		sg.length = hr.size.y
+	else:
+		sg = Seg.new(hr.position, Vector2i(1, 0), Vector2i(0, 1), hr.size.y)
+		sg.length = hr.size.x
+	for i in sg.length:
+		for j in sg.width:
+			var c := sg.cell(i, j)
+			st.set_c(c.x, c.y, S.CH_FLOOR)
+			st.zone[st.idx(c.x, c.y)] = z
+			sg.cells.append(c)
+	segs.append(sg)
 
 
-func _length() -> int:
+func _split(R: Rect2i, sd: Dictionary) -> void:
+	if R.size.x < 3 or R.size.y < 3:
+		return
+	var plan := _leaf_plan(R, sd)
+	var long := maxi(R.size.x, R.size.y)
+	var stop := false
+	if not plan.is_empty():
+		stop = long <= rng.rint(12, 24) or (long <= 40 and rng.chance(0.3))
+	if stop:
+		_leaf(R, sd, plan)
+		return
+	# Hallways must start on a hallway: vertical ones need a hallway north or south.
+	var can_v: bool = sd.n or sd.s
+	var can_h: bool = sd.w or sd.e
+	var order: Array = []
+	var too_deep_h := R.size.y > MAX_ROW_DEPTH * 2 + 3
+	var too_deep_v := R.size.x > MAX_ROW_DEPTH * 2 + 3
+	if can_v and can_h:
+		# Prefer long hallways: run along the longer side, cutting the shorter one.
+		if R.size.x >= R.size.y:
+			order = [false, true] if (too_deep_h or rng.chance(0.55)) else [true, false]
+		else:
+			order = [true, false] if (too_deep_v or rng.chance(0.55)) else [false, true]
+	elif can_v:
+		order = [true]
+	elif can_h:
+		order = [false]
+	for vertical in order:
+		if _try_split(R, sd, vertical):
+			return
+	if not plan.is_empty():
+		_leaf(R, sd, plan)
+	else:
+		_fallback_leaf(R, sd)
+
+
+func _hall_width() -> int:
 	var roll := rng.nextf()
-	if roll < 0.3:
-		return rng.rint(4, 9)
-	if roll < 0.78:
-		return rng.rint(10, 22)
-	return rng.rint(23, 44)
+	if roll < 0.07:
+		return 4
+	if roll < 0.2:
+		return 3
+	return 2
 
 
-## A wall tile that is part of a room's shell (next to its floor or a doorway) never becomes hallway.
-func _touches_room(c: Vector2i) -> bool:
-	for dy in range(-1, 2):
-		for dx in range(-1, 2):
-			var q := c + Vector2i(dx, dy)
-			if st.room_index(q.x, q.y) >= 0 or st.get_c(q.x, q.y) == S.CH_DOOR:
-				return true
+func _try_split(R: Rect2i, sd: Dictionary, vertical: bool) -> bool:
+	var cw := _hall_width()
+	var span := R.size.x if vertical else R.size.y
+	for attempt in 2:
+		var lo := MIN_CHILD
+		var hi := span - MIN_CHILD - cw
+		if hi < lo:
+			cw = 2
+			hi = span - MIN_CHILD - cw
+			if hi < lo:
+				return false
+		# Anywhere in the middle half, so rows of rooms vary in depth.
+		var mid := (lo + hi) / 2
+		var jitter := maxi(1, (hi - lo) / 2)
+		var at := clampi(mid + rng.rint(-jitter, jitter), lo, hi)
+		if vertical:
+			var x := R.position.x + at
+			_hallway(Rect2i(x, R.position.y, cw, R.size.y), Vector2i(0, 1))
+			_split(Rect2i(R.position.x, R.position.y, at, R.size.y), _with(sd, "e"))
+			_split(Rect2i(x + cw, R.position.y, R.end.x - x - cw, R.size.y), _with(sd, "w"))
+		else:
+			var y := R.position.y + at
+			_hallway(Rect2i(R.position.x, y, R.size.x, cw), Vector2i(1, 0))
+			_split(Rect2i(R.position.x, R.position.y, R.size.x, at), _with(sd, "s"))
+			_split(Rect2i(R.position.x, y + cw, R.size.x, R.end.y - y - cw), _with(sd, "n"))
+		return true
 	return false
 
 
-## Carve up to `max_len` rows of a segment; stops at the wing edge, at another hallway it joins,
-## or where it would run too close alongside one. Stubs shorter than two rows are undone.
-func _grow(s: Seg, max_len: int) -> void:
-	var i := 0
-	while i < max_len:
-		var ok := true
-		var hit := false
-		for j in s.width:
-			var c := s.cell(i, j)
-			if not inside(c):
-				ok = false
-				break
-			if st.get_c(c.x, c.y) != S.CH_WALL:
-				if is_corr(c):
-					hit = true
-				else:
-					ok = false
-					break
-			elif _touches_room(c):
-				ok = false
-				break
-		if not ok or hit:
-			break
-		if i >= 1:
-			var near := false
-			for k in range(1, CLEAR + 1):
-				if is_corr(s.cell(i, -k)) or is_corr(s.cell(i, s.width - 1 + k)):
-					near = true
-					break
-			if near:
-				break
-		for j in s.width:
-			var c := s.cell(i, j)
-			st.set_c(c.x, c.y, S.CH_FLOOR)
-			st.zone[st.idx(c.x, c.y)] = z
-			s.cells.append(c)
-		corridor_cells += s.width
-		i += 1
-	s.length = i
-	if s.length < 2 and not s.spine:
-		for c in s.cells:
-			st.set_c(c.x, c.y, S.CH_WALL)
-		corridor_cells -= s.cells.size()
-		s.cells.clear()
-		s.length = 0
-	else:
-		segs.append(s)
+func _with(sd: Dictionary, key: String) -> Dictionary:
+	var d := sd.duplicate()
+	d[key] = true
+	return d
 
 
-func _child(s: Seg, i: int, plus: bool, cw: int) -> Seg:
-	var start: Vector2i
-	var d: Vector2i
-	if plus:
-		start = s.cell(i, s.width)
-		d = s.side
-	else:
-		start = s.cell(i, -1)
-		d = -s.side
-	var c := Seg.new(start, d, s.dir, cw)
-	_grow(c, _length() if cw <= 3 else rng.rint(4, 8))
-	return c if c.length >= 2 else null
-
-
-func _turn(s: Seg, plus: bool, long: bool) -> Seg:
-	var base := s.length - s.width
-	if base < 0:
-		return null
-	var start := s.cell(base, s.width) if plus else s.cell(base, -1)
-	var d := s.side if plus else -s.side
-	var t := Seg.new(start, d, s.dir, s.width)
-	t.spine = long
-	_grow(t, rng.rint(18, 60) if long else _length())
-	return t if t.length >= 2 else null
-
-
-## A short open hall where a hallway widens out, then a hallway carrying on beyond it.
-func _hall(s: Seg) -> Seg:
-	var wd := rng.rint(5, 7)
-	var start := s.cell(s.length, 0) - s.side * ((wd - s.width) / 2)
-	var hall := Seg.new(start, s.dir, s.side, wd)
-	_grow(hall, rng.rint(5, 8))
-	if hall.length < 4:
-		return null
-	var on := Seg.new(hall.cell(hall.length, (wd - 2) / 2), s.dir, s.side, 2)
-	_grow(on, _length())
-	return on if on.length >= 2 else null
-
-
-## Reach far corners: from the hallway tile nearest to the farthest uncovered tile, run a
-## hallway toward it (straight along the longer axis, then turn).
-func _cover() -> void:
-	var tries := 0
-	var skip := {}
-	while tries < 14:
-		tries += 1
-		var dist := _distance_map()
-		var far := Vector2i(-1, -1)
-		var best := COVER_DIST
-		for y in range(rect.position.y + 1, rect.end.y - 1):
-			for x in range(rect.position.x + 1, rect.end.x - 1):
-				var v: int = dist.get(Vector2i(x, y), 9999)
-				if v > best and not skip.has(Vector2i(x, y)):
-					best = v
-					far = Vector2i(x, y)
-		if far.x < 0:
-			return
-		skip[far] = true
-		var from := _nearest_corr(far)
-		if from.x < 0:
-			return
-		var delta := far - from
-		var d := Vector2i(signi(delta.x), 0) if absi(delta.x) >= absi(delta.y) else Vector2i(0, signi(delta.y))
-		var sd := Vector2i(absi(d.y), absi(d.x))
-		# Start just outside the hallway, two wide along it.
-		var start := from + d
-		while is_corr(start) and inside(start):
-			start += d
-		var seg := Seg.new(start, d, sd, 2)
-		var run := absi(delta.x) if d.x != 0 else absi(delta.y)
-		_grow(seg, maxi(3, run))
-		if seg.length >= 3:
-			var other := Vector2i(0, signi(delta.y)) if d.x != 0 else Vector2i(signi(delta.x), 0)
-			if other != Vector2i.ZERO:
-				var t := _turn(seg, other == seg.side, false)
-				if t != null:
-					t.spine = false
-
-
-func _distance_map() -> Dictionary:
-	var dist := {}
-	var q: Array[Vector2i] = []
-	for s: Seg in segs:
-		for c in s.cells:
-			if not dist.has(c):
-				dist[c] = 0
-				q.append(c)
-	var qi := 0
-	while qi < q.size():
-		var p: Vector2i = q[qi]
-		qi += 1
-		var dv: int = dist[p]
-		for d in S.DIRS:
-			var n := p + d
-			if dist.has(n) or not inside(n):
+## How a region packs into rooms, or {} when it cannot. Rows run along x ("h") with doors north
+## or south, or along y ("v") with doors west or east. The longer row wins.
+func _leaf_plan(R: Rect2i, sd: Dictionary) -> Dictionary:
+	var best := {}
+	for horiz in [true, false]:
+		var depth := R.size.y if horiz else R.size.x
+		var length := R.size.x if horiz else R.size.y
+		var fa: bool = sd.n if horiz else sd.w
+		var fb: bool = sd.s if horiz else sd.e
+		var ea: bool = sd.w if horiz else sd.n
+		var eb: bool = sd.e if horiz else sd.s
+		var a := 1 if ea else 0
+		var b := length - 1 - (1 if eb else 0)
+		if b - a + 1 < MIN_ROW_DEPTH:
+			continue
+		var rows: Array = []
+		if fa and fb:
+			var inner_d := depth - 2
+			if inner_d >= MIN_ROW_DEPTH * 2 + 1 and inner_d <= MAX_ROW_DEPTH * 2 + 1:
+				var lo := maxi(MIN_ROW_DEPTH, inner_d - 1 - MAX_ROW_DEPTH)
+				var hi := mini(MAX_ROW_DEPTH, inner_d - 1 - MIN_ROW_DEPTH)
+				var d1 := rng.rint(lo, hi)
+				rows.append({"lo": 1, "hi": d1, "front": -1})
+				rows.append({"lo": d1 + 2, "hi": depth - 2, "front": 1})
+			elif inner_d >= MIN_ROW_DEPTH and inner_d <= MAX_ROW_DEPTH:
+				rows.append({"lo": 1, "hi": depth - 2, "front": -1 if rng.chance(0.5) else 1})
+			else:
 				continue
-			dist[n] = dv + 1
-			q.append(n)
-	return dist
-
-
-func _nearest_corr(p: Vector2i) -> Vector2i:
-	var best := Vector2i(-1, -1)
-	var bd := 1 << 30
-	for s: Seg in segs:
-		for c in s.cells:
-			var d := absi(c.x - p.x) + absi(c.y - p.y)
-			if d < bd:
-				bd = d
-				best = c
+		elif fa:
+			if depth - 1 < MIN_ROW_DEPTH or depth - 1 > MAX_ROW_DEPTH:
+				continue
+			rows.append({"lo": 1, "hi": depth - 1, "front": -1})
+		elif fb:
+			if depth - 1 < MIN_ROW_DEPTH or depth - 1 > MAX_ROW_DEPTH:
+				continue
+			rows.append({"lo": 0, "hi": depth - 2, "front": 1})
+		else:
+			continue
+		var score := b - a + 1
+		if best.is_empty() or score > int(best.score):
+			best = {"horiz": horiz, "a": a, "b": b, "rows": rows, "score": score}
 	return best
+
+
+## A region too deep for rows that cannot be split: one row against its hallway, the rest solid.
+func _fallback_leaf(R: Rect2i, sd: Dictionary) -> void:
+	for key in ["n", "s", "w", "e"]:
+		if not sd[key]:
+			continue
+		var horiz: bool = key == "n" or key == "s"
+		var depth := R.size.y if horiz else R.size.x
+		var opposite: String = {"n": "s", "s": "n", "w": "e", "e": "w"}[key]
+		var back_open: bool = sd[opposite]
+		var avail := depth - 1 - (1 if back_open else 0)
+		if avail < MIN_ROW_DEPTH:
+			continue
+		var d := mini(MAX_ROW_DEPTH, avail)
+		if d == avail and back_open:
+			# The row reaches the hallway behind it: plan it with both sides.
+			var both := sd.duplicate()
+			var p2 := _leaf_plan(R, both)
+			if not p2.is_empty():
+				_leaf(R, both, p2)
+				return
+			continue
+		var sub: Rect2i
+		match key:
+			"n": sub = Rect2i(R.position.x, R.position.y, R.size.x, d + 1)
+			"s": sub = Rect2i(R.position.x, R.end.y - d - 1, R.size.x, d + 1)
+			"w": sub = Rect2i(R.position.x, R.position.y, d + 1, R.size.y)
+			_: sub = Rect2i(R.end.x - d - 1, R.position.y, d + 1, R.size.y)
+		var only := _sides(key == "n", key == "s", key == "w", key == "e")
+		# Hallways at the ends of the row still need their end walls.
+		if horiz:
+			only.w = sd.w
+			only.e = sd.e
+		else:
+			only.n = sd.n
+			only.s = sd.s
+		var plan := _leaf_plan(sub, only)
+		if not plan.is_empty():
+			_leaf(sub, only, plan)
+			return
+
+
+func _leaf(R: Rect2i, sd: Dictionary, plan: Dictionary) -> void:
+	# Some regions become open halls: the wide, empty spaces between the hallways.
+	var w := R.size.x
+	var h := R.size.y
+	if w >= 5 and h >= 5 and w <= 14 and h <= 14 and rng.chance(0.08):
+		_open_hall(R)
+		return
+	var horiz: bool = plan.horiz
+	for row in plan.rows:
+		var lo: int = row.lo
+		var hi: int = row.hi
+		var d := hi - lo + 1
+		var front: Vector2i = (Vector2i(0, row.front) if horiz else Vector2i(row.front, 0))
+		var pos: int = plan.a
+		var end: int = plan.b
+		while pos <= end:
+			var rem := end - pos + 1
+			var wv := _pick_width(d)
+			if rem <= wv or (rem - wv - 1 < 3):
+				wv = rem
+				if wv > MAX_ROOM_W:
+					wv = rem - 4
+			wv = clampi(wv, 3, rem)
+			var rr: Rect2i
+			if horiz:
+				rr = Rect2i(R.position.x + pos, R.position.y + lo, wv, d)
+			else:
+				rr = Rect2i(R.position.x + lo, R.position.y + pos, d, wv)
+			slots.append({"rect": rr, "front": front, "kind": "", "wing": String(wing.id)})
+			pos += wv + 1
+
+
+func _pick_width(d: int) -> int:
+	if d <= 3:
+		return rng.rint(3, 5)
+	if d <= 5:
+		return rng.pick([3, 4, 4, 5, 5, 6, 6, 7, 8])
+	return rng.pick([4, 5, 6, 6, 7, 7, 8, 9, 9, 10, 11, 12])
+
+
+func _open_hall(R: Rect2i) -> void:
+	for y in range(R.position.y, R.end.y):
+		for x in range(R.position.x, R.end.x):
+			st.set_c(x, y, S.CH_FLOOR)
+			st.zone[st.idx(x, y)] = z
+	# Square pillars in a grid when there is room to walk around them.
+	if R.size.x >= 7 and R.size.y >= 7:
+		var y := R.position.y + 2
+		while y < R.end.y - 2:
+			var x := R.position.x + 2
+			while x < R.end.x - 2:
+				st.set_c(x, y, S.CH_WALL)
+				x += 3
+			y += 3
+	halls.append(R)
 
 
 # ---------------------------------------------------------------------------
 # Rooms
 # ---------------------------------------------------------------------------
 
-## Summed-area table of carved tiles over the wing rect, for O(1) "is this rectangle solid".
-var _sat := PackedInt32Array()
-var _sw := 0
+## Slot size in the room frame: w along the door wall, d away from it.
+static func slot_wd(slot: Dictionary) -> Vector2i:
+	var r: Rect2i = slot.rect
+	var f: Vector2i = slot.front
+	return Vector2i(r.size.x, r.size.y) if f.x == 0 else Vector2i(r.size.y, r.size.x)
 
 
-func _rebuild_sat() -> void:
-	_sw = rect.size.x + 1
-	_sat.resize(_sw * (rect.size.y + 1))
-	_sat.fill(0)
-	for y in rect.size.y:
-		var row := 0
-		for x in rect.size.x:
-			var gx := rect.position.x + x
-			var gy := rect.position.y + y
-			if st.cells[st.idx(gx, gy)] != S.CH_WALL:
-				row += 1
-			_sat[(y + 1) * _sw + x + 1] = _sat[y * _sw + x + 1] + row
-
-
-## Carved tiles inside [x0, x1] x [y0, y1] (global, inclusive).
-func _carved(x0: int, y0: int, x1: int, y1: int) -> int:
-	var lx0 := x0 - rect.position.x
-	var ly0 := y0 - rect.position.y
-	var lx1 := x1 - rect.position.x + 1
-	var ly1 := y1 - rect.position.y + 1
-	return _sat[ly1 * _sw + lx1] - _sat[ly0 * _sw + lx1] - _sat[ly1 * _sw + lx0] + _sat[ly0 * _sw + lx0]
-
-
-func _rooms(mandatory: Array) -> Array:
-	var pending: Array = mandatory.duplicate()
-	pending.sort_custom(func(a, b): return _min_area(a) > _min_area(b))
-	var cands := _frontage()
-	_rebuild_sat()
-	for pass_i in 2:
-		for cand in cands:
-			var wall_t: Vector2i = cand[0]
-			var n: Vector2i = cand[1]
-			if st.get_c(wall_t.x, wall_t.y) != S.CH_WALL or not is_corr(wall_t - n):
-				continue
-			var beyond := wall_t + n
-			if not inside(beyond) or st.get_c(beyond.x, beyond.y) != S.CH_WALL:
-				continue
-			var avail := _depth_avail(wall_t, n, 11)
-			if avail < 3:
-				continue
-			var order: Array = []
-			for k in pending:
-				order.append(k)
-			if pass_i == 0:
-				for i in 3:
-					var k := _fill_kind()
-					if k != "":
-						order.append(k)
-			for kind in order:
-				if _try_room(wall_t, n, kind, pass_i == 1, avail):
-					var idx := pending.find(kind)
-					if idx >= 0:
-						pending.remove_at(idx)
-					break
-		if pending.is_empty():
-			break
-	return pending
-
-
-func _min_area(kind: String) -> int:
-	var k: Dictionary = Rooms.KINDS[kind]
-	return int(k.w[0]) * int(k.d[0])
-
-
-func _fill_kind() -> String:
-	var kinds: Array = []
-	var weights: Array = []
-	for k in Rooms.KINDS.keys():
-		if Rooms.MAP_CAP.has(k) and int(map_counts.get(k, 0)) >= int(Rooms.MAP_CAP[k]):
+## Carve every slot that got a kind, with its door or archway.
+func place_rooms() -> void:
+	for slot in slots:
+		if String(slot.kind) == "":
 			continue
-		if Rooms.WING_CAP.has(k) and int(placed_kinds.get(k, 0)) >= int(Rooms.WING_CAP[k]):
-			continue
-		var wgt: float = Rooms.KINDS[k].weight
-		# Deeper wings lean toward the grim rooms.
-		if k == "morgue" or k == "radiology" or k == "lab":
-			wgt *= 0.4 + 0.4 * int(wing.depth)
-		if k == "waiting_room" or k == "cafeteria":
-			wgt *= 1.6 if int(wing.depth) <= 1 else 0.3
-		kinds.append(k)
-		weights.append(wgt)
-	var i := rng.weighted(weights)
-	return kinds[i] if i >= 0 else ""
+		_place_room(slot)
 
 
-## Hallway side tiles with solid wall beyond them: [[wall tile, outward dir]], in hallway order.
-func _frontage() -> Array:
-	var out: Array = []
-	var seen := {}
-	for s: Seg in segs:
-		for i in s.length:
-			for pair in [[0, -s.side], [s.width - 1, s.side]]:
-				var c := s.cell(i, pair[0])
-				var n: Vector2i = pair[1]
-				var key := _fkey(c + n, n)
-				if not seen.has(key):
-					seen[key] = true
-					out.append([c + n, n])
-		# Rooms at the dead end of a hallway, facing back down it.
-		if s.length >= 2:
-			for j in s.width:
-				var c := s.cell(s.length - 1, j)
-				var key := _fkey(c + s.dir, s.dir)
-				if not seen.has(key):
-					seen[key] = true
-					out.append([c + s.dir, s.dir])
-	return out
-
-
-func _fkey(p: Vector2i, n: Vector2i) -> int:
-	return ((p.y * 4096 + p.x) * 4) + (0 if n.y < 0 else (1 if n.y > 0 else (2 if n.x < 0 else 3)))
-
-
-## Solid interior rows straight behind a doorway (three tiles wide), up to cap.
-func _depth_avail(door: Vector2i, n: Vector2i, cap: int) -> int:
-	var along := Vector2i(absi(n.y), absi(n.x))
-	var k := 1
-	while k <= cap:
-		for j in [-1, 0, 1]:
-			var p := door + n * k + along * j
-			if not inside(p) or st.get_c(p.x, p.y) != S.CH_WALL:
-				return k - 1
-		k += 1
-	return cap
-
-
-func _try_room(door: Vector2i, n: Vector2i, kind: String, smallest: bool, avail: int) -> bool:
-	var k: Dictionary = Rooms.KINDS[kind]
-	if int(k.d[0]) > avail:
-		return false
-	var ws := range(int(k.w[1]), int(k.w[0]) - 1, -1)
-	var ds := range(mini(int(k.d[1]), avail), int(k.d[0]) - 1, -1)
-	if smallest:
-		ws.reverse()
-		ds.reverse()
-	elif rng.chance(0.35):
-		# Not always the biggest room that fits: some variety in size.
-		ws = [int(k.w[0]) + rng.rint(0, int(k.w[1]) - int(k.w[0]))] + ws
-	var vertical := n.x == 0
-	for D in ds:
-		for Wd in ws:
-			var offsets := [1, Wd - 2, Wd / 2]
-			if int(k.open) > 0:
-				offsets = [Wd / 2, Wd / 2 - 1, Wd / 2 + 1]
-			for a in offsets:
-				if a < 0 or a > Wd - 1:
-					continue
-				var r := _rect_for(door, n, Wd, D, a)
-				if not _solid_with_walls(r):
-					continue
-				_place_room(r, door, n, kind, a)
-				return true
-	return false
-
-
-func _rect_for(door: Vector2i, n: Vector2i, Wd: int, D: int, a: int) -> Rect2i:
-	if n == Vector2i(0, -1):
-		return Rect2i(door.x - a, door.y - D, Wd, D)
-	if n == Vector2i(0, 1):
-		return Rect2i(door.x - a, door.y + 1, Wd, D)
-	if n == Vector2i(-1, 0):
-		return Rect2i(door.x - D, door.y - a, D, Wd)
-	return Rect2i(door.x + 1, door.y - a, D, Wd)
-
-
-func _solid_with_walls(r: Rect2i) -> bool:
-	var x0 := r.position.x - 1
-	var y0 := r.position.y - 1
-	var x1 := r.end.x
-	var y1 := r.end.y
-	if x0 < rect.position.x or y0 < rect.position.y or x1 > rect.end.x - 1 or y1 > rect.end.y - 1:
-		return false
-	return _carved(x0, y0, x1, y1) == 0
-
-
-func _place_room(r: Rect2i, door: Vector2i, n: Vector2i, kind: String, a: int) -> void:
+func _place_room(slot: Dictionary) -> void:
+	var r: Rect2i = slot.rect
+	var f: Vector2i = slot.front
+	var kind: String = slot.kind
+	var wd := slot_wd(slot)
+	var open_w := int(Rooms.KINDS[kind].open)
+	var a: int
+	if open_w > 0:
+		a = wd.x / 2
+	elif wd.x <= 5:
+		a = 1 if rng.chance(0.5) else wd.x - 2
+	else:
+		a = rng.pick([1, wd.x / 2, wd.x - 2])
+	a = clampi(a, 0, wd.x - 1)
+	var door: Vector2i
+	var along := Vector2i(absi(f.y), absi(f.x))
+	if f == Vector2i(0, 1):
+		door = Vector2i(r.position.x + a, r.end.y)
+	elif f == Vector2i(0, -1):
+		door = Vector2i(r.position.x + a, r.position.y - 1)
+	elif f == Vector2i(1, 0):
+		door = Vector2i(r.end.x, r.position.y + a)
+	else:
+		door = Vector2i(r.position.x - 1, r.position.y + a)
 	var side := "S"
-	if n == Vector2i(0, 1):
+	if f == Vector2i(0, -1):
 		side = "N"
-	elif n == Vector2i(-1, 0):
+	elif f == Vector2i(1, 0):
 		side = "E"
-	elif n == Vector2i(1, 0):
+	elif f == Vector2i(-1, 0):
 		side = "W"
+	var n := -f
 	var ri := st.add_room(r, kind, z, String(wing.id), int(wing.depth), {"side": side, "door": door, "entry": door + n})
-	placed_kinds[kind] = int(placed_kinds.get(kind, 0)) + 1
-	map_counts[kind] = int(map_counts.get(kind, 0)) + 1
 	st.set_c(door.x, door.y, S.CH_DOOR)
 	st.zone[st.idx(door.x, door.y)] = z
 	(st.rooms[ri].doors as Array).append(door)
-	var open_w := int(Rooms.KINDS[kind].open)
 	if open_w > 0:
 		# An archway instead of a door: the wall tiles either side of the door open too.
 		st.set_c(door.x, door.y, S.CH_FLOOR)
-		var along := Vector2i(absi(n.y), absi(n.x))
 		var half := (open_w - 1) / 2
 		for k in range(-half, open_w - half):
 			var t := door + along * k
-			var inner := t + n
-			if st.room_index(inner.x, inner.y) != ri or not is_corr(t - n):
+			var inside := t + n
+			if st.room_index(inside.x, inside.y) != ri or not is_corr(t + f):
 				continue
 			st.set_c(t.x, t.y, S.CH_FLOOR)
 			st.zone[st.idx(t.x, t.y)] = z
 			(st.rooms[ri].open as Array).append(t)
 		(st.rooms[ri].doors as Array).clear()
-	_rebuild_sat()
 
 
-func _furnish() -> void:
+## Furniture, hallway dressing and lights, once every room on the map exists.
+func finish() -> void:
 	for ri in st.rooms.size():
 		if int(st.rooms[ri].zone) == z:
 			Rooms.furnish(st, ri, rng)
+	_dress_corridors()
+	_lights()
 
 
 # ---------------------------------------------------------------------------
@@ -583,10 +436,13 @@ func _wall_side_ok(c: Vector2i, n: Vector2i) -> bool:
 		return false
 	if st.door_near(c.x, c.y) or st.keep[st.idx(c.x, c.y)] != 0 or st.blocked[st.idx(c.x, c.y)] != 0:
 		return false
-	# Not in an archway's mouth.
+	# Not in an archway's mouth, and not against a pillar.
 	for d in S.DIRS:
 		var q := c + d
 		if st.get_c(q.x, q.y) == S.CH_FLOOR and st.room_index(q.x, q.y) >= 0:
+			return false
+	for hr: Rect2i in halls:
+		if hr.grow(1).has_point(c):
 			return false
 	return true
 
@@ -614,7 +470,7 @@ func _dress_corridors() -> void:
 					if far and st.add_container(c, n, "trauma_bag", -1):
 						bags += 1
 						bag_spots.append(c)
-				elif roll < 0.5:
+				elif roll < 0.42:
 					var weights: Array = []
 					for e in CLUTTER:
 						weights.append(e[1])
@@ -622,16 +478,13 @@ func _dress_corridors() -> void:
 					var depth := Defs.size(kind).z * 0.5 / Defs.TILE + 0.03
 					var face := Vector2(-n.x, -n.y)
 					var pos := Vector2(c.x + 0.5, c.y + 0.5) + Vector2(n.x, n.y) * (0.5 - depth)
-					if kind == "gurney" or kind == "gurney_body" or kind == "bench":
+					if kind == "gurney" or kind == "gurney_body":
 						# Long things lie along the wall.
 						face = Vector2(s.dir.x, s.dir.y) * (1 if rng.chance(0.5) else -1)
 						var hw := Defs.size(kind).x * 0.5 / Defs.TILE + 0.03
 						pos = Vector2(c.x + 0.5, c.y + 0.5) + Vector2(n.x, n.y) * (0.5 - hw)
-						if kind == "bench":
-							face = Vector2(-n.x, -n.y)
-							pos = Vector2(c.x + 0.5, c.y + 0.5) + Vector2(n.x, n.y) * (0.5 - depth)
 					st.put(kind, pos, Defs.yaw_facing(face), -1)
-				elif roll < 0.6:
+				elif roll < 0.52:
 					var mount := "extinguisher" if rng.chance(0.6) else "wall_clock"
 					st.put(mount, Vector2(c.x + 0.5, c.y + 0.5) + Vector2(n.x, n.y) * 0.5, Defs.yaw_facing(Vector2(-n.x, -n.y)), -1)
 			i += rng.rint(4, 9)
@@ -640,9 +493,9 @@ func _dress_corridors() -> void:
 		if s.length >= 14 and rng.chance(0.35):
 			var c := s.cell(s.length - 1, 0)
 			var n := -s.side
-			if st.get_c(c.x + n.x, c.y + n.y) == S.CH_WALL:
+			if st.get_c(c.x + n.x, c.y + n.y) == S.CH_WALL and is_corr(c):
 				st.put("security_camera", Vector2(c.x + 0.5, c.y + 0.5) + Vector2(n.x, n.y) * 0.5, Defs.yaw_facing(Vector2(-s.dir.x, -s.dir.y)), -1)
-	# Any trauma bags still missing go on the longest free walls.
+	# Every wing gets at least one trauma bag on a hallway wall.
 	if bags == 0:
 		for s: Seg in segs:
 			if bags > 0:
@@ -652,6 +505,13 @@ func _dress_corridors() -> void:
 				if _wall_side_ok(c, -s.side) and st.add_container(c, -s.side, "trauma_bag", -1):
 					bags += 1
 					break
+	# Benches and a plant or two in the open halls.
+	for hr: Rect2i in halls:
+		if rng.chance(0.6):
+			var p := Vector2(hr.position.x + hr.size.x * 0.5, hr.position.y + 1.0)
+			st.put("bench", p, Defs.yaw_facing(Vector2(0, 1)), -1)
+		if rng.chance(0.4):
+			st.put("plant", Vector2(hr.position.x + 0.5, hr.end.y - 0.5), 0.0, -1)
 
 
 func _lights() -> void:
@@ -665,6 +525,17 @@ func _lights() -> void:
 			if not seen.has(c) and st.walkable(c.x, c.y):
 				seen[c] = true
 				st.lights.append({"tile": c, "zone": z, "mode": -1})
+	for hr: Rect2i in halls:
+		var y := hr.position.y + 1
+		while y < hr.end.y:
+			var x := hr.position.x + 1
+			while x < hr.end.x:
+				var t := Vector2i(x, y)
+				if not seen.has(t) and st.walkable(t.x, t.y):
+					seen[t] = true
+					st.lights.append({"tile": t, "zone": z, "mode": -1})
+				x += 4
+			y += 4
 	for r in st.rooms:
 		if int(r.zone) != z:
 			continue

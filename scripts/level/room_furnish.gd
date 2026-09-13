@@ -399,9 +399,24 @@ static func _morgue(f: Frame) -> void:
 	for iu in range(1, f.W - 1):
 		f.back("morgue_fridge_open" if iu == open_at else "morgue_fridge", iu + 0.5)
 	var tables := [f.W * 0.5] if f.W < 8 else [f.W * 0.5 - 1.5, f.W * 0.5 + 1.5]
+	var placed_u: Array = []
 	for i in tables.size():
-		if f.put("autopsy_table", tables[i], f.D * 0.5 - 0.2, 0, -1) and i == 0:
-			f.put("covered_body", tables[i], f.D * 0.5 - 0.2, 0, -1, {"y": 0.92})
+		# Keep clear of the doorway: try the planned spot, then either side of it.
+		for du in [0.0, 1.0, -1.0, 2.0, -2.0]:
+			var u: float = clampf(tables[i] + du, 0.8, f.W - 0.8)
+			var tv := f.D * 0.5 - 0.2
+			var ok := f.put("autopsy_table", u, tv, 0, -1)
+			if not ok:
+				tv += 0.5
+				ok = f.put("autopsy_table", u, tv, 0, -1)
+			if ok:
+				if placed_u.is_empty():
+					f.put("covered_body", u, tv, 0, -1, {"y": 0.92})
+				placed_u.append(u)
+				break
+	if placed_u.is_empty():
+		placed_u.append(f.W * 0.5)
+	tables = placed_u
 	f.container_any([[0, 1], [0, 2]], -1, 0, "drawer_unit")
 	f.container_any([[f.W - 1, 2], [f.W - 1, 3], [0, 3]], 1, 0, "pegboard")
 	f.put("instrument_cart", tables[0] + 1.1, f.D * 0.5 + 0.9, -1, 0)
@@ -439,6 +454,13 @@ static func _cafeteria(f: Frame) -> void:
 					f.put("tray", u + 0.3, v, 0, -1, {"y": 0.75})
 			u += 3.2
 		v += 2.8
+	if not f.has_piece("cafeteria_table"):
+		# A shallow cafeteria: one table where there is room.
+		for c in [[f.W * 0.5, 2.0], [f.W * 0.5 - 1.5, 2.0], [f.W * 0.5 + 1.5, 2.0], [f.W * 0.5, 1.6]]:
+			if f.put("cafeteria_table", c[0], c[1], 0, -1):
+				f.put("school_chair", c[0] - 0.45, c[1] - 0.78, 0, 1)
+				f.put("school_chair", c[0] + 0.45, c[1] + 0.78, 0, -1)
+				break
 	f.put("vending", f.half("vending"), f.D - 3.5, 1, 0)
 	f.put("bin", f.W - 0.35, 0.5, -1, 0)
 	f.mount_left("wall_clock", 1.5)

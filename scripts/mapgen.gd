@@ -136,29 +136,15 @@ static func _attempt(seed: int, attempt: int) -> Dictionary:
 	Entrance.build(st, ex, ey, 2 if four else 1)
 	var neutral_rect := Neutral.build(st, ex + 17.0, ey1 + 1, rng)
 
-	# ---- which special rooms go in which wing ----------------------------------------------
-	var n := defs.size()
-	var mandatory := {}
+	# ---- wings: hallways and room slots, then which room is which --------------------------
+	var gens: Array = []
 	for d in defs:
-		mandatory[d.id] = ["nurse_station", "supply_closet", "janitor_closet", "patient_room", "patient_room", "office", "restroom"]
-	var at_depth := func(k: int) -> String:
-		for d in defs:
-			if int(d.depth) == clampi(k, 1, n):
-				return d.id
-		return defs[0].id
-	(mandatory[at_depth.call(1)] as Array).append("waiting_room")
-	(mandatory[at_depth.call(2)] as Array).append("cafeteria")
-	(mandatory[at_depth.call(rng.rint(2, n))] as Array).append("pharmacy")
-	(mandatory[at_depth.call(n - 1)] as Array).append("lab")
-	(mandatory[at_depth.call(n)] as Array).append("radiology")
-	(mandatory[at_depth.call(n)] as Array).append("morgue")
-
-	var missing: Array = []
-	var counts := {}
-	for d in defs:
-		var res := WingGen.generate(st, d, rng, mandatory[d.id], counts)
-		for k in res.pending:
-			missing.append("%s: %s" % [d.id, k])
+		gens.append(WingGen.carve(st, d, rng))
+	var missing := _assign_kinds(gens, defs, rng)
+	for g in gens:
+		g.place_rooms()
+	for g in gens:
+		g.finish()
 
 	_place_markers(st, rng)
 	_light_modes(st, sub)
@@ -190,6 +176,117 @@ static func _attempt(seed: int, attempt: int) -> Dictionary:
 		"spots": st.spots,
 		"props": [],
 	}
+
+
+## Rooms every wing must have, so each wing can supply every surgical item.
+const WING_ROOMS := ["nurse_station", "supply_closet", "janitor_closet", "patient_room", "patient_room", "office", "restroom"]
+
+
+## Does a slot of w x d (along the door wall x away from it) suit a room kind?
+static func _fits(kind: String, wd: Vector2i, tol_w: int, tol_d: int, shrink := 0) -> bool:
+	var k: Dictionary = Rooms.KINDS[kind]
+	return wd.x >= int(k.w[0]) - shrink and wd.x <= int(k.w[1]) + tol_w \
+			and wd.y >= maxi(3, int(k.d[0]) - shrink) and wd.y <= int(k.d[1]) + tol_d
+
+
+static func _slack(kind: String, wd: Vector2i) -> int:
+	var k: Dictionary = Rooms.KINDS[kind]
+	return absi(wd.x - int(k.w[0])) + absi(wd.y - int(k.d[0]))
+
+
+## Give every room slot a kind: the rooms each wing needs, the map's special rooms in the wings
+## the design wants them (deeper wings get the lab, radiology and the morgue), then weighted
+## filler. Returns what could not be placed anywhere.
+static func _assign_kinds(gens: Array, defs: Array, rng: Rng) -> Array:
+	var n := defs.size()
+	var by_depth := {}
+	for i in n:
+		by_depth[int(defs[i].depth)] = i
+	var want: Array = []
+	for i in n:
+		for k in WING_ROOMS:
+			want.append({"wing": i, "kind": k, "roam": false})
+	var special := [["waiting_room", 1], ["cafeteria", mini(2, n)], ["pharmacy", rng.rint(2, n)],
+			["lab", n - 1], ["radiology", n], ["morgue", n]]
+	for sp in special:
+		want.append({"wing": by_depth[clampi(int(sp[1]), 1, n)], "kind": sp[0], "roam": true})
+	# Biggest rooms first: they have the fewest slots to choose from.
+	want.sort_custom(func(a, b):
+		var aa := int(Rooms.KINDS[a.kind].w[0]) * int(Rooms.KINDS[a.kind].d[0])
+		var ba := int(Rooms.KINDS[b.kind].w[0]) * int(Rooms.KINDS[b.kind].d[0])
+		return aa > ba or (aa == ba and String(a.kind) < String(b.kind)))
+	var map_counts := {}
+	var wing_counts: Array = []
+	for i in n:
+		wing_counts.append({})
+	var missing: Array = []
+	for w in want:
+		var order: Array = [w.wing]
+		if w.roam:
+			# Nearest depth first.
+			var others: Array = range(n)
+			others.erase(w.wing)
+			var d0 := int(defs[w.wing].depth)
+			others.sort_custom(func(a, b): return absi(int(defs[a].depth) - d0) < absi(int(defs[b].depth) - d0))
+			order.append_array(others)
+		var done := false
+		for tol in [[0, 0, 0], [1, 0, 0], [2, 1, 0], [3, 2, 1]]:
+			for gi in order:
+				var best: Array = []
+				for slot in gens[gi].slots:
+					if String(slot.kind) != "":
+						continue
+					var wd: Vector2i = WingGen.slot_wd(slot)
+					if _fits(w.kind, wd, tol[0], tol[1], tol[2]):
+						best.append([_slack(w.kind, wd), slot])
+				if best.is_empty():
+					continue
+				best.sort_custom(func(a, b): return a[0] < b[0])
+				var pick: Dictionary = best[rng.rint(0, mini(2, best.size() - 1))][1]
+				pick.kind = w.kind
+				map_counts[w.kind] = int(map_counts.get(w.kind, 0)) + 1
+				wing_counts[gi][w.kind] = int(wing_counts[gi].get(w.kind, 0)) + 1
+				done = true
+				break
+			if done:
+				break
+		if not done:
+			missing.append("%s: %s" % [defs[w.wing].id, w.kind])
+	# Filler, weighted by depth.
+	for gi in n:
+		var depth := int(defs[gi].depth)
+		for slot in gens[gi].slots:
+			if String(slot.kind) != "":
+				continue
+			var wd: Vector2i = WingGen.slot_wd(slot)
+			var kinds: Array = []
+			var weights: Array = []
+			for k in Rooms.KINDS.keys():
+				if not _fits(k, wd, 2, 1):
+					continue
+				if Rooms.MAP_CAP.has(k) and int(map_counts.get(k, 0)) >= int(Rooms.MAP_CAP[k]):
+					continue
+				if Rooms.WING_CAP.has(k) and int(wing_counts[gi].get(k, 0)) >= int(Rooms.WING_CAP[k]):
+					continue
+				var wgt: float = Rooms.KINDS[k].weight
+				if k == "morgue" or k == "radiology" or k == "lab":
+					wgt *= 0.4 + 0.4 * depth
+				if k == "waiting_room" or k == "cafeteria":
+					wgt *= 1.6 if depth <= 1 else 0.3
+				kinds.append(k)
+				weights.append(wgt)
+			var kind := ""
+			var i := rng.weighted(weights)
+			if i >= 0:
+				kind = kinds[i]
+			elif wd.x <= 5 and wd.y <= 5:
+				kind = "supply_closet"
+			else:
+				kind = "patient_room"
+			slot.kind = kind
+			map_counts[kind] = int(map_counts.get(kind, 0)) + 1
+			wing_counts[gi][kind] = int(wing_counts[gi].get(kind, 0)) + 1
+	return missing
 
 
 ## Player spawns are stamped by the entrance; here: tool spawn candidates in wing rooms and
