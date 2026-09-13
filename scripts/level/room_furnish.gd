@@ -12,18 +12,18 @@ const Rng := preload("res://scripts/level/rng.gd")
 ## w / d: interior size ranges along / away from the door wall. open: archway width instead of
 ## a door (0 = door). weight: how often it fills leftover frontage. label: the sign over the door.
 const KINDS := {
-	"patient_room": {"w": [4, 7], "d": [4, 6], "weight": 26.0, "open": 0, "label": "WARD"},
-	"supply_closet": {"w": [3, 5], "d": [3, 5], "weight": 7.0, "open": 0, "label": "SUPPLY"},
-	"pharmacy": {"w": [6, 9], "d": [5, 7], "weight": 1.5, "open": 0, "label": "PHARMACY"},
-	"nurse_station": {"w": [5, 8], "d": [4, 5], "weight": 2.5, "open": 3, "label": "NURSES"},
-	"waiting_room": {"w": [7, 11], "d": [5, 7], "weight": 0.8, "open": 3, "label": "WAITING"},
-	"restroom": {"w": [4, 6], "d": [4, 5], "weight": 3.5, "open": 0, "label": "RESTROOM"},
-	"office": {"w": [4, 6], "d": [4, 5], "weight": 7.0, "open": 0, "label": "OFFICE"},
-	"lab": {"w": [6, 9], "d": [5, 7], "weight": 1.5, "open": 0, "label": "LABORATORY"},
-	"radiology": {"w": [6, 8], "d": [6, 8], "weight": 1.0, "open": 0, "label": "RADIOLOGY"},
-	"morgue": {"w": [6, 9], "d": [5, 7], "weight": 0.6, "open": 0, "label": "MORGUE"},
-	"janitor_closet": {"w": [3, 4], "d": [3, 4], "weight": 3.0, "open": 0, "label": "JANITOR"},
-	"cafeteria": {"w": [9, 13], "d": [6, 9], "weight": 0.3, "open": 4, "label": "CAFETERIA"},
+	"patient_room": {"w": [3, 6], "d": [3, 4], "weight": 26.0, "open": 0, "label": "WARD"},
+	"supply_closet": {"w": [3, 4], "d": [3, 3], "weight": 7.0, "open": 0, "label": "SUPPLY"},
+	"pharmacy": {"w": [4, 7], "d": [4, 5], "weight": 1.5, "open": 0, "label": "PHARMACY"},
+	"nurse_station": {"w": [4, 6], "d": [3, 4], "weight": 2.5, "open": 3, "label": "NURSES"},
+	"waiting_room": {"w": [5, 8], "d": [4, 5], "weight": 0.8, "open": 3, "label": "WAITING"},
+	"restroom": {"w": [3, 5], "d": [3, 4], "weight": 3.5, "open": 0, "label": "RESTROOM"},
+	"office": {"w": [3, 4], "d": [3, 4], "weight": 7.0, "open": 0, "label": "OFFICE"},
+	"lab": {"w": [4, 7], "d": [4, 5], "weight": 1.5, "open": 0, "label": "LABORATORY"},
+	"radiology": {"w": [4, 6], "d": [4, 6], "weight": 1.0, "open": 0, "label": "RADIOLOGY"},
+	"morgue": {"w": [4, 7], "d": [4, 5], "weight": 0.6, "open": 0, "label": "MORGUE"},
+	"janitor_closet": {"w": [3, 3], "d": [3, 3], "weight": 3.0, "open": 0, "label": "JANITOR"},
+	"cafeteria": {"w": [7, 11], "d": [5, 6], "weight": 0.3, "open": 4, "label": "CAFETERIA"},
 }
 
 ## Most of a kind on one map, and in one wing.
@@ -47,16 +47,17 @@ const REQUIRED := {
 	"supply_closet": ["steel_shelves"],
 	"pharmacy": ["pharmacy_counter", "med_shelf"],
 	"nurse_station": ["office_chair"],
-	"waiting_room": ["chair_row", "magazine_table", "reception_desk", "tv_wall"],
+	"waiting_room": ["chair_row", "magazine_table", "tv_wall"],
 	"restroom": ["stall", "wall_sink"],
 	"office": ["office_desk", "office_chair", "filing_cabinet"],
 	"lab": [["lab_bench", "lab_bench_scope"], "fume_hood"],
-	"radiology": ["ct_scanner", "console_desk"],
+	"radiology": ["ct_scanner", "lightbox"],
 	"morgue": [["morgue_fridge", "morgue_fridge_open"], "autopsy_table"],
 	"janitor_closet": ["mop_sink"],
 	"cafeteria": ["serving_counter", "cafeteria_table", "school_chair"],
-	"break_room": ["time_clock", "wall_phone", "break_table", "lockers"],
-	"or": ["or_table", "scrub_sink"],
+	"break_room": ["time_clock", "wall_phone", "break_table", "sofa"],
+	"or": ["or_table", "surgical_lamp", "anesthesia_cart"],
+	"scrub_room": ["scrub_sink"],
 	"lobby": ["reception_desk", "chair_row"],
 	"locker_room": ["lockers", "bench"],
 }
@@ -285,19 +286,25 @@ static func _supply_closet(f: Frame) -> void:
 
 
 static func _pharmacy(f: Frame) -> void:
-	# Fridges first along the back wall, then the counter across the front with a gate at one end.
-	var placed := 0
-	for iu in range(0, f.W, 2):
-		if placed < 3 and f.container(iu, f.D - 1, 0, 1, "med_fridge"):
-			placed += 1
+	# The counter across the front with a gate at one end, then the back wall: fridges at the
+	# ends (and the middle of a wide room), medicine shelves between them, more shelves down the
+	# side walls of a deep room.
 	var gate := f.W - 1 if f.door_u < f.W / 2 else 0
 	f.keep_cell(gate, 1)
 	for iu in f.W:
 		if iu == gate:
 			continue
 		f.put("pharmacy_counter", iu + 0.5, 1.5, 0, -1)
-
-	for iv in range(2, f.D - 1):
+	var fridge_cols := [0, f.W - 1]
+	if f.W >= 6:
+		fridge_cols.append(f.W / 2)
+	for iu in f.W:
+		if fridge_cols.has(iu):
+			if not f.container(iu, f.D - 1, 0, 1, "med_fridge"):
+				f.back("med_shelf", iu + 0.5)
+		else:
+			f.back("med_shelf", iu + 0.5)
+	for iv in range(2, f.D - 2):
 		f.left("med_shelf", iv + 0.5)
 		f.right("med_shelf", iv + 0.5)
 	f.mount_back("wall_clock", f.W - 0.5)
@@ -319,23 +326,28 @@ static func _nurse_station(f: Frame) -> void:
 
 
 static func _waiting_room(f: Frame) -> void:
-	f.mount_back("tv_wall", f.W * 0.35)
-	var rows := [f.D - 2.4]
-	if f.D >= 7:
-		rows.append(f.D - 4.0)
-	var u := 1.3
-	while u + 0.6 < f.W - 3.2:
-		for v in rows:
+	# Rows of joined seats facing a television on the back wall, a reception desk down one side
+	# of a wide room, magazines and a vending machine.
+	var desk := f.W >= 7
+	var right_edge := f.W - (2.2 if desk else 0.4)
+	f.mount_back("tv_wall", right_edge * 0.5)
+	var rows := [1.75]
+	if f.D >= 5:
+		rows.append(3.15)
+	for v in rows:
+		var u := 0.95
+		while u + 0.6 <= right_edge:
 			f.put("chair_row", u, v, 0, 1)
-		u += 1.5
-	f.put("reception_desk", f.W - 1.25, f.D * 0.5 + 0.3, -1, 0)
-	f.put("office_chair", f.W - 0.45, f.D * 0.5 + 0.3, -1, 0)
-	f.put("magazine_table", 0.6, 1.4, 1, 0)
-	f.put("plant", 0.4, f.D - 0.4, 0, -1)
-	f.put("plant", f.W - 0.4, f.D - 0.4, 0, -1)
-	f.put("vending", f.half("vending"), f.D - 1.8, 1, 0)
-	f.put("bin", f.W - 0.35, 0.4, -1, 0)
-	f.mount_left("wall_clock", 2.5)
+			u += 1.25
+	if desk:
+		f.put("reception_desk", f.W - 0.95, f.D * 0.5, -1, 0)
+		f.put("office_chair", f.W - 0.3, f.D * 0.5, -1, 0)
+	if not f.put("magazine_table", 0.6, f.D - 0.65, 1, 0):
+		f.put("magazine_table", right_edge - 0.6, f.D - 0.65, -1, 0)
+	f.put("plant", 0.35, f.D - 0.35, 0, -1)
+	f.put("vending", f.half("vending"), 0.9, 1, 0)
+	f.put("bin", right_edge - 0.3, 0.4, -1, 0)
+	f.mount_left("wall_clock", f.D * 0.5)
 
 
 static func _restroom(f: Frame) -> void:
@@ -384,11 +396,28 @@ static func _lab(f: Frame) -> void:
 
 
 static func _radiology(f: Frame) -> void:
-	f.put("ct_scanner", f.W * 0.5 + 0.5, f.D * 0.5 + 0.6, 0, -1)
-	if not f.left("console_desk", 1.6):
-		f.right("console_desk", 1.6)
-	f.put("lead_partition", 1.0, 2.9, 0, 1)
-	f.right("gurney", f.D - 1.6)
+	# The scanner along the room's long axis, couch toward the door, then the console desk
+	# behind a lead partition wherever there is space.
+	var placed := false
+	var tries: Array = []
+	if f.D >= f.W:
+		for du in [0.0, 0.5, -0.5, 1.0, -1.0]:
+			tries.append([f.W * 0.5 + du, f.D * 0.5 + 0.35, 0, -1])
+	for dv in [0.0, 0.5, -0.5, 1.0]:
+		tries.append([f.W * 0.5 + 0.3, f.D * 0.5 + dv, 1, 0])
+		tries.append([f.W * 0.5 - 0.3, f.D * 0.5 + dv, -1, 0])
+	if f.D < f.W:
+		for du in [0.0, 0.5, -0.5]:
+			tries.append([f.W * 0.5 + du, f.D * 0.5 + 0.35, 0, -1])
+	for t in tries:
+		if f.put("ct_scanner", t[0], t[1], t[2], t[3]):
+			placed = true
+			break
+	if not f.left("console_desk", 1.4) and not f.right("console_desk", 1.4) and not f.back("console_desk", 0.9):
+		f.back("console_desk", f.W - 0.9)
+	f.put("lead_partition", 1.0, 2.4, 0, 1)
+	if not f.right("gurney", f.D - 1.6):
+		f.left("gurney", f.D - 1.6)
 	f.mount_left("lightbox", f.D - 1.5)
 	f.mount_front("radiation_sign", clampf(f.door_u + 1.3, 0.3, f.W - 0.3))
 	f.st.rooms[f.room]["door_style"] = "lead"
@@ -398,21 +427,23 @@ static func _morgue(f: Frame) -> void:
 	var open_at := f.rng.rint(1, maxi(1, f.W - 2))
 	for iu in range(1, f.W - 1):
 		f.back("morgue_fridge_open" if iu == open_at else "morgue_fridge", iu + 0.5)
-	var tables := [f.W * 0.5] if f.W < 8 else [f.W * 0.5 - 1.5, f.W * 0.5 + 1.5]
+	var tables := [f.W * 0.5] if f.W < 7 else [f.W * 0.5 - 1.5, f.W * 0.5 + 1.5]
 	var placed_u: Array = []
 	for i in tables.size():
-		# Keep clear of the doorway: try the planned spot, then either side of it.
+		# Keep clear of the doorway: try the planned spot, then either side of it, then lying
+		# across the room.
+		var tries: Array = []
 		for du in [0.0, 1.0, -1.0, 2.0, -2.0]:
 			var u: float = clampf(tables[i] + du, 0.8, f.W - 0.8)
-			var tv := f.D * 0.5 - 0.2
-			var ok := f.put("autopsy_table", u, tv, 0, -1)
-			if not ok:
-				tv += 0.5
-				ok = f.put("autopsy_table", u, tv, 0, -1)
-			if ok:
+			tries.append([u, f.D * 0.5 - 0.2, 0, -1])
+			tries.append([u, f.D * 0.5 + 0.3, 0, -1])
+		for dv in [0.0, -0.5, 0.5]:
+			tries.append([tables[i], f.D * 0.5 - 0.3 + dv, 1, 0])
+		for t in tries:
+			if f.put("autopsy_table", t[0], t[1], t[2], t[3]):
 				if placed_u.is_empty():
-					f.put("covered_body", u, tv, 0, -1, {"y": 0.92})
-				placed_u.append(u)
+					f.put("covered_body", t[0], t[1], t[2], t[3], {"y": 0.92})
+				placed_u.append(t[0])
 				break
 	if placed_u.is_empty():
 		placed_u.append(f.W * 0.5)

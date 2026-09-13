@@ -43,7 +43,7 @@ const MONSTER_MIN_DIST := 18
 const MAX_ATTEMPTS := 8
 
 ## Rooms where monsters never spawn and nothing a case needs is placed.
-const SAFE_ROOMS := ["or", "break_room", "locker_room", "lobby"]
+const SAFE_ROOMS := ["or", "scrub_room", "break_room", "locker_room", "lobby"]
 ## Wing ids of the zones that are not wings.
 const SAFE_WINGS := ["entrance", "neutral"]
 
@@ -92,9 +92,9 @@ static func _attempt(seed: int, attempt: int) -> Dictionary:
 	var sub := seed if attempt == 0 else (seed * 7919 + attempt * 104729) & 0x7FFFFFFF
 	var rng := Rng.new(sub)
 	var four := rng.chance(0.42)
-	var nh := rng.rint(28, 42)
-	var ww := rng.rint(24, 38)
-	var ew := rng.rint(24, 38)
+	var nh := rng.rint(22, 34)
+	var ww := rng.rint(20, 32)
+	var ew := rng.rint(20, 32)
 	var ex := ww
 	var ey := nh
 	var ey1 := ey + Entrance.H - 1
@@ -103,19 +103,23 @@ static func _attempt(seed: int, attempt: int) -> Dictionary:
 	var st := S.new(W, H)
 
 	# ---- wings: rects, doorways, depth by area ------------------------------------------
+	var side: Array = Entrance.SIDE_DOOR_ROWS
 	var defs: Array = []
 	defs.append({"id": "west", "rect": Rect2i(0, 0, ex + 1, ey1 + 1),
-			"entry": [Vector2i(ex, ey + 2), Vector2i(ex, ey + 3)], "dir": Vector2i(-1, 0)})
+			"entry": [Vector2i(ex, ey + side[0]), Vector2i(ex, ey + side[1])], "dir": Vector2i(-1, 0)})
 	if four:
-		defs.append({"id": "north_west", "rect": Rect2i(ex, 0, 18, ey + 1),
-				"entry": [Vector2i(ex + 7, ey), Vector2i(ex + 8, ey)], "dir": Vector2i(0, -1)})
-		defs.append({"id": "north_east", "rect": Rect2i(ex + 17, 0, 17, ey + 1),
-				"entry": [Vector2i(ex + 25, ey), Vector2i(ex + 26, ey)], "dir": Vector2i(0, -1)})
+		var a: Array = Entrance.NORTH_DOORS_TWO[0]
+		var b: Array = Entrance.NORTH_DOORS_TWO[1]
+		defs.append({"id": "north_west", "rect": Rect2i(ex, 0, 15, ey + 1),
+				"entry": [Vector2i(ex + a[0], ey), Vector2i(ex + a[1], ey)], "dir": Vector2i(0, -1)})
+		defs.append({"id": "north_east", "rect": Rect2i(ex + 14, 0, Entrance.W - 14, ey + 1),
+				"entry": [Vector2i(ex + b[0], ey), Vector2i(ex + b[1], ey)], "dir": Vector2i(0, -1)})
 	else:
+		var c: Array = Entrance.NORTH_DOORS_ONE
 		defs.append({"id": "north", "rect": Rect2i(ex, 0, Entrance.W, ey + 1),
-				"entry": [Vector2i(ex + 16, ey), Vector2i(ex + 17, ey)], "dir": Vector2i(0, -1)})
+				"entry": [Vector2i(ex + c[0], ey), Vector2i(ex + c[1], ey)], "dir": Vector2i(0, -1)})
 	defs.append({"id": "east", "rect": Rect2i(ex + Entrance.W - 1, 0, ew + 1, ey1 + 1),
-			"entry": [Vector2i(ex + Entrance.W - 1, ey + 2), Vector2i(ex + Entrance.W - 1, ey + 3)], "dir": Vector2i(1, 0)})
+			"entry": [Vector2i(ex + Entrance.W - 1, ey + side[0]), Vector2i(ex + Entrance.W - 1, ey + side[1])], "dir": Vector2i(1, 0)})
 	var by_area := defs.duplicate()
 	by_area.sort_custom(func(a, b):
 		var aa: int = a.rect.size.x * a.rect.size.y
@@ -134,7 +138,7 @@ static func _attempt(seed: int, attempt: int) -> Dictionary:
 
 	# ---- entrance building and neutral area ----------------------------------------------
 	Entrance.build(st, ex, ey, 2 if four else 1)
-	var neutral_rect := Neutral.build(st, ex + 17.0, ey1 + 1, rng)
+	var neutral_rect := Neutral.build(st, ex + Entrance.DOOR_X, ey1 + 1, rng)
 
 	# ---- wings: hallways and room slots, then which room is which --------------------------
 	var gens: Array = []
@@ -430,7 +434,7 @@ static func validate(gen: Dictionary) -> PackedStringArray:
 					problems.append("room %s at %d,%d contains a wall at %d,%d" % [r.kind, r.x, r.y, x, y])
 				elif st.room_at[y * w + x] != int(r.id):
 					problems.append("room %s at %d,%d overlaps another room at %d,%d" % [r.kind, r.x, r.y, x, y])
-	for k in ["or", "break_room", "lobby", "locker_room"]:
+	for k in ["or", "scrub_room", "break_room", "lobby", "locker_room"]:
 		if int(kind_count.get(k, 0)) != 1:
 			problems.append("expected 1 '%s' room, found %d" % [k, kind_count.get(k, 0)])
 	for k in ["pharmacy", "morgue", "lab", "radiology", "cafeteria", "waiting_room"]:

@@ -19,7 +19,7 @@ const Rng := preload("res://scripts/level/rng.gd")
 const Rooms := preload("res://scripts/level/room_furnish.gd")
 
 ## Deepest room row (tiles, away from its hallway).
-const MAX_ROW_DEPTH := 8
+const MAX_ROW_DEPTH := 6
 const MIN_ROW_DEPTH := 3
 ## Narrowest region a split may leave on either side of a new hallway.
 const MIN_CHILD := 4
@@ -325,10 +325,10 @@ func _leaf(R: Rect2i, sd: Dictionary, plan: Dictionary) -> void:
 
 func _pick_width(d: int) -> int:
 	if d <= 3:
-		return rng.rint(3, 5)
-	if d <= 5:
-		return rng.pick([3, 4, 4, 5, 5, 6, 6, 7, 8])
-	return rng.pick([4, 5, 6, 6, 7, 7, 8, 9, 9, 10, 11, 12])
+		return rng.pick([3, 3, 4, 4, 5])
+	if d <= 4:
+		return rng.pick([3, 3, 4, 4, 5, 5, 6, 6, 7])
+	return rng.pick([4, 5, 5, 6, 6, 7, 7, 8, 9, 10, 11])
 
 
 func _open_hall(R: Rect2i) -> void:
