@@ -333,8 +333,8 @@ func _sc_late_join():
 		var lp = game.players[late]
 		if lp.alive or game.alive_players().has(lp):
 			return _end(false, "the late joiner is alive in the middle of the shift")
-		if game._pod_prompt().contains(lp.player_name):
-			return _end(false, "the Re-Gen Pod offers to revive the late joiner: %s" % game._pod_prompt())
+		if lp.downed or game.can_pick_up(game.players[_peer_of(1)], lp, false):
+			return _end(false, "the late joiner counts as a downed teammate someone could carry")
 		if not await _until(func(): return _count_msgs("spectating") > 0, 40.0, "the late joiner to spectate"):
 			return
 		game._end_shift(true, "Test: shift over.")

@@ -23,7 +23,7 @@ You and your best friends clock into the ER with one goal: save a life. The prob
 - Up to 4 players, built so more is possible. Solo works.
 - Everyone is a surgeon, first person, with your own hands visible.
 - One player hosts over ENet; friends join by address (LAN, port forward or Tailscale). **TODO**: Steam lobbies and invites via GodotSteam.
-- **Dead players spectate** until a teammate holds E at the **Re-Gen Pod** in the clock-in room. **IDEA**: you must first recover the body's heart or brain.
+- **0 HP means downed**, not dead: you lie on the floor, crawl, and bleed out over five minutes. A teammate carries you to the OR's player table and stitches you up with a suture kit. Bleed out and you are dead until the next shift (spectating). Everyone down or dead fails the shift.
 - **Friendly fire is a feature**: Q shoves whatever is in front of you. A shoved teammate drops everything, and the vials smash.
 - **TODO**: proximity voice chat (and monsters that hear it), roles and classes, cosmetics, progression.
 

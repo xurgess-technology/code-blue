@@ -19,6 +19,8 @@ const MonsterModel := preload("res://scripts/monsters/monster_model.gd")
 const DevGun := preload("res://scripts/dev/dev_gun.gd")  # DEV HOOK
 const LootTable := preload("res://scripts/economy/loot_table.gd")  # INVENTORY HOOK
 const EconomyScript := preload("res://scripts/economy/economy.gd")  # INVENTORY HOOK
+const PlayerBodyScript := preload("res://scripts/downed/player_body.gd")  # DOWNED HOOK
+const PlayerTableScript := preload("res://scripts/downed/player_table.gd")  # DOWNED HOOK
 
 
 ## Run once. Safe to call again; later calls return immediately.
@@ -63,7 +65,7 @@ static func run(game: Node) -> void:
 	var bodies := {}
 	var bx := -0.6
 	for pid in Procedures.PATIENTS.keys():
-		for ail in Procedures.AILMENTS.keys():
+		for ail in Procedures.patient_ailments():
 			var b: Node3D = BodyScript.create(pid)
 			shelf.add_child(b)
 			b.position = Vector3(bx, -0.3, -0.8)
@@ -76,6 +78,20 @@ static func run(game: Node) -> void:
 				b.set_bleeding("gunshot", 0.8)
 			bodies["%s|%s" % [pid, ail]] = b
 			bx += 0.4
+	# DOWNED HOOK: the lying player on the player table (bleeding and stitched) and the table itself.
+	for stitched in [false, true]:
+		var pb: Node3D = PlayerBodyScript.create(1, Color("3d8f80"))
+		shelf.add_child(pb)
+		pb.position = Vector3(bx, -0.3, -0.8)
+		pb.scale = Vector3.ONE * 0.5
+		pb.set_bleeding("gash", 0.8)
+		pb.apply_flags({"stitched": stitched})
+		bodies["player|stitches"] = pb
+		bx += 0.4
+	var ptable := PlayerTableScript.make()
+	shelf.add_child(ptable)
+	ptable.position = Vector3(0.0, -1.4, -2.2)
+	ptable.scale = Vector3.ONE * 0.5
 
 	# Monsters: the visual model only, so nothing starts thinking or moving
 	var mx := -0.5
@@ -98,7 +114,7 @@ static func run(game: Node) -> void:
 			var path: String = Procedures.MINIGAME_SCRIPTS.get(step.game, "")
 			if path == "" or not ResourceLoader.exists(path):
 				continue
-			for pid in Procedures.PATIENTS.keys():
+			for pid in (["player"] if Procedures.is_player_only(ail) else Procedures.PATIENTS.keys()):
 				var body: Node3D = bodies["%s|%s" % [pid, ail]]
 				var mg: Node3D = (load(path) as GDScript).new()
 				shelf.add_child(mg)

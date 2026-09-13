@@ -225,11 +225,6 @@ const MODELS := {
 		"scale": 1.580, "yaw": 180,
 		"note": "CreativeTrio alarm clock via Poly Pizza. Desk clock, not a wall clock.",
 	},
-	"prop/pod": {
-		"path": "res://assets/models/props/pod.glb",
-		"scale": 1.500, "yaw": 180, "y": 0.450,
-		"note": "Kenney Space Station Kit table-display — glass dome reads as the Re-Gen Pod.",
-	},
 	# "prop/ivstand" is deliberately absent: no CC0 IV stand found. See ASSETS.md.
 }
 
@@ -292,7 +287,6 @@ const ALIASES := {
 	"cabinet": "prop/cabinet",
 	"operating_table": "prop/table_op",
 	"time_clock": "prop/clock",
-	"regen_pod": "prop/pod",
 	"gurney": "prop/gurney",
 	"wheelchair": "prop/wheelchair",
 	"ivstand": "prop/ivstand",
