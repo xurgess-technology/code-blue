@@ -18,6 +18,7 @@ extends Node3D
 
 const MinigameBase := preload("res://scripts/surgery/minigame.gd")
 const BodyScript := preload("res://scripts/patient_body.gd")
+const PlayerBodyScript := preload("res://scripts/downed/player_body.gd")
 
 var game_id := "anesthetic"
 var patient_id := "bob"
@@ -88,6 +89,9 @@ func _ready() -> void:
 		return
 	if ailment_id == "":
 		ailment_id = "amputation" if game_id in ["tourniquet", "saw"] or variant == "stump" else "gunshot"
+		if game_id == "stitches":   # downed (sweep 2 wave 3): a downed surgeon on the player table
+			ailment_id = "stitches"
+			patient_id = "player"
 	var step := _find_step()
 	if variant == "" and step.has("variant"):
 		variant = step.variant
@@ -96,7 +100,7 @@ func _ready() -> void:
 		flags["amputated"] = true
 
 	_build_room()
-	body = BodyScript.create(patient_id)
+	body = PlayerBodyScript.create(1, Color("3d8f80")) if patient_id == "player" else BodyScript.create(patient_id)
 	add_child(body)
 	body.position = Vector3(0, 0.95, 0)
 	if body.has_method("set_ailment"):

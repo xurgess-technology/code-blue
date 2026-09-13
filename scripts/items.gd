@@ -81,6 +81,21 @@ const ITEMS := {
 		"where": "Hung on pegboards in maintenance and storage rooms. Sometimes left leaning against a gurney somewhere it has no business being.",
 		"handling": "Reusable. Heavy. Stays in the OR once delivered.",
 	},
+	# downed (sweep 2 wave 3): closes a downed teammate's wound on the OR's player table. Not in
+	# SURGICAL (that list is what a patient case can need); game.gd spawns a few every shift.
+	"suture_kit": {
+		"name": "Suture kit",
+		"short": "Suture kits",
+		"surgical": true,
+		"consumable": true,
+		"batch": [1, 2],
+		"fragile": false,
+		"found": {"trauma_bag": 0.4, "station_drawers": 0.35, "drawer_unit": 0.25},
+		"loose_surfaces": [],
+		"real_use": "A sterile pack with a curved needle already threaded with suture. Each bite goes in on one side of a gash and out the other, and pulling the thread snug draws the edges together so the bleeding stops and the wound can heal.",
+		"where": "In trauma bags on corridor walls, in nurse station drawers and in the steel drawer units of storage rooms.",
+		"handling": "Consumable. Found in packs of 1 or 2. Put one on the OR supply shelf, carry a downed teammate to the player table and stitch them up.",
+	},
 	"guide": {
 		"name": "Medical guide",
 		"short": "Medical guide",
@@ -97,7 +112,7 @@ const ITEMS := {
 }
 
 ## Tabs the guide shows as locked, so it is obvious the pool will grow.
-const LOCKED := ["Defibrillator", "Scalpel", "Sutures", "Clamp", "IV bag", "Sedative dart", "Battery", "Retractor"]
+const LOCKED := ["Defibrillator", "Scalpel", "Clamp", "IV bag", "Sedative dart", "Battery", "Retractor"]
 
 
 ## Sellable loot (scripts/economy/loot_table.gd). Not in ITEMS so the guide, the supply spawner

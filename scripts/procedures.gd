@@ -57,6 +57,16 @@ const AILMENTS := {
 			{"id": "dress", "label": "Dress the stump", "item": "gauze", "uses": 2, "game": "gauze", "variant": "stump", "site": "limb_cut"},
 		],
 	},
+	# downed (sweep 2 wave 3): a downed teammate on the OR's player table. `player_only` keeps it
+	# out of roll() and off the patient tables; the body is scripts/downed/player_body.gd.
+	"stitches": {
+		"name": "Laceration",
+		"code": "LC",
+		"player_only": true,
+		"steps": [
+			{"id": "stitch", "label": "Stitch the wound closed", "item": "suture_kit", "uses": 1, "game": "stitches", "site": "gash"},
+		],
+	},
 }
 
 ## Where each minigame script lives. The surgery system loads these by id.
@@ -66,6 +76,7 @@ const MINIGAME_SCRIPTS := {
 	"tourniquet": "res://scripts/surgery/games/tourniquet.gd",
 	"saw": "res://scripts/surgery/games/saw.gd",
 	"gauze": "res://scripts/surgery/games/gauze.gd",
+	"stitches": "res://scripts/surgery/games/stitches.gd",
 }
 
 
@@ -75,12 +86,25 @@ static func roll(seed_value: int, shift: int) -> Dictionary:
 	rng.seed = hash("%d|case|%d" % [seed_value, shift])
 	var patient_ids := PATIENTS.keys()
 	patient_ids.sort()
-	var ailment_ids := AILMENTS.keys()
-	ailment_ids.sort()
+	var ailment_ids := patient_ailments()
 	return {
 		"patient": patient_ids[rng.randi_range(0, patient_ids.size() - 1)],
 		"ailment": ailment_ids[rng.randi_range(0, ailment_ids.size() - 1)],
 	}
+
+
+## Ailments a patient case can have, sorted (everything but the player-only ones such as stitches).
+static func patient_ailments() -> Array:
+	var out := []
+	for id in AILMENTS.keys():
+		if not bool(AILMENTS[id].get("player_only", false)):
+			out.append(id)
+	out.sort()
+	return out
+
+
+static func is_player_only(ailment_id: String) -> bool:
+	return bool(AILMENTS.get(ailment_id, {}).get("player_only", false))
 
 
 static func patient(id: String) -> Dictionary:
