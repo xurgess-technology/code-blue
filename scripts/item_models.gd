@@ -5,6 +5,36 @@ extends RefCounted
 ## there is no collision, and a stack of N looks like N things.
 
 
+const LootModels := preload("res://scripts/economy/loot_models.gd")
+const LootTable := preload("res://scripts/economy/loot_table.gd")
+const ItemsDB := preload("res://scripts/items.gd")
+
+## Colour coding (inventory worker, sweep 2): surgical supplies get a teal rim, sellable loot a
+## gold one, so it is obvious in the dark what the surgery needs. One cached overlay shader,
+## two cached materials, applied as `material_overlay` so shared or imported materials are
+## never modified. The guide binder is neither.
+const TINT_TEAL := Color(0.25, 0.95, 0.85)
+const TINT_GOLD := Color(1.0, 0.72, 0.22)
+const TINT_SHADER := """
+shader_type spatial;
+render_mode unshaded, blend_add, depth_draw_never, cull_back, shadows_disabled;
+
+uniform vec3 tint : source_color = vec3(1.0, 0.72, 0.22);
+uniform float rim = 0.9;
+uniform float base = 0.035;
+
+void fragment() {
+	float facing = clamp(dot(normalize(NORMAL), normalize(VIEW)), 0.0, 1.0);
+	float edge = pow(1.0 - facing, 3.0);
+	float breathe = 0.82 + 0.18 * sin(TIME * 2.1);
+	ALBEDO = tint * (edge * rim * breathe + base);
+}
+"""
+
+static var _tint_shader: Shader = null
+static var _tint_mats := {}
+
+
 static func make(kind: String, count: int = 1) -> Node3D:
 	var assets = Engine.get_main_loop().root.get_node_or_null("Assets") if Engine.get_main_loop() else null
 	if assets != null and assets.has("item/" + kind):
@@ -20,8 +50,57 @@ static func make(kind: String, count: int = 1) -> Node3D:
 		"tourniquet": _tourniquet(root)
 		"bone_saw": _bone_saw(root)
 		"guide": _guide(root)
-		_: _add(root, _box(Vector3(0.15, 0.1, 0.15), Color.MAGENTA), Vector3(0, 0.05, 0))
+		_:
+			if LootTable.has(kind):
+				LootModels.build(root, kind, count)
+			else:
+				_add(root, _box(Vector3(0.15, 0.1, 0.15), Color.MAGENTA), Vector3(0, 0.05, 0))
 	return root
+
+
+## make() plus the teal (surgical) or gold (loot) rim. Use this for items in the world, in hands
+## and on the shelf; minigames keep the plain make() for their close-up tools.
+static func make_tinted(kind: String, count: int = 1) -> Node3D:
+	var n := make(kind, count)
+	apply_tint(n, kind)
+	return n
+
+
+## The overlay material for a kind: teal for surgical supplies, gold for loot, null otherwise.
+static func tint_material(kind: String) -> Material:
+	var key := ""
+	if ItemsDB.is_surgical(kind):
+		key = "teal"
+	elif ItemsDB.is_loot(kind):
+		key = "gold"
+	if key == "":
+		return null
+	if _tint_mats.has(key):
+		return _tint_mats[key]
+	if _tint_shader == null:
+		_tint_shader = Shader.new()
+		_tint_shader.code = TINT_SHADER
+	var m := ShaderMaterial.new()
+	m.shader = _tint_shader
+	var col: Color = TINT_TEAL if key == "teal" else TINT_GOLD
+	m.set_shader_parameter("tint", Vector3(col.r, col.g, col.b))
+	# Gold loot is often dark metal and plastic; teal supplies are mostly bright: even them out.
+	m.set_shader_parameter("rim", 0.75 if key == "teal" else 0.95)
+	m.set_shader_parameter("base", 0.03 if key == "teal" else 0.04)
+	_tint_mats[key] = m
+	return m
+
+
+## Put the kind's rim on every mesh under `node` (no-op for kinds without one).
+static func apply_tint(node: Node, kind: String) -> void:
+	var mat := tint_material(kind)
+	if mat == null or node == null:
+		return
+	if node is GeometryInstance3D and not (node is Label3D):
+		(node as GeometryInstance3D).material_overlay = mat
+	for c in node.find_children("*", "GeometryInstance3D", true, false):
+		if not (c is Label3D):
+			(c as GeometryInstance3D).material_overlay = mat
 
 
 ## Rough footprint so containers and shelves can space stacks out.
@@ -33,6 +112,8 @@ static func footprint(kind: String) -> Vector3:
 		"tourniquet": return Vector3(0.28, 0.05, 0.1)
 		"bone_saw": return Vector3(0.52, 0.05, 0.16)
 		"guide": return Vector3(0.24, 0.06, 0.31)
+	if LootTable.has(kind):
+		return LootModels.footprint(kind)
 	return Vector3(0.15, 0.1, 0.15)
 
 

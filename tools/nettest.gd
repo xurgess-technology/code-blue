@@ -217,7 +217,7 @@ func _sc_leave_items():
 			return
 		var leaver: int = _peer_of(1)
 		var p = game.players[leaver]
-		p.slots = [{"kind": "gauze", "count": 3}, {"kind": "anesthetic", "count": 2}]
+		p.slots = [{"kind": "gauze", "count": 3}, {"kind": "anesthetic", "count": 2}, {"kind": "", "count": 0}, {"kind": "", "count": 0}]
 		var before := {"gauze": game.supply_count("gauze"), "anesthetic": game.supply_count("anesthetic")}
 		_send("leave", {"peer": leaver})
 		if not await _until(func(): return _count_msgs("standing") > 0, 40.0, "the leaver to take position"):
@@ -473,7 +473,7 @@ func _shift_bot(st: Dictionary) -> void:
 		var n: int = int(need[kind]) - game.shelf_count(kind)
 		if n > 0:
 			short[kind] = n
-	for i in 2:
+	for i in me.slots.size():
 		var s: Dictionary = me.slots[i]
 		if s.kind != "" and short.has(s.kind):
 			me.selected = i
@@ -594,7 +594,7 @@ func _nearest_item(kind: String) -> int:
 
 
 func _slot_of(kind: String) -> int:
-	for i in 2:
+	for i in _me().slots.size():
 		if _me().slots[i].kind == kind:
 			return i
 	return -1

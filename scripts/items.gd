@@ -100,33 +100,68 @@ const ITEMS := {
 const LOCKED := ["Defibrillator", "Scalpel", "Sutures", "Clamp", "IV bag", "Sedative dart", "Battery", "Retractor"]
 
 
+## Sellable loot (scripts/economy/loot_table.gd). Not in ITEMS so the guide, the supply spawner
+## and the dev panel's supply list leave it alone; def() and every helper below still know it.
+const LootTable := preload("res://scripts/economy/loot_table.gd")
+
+static var _loot_defs := {}
+
+
 static func exists(kind: String) -> bool:
-	return ITEMS.has(kind)
+	return ITEMS.has(kind) or LootTable.has(kind)
 
 
 static func def(kind: String) -> Dictionary:
-	return ITEMS.get(kind, {})
+	if ITEMS.has(kind):
+		return ITEMS[kind]
+	if not LootTable.has(kind):
+		return {}
+	if not _loot_defs.has(kind):
+		_loot_defs[kind] = LootTable.def(kind)
+	return _loot_defs[kind]
 
 
 static func display_name(kind: String) -> String:
-	return ITEMS.get(kind, {}).get("name", kind.capitalize())
+	return def(kind).get("name", kind.capitalize())
 
 
 static func is_consumable(kind: String) -> bool:
-	return ITEMS.get(kind, {}).get("consumable", false)
+	return def(kind).get("consumable", false)
 
 
 static func is_fragile(kind: String) -> bool:
-	return ITEMS.get(kind, {}).get("fragile", false)
+	return def(kind).get("fragile", false)
 
 
 static func is_surgical(kind: String) -> bool:
-	return ITEMS.get(kind, {}).get("surgical", false)
+	return def(kind).get("surgical", false)
+
+
+## Sellable loot: gold tint, goes in the sell bin, never on the shelf.
+static func is_loot(kind: String) -> bool:
+	return LootTable.has(kind)
+
+
+## Takes two hand slots.
+static func is_bulky(kind: String) -> bool:
+	return def(kind).get("bulky", false)
+
+
+## How many hand slots one stack of this kind occupies.
+static func slots_needed(kind: String) -> int:
+	return 2 if is_bulky(kind) else 1
+
+
+## "Anesthetic vials" style label for a stack of `count`.
+static func stack_label(kind: String, count: int) -> String:
+	if count <= 1:
+		return display_name(kind)
+	return "%d %s" % [count, def(kind).get("short", display_name(kind))]
 
 
 ## Whether two stacks of this kind merge into one hand slot.
 static func stacks(kind: String) -> bool:
-	return is_consumable(kind)
+	return is_consumable(kind) or bool(def(kind).get("stack", false))
 
 
 ## How many of a fragile stack survive a drop. Roughly a third breaks, never the whole stack.

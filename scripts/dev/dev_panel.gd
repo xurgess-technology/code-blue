@@ -6,6 +6,7 @@ extends CanvasLayer
 const ACCENT := Color(0.3, 0.95, 0.8)
 const DIM := Color(0.6, 0.68, 0.7)
 const PANEL_W := 400.0
+const LootTableScript := preload("res://scripts/economy/loot_table.gd")
 
 var game: Node = null
 var main: Node = null
@@ -164,7 +165,7 @@ func _build() -> void:
 	# ---- spawning
 	_section(col, "Spawn")
 	var s1 := _row(col)
-	var item_names: Array = Items.ITEMS.keys()
+	var item_names: Array = Items.ITEMS.keys() + LootTableScript.kinds()  # inventory: loot too
 	var items := _option(s1, item_names.map(func(k): return Items.display_name(k)))
 	items.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var count := SpinBox.new()
@@ -183,6 +184,14 @@ func _build() -> void:
 	var s3 := _row(col)
 	_button(s3, "Kill all monsters", func(): _req("kill_monsters"))
 	_c["monster_count"] = _label(s3, "", 12, DIM)
+
+	# ---- money (inventory, sweep 2)
+	_section(col, "Money")
+	var mo1 := _row(col)
+	for amt in [100, 1000, 10000, -1000]:
+		_button(mo1, ("+$%d" if amt > 0 else "-$%d") % absi(amt), func(): _req("money", {"amount": amt}))
+	_button(mo1, "Reset", func(): _req("money", {"reset": true}))
+	_c["money_label"] = _label(col, "", 12, DIM)
 
 	# ---- patient
 	_section(col, "Patient")
@@ -332,6 +341,7 @@ func _refresh() -> void:
 	if main != null and "quality" in main and gfx.selected != int(main.quality):
 		gfx.select(int(main.quality))
 	(_c["monster_count"] as Label).text = "%d alive" % game.monsters.size()
+	(_c["money_label"] as Label).text = "Team money $%d, %d gold bars (next $%d)." % [int(game.money), int(game.gold_bars), int(game.gold_bar_price())]
 	if game.case.is_empty():
 		(_c["case_label"] as Label).text = "Table empty."
 	else:

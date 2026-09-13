@@ -17,6 +17,8 @@ const RENDER_FRAMES := 8
 const BodyScript := preload("res://scripts/patient_body.gd")
 const MonsterModel := preload("res://scripts/monsters/monster_model.gd")
 const DevGun := preload("res://scripts/dev/dev_gun.gd")  # DEV HOOK
+const LootTable := preload("res://scripts/economy/loot_table.gd")  # INVENTORY HOOK
+const EconomyScript := preload("res://scripts/economy/economy.gd")  # INVENTORY HOOK
 
 
 ## Run once. Safe to call again; later calls return immediately.
@@ -47,6 +49,15 @@ static func run(game: Node) -> void:
 			shelf.add_child(m)
 			m.position = Vector3(x, 0.35, 0.0)
 			x += 0.26
+
+	# INVENTORY HOOK: the teal / gold rim overlay on stacks, every loot kind, the sell bin, the
+	# shop counter and a gold pile.
+	for kind in Items.ITEMS.keys() + LootTable.kinds():
+		var tm := ItemModels.make_tinted(kind, 1)
+		shelf.add_child(tm)
+		tm.position = Vector3(x, 0.05, 0.3)
+		x += 0.2
+	EconomyScript.warm(shelf)
 
 	# Patients, each showing every visual state a case can reach
 	var bodies := {}
