@@ -22,6 +22,8 @@ extends Node
 ##   full_shift       host + N clients play a whole shift to the win screen (the runner adds lag)
 ##   economy          client 1 picks up loot, sells it and buys gold bars; the host and client 2
 ##                    see the money and the pile; client 3 joins afterwards and sees the pile too
+##   downed           client 1 goes down and crawls; client 2 carries them to the player table and
+##                    stitches them up; the host and both clients see each stage
 ##
 ## Every process exits 0 on success and 1 on failure, printing "PASS:" or "FAIL:" and why.
 ## Coordination between processes travels over the game's own connection (the _msg RPC).
@@ -107,6 +109,7 @@ func _run() -> void:
 		"host_quit", "host_kill": await _sc_host_quit()
 		"full_shift": await _sc_full_shift()
 		"economy": await _sc_economy()
+		"downed": await _sc_downed()
 		_: _end(false, "unknown scenario " + scenario)
 
 
@@ -532,6 +535,124 @@ func _sc_economy():
 			return
 	_say("bought %d bars, $%d left" % [game.gold_bars, game.money])
 	await _finish_together("sold loot and bought %d bars through the sell bin and the shop" % game.gold_bars)
+
+
+## Downed (sweep 2 wave 3): client 1 goes down, client 2 carries them to the player table and
+## stitches them up; the host and both clients see every stage.
+func _sc_downed():
+	if role == "host":
+		if not await _start_shift_when_full():
+			return
+		game._clear_monsters()
+		if not await _until(func(): return not game.player_table.is_empty(), 20.0, "the player table"):
+			return
+		var downed_id: int = _peer_of(1)
+		var carrier_id: int = _peer_of(2)
+		var p1 = game.players[downed_id]
+		var p2 = game.players[carrier_id]
+		# Down client 1 a few metres from the player table.
+		_send("stand", {"peer": downed_id, "pos": game.player_table.position + Vector3(0.0, 0.0, 3.5)})
+		if not await _until(func(): return _count_msgs("standing") > 0, 30.0, "client 1 in place"):
+			return
+		await _wall_wait(0.5)
+		game.knock_down_player(p1, "test")
+		game.shelf["suture_kit"] = 1
+		game.shelf_node.show_stock(game.shelf)
+		if not await _until(func(): return _count_msgs("crawled") > 0, 30.0, "client 1 to crawl"):
+			return
+		_send("downed", {"peer": downed_id, "carrier": carrier_id})
+		var seen := {"carry": false, "follow": false, "table": false, "op": false}
+		var watch := func():
+			if p2.carrying == downed_id and p1.carried_by == carrier_id:
+				seen.carry = true
+				if p1.global_position.distance_to(p2.global_position) < 1.8:
+					seen.follow = true
+			if p1.on_table and game.player_surgery.patient() == p1:
+				seen.table = true
+			if game.player_surgery.operator_peer() == carrier_id:
+				seen.op = true
+		if not await _do_until(watch, func(): return seen.op and not p1.downed and p1.alive, 150.0, "client 1 to be stitched up"):
+			return
+		if not (seen.carry and seen.follow and seen.table):
+			return _end(false, "host saw carry=%s follow=%s table=%s" % [str(seen.carry), str(seen.follow), str(seen.table)])
+		if p1.hp != Game.REVIVE_HP or game.shelf_count("suture_kit") != 0 or not game.player_surgery.case.is_empty():
+			return _end(false, "after the stitches: hp %d, kits %d, case %s" % [p1.hp, game.shelf_count("suture_kit"), str(game.player_surgery.case)])
+		_say("client 1 carried, laid on the table and stitched up by client 2; hp %d" % p1.hp)
+		await _finish_together("downed, carried, stitched and revived, seen by the host")
+		return
+	if not await _wait_shift_as_client():
+		return
+	if not await _until(func(): return _count_msgs("downed") > 0 or _count_msgs("stand") > 0, 60.0, "the setup"):
+		return
+	var me := _me()
+	if index == 1:
+		if not await _until(func(): return _count_msgs("stand") > 0, 30.0, "stand order"):
+			return
+		me.teleport(game._floor_at(_msgs("stand")[0].data.pos))
+		await _wall_wait(1.0)
+		_send("standing", {})
+		var dbg := {"t": 0}
+		if not await _do_until(func():
+				dbg.t += 1
+				if dbg.t % 120 == 0:
+					_say("DBG downed=%s hp=%d recv=%d pos=%s" % [str(me.downed), me.hp, game._recv_latest, str(me.global_position)]),
+				func(): return me.downed, 30.0, "going down"):
+			return
+		if not await _until(func(): return game.downed_view._layer.visible, 5.0, "the bleed-out overlay"):
+			return
+		var from := me.global_position
+		me.bot_move = Vector2(0, -1)
+		await _wall_wait(0.8)
+		me.bot_move = Vector2.ZERO
+		if me.global_position.distance_to(from) < 0.2:
+			return _end(false, "could not crawl while downed")
+		_send("crawled", {})
+		var seen := {"carried": false, "table": false, "op": false}
+		var watch := func():
+			if me.carried_by != 0:
+				seen.carried = true
+			if me.on_table:
+				seen.table = true
+				if game.player_surgery.surgery.mg != null:
+					seen.op = true
+		if not await _do_until(watch, func(): return me.alive and not me.downed, 150.0, "being stitched up"):
+			return
+		if not (seen.carried and seen.table and seen.op):
+			return _end(false, "downed client saw carried=%s table=%s minigame=%s" % [str(seen.carried), str(seen.table), str(seen.op)])
+		if me.hp != Game.REVIVE_HP or me.global_position.y > 0.5:
+			return _end(false, "revived with hp %d at %s" % [me.hp, str(me.global_position)])
+		await _finish_together("went down, crawled, was carried and stitched back up (hp %d)" % me.hp)
+		return
+	# Client 2: the rescuer.
+	if not await _until(func(): return _count_msgs("downed") > 0, 60.0, "downed order"):
+		return
+	var target_id: int = _msgs("downed")[0].data.peer
+	if not await _until(func(): return game.players.has(target_id) and game.players[target_id].downed, 20.0, "the teammate to be down"):
+		return
+	var target = game.players[target_id]
+	var lift := func(): _press_at(target.global_position, "pl_%d" % target_id, true)
+	if not await _do_until(lift, func(): return me.carrying == target_id, 40.0, "lifting the teammate"):
+		return
+	me.bot_interact = false
+	# Walk a few steps with them over the shoulder, as a player would.
+	me.bot_aim_id = ""
+	me.bot_move = Vector2(0, -1)
+	await _wall_wait(1.2)
+	me.bot_move = Vector2.ZERO
+	if target.global_position.distance_to(me.global_position) > 1.8 or me.carrying != target_id:
+		return _end(false, "the carried teammate is not on my shoulder")
+	var place := func(): _press_at(game.player_table.position, "player_table")
+	if not await _do_until(place, func(): return target.on_table, 40.0, "laying them on the table"):
+		return
+	game.player_surgery.surgery.bot_skill = 1.0
+	var operate := func():
+		if not game.player_surgery.surgery.is_local_operating():
+			_press_at(game.player_table.position, "player_table")
+	if not await _do_until(operate, func(): return game.player_surgery.surgery.is_local_operating() or not target.downed, 40.0, "starting the stitches"):
+		return
+	if not await _until(func(): return not target.downed and target.alive, 90.0, "the stitches to finish"):
+		return
+	await _finish_together("carried a downed teammate to the table and stitched them up")
 
 
 ## One frame of a simple co-op bot: clock in, bring what the shelf lacks, operate.
