@@ -232,6 +232,17 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   phone, crew, clock-out, pay), not walking; `tools/looptest.tscn` and the playtest walk it.
 - **The dev room's Clear tables** also sends any crew on its way back; a crew mid-walk with no case
   turns around.
+- **The player table's operation is only mirrored into `game.cases`** (`mirror: true`): the
+  downed worker's `player_surgery.gd` still owns it and replicates it in `pt`, so its state crosses
+  the wire twice. The integration wave can move it onto a real case and a surgery system from
+  `game.surgeries`. On fallback levels clients do not append the player table to
+  `level_info.tables`, so the mirror's `table` index only resolves on the host there.
+- **`full_shift_lag` fails** (120 ms, 40 ms jitter, 3% loss): after the hospital merge the lagged
+  clients stop receiving updates early in the shift and the host plays alone until the timeout;
+  the coordinator saw the same with `deliver` on main before the loop landed. Every unlagged
+  scenario passes, `two_patients` included. Clock-in now spawns about 70 loot stacks at once (the
+  same burst `begin_shift` had), which makes one big delta; splitting large deltas across ticks is
+  one thing to try (networking section of `game.gd`). Not investigated further by the loop worker.
 
 ## OR screen and minimal HUD (sweep 2 wave 3)
 

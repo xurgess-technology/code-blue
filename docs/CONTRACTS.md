@@ -606,9 +606,16 @@ loop.pay_for(case, shift) -> int   # stable 200 (+25/shift), extra stable 300 (+
   monsters and (per case) supplies spawn fresh from `seed + shift`. Nobody is moved and hands are
   kept at the next lobby; the dead and late joiners get up at the start. Game over builds a new
   hospital (`seed + 7919`). Clients learn the phase from `_rpc_shift`/snapshots and move themselves.
-- Game over: during a shift, every non-waiting, non-bot player is `alive == false` or has
-  `downed == true` (read with `p.get("downed")`, so it works before the downed worker lands).
-  Never in the dev room.
+- Game over: during a shift, `game.all_players_out()` (downed worker: every non-waiting player is
+  downed or dead). Never in the dev room. At the next shift's lobby the dead and the downed get
+  up at the start.
+- The player table (downed worker): the stitches operation stays in
+  `scripts/downed/player_surgery.gd`; the host mirrors it into `game.cases` every tick as a
+  `patient_id "player"` case with `mirror: true`, `table = game.player_table_index()` (the "player"
+  entry of `level_info.tables`, appended on fallback levels once the player table is placed),
+  `player_id`, `ailment_id "stitches"`, `step_index`, `flags`, `vitals` (the bleed clock) and state
+  `on_table` (`stable` once the step is done). It gets no PatientBody, drain, pay or clock-out
+  rule from the loop; it exists so it replicates with the cases and the OR monitor lists it.
 - The phone: on a level with `level_info.phone` at wall height the loop adds the aim target, a
   blinking lamp and a glow to the hospital's wall phone; otherwise it builds a desk phone on a side
   table near the clock. Sounds `loop_ring`, `loop_pickup`, `loop_hangup`, `loop_gurney`,

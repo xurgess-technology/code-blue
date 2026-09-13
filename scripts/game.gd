@@ -338,6 +338,7 @@ func _populate_shift_world() -> void:
 	for n in get_tree().get_nodes_in_group("container"):
 		if n.has_method("is_open") and n.is_open():
 			n.set_open(false, false)
+	spawn_suture_kits()  # downed: every shift has suture kits for the player table
 	spawn_loot()
 	_spawn_monsters()
 
@@ -694,6 +695,12 @@ func _setup_tables() -> void:
 	if all.is_empty():
 		all = [{"position": table_pos(), "yaw": _table_yaw(), "kind": "patient"}]
 		level_info["tables"] = all
+	var n_patient := 0
+	for t in all:
+		if String(t.get("kind", "patient")) == "patient":
+			n_patient += 1
+	if n_patient < 2:
+		# A level with one patient table (the dev room, the fallback ward, old maps) gets a second.
 		level_info["tables_fallback"] = true
 		var second: Dictionary = TablesScript.place_second(self, level, table_pos(), _table_yaw(), level_info)
 		if not second.is_empty():
@@ -1361,6 +1368,49 @@ func remove_case(id: int) -> void:
 	_apply_cases_locally()
 
 
+## Index of the player table in level_info.tables, or -1. Levels without one in the data (the
+## fallback second-table levels) get the downed worker's placed player table appended once it exists.
+func player_table_index() -> int:
+	var all: Array = level_info.get("tables", [])
+	for i in all.size():
+		if String(all[i].get("kind", "")) == "player":
+			return i
+	if bool(level_info.get("tables_fallback", false)) and not player_table.is_empty():
+		all.append({"position": player_table.position, "yaw": float(player_table.get("yaw", 0.0)), "kind": "player"})
+		return all.size() - 1
+	return -1
+
+
+## Host (loop + downed): the stitches operation on the player table runs in
+## scripts/downed/player_surgery.gd; this mirrors it into `cases` as a `patient_id "player"` case
+## (`mirror: true`) so it replicates with the others and the OR monitor lists it. The mirror is
+## read-only: player_surgery stays the authority for the operation itself.
+func _sync_player_case() -> void:
+	var pc: Dictionary = player_surgery.case if player_surgery != null else {}
+	var mirror := {}
+	for c in cases:
+		if bool(c.get("mirror", false)):
+			mirror = c
+			break
+	if pc.is_empty():
+		if not mirror.is_empty():
+			cases.erase(mirror)
+			_apply_cases_locally()
+		return
+	if mirror.is_empty():
+		mirror = {"id": _next_case_id, "mirror": true, "patient_id": "player", "state": "on_table"}
+		_next_case_id += 1
+		cases.append(mirror)
+	mirror["table"] = player_table_index()
+	mirror["player_id"] = int(pc.get("player_id", 0))
+	mirror["ailment_id"] = String(pc.get("ailment_id", "stitches"))
+	mirror["step_index"] = int(pc.get("step_index", 0))
+	mirror["flags"] = (pc.get("flags", {}) as Dictionary).duplicate(true)
+	mirror["vitals"] = snappedf(float(player_surgery.vitals), 0.1)
+	mirror["state"] = "stable" if Procedures.step(String(mirror.ailment_id), int(mirror.step_index)).is_empty() else "on_table"
+	_apply_cases_locally()
+
+
 func _alias_case() -> Dictionary:
 	for c in cases:
 		if String(c.get("patient_id", "")) != "player":
@@ -1684,6 +1734,7 @@ func _simulate(delta: float) -> void:
 	if phase != Phase.MENU:
 		_tick_downed(delta)
 		_tick_carry_holds(delta)
+		_sync_player_case()   # loop: the player table's operation as a "player" case
 	match phase:
 		Phase.LOBBY:
 			_sim_lobby(delta)

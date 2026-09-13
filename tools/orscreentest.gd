@@ -149,7 +149,11 @@ func _check_shift_model() -> void:
 				_say("[orscreen] t=%.0f %s ticked green (%d/%d)" % [elapsed, s.kind, s.have, s.need])
 			_ticks_seen[s.kind] = true
 		_was_ok[s.kind] = bool(s.ok)
-	# Once, after the first step: a low and a critical reading, then put the vitals back.
+	_low_check(cur)
+
+
+## Once, after the first step: a low and a critical reading, then put the vitals back.
+func _low_check(cur: int) -> void:
 	if cur >= 1 and not _low_checked:
 		_low_checked = true
 		var keep: float = game.vitals
@@ -189,6 +193,14 @@ func _check_multi(m: Dictionary) -> void:
 				if int(s.need) != int(need.get(s.kind, -1)) or int(s.have) > game.shelf_count(s.kind):
 					_problem("panel %d supply %s shows %d/%d with %d on the shelf" % [i, s.kind, s.have, s.need, game.shelf_count(s.kind)])
 					break
+	# The first patient's steps and the low / critical reading are tracked here too.
+	var c0: Dictionary = game.case
+	if not c0.is_empty() and m.panels.size() > 0 and String(m.panels[0].get("patient_id", "")) == String(c0.patient_id):
+		var cur0 := Procedures.steps(String(c0.ailment_id)).size() if String(c0.state) == "stable" else int(c0.step_index)
+		_steps_seen[cur0] = true
+		_ailment = String(c0.ailment_id)
+		if String(c0.state) == "on_table":
+			_low_check(cur0)
 
 
 # ------------------------------------------------------------------------------ one-off checks

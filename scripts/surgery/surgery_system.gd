@@ -228,6 +228,30 @@ func _case() -> Dictionary:
 	return game.get("case") if game.get("case") is Dictionary else {}
 
 
+## This table's patient's vitals (a stand-in game without cases: its own `vitals`).
+func _case_vitals() -> float:
+	var c := _case()
+	if c.has("vitals"):
+		return float(c.vitals)
+	return float(game.get("vitals")) if game != null and game.get("vitals") != null else 100.0
+
+
+## The game's per-table callbacks; a stand-in "game" without cases (scripts/downed/player_surgery.gd)
+## keeps the old one-table signatures.
+func _game_botch(amount: float, reason: String) -> void:
+	if game.has_method("case_on_table"):
+		game.surgery_botch(amount, reason, table_index)
+	else:
+		game.surgery_botch(amount, reason)
+
+
+func _game_step_done(result: Dictionary) -> void:
+	if game.has_method("case_on_table"):
+		game.surgery_step_done(result, table_index)
+	else:
+		game.surgery_step_done(result)
+
+
 func _body():
 	if game == null:
 		return null
@@ -255,7 +279,7 @@ func receive_operator_report(peer_id: int, report: Dictionary) -> void:
 				mg.apply_net_state(ms)
 		for b in report.get("botches", []):
 			if b is Array and b.size() >= 2:
-				game.surgery_botch(float(b[0]), String(b[1]), table_index)
+				_game_botch(float(b[0]), String(b[1]))
 		if report.has("stir"):
 			_stir_count += 1
 			_stir_strength = float(report.stir)
@@ -267,7 +291,7 @@ func receive_operator_report(peer_id: int, report: Dictionary) -> void:
 			var result = report.get("finished")
 			operator_id = 0
 			_last_operator = 0
-			game.surgery_step_done(result if result is Dictionary else {}, table_index)
+			_game_step_done(result if result is Dictionary else {})
 	if report.has("exit") and peer_id == operator_id:
 		_end_operation()
 
@@ -357,7 +381,7 @@ func _monitor(delta: float) -> void:
 	_beep_timer -= delta
 	if _beep_timer > 0.0:
 		return
-	var v: float = clampf(float(_case().get("vitals", 100.0)), 0.0, 100.0)
+	var v: float = clampf(_case_vitals(), 0.0, 100.0)
 	_beep_timer = lerpf(0.38, 0.85, v / 100.0)
 	var cue := "surgery_beep" if v > 50.0 else ("surgery_beep_low" if v > 25.0 else "surgery_beep_crit")
 	_audio(cue, _table_pos(), -5.0)
@@ -737,7 +761,7 @@ func hud_state() -> Dictionary:
 	var c := _case()
 	st["step_index"] = int(c.get("step_index", 0))
 	st["steps"] = Procedures.steps(String(c.get("ailment_id", ""))).size()
-	st["vitals"] = float(c.get("vitals", 100.0))
+	st["vitals"] = _case_vitals()
 	if not st.has("title"):
 		st["title"] = st.step_label
 	return st

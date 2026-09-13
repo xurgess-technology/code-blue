@@ -38,6 +38,12 @@ static func place_second(game: Node, level: Node3D, first: Vector3, yaw: float, 
 	var lectern: Dictionary = info.get("lectern", {})
 	if lectern.has("position"):
 		keep_clear.append(lectern.position)
+	for t in info.get("tables", []):
+		var tp: Vector3 = t.get("position", first)
+		if tp.distance_to(first) > 0.1:
+			keep_clear.append(tp)   # e.g. the player table
+			keep_clear.append(tp + Basis(Vector3.UP, float(t.get("yaw", 0.0))) * Vector3(1.0, 0, 0))
+			keep_clear.append(tp - Basis(Vector3.UP, float(t.get("yaw", 0.0))) * Vector3(1.0, 0, 0))
 	for e in info.get("containers", []):
 		var n = e.get("node")
 		if n != null and is_instance_valid(n) and n is Node3D:
