@@ -510,7 +510,8 @@ func _build() -> void:
 	# The glowing guide along the cut: it flashes green, amber or red with each pass.
 	_guide = _decal(_texture("glow_line"), Vector3(0.09, proj_h, hs * 3.2 + 0.05), Vector3(0, proj_y, 0), 10)
 	_guide.texture_emission = _guide.texture_albedo
-	_guide.emission_energy = 6.0
+	# Bright enough to read under the work lamp, not so bright it blooms the limb away.
+	_guide.emission_energy = 1.3
 	_guide.modulate = GUIDE_COLORS[Verdict.NONE]
 	_bruise = _decal(_texture("bruise"), Vector3(0.05, proj_h, 0.05), Vector3(0, proj_y, 0), 2)
 	_dust_decal = _decal(_texture("dust"), Vector3(0.08, proj_h, 0.1), Vector3(0, proj_y, 0), 3)
@@ -690,7 +691,7 @@ func _update_visuals(delta: float) -> void:
 	# right after it; red at once while the blade is off the line.
 	_flash = maxf(0.0, _flash - delta * 1.6)
 	var gcol: Color = GUIDE_COLORS[Verdict.NONE]
-	var glow := 0.45
+	var glow := 0.25
 	if held and off_now > 0.35:
 		gcol = GUIDE_COLORS[Verdict.OFF]
 		glow = 0.9

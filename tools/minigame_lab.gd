@@ -48,6 +48,7 @@ var mg: Node3D
 var cam: Camera3D
 var body: Node3D
 var site := Transform3D()
+var step_site := ""
 var t := 0.0
 var botch_total := 0.0
 var botch_count := 0
@@ -90,6 +91,9 @@ func _ready() -> void:
 	var step := _find_step()
 	if variant == "" and step.has("variant"):
 		variant = step.variant
+	# The stump dressing comes after the saw: show the limb already off unless told otherwise.
+	if game_id == "gauze" and variant == "stump" and not flags.has("amputated"):
+		flags["amputated"] = true
 
 	_build_room()
 	body = BodyScript.create(patient_id)
@@ -103,6 +107,7 @@ func _ready() -> void:
 		body.apply_flags(flags)
 	await get_tree().process_frame
 	site = body.site_transform(step.site) if body.has_method("site_transform") else Transform3D(Basis(), Vector3(0, 1.2, 0))
+	step_site = String(step.site)
 
 	var path: String = Procedures.MINIGAME_SCRIPTS.get(game_id, "")
 	if path == "" or not ResourceLoader.exists(path):
@@ -222,6 +227,9 @@ func _physics_process(delta: float) -> void:
 	if mg == null:
 		return
 	t += delta
+	# Follow the site as the body breathes and stirs, as the surgery system's _place_mg does.
+	if body != null and body.has_method("site_transform") and step_site != "":
+		mg.global_transform = body.site_transform(step_site).orthonormalized()
 	if not mg.done:
 		var shake := _stir_tick(delta)
 		if bot_skill >= 0.0:

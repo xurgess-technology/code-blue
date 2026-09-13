@@ -417,6 +417,9 @@ func _build() -> void:
 	var vb := BoxMesh.new()
 	vb.size = Vector3(1.0, 0.002, 0.009)
 	_vein_mat = _unshaded(Color(0.2, 0.3, 0.85, 0.8))
+	# The target must never hide: a fidgeting arm or a gown fold used to swallow the vein.
+	_vein_mat.no_depth_test = true
+	_vein_mat.render_priority = 1
 	var vein := MeshInstance3D.new()
 	vein.mesh = vb
 	vein.material_override = _vein_mat
@@ -425,6 +428,8 @@ func _build() -> void:
 	vein.name = "Vein"
 	add_child(vein)
 	_flow_mat = _unshaded(Color(1.0, 0.72, 0.15, 0.9))
+	_flow_mat.no_depth_test = true
+	_flow_mat.render_priority = 2
 	_flow = MeshInstance3D.new()
 	_flow.mesh = vb
 	_flow.material_override = _flow_mat

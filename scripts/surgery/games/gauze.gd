@@ -17,6 +17,7 @@ extends "res://scripts/surgery/minigame.gd"
 ##         middle    = GOOD: a taut white strip, a green trail behind the roll;
 ##         far out   = TIGHT: the strip thins and turns pink, it creaks, the skin next to the
 ##                     dressing blanches white, and if you keep it up that botches.
+##       A faint ring shows the path that pulls it just right; it glows green while you are on it.
 ##       Going backwards unwinds the last turns. A stir yanks the wrap loose (botch).
 ## Result {"dressed": true}.
 
@@ -44,9 +45,9 @@ const R_LOOSE := 0.075            # pulled out less than this: loose
 const R_TIGHT := 0.165            # pulled out more than this: too tight (narrower later)
 const LOOSE_GAIN := 0.55
 const TIGHT_TIME := 1.0           # seconds of continuous over-tight pulling before it botches
-const TIGHT_BOTCH := 3.5
+const TIGHT_BOTCH := 4.0
 const TIGHT_REPEAT := 1.5
-const UNWIND_BOTCH := 1.5
+const UNWIND_BOTCH := 2.0
 const SLIP_BOTCH := 2.0
 const SOAK_BOTCH := 2.0
 const SEG := PI * 0.5             # one tension mark per quarter turn of gauze
@@ -114,6 +115,8 @@ var _strip_mat: StandardMaterial3D
 var _trail: MeshInstance3D
 var _trail_mesh: ImmediateMesh
 var _trail_pts: Array = []        # [{p: Vector2, t: float, c: Color}]
+var _path: MeshInstance3D
+var _path_mat: StandardMaterial3D
 var _blanch: Decal
 var _blanch_ring: MeshInstance3D
 var _blanch_mat: StandardMaterial3D
@@ -407,7 +410,7 @@ func hud_state() -> Dictionary:
 			hint = "Press gauze into the wound until it stops bleeding."
 		Stage.WRAP:
 			if not pressing:
-				hint = "Hold left click and circle the roll round the %s." % ("stump" if variant == "stump" else "wound")
+				hint = "Hold left click and circle the roll along the ring."
 			elif pull == Pull.TIGHT:
 				hint = "Too tight! Bring the roll in closer."
 			elif pull == Pull.LOOSE:
@@ -768,6 +771,19 @@ func _build() -> void:
 	# The trail the roll leaves, coloured by the tension: green good, amber loose, red tight.
 	_trail_mesh = ImmediateMesh.new()
 	_trail = _mesh_node(_trail_mesh, _unshaded(Color.WHITE))
+	# A faint ring where the roll does the most good: circle along it. Not a band to match, just
+	# a path; it glows green while the pull is right and fades while the trail says otherwise.
+	var path_ring := TorusMesh.new()
+	path_ring.inner_radius = 0.975
+	path_ring.outer_radius = 1.0
+	path_ring.rings = 64
+	path_ring.ring_segments = 4
+	_path_mat = _unshaded(Color(1, 1, 1, 0.0))
+	_path = _mesh_node(path_ring, _path_mat)
+	var pr := (R_LOOSE + r_tight) * 0.5
+	_path.scale = Vector3(pr, 0.02, pr)
+	_path.position = Vector3(0, 0.044, 0)
+	_path.visible = false
 	_set_layers(self)
 	if _blanch_ring != null:
 		_blanch_ring.visible = false
@@ -981,6 +997,18 @@ func _update_visuals(delta: float) -> void:
 		_set_rolls(1 if wrap_frac() >= 0.5 else maxi(1, int(ctx.get("step", {}).get("uses", 2))))
 	elif stage == Stage.DONE and variant == "stump":
 		_set_rolls(0)
+
+	# The path ring.
+	_path.visible = wrapping
+	if wrapping:
+		var pa := 0.22 + 0.12 * sin(_t * 4.0)
+		var pc := Color(1, 1, 1)
+		if pressing and pull == Pull.GOOD:
+			pc = Color(0.2, 1.0, 0.4)
+			pa = 0.5
+		elif pressing and pull != Pull.NONE:
+			pa = 0.3
+		_path_mat.albedo_color = Color(pc.r, pc.g, pc.b, pa)
 
 	# The trail.
 	if wrapping and pressing and cursor.length() >= R_IN:

@@ -1095,12 +1095,13 @@ func _update_visuals(delta: float) -> void:
 
 	# Crank aids.
 	var orbit_on := stage == Stage.CRANK and _stand > 0.5
-	var oa := move_toward(_orbit_mat.albedo_color.a, 0.35 if orbit_on else 0.0, maxf(delta, 0.0) * 2.0)
+	# The circle to trace round the rod; it fades once the pulse has stopped (nothing left to do).
+	var orbit_a := 0.6 if pressure < good_min else 0.2
+	var oa := move_toward(_orbit_mat.albedo_color.a, orbit_a if orbit_on else 0.0, maxf(delta, 0.0) * 2.0)
 	_orbit_mat.albedo_color = Color(0.85, 0.95, 1.0, oa)
 	_orbit.visible = oa > 0.01
-	_orbit.transform = Transform3D(Basis().scaled(Vector3(0.05, 1.0, 0.05)), Vector3(strap_x, 0.03, 0))
-	_orbit.rotation = Vector3(0, -_t * 0.6, 0)
-	_orbit.scale = Vector3(0.05, 1.0, 0.05)
+	# Uniform scale: the chevrons are children in ring units and stood up as long spikes otherwise.
+	_orbit.transform = Transform3D(Basis(Vector3.UP, -_t * 0.6).scaled(Vector3.ONE * 0.05), Vector3(strap_x, 0.03, 0))
 	_dot.visible = ctx.get("operator", false) and stage == Stage.CRANK
 	_dot.position = Vector3(cursor.x, 0.03, cursor.y)
 
