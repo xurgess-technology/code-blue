@@ -175,7 +175,7 @@ func _dev_room() -> void:
 	me.bot_interact = false
 	_check(me.carrying == did and dummy.carried_by == me.peer_id, "holding E picks the downed dummy up")
 	await _frames(2)
-	_check(dummy.global_position.distance_to(me.global_position + Vector3.UP * 1.35) < 0.6, "the carried body rides on the carrier's shoulder")
+	_check(dummy.global_position.distance_to(me.global_position + Vector3.UP * 1.35) < 0.8, "the carried body rides on the carrier's shoulder")
 	_stand(Vector3(20.0, 0, 15.5), -PI / 2.0)
 	await _frames(2)
 	start = me.global_position

@@ -149,9 +149,6 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 
 ## Dev room (sweep 2 wave 1)
 
-- **Knock-down is a stand-in.** Until the downed system (wave 3) it is damage to 1 HP plus a
-  3 s stun (you see the floor, others see you lying down). `game.knock_down_player` is the one
-  place to replace.
 - **The HUD still shows the case panel and "operate / bring to the shelf"** in the dev room while
   a patient is on the table. Harmless; the HUD becomes minimal in wave 3.
 - **Bots are simple.** They path on the navmesh without avoiding each other or monsters, never
@@ -233,6 +230,45 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   "hold E at the time clock" instruction is the lobby message (6 s) plus the clock's interact
   prompt; the monitor's idle screen says "clock in to start the shift" but it is in the OR. The
   `loop` worker's phone/flow should carry any new objective in the world or in messages.
+
+## Downed players (sweep 2 wave 3)
+
+- **The stitches operation is self-contained.** `game.add_case` / `game.cases` do not exist on this
+  branch, so the player table runs its own copy of the surgery system through
+  `scripts/downed/player_surgery.gd` (an adapter standing in for the game). The integration wave
+  should rewire `game.start_player_surgery(p)` onto `add_case({patient_id: "player", player_id,
+  ailment_id: "stitches", table: <player table index>})` and delete the adapter; until then the OR
+  monitor does not list the player case, and `game.surgery_camera()` / `surgery_wants_mouse()` /
+  `surgery_local_exit()` stand in for per-table surgery lookups in `main.gd` and `hud.gd`.
+- **Solo means game over on the first down.** Nobody can carry you, so `all_players_out()` fails
+  the shift at once (the mortal playtest now reports "went down" instead of "died"). The dev room
+  never ends the shift for it.
+- **The carry pose is a stiff plank.** The carried body lies straight over the right shoulder (no
+  bend, no animation), sticking out behind the carrier; with the big-headed surgeon model it is
+  mostly hidden from straight in front. The carried player's camera sits a metre behind the
+  shoulder point along their own look direction, so looking around orbits a little.
+- **A dropped client can land at shoulder height for a moment** if a stale snapshot (still saying
+  "carried") arrives after the reliable `placed` event: it then falls from the carrier's shoulder
+  next to where it was put down.
+- **Downed players do not watch for the Night Nurse** (`alive_players()` excludes them, and
+  perception uses it) and make no footstep noise while crawling. Calling for help is heard by
+  teammates only; monsters ignore downed players entirely.
+- **Bleeding keeps running while being stitched** (at half speed on the table); a botch costs
+  4 s of bleed per vitals point. A patient who bleeds out mid-stitch dies on the table.
+- **The player table is placed by ray casts** when `level_info.tables` has no "player" entry (the
+  fallback ward): the first clear 2.3 x 1.1 m spot 2.7-3.4 m from the OR table. On the hospital
+  and the dev room the level's own entry is used; a level table is detected by a downward ray
+  (a top between 0.5 and 1.4 m) and no model is added.
+- **Suture kits skip `ItemSpawner.plan`**: `game.spawn_suture_kits()` places three stacks of 1-2 in
+  random legal containers (trauma bags, nurse station drawers, drawer units), not spread by wing
+  depth, and not topped up by the softlock guard.
+- **Nettest with lag fails before any downed code runs** (also on `main` after the hospital merge):
+  `deliver` and `downed` with `--lag=120 --jitter=40 --loss=0.03` stop receiving snapshots a few
+  seconds into the shift (the host logs 2.3 KB keyframes over the MTU). `late_join` failed once on
+  this branch without lag (the host never saw the late joiner's "spectating" message); not
+  investigated.
+- **`tools/mapcheck.gd` reports seed 112** (a morgue tray anchor 3.3 m off the navmesh); the same
+  on `main` before the pod removal.
 
 ## Testing tips
 

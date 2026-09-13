@@ -15,6 +15,8 @@ const SurgeryScript := preload("res://scripts/surgery/surgery_system.gd")
 const PlayerBodyScript := preload("res://scripts/downed/player_body.gd")
 
 const BOTCH_BLEED_SECONDS := 4.0
+## Seconds between the last stitch and the patient getting up.
+const REVIVE_DELAY := 1.2
 
 var game: Node = null
 var surgery: Node = null
@@ -25,6 +27,7 @@ var patient_body: Node3D = null
 var _case_key := ""
 var _flags_key := ""
 var _say_timer := 0.0
+var _revive_in := 0.0
 
 # ---- what the surgery system reads from its "game" ----
 var players: Dictionary:
@@ -96,6 +99,7 @@ func _vitals() -> float:
 func start(p: Node) -> void:
 	if not is_host() or p == null:
 		return
+	_revive_in = 0.0
 	case = {"patient_id": "player", "player_id": p.peer_id, "ailment_id": "stitches", "step_index": 0,
 		"flags": {"sedation": 1.0}}
 	apply_locally()
@@ -103,6 +107,7 @@ func start(p: Node) -> void:
 
 ## Host: the table is empty again (revived, dead, or gone).
 func clear() -> void:
+	_revive_in = 0.0
 	if case.is_empty():
 		return
 	case = {}
@@ -168,10 +173,8 @@ func surgery_step_done(result: Dictionary) -> void:
 	game._sound("step_done", table_pos())
 	var next := Procedures.step(String(case.ailment_id), int(case.step_index))
 	if next.is_empty():
-		var p := patient()
-		if p != null:
-			game.revive_player(p, "stitches")
-		clear()
+		# A moment to see the closed wound before they sit up and climb off the table.
+		_revive_in = REVIVE_DELAY
 
 
 func send_operator_report(report: Dictionary) -> void:
@@ -206,6 +209,11 @@ func physics_tick(delta: float) -> void:
 		var p := patient()
 		if p == null or not p.alive or not p.on_table:
 			clear()
+		elif _revive_in > 0.0:
+			_revive_in -= delta
+			if _revive_in <= 0.0:
+				game.revive_player(p, "stitches")
+				clear()
 	surgery.physics_tick(delta)
 	if patient_body != null and is_instance_valid(patient_body):
 		patient_body.set_vitals(_vitals())
@@ -254,5 +262,6 @@ func apply_net_state(s: Dictionary) -> void:
 
 
 func reset() -> void:
+	_revive_in = 0.0
 	case = {}
 	apply_locally()

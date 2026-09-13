@@ -999,20 +999,25 @@ func _update_down_pose(delta: float) -> void:
 		if on_table:
 			eye = 0.28
 		elif carried_by != 0:
-			eye = 0.12
+			eye = 0.3
 		elif down and alive:
 			eye = 0.45
 		if not is_equal_approx(head.position.y, eye):
 			head.position.y = eye if carried_by != 0 or on_table else move_toward(head.position.y, eye, delta * 6.0)
+		# Carried, your view hangs back over the carrier's shoulder instead of inside their head.
+		var back := 1.0 if carried_by != 0 else 0.0
+		if not is_equal_approx(head.position.z, back):
+			head.position.z = back
 		return
 	if carried_by != 0:
-		# Over the shoulder: lying across it, feet to the right.
-		body_visual.rotation = Vector3(0.0, 0.0, PI * 0.5)
-		body_visual.position = Vector3(0.95, 0.0, 0.0)
+		# A fireman's carry over the right shoulder (game.pinned_pose puts the root there): legs
+		# down the front, the rest of the body down the carrier's back.
+		body_visual.rotation = Vector3(PI * 0.5, 0.0, 0.0)
+		body_visual.position = Vector3(0.0, 0.0, -0.6)
 		return
-	if not is_zero_approx(body_visual.rotation.z):
-		body_visual.rotation.z = 0.0
-		body_visual.position.x = 0.0
+	if not is_zero_approx(body_visual.position.z):
+		body_visual.rotation = Vector3.ZERO
+		body_visual.position = Vector3.ZERO
 	var tilt := -PI * 0.47 if down else 0.0
 	if not is_equal_approx(body_visual.rotation.x, tilt):
 		body_visual.rotation.x = move_toward(body_visual.rotation.x, tilt, delta * 6.0)

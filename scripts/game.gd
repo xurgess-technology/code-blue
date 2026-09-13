@@ -1668,7 +1668,7 @@ func pinned_pose(p: Node) -> Transform3D:
 		var c = players.get(p.carried_by)
 		if c != null and is_instance_valid(c):
 			var cb := Basis(Vector3.UP, c.rotation.y)
-			return Transform3D(cb, c.global_position + cb * Vector3(0.0, 1.35, 0.3))
+			return Transform3D(cb, c.global_position + cb * Vector3(0.55, 1.3, 0.0))
 	return p.global_transform
 
 

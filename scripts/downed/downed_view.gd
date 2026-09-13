@@ -1,7 +1,9 @@
 extends Node
 ## What downed players look like, on every machine: the blood trail a downed (or carried) player
-## leaves on the floor, and for the local downed player a slow red vignette with a small bleed-out
-## clock that only they see. Child "DownedView" of Game; reads replicated Player fields only.
+## leaves on the floor, and for the local downed player a slow red vignette (a screen effect) with a
+## small, dim bleed-out clock above their hearts that only they see; everything else a downed player
+## needs to know arrives as the game's short messages. Child "DownedView" of Game; reads replicated
+## Player fields only.
 
 const MAX_DECALS := 72
 const CRAWL_STEP_M := 0.5
@@ -30,7 +32,6 @@ var _layer: CanvasLayer
 var _veil: ColorRect
 var _veil_mat: ShaderMaterial
 var _clock: Label
-var _state: Label
 var _t := 0.0
 static var _shader: Shader
 
@@ -51,21 +52,22 @@ func setup(g: Node) -> void:
 	_veil_mat.shader = _shader
 	_veil.material = _veil_mat
 	_layer.add_child(_veil)
-	_clock = _label(13, Color(0.85, 0.3, 0.28, 0.8))
-	_clock.offset_top = -58
-	_state = _label(12, Color(0.8, 0.78, 0.75, 0.7))
-	_state.offset_top = -38
+	# Minimal HUD rules (docs/CONTRACTS.md): one small, dim clock just above your hearts, bottom left.
+	_clock = _label(13, Color(0.85, 0.32, 0.3, 0.75))
+	_clock.offset_left = 14
+	_clock.offset_top = -92
+	_clock.offset_bottom = -72
 	_layer.visible = false
 
 
 func _label(size: int, col: Color) -> Label:
 	var l := Label.new()
 	l.anchor_left = 0.0
-	l.anchor_right = 1.0
+	l.anchor_right = 0.0
 	l.anchor_top = 1.0
 	l.anchor_bottom = 1.0
-	l.offset_bottom = 0
-	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.offset_right = 260
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	l.add_theme_font_size_override("font_size", size)
 	l.add_theme_color_override("font_color", col)
 	l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.7))
@@ -153,11 +155,3 @@ func _overlay() -> void:
 	_veil_mat.set_shader_parameter("pulse", beat)
 	var secs := int(ceil(float(me.bleed)))
 	_clock.text = "bleeding out  %d:%02d" % [secs / 60, secs % 60]
-	var line := "Crawl, or call for help. Someone has to carry you to the OR."
-	if me.on_table:
-		var op = game.players.get(game.player_surgery.operator_peer())
-		line = "%s is stitching you up." % op.player_name if op != null else "On the table. Someone needs a suture kit on the shelf."
-	elif me.carried_by != 0:
-		var c = game.players.get(me.carried_by)
-		line = "%s is carrying you." % (c.player_name if c != null else "Someone")
-	_state.text = line

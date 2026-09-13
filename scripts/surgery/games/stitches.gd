@@ -283,6 +283,8 @@ func hud_state() -> Dictionary:
 		hint = "Too far off: put the needle in on the green ring."
 	elif stitch == 0 and half == 0:
 		hint = "Click the green ring, then the one across, to pull the gash shut."
+	elif stitch >= N_STITCHES:
+		hint = "Pulling the last stitch tight."
 	elif half == 1:
 		hint = "Now across the gash: click the other ring to pull it tight."
 	else:
