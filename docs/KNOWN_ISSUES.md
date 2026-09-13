@@ -40,6 +40,52 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 - **Guide draws on canvas layer 60**, above the post-processing layer (50). Any HUD drawn above
   60 would appear over the book.
 
+## Settings (sweep 2, wave 1)
+
+- **Night Nurse perception uses 78 degrees for remote players.** `fov` applies only to the local
+  player's camera, and the host does not know a client's field of view, so on the host a
+  client with a wider view counts as "looking" over a slightly narrower cone than they see.
+  Replicate the fov in the player report if it matters.
+- **High brightness washes out lit areas.** At 100% dark rooms become readable (the point) but
+  corridors under working fixtures and the near-wall glow go milky; 0% is close to black in
+  unlit rooms. The curve is in `Look.apply_brightness`; re-tune after the hospital rework lands
+  (new darker wings). Default (50%) is exactly the shipped look.
+- **Held items change size with fov.** Their screen position is kept, but at 60 degrees the bone
+  saw is large and at 100 small, as with any fixed viewmodel distance. No separate viewmodel fov.
+- **Window mode is not applied to tool runs.** Settings skips window changes when the command
+  line has a `.tscn` path or window flags, so tools keep their `--resolution` window; F11 in a
+  tool only changes the saved setting. "Windowed" restores a 1600x900 centred window.
+- **The old `user://prefs.cfg` still exists.** Only its `video/quality` is migrated (once, when
+  `settings.cfg` is missing); the menu keeps name and address there. Note `Menu._save_prefs`
+  rewrites that file from scratch, which is why the quality preset used to get lost.
+- **Tools inherit the player's saved settings** (brightness, fov, volumes) from
+  `user://settings.cfg`, which every worktree shares. `settingstest` and `settingsshot` use
+  scratch files; `gameshot` and `perfprobe` do not, so reset settings before comparing looks.
+
+## Networking (sweep 2, net worker)
+
+- **The Steam backend is untested end to end.** Steam is not installed on the development
+  machine, so only this was verified: GodotSteam 4.22.1 loads in Godot 4.7.2 and exposes
+  `SteamMultiplayerPeer`; `steamInitEx(480)` without a Steam client fails cleanly and the game
+  falls back to ENet with the Steam button hidden; a missing extension library does not stop
+  the game. Not verified: lobby creation, `host_with_lobby` / `connect_to_lobby` (the code falls
+  back to `create_host` / `create_client`), invites, "Join game", `+connect_lobby` launches,
+  persona names, and how quickly a vanished Steam peer is noticed. Needs two Steam accounts.
+- **Upstream player state is still 20 Hz full state** (a compact array, about 2.5-3.5 KB/s per
+  client with operator reports). Fine for four players; delta it if the player count grows.
+- **Keyframes are one unreliable message** (about 4-8 KB mid-shift), so ENet fragments them and a
+  lossy link loses more of them. Deltas never depend on a keyframe arriving (clients ack what
+  they decoded), so this only delays recovery from a missing base. Splitting keyframes across
+  ticks would fix it.
+- **Monsters are the largest part of a snapshot** (about 2 KB/s per client with two or three
+  moving). Sending their position at a lower rate or as smaller deltas would halve the total.
+- **A killed client takes 5 to 12 seconds to be noticed** (ENet timeout, `Net.TIMEOUT_*_MS`).
+  Until then its surgeon stands frozen, and if it was operating, nobody else can start the step.
+- **`menu.gd` `_save_prefs()` overwrites `user://prefs.cfg`** without loading it first, which drops
+  the saved graphics quality (pre-existing; the settings worker owns preferences now).
+- **Nettest bots teleport** instead of walking, so the multiplayer tests prove replication, not
+  navigation or monster pressure. `tools/playtest.tscn` still covers those solo.
+
 ## Level and tools
 
 - **The OR supply shelf is about 4.2 m from the table** (the OR template has no wall closer that
@@ -55,6 +101,29 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   behind it. `tools/monster_lab.tscn` (all scenarios pass) remains the real monster check.
 - **Headless runs log "Parameter m is null" from the gauze warmup.** It comes from the dummy
   renderer used by `--headless` and does not happen in a window.
+
+## Dev room (sweep 2 wave 1)
+
+- **Knock-down is a stand-in.** Until the downed system (wave 3) it is damage to 1 HP plus a
+  3 s stun (you see the floor, others see you lying down). `game.knock_down_player` is the one
+  place to replace.
+- **The HUD still shows the case panel and "operate / bring to the shelf"** in the dev room while
+  a patient is on the table. Harmless; the HUD becomes minimal in wave 3.
+- **Bots are simple.** They path on the navmesh without avoiding each other or monsters, never
+  flee, and keep their flashlight off. Their cameras count as watchers for the Night Nurse, and
+  bots and dummies count as living players for monsters and the "everyone is dead" check.
+- **A bot operates with the minigame's own `bot_input`.** If a reworked minigame's bot input stops
+  finishing, bots stop finishing that step. The devtest covers only the anesthetic step.
+- **Noclip skips the rest of the movement step**, so F, Q and G do nothing while flying.
+- **Humans who die vanish** (as in a shift) and auto-revive at the spawn after 4 s; dead bots and
+  dummies lie where they fell until revived or removed.
+- **Time scale is `Engine.time_scale` on every machine** (replicated), so it also slows a client's
+  own walking.
+- **The room is bright and a little hazy**: the global volumetric fog from `look.gd` still
+  applies; the fixtures' fog energy is only turned down.
+- **Monsters killed right against the barrier fall out of sight** behind it.
+- **`tools/nettest.tscn` is still broken** (net worker); the dev room has its own two-process check
+  in `tools/devtest.tscn`. Run the host first; the client waits on real time, not game time.
 
 ## Testing tips
 

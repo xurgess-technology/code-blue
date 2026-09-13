@@ -407,9 +407,10 @@ func recoil_after_hit() -> void:
 
 func report() -> Dictionary:
 	return {
-		"id": monster_id, "kind": kind, "pos": global_position, "y": rotation.y,
-		"st": state, "md": mode, "mv": moving, "sp": snappedf(speed, 0.05),
-		"ob": observed, "ly": snappedf(listen_yaw, 0.01), "lg": lunge_t > 0.0, "cm": calm > 0.0,
+		# Quantized (1 cm, 1/128 rad; power-of-two steps stay 4-byte floats on the wire) so a monster standing still costs no snapshot delta.
+		"id": monster_id, "kind": kind, "pos": global_position.snappedf(0.01), "y": snappedf(rotation.y, 1.0 / 128.0),
+		"st": state, "md": mode, "mv": moving, "sp": snappedf(speed, 1.0 / 16.0),
+		"ob": observed, "ly": snappedf(listen_yaw, 1.0 / 64.0), "lg": lunge_t > 0.0, "cm": calm > 0.0,
 	}
 
 

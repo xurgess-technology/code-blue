@@ -201,7 +201,10 @@ static func make_environment_resource() -> Environment:
 ## bright end pushes shadows toward sickly teal and anything the flashlight
 ## actually reaches toward warm tungsten. That single split is most of the
 ## R.E.P.O. palette.
-static func make_grade_gradient() -> GradientTexture1D:
+##
+## [param gamma] (settings hook, brightness): when not 1.0 the ramp is resampled so input x
+## reads the shipped ramp at x^gamma; below 1 lifts the shadows, above 1 sinks them.
+static func make_grade_gradient(gamma := 1.0) -> GradientTexture1D:
 	var g := Gradient.new()
 	g.offsets = PackedFloat32Array([0.0, 0.22, 0.50, 0.78, 1.0])
 	g.colors = PackedColorArray([
@@ -213,11 +216,84 @@ static func make_grade_gradient() -> GradientTexture1D:
 	])
 	g.interpolation_mode = Gradient.GRADIENT_INTERPOLATE_LINEAR
 
+	if not is_equal_approx(gamma, 1.0):
+		const N := 48
+		var offs := PackedFloat32Array()
+		var cols := PackedColorArray()
+		for i in N + 1:
+			# Denser samples near black, where the gamma bend is steepest.
+			var x := pow(float(i) / N, 2.0)
+			offs.append(x)
+			# Take the brightness from x^gamma but keep the shipped hue for x, so lifted
+			# shadows stay the grade's teal instead of sliding into its saturated green.
+			var base := g.sample(x)
+			var bent_c := g.sample(pow(x, gamma))
+			var l0 := base.get_luminance()
+			var l1 := bent_c.get_luminance()
+			if l0 > 0.02:
+				var r := l1 / l0
+				cols.append(Color(minf(base.r * r, 1.0), minf(base.g * r, 1.0), minf(base.b * r, 1.0)))
+			else:
+				cols.append(bent_c)
+		var bent := Gradient.new()
+		bent.offsets = offs
+		bent.colors = cols
+		bent.interpolation_mode = Gradient.GRADIENT_INTERPOLATE_LINEAR
+		g = bent
+
 	var tex := GradientTexture1D.new()
 	tex.gradient = g
 	tex.width = 256
 	tex.use_hdr = false
 	return tex
+
+
+# ---------------------------------------------------------------------------
+# Brightness (settings hook)
+# ---------------------------------------------------------------------------
+
+## The shipped look. Settings "brightness" is 0..1 with this in the middle.
+const BRIGHTNESS_DEFAULT := 0.5
+
+## Apply the player's brightness setting to the environment under [param target] (a node
+## that has the Look environment as a child or descendant, a WorldEnvironment, or an
+## Environment).
+##
+## Two free knobs inside the tonemap pass the frame already runs, so it costs nothing:
+## - a gamma bend baked into the colour-grade ramp, which lifts (or sinks) the shadows and
+##   midtones where dark corridors live while pure black stays black and the flashlight
+##   hotspot stays where it was;
+## - a small tonemap exposure change on top, so lit areas follow a little.
+## At the default (0.5) the shipped ramp and exposure 1.0 are restored exactly.
+static func apply_brightness(target: Object, value: float) -> void:
+	var env: Environment = null
+	if target is Environment:
+		env = target
+	elif target is WorldEnvironment:
+		env = (target as WorldEnvironment).environment
+	elif target is Node:
+		var we := (target as Node).get_node_or_null(ENV_NODE_NAME) as WorldEnvironment
+		if we == null:
+			we = (target as Node).find_child(ENV_NODE_NAME, true, false) as WorldEnvironment
+		if we == null:
+			we = _find_first_world_environment(target)
+		if we != null:
+			env = we.environment
+	if env == null:
+		return
+	var v := clampf(value, 0.0, 1.0)
+	var d := v - BRIGHTNESS_DEFAULT
+	env.set_meta("brightness", v)
+	if absf(d) < 0.004:
+		env.adjustment_color_correction = make_grade_gradient()
+		env.tonemap_exposure = 1.0
+		return
+	# Gamma on the ramp input: 0.6 at the top of the slider (shadows lifted), about 1.5 at
+	# the bottom (a darker, crushed look). 1.0 in the middle.
+	var p := pow(2.0, -d * 1.47) if d > 0.0 else pow(2.0, -d * 1.17)
+	env.adjustment_color_correction = make_grade_gradient(p)
+	# +/- a quarter stop at the ends; more than that washes out the lit areas.
+	env.tonemap_exposure = pow(2.0, d * 0.5)
 
 
 ## Physical-ish camera attributes. Auto exposure is deliberately OFF: in a game

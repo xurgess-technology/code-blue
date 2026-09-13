@@ -171,11 +171,16 @@ func interact(player) -> void:
 # ---------------------------------------------------------------------------
 # networking
 
+## Quantized (5 mm, rotation components to 0.002) so a resting stack never changes between
+## snapshots and costs nothing after the client has it. Items inside a container follow the
+## slot on every machine, so their transform is not sent at all.
 func report() -> Dictionary:
-	return {
-		"id": item_id, "k": kind, "n": count, "st": state, "ct": container_id, "sl": slot,
-		"p": global_position, "q": global_basis.get_rotation_quaternion(),
-	}
+	var d := {"id": item_id, "k": kind, "n": count, "st": state, "ct": container_id, "sl": slot}
+	if state != State.IN_CONTAINER:
+		var q := global_basis.get_rotation_quaternion()
+		d["p"] = global_position.snappedf(0.005)
+		d["q"] = Quaternion(snappedf(q.x, 0.002), snappedf(q.y, 0.002), snappedf(q.z, 0.002), snappedf(q.w, 0.002))
+	return d
 
 
 func apply_remote(s: Dictionary) -> void:
@@ -185,7 +190,11 @@ func apply_remote(s: Dictionary) -> void:
 	container_id = String(s.ct)
 	slot = int(s.sl)
 	set_count(int(s.n))
-	_target = Transform3D(Basis(s.q as Quaternion), s.p as Vector3)
+	if not s.has("p"):
+		return   # in a container: _physics_process follows the slot
+	var q := (s.get("q", Quaternion.IDENTITY) as Quaternion)
+	q = q.normalized() if q.length_squared() > 0.0001 else Quaternion.IDENTITY
+	_target = Transform3D(Basis(q), s.p as Vector3)
 	if not _has_target:
 		global_transform = _target
 	_has_target = true

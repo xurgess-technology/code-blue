@@ -5,6 +5,8 @@ extends CharacterBody3D
 
 const GLOW_RANGE := 3.6
 const MOUSE_SENS := 0.0022
+## The field of view the first-person hands and held item were placed for.
+const BASE_FOV := 78.0
 const ACCEL := 14.0
 const AIR_ACCEL := 3.0
 const JUMP_FORCE := 0.0  # no jumping: this is a hospital
@@ -56,6 +58,14 @@ var bot_pitch: float = 0.0
 var bot_aim_id: String = ""
 ## Bump to press E once on whatever the bot aims at.
 var bot_press: int = 0
+
+## DEV HOOK (scripts/dev): a dev room bot or target dummy. The host simulates it like a local
+## player through the bot_* seam; everyone else sees it like a remote player.
+var is_bot: bool = false
+## DEV HOOK: seconds left knocked down (no moving). Wave 3's downed state replaces this.
+var stun: float = 0.0
+## DEV HOOK: flying through walls (dev panel).
+var noclip: bool = false
 
 var _shove_seen: int = 0
 var _drop_seen: int = 0
@@ -137,7 +147,7 @@ func _build() -> void:
 
 	camera = Camera3D.new()
 	camera.name = "Camera"
-	camera.fov = 78.0
+	camera.fov = BASE_FOV
 	camera.near = 0.05
 	camera.far = 120.0
 	camera.current = is_local
@@ -197,8 +207,37 @@ func _ready() -> void:
 		body_visual.visible = false
 		name_tag.visible = false
 		hands.visible = true
+		# Settings hook: the local camera follows the field of view setting, live.
+		apply_fov(float(Settings.get_value("fov")))
+		Settings.changed.connect(_on_setting_changed)
 	else:
 		hands.visible = false
+
+
+## Settings hook.
+func _on_setting_changed(key: String, value) -> void:
+	if key == "fov":
+		apply_fov(float(value))
+
+
+## Settings hook: set the resting field of view (the sprint kick in CameraFX adds on top),
+## and move the first-person hands and held stack so they keep their place on screen:
+## their x/y offsets scale with tan(fov / 2), their depth stays.
+func apply_fov(fov_deg: float) -> void:
+	if camera == null:
+		return
+	camera.fov = fov_deg
+	if fx != null and "_base_fov" in fx:
+		fx.set("_base_fov", fov_deg)
+	var k := tan(deg_to_rad(fov_deg) * 0.5) / tan(deg_to_rad(BASE_FOV) * 0.5)
+	var placed: Array = hands.get_children() if hands != null else []
+	if _held_fp != null:
+		placed.append(_held_fp)
+	for n in placed:
+		if not n.has_meta("fov_base_pos"):
+			n.set_meta("fov_base_pos", n.position)
+		var b: Vector3 = n.get_meta("fov_base_pos")
+		n.position = Vector3(b.x * k, b.y * k, b.z)
 
 
 func _make_body() -> Node3D:
@@ -278,15 +317,19 @@ func _input(event: InputEvent) -> void:
 	if not is_local or not alive:
 		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-		_yaw -= event.relative.x * MOUSE_SENS
-		_pitch = clampf(_pitch - event.relative.y * MOUSE_SENS, -1.3, 1.3)
+		# Settings hook: "sensitivity" multiplies the base look speed.
+		var sens: float = MOUSE_SENS * float(Settings.get_value("sensitivity"))
+		_yaw -= event.relative.x * sens
+		_pitch = clampf(_pitch - event.relative.y * sens, -1.3, 1.3)
 
 
 func _physics_process(delta: float) -> void:
-	if is_local:
+	# DEV HOOK: the host drives dev room bots as if they were its own players.
+	if is_local or (is_bot and game != null and game.is_host()):
 		_local_step(delta)
 	else:
 		_remote_step(delta)
+	stun = maxf(0.0, stun - delta)
 	invuln = maxf(0.0, invuln - delta)
 	if not alive:
 		dead_time += delta
@@ -296,7 +339,7 @@ func _local_step(delta: float) -> void:
 	var g: Node = game
 	# The mouse is only free while a menu, the guide or the surgery view has it,
 	# and then the surgeon stands still.
-	var can_move: bool = alive and (g == null or not g.paused) \
+	var can_move: bool = alive and (g == null or not g.paused) and stun <= 0.0 \
 		and (bot_active or Input.mouse_mode == Input.MOUSE_MODE_CAPTURED)
 
 	var input_dir := Vector2.ZERO
@@ -327,6 +370,13 @@ func _local_step(delta: float) -> void:
 	rotation.y = _yaw
 	head.rotation.x = _pitch
 
+	# DEV HOOK (scripts/dev): noclip flies through walls; nothing below applies.
+	if noclip and g != null and g.dev != null:
+		g.dev.noclip_move(self, input_dir, want_sprint, delta)
+		if g.is_host():
+			_consume_actions()
+		return
+
 	moving = input_dir.length() > 0.1 and not operating
 	sprinting = moving and can_move and want_sprint and stamina > 0.0
 	stamina = clampf(stamina + (-delta / 4.5 if sprinting else delta / 5.0), 0.0, 1.0)
@@ -354,7 +404,9 @@ func _local_step(delta: float) -> void:
 			set_flashlight(not flashlight_on)
 			Audio.play("click")
 		_shove_cd = maxf(0.0, _shove_cd - delta)
-		if Input.is_action_just_pressed("shove") and _shove_cd <= 0.0:
+		# DEV HOOK: with the dev gun out, the left mouse button fires instead of shoving.
+		var gun_out: bool = g != null and g.dev_mode and g.dev.has_gun(peer_id) and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+		if Input.is_action_just_pressed("shove") and _shove_cd <= 0.0 and not gun_out:
 			_shove_cd = C.SHOVE_COOLDOWN
 			shove_count += 1
 		if Input.is_action_just_pressed("drop") and slots[selected].kind != "":
@@ -485,6 +537,7 @@ func holding(kind: String) -> bool:
 
 
 func _process(_delta: float) -> void:
+	_update_down_pose(_delta)  # DEV HOOK
 	var s: Dictionary = slots[selected]
 	var key := "%s:%d" % [s.kind, s.count]
 	if key == _held_key:
@@ -582,53 +635,72 @@ func flinch() -> void:
 
 func _set_visible_alive(a: bool) -> void:
 	if not is_local:
-		body_visual.visible = a
+		body_visual.visible = a or is_bot  # DEV HOOK: dead bots stay, lying where they fell
 		name_tag.visible = a
 	collision_layer = C.L_PLAYER if a else 0
+
+
+## DEV HOOK (scripts/dev): knocked down (stun) you see the floor; everyone else sees you lying
+## on it. Dead bots lie there too. Wave 3's downed state replaces this.
+func _update_down_pose(delta: float) -> void:
+	var down := stun > 0.0 or (is_bot and not alive)
+	if is_local and not is_bot:
+		var eye := 0.45 if down and alive else C.EYE_H
+		if not is_equal_approx(head.position.y, eye):
+			head.position.y = move_toward(head.position.y, eye, delta * 6.0)
+		return
+	var tilt := -PI * 0.47 if down else 0.0
+	if not is_equal_approx(body_visual.rotation.x, tilt):
+		body_visual.rotation.x = move_toward(body_visual.rotation.x, tilt, delta * 6.0)
+		body_visual.position.y = 0.3 * (body_visual.rotation.x / (-PI * 0.47))
 
 
 # =========================================================================
 # networking
 # =========================================================================
 
-## Client -> host, 20 Hz: everything about my own surgeon.
-func report_state() -> Dictionary:
-	return {
-		"p": global_position, "y": rotation.y, "pi": head.rotation.x,
-		"fl": flashlight_on, "sp": sprinting, "mv": moving,
-		"ia": wants_interact, "sh": shove_count, "dr": drop_count,
-		"ai": aim_id, "ic": interact_count, "sel": selected,
-	}
+## Client -> host, 20 Hz: everything about my own surgeon. A positional array rather than a
+## dictionary: no key strings on the wire, about a third of the size.
+##   [position, yaw, pitch, flag bits (1 light, 2 sprint, 4 moving, 8 holding E),
+##    shove count, drop count, aim id, interact count, selected hand]
+func report_state() -> Array:
+	var bits := (1 if flashlight_on else 0) | (2 if sprinting else 0) | (4 if moving else 0) | (8 if wants_interact else 0)
+	return [global_position, rotation.y, head.rotation.x, bits, shove_count, drop_count, aim_id, interact_count, selected]
 
 
-func apply_remote_state(s: Dictionary) -> void:
+func apply_remote_state(s: Array) -> void:
+	if s.size() < 9:
+		return
+	var bits := int(s[3])
 	if alive:
-		_target_pos = s.p
-		global_position = s.p
-	_target_yaw = s.y
-	rotation.y = s.y
-	_pitch = s.pi
-	head.rotation.x = s.pi
-	set_flashlight(s.fl)
-	sprinting = s.sp
-	moving = s.mv
-	wants_interact = s.ia
-	shove_count = s.sh
-	drop_count = s.dr
-	aim_id = String(s.get("ai", ""))
-	selected = clampi(int(s.get("sel", selected)), 0, 1)
+		_target_pos = s[0]
+		global_position = s[0]
+	_target_yaw = float(s[1])
+	rotation.y = float(s[1])
+	_pitch = float(s[2])
+	head.rotation.x = float(s[2])
+	set_flashlight(bits & 1 != 0)
+	sprinting = bits & 2 != 0
+	moving = bits & 4 != 0
+	wants_interact = bits & 8 != 0
+	shove_count = int(s[4])
+	drop_count = int(s[5])
+	aim_id = String(s[6])
+	selected = clampi(int(s[8]), 0, 1)
 	# Drop before interacting so a count that moved in the same tick uses the right hand.
-	var ic := int(s.get("ic", interact_count))
-	interact_count = ic
+	interact_count = int(s[7])
 	_consume_actions()
 
 
-## Host -> everyone, 20 Hz: the authoritative view of every surgeon.
+## Host -> everyone, 20 Hz: the authoritative view of every surgeon. Values are quantized
+## (1 cm, ~0.6 degrees) so a surgeon standing still produces no snapshot delta, and `sl` is a
+## deep copy because the host edits hand stacks in place.
 func report_full() -> Dictionary:
 	return {
-		"id": peer_id, "p": global_position, "y": rotation.y, "pi": head.rotation.x,
+		"id": peer_id, "p": global_position.snappedf(0.01), "y": snappedf(rotation.y, 1.0 / 128.0),
+		"pi": snappedf(head.rotation.x, 1.0 / 128.0),
 		"fl": flashlight_on, "sp": sprinting, "mv": moving, "op": operating,
-		"hp": hp, "al": alive, "iv": invuln > 0.0, "sl": slots, "sel": selected,
+		"hp": hp, "al": alive, "iv": invuln > 0.0, "sl": slots.duplicate(true), "sel": selected,
 	}
 
 

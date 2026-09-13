@@ -19,6 +19,13 @@ const QUALITY_NAMES := ["LOW", "MEDIUM", "HIGH"]
 
 var _fps_label: Label
 var _look: GDScript = null
+## Settings hook: the settings screen (menu and pause), scripts/settings_screen.gd.
+var settings_ui: CanvasLayer = null
+
+## DEV HOOK: the dev room panel (a CanvasLayer, hidden outside the dev room).
+var dev_panel: CanvasLayer = null
+const DevPanelScript := preload("res://scripts/dev/dev_panel.gd")
+const DevRoomScript := preload("res://scripts/dev/dev_room.gd")
 
 
 func _ready() -> void:
@@ -42,6 +49,10 @@ func _ready() -> void:
 		add_child(_basic_environment())
 	quality = _load_quality()
 	set_quality(quality, false)
+	# Settings hook: brightness now, and quality / brightness whenever they change.
+	if _look != null and _look.has_method("apply_brightness"):
+		_look.apply_brightness(self, float(Settings.get_value("brightness")))
+	Settings.changed.connect(_on_setting_changed)
 
 	var fps_layer := CanvasLayer.new()
 	fps_layer.layer = 10
@@ -73,9 +84,21 @@ func _ready() -> void:
 	menu.chose_solo.connect(_start_solo)
 	menu.chose_host.connect(_start_host)
 	menu.chose_join.connect(_start_join)
+	# DEV HOOK (scripts/dev): the secret dev room and its panel.
+	menu.chose_dev.connect(start_dev)
+	dev_panel = DevPanelScript.new()
+	dev_panel.name = "DevPanel"
+	add_child(dev_panel)
+	dev_panel.setup(game, self)
 	Net.joined_ok.connect(_on_joined)
 	Net.join_failed.connect(_on_join_failed)
 	Net.host_left.connect(func(): _back_to_menu("The host left the game."))
+	# net hooks: Steam hosting, invites, and the pause-menu invite button.
+	menu.chose_host_steam.connect(_start_host_steam)
+	Net.host_ready.connect(_on_steam_hosted)
+	Net.host_failed.connect(func(reason): menu.show_menu(reason))
+	Net.invite_accepted.connect(_on_steam_invite)
+	_build_invite_button()
 	game.notice.connect(func(_t, _s): pass)
 
 	# The medical guide binder. The guide worker's UI when present, the stub otherwise.
@@ -83,6 +106,13 @@ func _ready() -> void:
 	guide = guide_script.new()
 	guide.name = "Guide"
 	add_child(guide)
+
+	# Settings hook: the settings screen, opened from the title menu and the pause overlay.
+	settings_ui = load("res://scripts/settings_screen.gd").new()
+	settings_ui.name = "SettingsUI"
+	settings_ui.menu = menu
+	add_child(settings_ui)
+	menu.chose_settings.connect(settings_ui.open)
 
 	Audio.set_ambience(true)
 	_set_mouse(false)
@@ -101,10 +131,8 @@ func set_quality(q: int, save: bool = true) -> void:
 	# Test tools change presets constantly; only a player's own choice is remembered.
 	if not save:
 		return
-	var cfg := ConfigFile.new()
-	cfg.load("user://prefs.cfg")
-	cfg.set_value("video", "quality", quality)
-	cfg.save("user://prefs.cfg")
+	# Settings hook: the preset is saved by the Settings autoload (user://settings.cfg).
+	Settings.set_value("quality", quality)
 
 
 ## The player's saved choice, otherwise MEDIUM.
@@ -112,10 +140,19 @@ func set_quality(q: int, save: bool = true) -> void:
 ## MEDIUM holds 75+ fps (1% low) in the heaviest rooms, LOW about 80-130, HIGH is for
 ## dedicated GPUs.
 func _load_quality() -> int:
-	var cfg := ConfigFile.new()
-	if cfg.load("user://prefs.cfg") == OK and cfg.has_section_key("video", "quality"):
-		return int(cfg.get_value("video", "quality"))
-	return 1
+	# Settings hook: Settings migrated the old prefs.cfg video/quality on first run.
+	return int(Settings.get_value("quality"))
+
+
+## Settings hook: apply what main owns when the player changes it (settings screen, F2).
+func _on_setting_changed(key: String, value) -> void:
+	match key:
+		"quality":
+			if int(value) != quality:
+				set_quality(int(value), false)
+		"brightness":
+			if _look != null and _look.has_method("apply_brightness"):
+				_look.apply_brightness(self, float(value))
 
 
 ## A plain environment so the game is playable before the look pass lands.
@@ -164,11 +201,76 @@ func _start_host(player_name: String) -> void:
 
 func _start_join(player_name: String, address: String) -> void:
 	var parsed := Net.parse_address(address)
-	Net.local_name = player_name
 	menu.set_status("Joining %s:%d..." % [parsed.address, parsed.port])
-	var err := Net.join(parsed.address, parsed.port)
+	var err := Net.join(parsed.address, parsed.port, player_name)
 	if not err.is_empty():
 		menu.show_menu(err)
+
+
+## DEV HOOK: into the dev room, alone or hosting (friends then join it like any hosted game).
+func start_dev(player_name: String, host: bool) -> void:
+	if host:
+		var err := Net.host(player_name)
+		if not err.is_empty():
+			menu.show_menu(err)
+			return
+		var addresses := Net.local_addresses()
+		hud.host_info = "Friends join at: %s" % ", ".join(addresses.map(func(a): return "%s:%d" % [a, C.DEFAULT_PORT])) \
+			if not addresses.is_empty() else "Hosting on port %d" % C.DEFAULT_PORT
+	else:
+		Net.start_solo(player_name)
+		hud.host_info = ""
+	game.start_session(DevRoomScript.SEED)
+	_enter_game()
+
+
+
+## Steam: names come from Steam personas, so the typed name is not used.
+func _start_host_steam(_player_name: String) -> void:
+	var err := Net.host_steam()
+	if not err.is_empty():
+		menu.show_menu(err)
+
+
+func _on_steam_hosted() -> void:
+	game.start_session(randi())
+	hud.host_info = "Steam lobby open (friends only). Esc, then Invite friends, or invite from the Steam overlay."
+	_enter_game()
+
+
+## Accepted an invite or clicked "Join game" on a friend: leave whatever we were doing and go.
+func _on_steam_invite(lobby: int) -> void:
+	if game.phase != Game.Phase.MENU:
+		_back_to_menu("")
+	menu.set_enabled(false)
+	menu.set_status("Joining your friend's Steam lobby...")
+	var err := Net.join_steam(lobby)
+	if not err.is_empty():
+		menu.show_menu(err)
+
+
+var _invite_button: Button
+
+
+func _build_invite_button() -> void:
+	var layer := CanvasLayer.new()
+	layer.layer = 6
+	add_child(layer)
+	_invite_button = Button.new()
+	_invite_button.text = "Invite Steam friends"
+	_invite_button.custom_minimum_size = Vector2(240, 44)
+	_invite_button.add_theme_font_size_override("font_size", 17)
+	_invite_button.anchor_left = 0.5
+	_invite_button.anchor_right = 0.5
+	_invite_button.anchor_top = 0.4
+	_invite_button.anchor_bottom = 0.4
+	_invite_button.offset_left = -120
+	_invite_button.offset_right = 120
+	_invite_button.offset_top = 130
+	_invite_button.offset_bottom = 174
+	_invite_button.visible = false
+	_invite_button.pressed.connect(func(): Net.invite_friends())
+	layer.add_child(_invite_button)
 
 
 func _on_joined() -> void:
@@ -217,8 +319,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 
 	if event.is_action_pressed("fullscreen"):
-		var full := DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN
-		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED if full else DisplayServer.WINDOW_MODE_FULLSCREEN)
+		# Settings hook: F11 flips the saved window mode (windowed <-> fullscreen).
+		var full: bool = Settings.get_value("window_mode") != "windowed"
+		Settings.set_value("window_mode", "windowed" if full else "fullscreen")
 		get_viewport().set_input_as_handled()
 		return
 
@@ -281,7 +384,8 @@ func _can_read(me) -> bool:
 func _update_mouse() -> void:
 	var free: bool = menu.visible or game.phase == Game.Phase.MENU or game.paused \
 		or (guide != null and guide.is_open()) \
-		or (game.surgery != null and game.surgery.wants_mouse())
+		or (game.surgery != null and game.surgery.wants_mouse()) \
+		or (dev_panel != null and dev_panel.is_open())  # DEV HOOK
 	var want := Input.MOUSE_MODE_VISIBLE if free else Input.MOUSE_MODE_CAPTURED
 	if Input.mouse_mode != want:
 		Input.set_mouse_mode(want)
@@ -305,6 +409,7 @@ func _process(_delta: float) -> void:
 	if _fps_label.visible:
 		_fps_label.text = "%d fps  %s" % [Engine.get_frames_per_second(), QUALITY_NAMES[quality]]
 	_update_mouse()
+	_invite_button.visible = game.paused and Net.backend == "steam" and game.phase != Game.Phase.MENU
 	# While operating, the surgery view's camera wins; otherwise whoever we are watching.
 	var surgery_cam: Camera3D = game.surgery.camera() if game.surgery != null and game.phase != Game.Phase.MENU else null
 	if surgery_cam != null:

@@ -254,6 +254,145 @@ The main scene opens the guide when the local player presses R while holding the
 looking at it. While it is open the mouse is visible and the player cannot move; in co-op the
 world keeps running.
 
+## Settings (settings worker, sweep 2)
+
+`Settings` autoload (`scripts/settings.gd`, registered after `Audio`), persisted to
+`user://settings.cfg` (section `settings`):
+
+```gdscript
+Settings.get_value(key)          # current value (defaults when unset)
+Settings.set_value(key, v)       # clamps / validates, applies, emits, saves ~0.4 s later
+signal changed(key: String, value)   # only when the value really changed
+Settings.save_now()  Settings.reset_to_defaults()
+Settings.use_path(p)  Settings.reload()   # test seams: point at a scratch file, re-read it
+static func slider_to_db(v) -> float     # 0..1 slider to dB (squared amplitude, 0 = -80)
+```
+
+| Key | Type, range | Default | Applied by |
+| --- | --- | --- | --- |
+| `master_volume` | float 0..1 | 1.0 | Settings: `Master` bus |
+| `music_volume` | float 0..1 | 1.0 | Settings -> `Audio.music_volume_db` (Audio drives the `Music` bus each frame) |
+| `sfx_volume` | float 0..1 | 1.0 | Settings: `SFX` bus (`Ambience` sends into it) |
+| `window_mode` | `"fullscreen"` (exclusive), `"borderless"`, `"windowed"` | `"windowed"` | Settings; skipped headless and when launched with a `.tscn` or window flags |
+| `brightness` | float 0..1 | 0.5 | `main.gd` -> `Look.apply_brightness(root, v)` |
+| `sensitivity` | float 0.2..3.0, multiplier | 1.0 | `player.gd` mouse look (`MOUSE_SENS * v`) |
+| `fov` | float 60..100, vertical degrees | 78.0 | `player.gd` `apply_fov()`, local player camera only |
+| `quality` | int 0..2 | 1 | `main.gd` `set_quality()`; migrated once from `prefs.cfg` `video/quality` |
+
+- Anything new that should follow a setting reads `get_value()` when built and connects
+  `changed`; do not write the config file yourself.
+- Buses (`default_bus_layout.tres`): `Master`, `Hall` (reverb, -> Master), `Music` (-> Hall),
+  `SFX` (-> Master), `Ambience` (-> SFX). New sounds go through `Audio.play()` (SFX bus); a
+  player of your own must use bus `"SFX"` (or `"Music"`) so the volume settings reach it.
+- `Look.apply_brightness(target, v)` bends the colour-grade ramp (a gamma on its input, keeping
+  the shipped hue) and moves tonemap exposure by up to a quarter stop. 0.5 restores the shipped
+  ramp and exposure 1.0 exactly. Code that replaces `adjustment_color_correction` or
+  `tonemap_exposure` must re-apply brightness afterwards.
+- `Player.apply_fov(deg)` sets the camera fov and CameraFX's `_base_fov` (the sprint kick adds on
+  top) and moves the first-person `Hands` children and `HeldFirstPerson` so their x/y scale with
+  `tan(fov/2)`. Anything new parented to the first-person camera should do the same (store its
+  base position in meta `fov_base_pos`, or add it under `Hands`).
+- `SettingsUI` (`scripts/settings_screen.gd`, a CanvasLayer at layer 6, child of Main):
+  `open()`, `close()`, `is_open()`, `signal closed`. `Menu.chose_settings` opens it; while
+  `game.paused` it shows its own "Settings" button under the HUD's PAUSED text. While open it
+  eats keys and clicks except F2 / F3 / F11; Esc closes it (back to menu or pause).
+- Tests: `tools/settingstest.tscn` (headless), `tools/settingsshot.tscn` (windowed screenshots to
+  `tools/settings_shots/`, plus the mouse-look sensitivity check that needs a captured mouse).
+
+## Dev room (dev worker, sweep 2 wave 1)
+
+A secret level mode (`scripts/dev/**`). The session seed `SEED` (-4077, in
+`scripts/dev/dev_room.gd`) *is* the dev room: `game.start_lobby` sets `game.dev_mode` from the
+seed, so a client that joins builds the same room from the snapshot with no extra protocol.
+The way in is deliberately not written down here.
+
+Game API (host only; wave 3 `downed` changes what these do, not their signatures):
+
+```gdscript
+game.dev_mode: bool                      # every machine; true inside the dev room
+game.dev: Node                           # scripts/dev/dev_room.gd, child "Dev" of Game, always present
+game.damage_player(p, amount: int, source: String, knock := Vector3.ZERO)
+    # every hurt goes here; monster_hit_player calls it. source: "monster:<kind>", "dev_gun:<name>"
+game.knock_down_player(p, source: String, knock := Vector3.ZERO, seconds := 3.0)
+    # stand-in until wave 3: damage down to 1 HP plus p.stun seconds; replace the body, keep the call
+game.kill_monster(m)                     # removes it for good; everyone sees it fall ("monster_killed" event)
+game.knock_down_monster(m, dir := Vector3.ZERO, seconds := 4.0)   # Discharged stunned, Night Nurse calmed
+```
+
+Player fields added: `is_bot` (a dev bot or target dummy: a real Player the host simulates
+through the `bot_*` seam, remote on clients, not in `Net.names`, negative id), `stun` (seconds
+knocked down, no movement; a `"stun"` event plus the dev snapshot block), `noclip`.
+
+- Bots live in `game.players` like everyone else. Code that iterates players must not assume
+  every id is in `Net.peer_ids()` (the HUD party list uses the roster, so bots are not listed).
+  `_sync_players` never removes an `is_bot` player.
+- Snapshot key `"dv"` carries the dev state (`dev.net_state()` / `dev.apply_net_state()`), empty
+  outside the dev room. Clients apply it before the player list so bot nodes exist.
+- `game._event` passes kinds it does not know to `dev.on_event(kind, data)`.
+- The room fills the level_info keys the game reads today (player/tool/monster spawns, table,
+  table_yaw, shelf, lectern, lights, containers, nav_region) plus `dev_room: true`, `dev_gate`,
+  `dummy_spots`. It has none of the wave 1 hospital keys (tables, or_screen, phone, entrance,
+  neutral, wings): code using those must check for them.
+- The room is always in `Phase.SHIFT` (no clock-in). A saved or lost patient clears the table
+  instead of starting a lobby. Wave 2's phone call: add `game.dev_phone_call()` and the panel's
+  button calls it (until then `dev.phone_call_requested` is emitted).
+- `surgery_system.gd` lets an `is_bot` operator operate on the host with the minigame's
+  `bot_input(t, skill)` (skill from the bot's meta `bot_skill`). Minigames must keep
+  `bot_input` finishing their step.
+- Interactables: `dev_disp_<item kind>` dispensers (endless stacks) and `dev_disp_dev_gun`.
+- World changes from the panel or tests: `game.dev.request(action, args)`; the host applies,
+  a client sends. Shots: `game.dev.fire(shooter, from, dir, "kill" | "knock")`.
+- Sounds `dev_zap`, `dev_thump`, `dev_defib` from `tools/gen_audio_dev.mjs`.
+
+## Networking (net worker, sweep 2)
+
+`Net` autoload (`scripts/net.gd`):
+
+```gdscript
+Net.host(player_name, port = C.DEFAULT_PORT) -> String       # "" or an error; ENet, synchronous
+Net.join(address, port = C.DEFAULT_PORT, player_name = "") -> String   # answers via joined_ok / join_failed
+Net.host_steam(player_name = "") -> String   # friends-only lobby; answers via host_ready / host_failed
+Net.join_steam(lobby_id, player_name = "") -> String         # answers via joined_ok / join_failed
+Net.invite_friends() -> bool                 # Steam overlay invite dialog for the current lobby
+Net.steam_available() -> bool                # extension loaded AND Steam client running AND init ok
+Net.leave(); Net.is_host(); Net.my_id(); Net.peer_ids(); Net.name_for(id)
+Net.names       # peer id -> display name (Steam personas on the Steam backend)
+Net.local_name  # survives reset(); the name this machine introduces itself with
+Net.backend     # "solo" | "enet" | "steam"
+Net.bytes_sent / Net.bytes_received          # ENet wire bytes, for measurements
+signal roster_changed, joined_ok, join_failed(reason), host_left, host_ready, host_failed(reason),
+       invite_accepted(lobby_id)             # Steam invite / "Join game" / +connect_lobby
+```
+
+- Never reference a GodotSteam class or the `Steam` singleton directly outside `net.gd`: the
+  extension may be missing, and a direct reference breaks parsing.
+- Steam is not initialised in headless runs (tests); `--steam` forces it, `--no-steam` skips it.
+- Lag simulation for a joining ENet client: `--net-lag=MS --net-jitter=MS --net-loss=0..1`, or
+  `Net.set_lag_simulation()` before `join()`.
+
+Replication (networking section of `scripts/game.gd`):
+
+- Host -> each client, 20 Hz, unreliable: acked deltas of a state made of `g` (global fields,
+  with the surgery state flattened into `sg.*` and `ms.*`), `pl` (Player.report_full per peer),
+  `mo` (Monster.report), `it` (WorldItem.report), `ct` (open containers only). Clients ack in
+  `_player_state(ack, Player.report_state())`. Keyframes on demand and every 10 s.
+- **Reports must be quantized and must not share mutable data with the live object** (return
+  copies of arrays and dictionaries), or unchanged things resend forever or changes go unseen.
+  `apply_remote(d)` / `apply_remote_full(d)` always receive the whole merged report, never a
+  partial one. A report may omit a field (WorldItem omits `p`/`q` inside a container).
+- `Player.report_state() -> Array` (client -> host) is positional; see its comment.
+- Anything new that must reach clients: add it to a report (continuous state) or send a reliable
+  `_event` (one-off). Do not add new full-state RPCs.
+- `game.waiting_peers` (peer id -> true, replicated): peers that joined mid-shift. They exist as
+  not-alive Players, the Re-Gen Pod ignores them, and `start_lobby` spawns them. Anything that
+  counts or revives dead players must skip them.
+- A peer leaving: its hands drop where it stood through `_drop_hands_in_place` (no breakage),
+  `surgery.end()` pauses its operation with progress kept.
+
+Tests: `godot --headless --path . --script tools/nettest_run.gd` runs every multi-process
+scenario (`-- --only=a,b`, `--lag=MS --jitter=MS --loss=P`, `--only=bandwidth`). Add a scenario
+for anything that changes what crosses the wire.
+
 ## Design decisions (locked)
 
 - One patient (Bob or the seal) and one ailment (gunshot or amputation) per shift.
