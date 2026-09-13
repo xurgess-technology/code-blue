@@ -92,22 +92,32 @@ func _sample() -> void:
 			_check_shift_model()
 		Game.Phase.WON:
 			var m: Dictionary = ModelScript.build(game)
-			if m.panels.size() == 1 and m.panels[0].state == "stable":
+			# loop: a clocked-out shift may have had several patients; all of them read stable.
+			if not m.panels.is_empty() and m.panels.all(func(pn): return pn.state == "stable"):
 				_stable_seen = true
-				for s in m.panels[0].steps:
-					if s.state != "done":
-						_problem("WON but step '%s' is %s" % [s.label, s.state])
+				for pn in m.panels:
+					for s in pn.steps:
+						if s.state != "done":
+							_problem("WON but step '%s' is %s" % [s.label, s.state])
 
 
 func _check_shift_model() -> void:
 	var m: Dictionary = ModelScript.build(game)
 	_checked_frames += 1
-	if m.mode != "cases" or m.panels.size() != 1:
-		_problem("shift: expected one panel, got mode=%s panels=%d" % [m.mode, m.panels.size()])
+	# loop: one panel per case (game.cases), in order. Several at once are checked case by case;
+	# the detailed supply rows only with one live case (the shelf is shared out between panels).
+	var n_cases: int = game.cases.size() if "cases" in game else 1
+	if m.mode != "cases" or m.panels.size() != n_cases:
+		_problem("shift: expected %d panels, got mode=%s panels=%d" % [n_cases, m.mode, m.panels.size()])
+		return
+	if n_cases > 1:
+		_check_multi(m)
 		return
 	var p: Dictionary = m.panels[0]
 	var steps := Procedures.steps(game.case.ailment_id)
 	var cur := int(game.case.step_index)
+	if String(game.case.get("state", "on_table")) == "stable":
+		cur = steps.size()
 	if p.steps.size() != steps.size():
 		_problem("steps: %d on screen, %d in the procedure" % [p.steps.size(), steps.size()])
 	if int(p.current) != cur:
@@ -150,6 +160,35 @@ func _check_shift_model() -> void:
 		game.vitals = keep
 		_expect(lo.level == "low" and cr.level == "critical", "vitals 40 is low and 12 is critical (%s, %s)" % [lo.level, cr.level])
 		_expect(CanvasScript.bpm_for(12.0) > CanvasScript.bpm_for(90.0) + 40.0, "the trace speeds up as vitals fall")
+
+
+var _multi_seen := false
+
+
+## loop: several real cases on the screen at once (the extra patient): each panel matches its case.
+func _check_multi(m: Dictionary) -> void:
+	if not _multi_seen:
+		_multi_seen = true
+		_say("[orscreen] t=%.0f the screen shows %d patients" % [elapsed, m.panels.size()])
+	for i in m.panels.size():
+		var p: Dictionary = m.panels[i]
+		var c: Dictionary = game.cases[i]
+		if int(p.id) != int(c.id) or int(p.table) != int(c.table) or String(p.state) != String(c.state):
+			_problem("panel %d shows case %d table %d %s, game has %d table %d %s" % [i, p.id, p.table, p.state, c.id, c.table, c.state])
+			continue
+		var steps := Procedures.steps(String(c.ailment_id))
+		var cur := steps.size() if String(c.state) == "stable" else int(c.step_index)
+		if int(p.current) != cur:
+			_problem("panel %d current step %d, case at %d" % [i, p.current, cur])
+		var v := 0.0 if String(c.state) == "dead" else clampf(float(c.vitals), 0.0, 100.0)
+		if absf(float(p.vitals) - v) > 0.01:
+			_problem("panel %d vitals %.2f, case %.2f" % [i, p.vitals, v])
+		if String(c.state) == "on_table" or String(c.state) == "incoming":
+			var need := Procedures.remaining_requirements(String(c.ailment_id), int(c.step_index))
+			for s in p.supplies:
+				if int(s.need) != int(need.get(s.kind, -1)) or int(s.have) > game.shelf_count(s.kind):
+					_problem("panel %d supply %s shows %d/%d with %d on the shelf" % [i, s.kind, s.have, s.need, game.shelf_count(s.kind)])
+					break
 
 
 # ------------------------------------------------------------------------------ one-off checks
@@ -254,6 +293,8 @@ func _finish(ok: bool) -> void:
 	_expect(not _ticks_seen.is_empty(), "supplies ticked green as they arrived (%s)" % str(_ticks_seen.keys()))
 	_expect(_low_checked, "checked low and critical vitals")
 	_expect(_stable_seen, "the screen read stable when the shift was won")
+	if take_extra:
+		_expect(_multi_seen, "the screen showed both patients at once (--extra)")
 	_expect(_far_frames > 60 and _far_refreshes <= 2, "no picture refreshes while the screen was out of view (%d frames, %d refreshes)" % [_far_frames, _far_refreshes])
 	var scr = game.get("or_screen")
 	_expect(scr != null and scr.refresh_count > 20, "the picture refreshed while in view (%d refreshes)" % (scr.refresh_count if scr != null else -1))
