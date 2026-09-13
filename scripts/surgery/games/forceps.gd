@@ -48,7 +48,7 @@ const TOOL_PITCH := deg_to_rad(48.0)
 const SPEED_MAX_OPEN := 0.10   # m/s
 const SPEED_MAX_GRIP := 0.07
 const SPEED_TAU := 0.12
-const JOLT_DIST := 0.015       # a cursor jump bigger than this in one frame is a jolt, not speed
+const JOLT_DIST := 0.015       # a cursor jump bigger than this in one frame is a teleport, not speed
 const CONTACT_PEN := 0.0004
 const HIT_COST := 1.0
 const HIT_COOLDOWN := 0.6
@@ -88,6 +88,7 @@ var drops := 0
 var damage := 0.0
 var stage: int = Stage.OUTSIDE
 var _last_cursor = null
+var _jolt_t := 0.0
 var _hit_cd := 0.0
 var _spurt_cd := 0.0
 var _acc := 0.0
@@ -436,6 +437,11 @@ func bullet_pos() -> Vector2:
 	return point_at(bullet_s)
 
 
+## The stir's shake still drags the tip into the walls; it just does not count as rushing.
+func on_jolt(_offset: Vector2, _strength: float, duration: float) -> void:
+	_jolt_t = duration
+
+
 func handle_cursor(p: Vector2, buttons: int, delta: float) -> void:
 	if done or pts.size() < 2:
 		return
@@ -443,9 +449,10 @@ func handle_cursor(p: Vector2, buttons: int, delta: float) -> void:
 	_time += delta
 	var primary := (buttons & BUTTON_PRIMARY) != 0
 
-	# Cursor speed; a single-frame jump (a sedation jolt, a teleporting mouse) is not speed.
+	# Cursor speed; the framework's shake after a stir, or a teleporting mouse, is not speed.
+	_jolt_t = maxf(0.0, _jolt_t - delta)
 	var raw := 0.0
-	if _last_cursor != null:
+	if _last_cursor != null and _jolt_t <= 0.0:
 		var mv: float = (p - _last_cursor).length()
 		raw = mv / delta if mv < JOLT_DIST else 0.0
 	_last_cursor = p
@@ -804,8 +811,8 @@ func _build_visuals() -> void:
 
 
 ## The patient's wound decals only project onto layer 1 (cull_mask = 1). Our raised wound model
-## lives on layer 2 so a bruise decal's box does not stamp hard-edged rectangles across it.
-const VIS_LAYER := 2
+## lives on the minigame layer so a bruise decal's box does not stamp hard-edged rectangles across it.
+const VIS_LAYER := OWN_LAYER
 
 
 func _set_layers(n: Node) -> void:
@@ -1455,7 +1462,8 @@ static func self_test(parent: Node, count: int = 20) -> Dictionary:
 				bend_hist[g.bends] = int(bend_hist.get(g.bends, 0)) + 1
 			print("[forceps-selftest] ch=%02d diff=%.2f len=%.1fcm hw=%.1fmm bends=%d %-15s %s t=%.1fs botches=%d vitals=%.1f drops=%d" % [
 				i, diff, g.length * 100.0, g.hw_base * 1000.0, g.bends, m[0], "DONE" if stats.done else "UNFINISHED", t, stats.n, stats.botch, g.drops])
-			g.free()
+			# queue_free: free() here errors ("locked object") and aborted the test after one run.
+			g.queue_free()
 	print("[forceps-selftest] channels=%d mean length=%.1fcm mean half-width=%.1fmm bends=%s" % [count, chan_len / count * 100.0, chan_hw / count * 1000.0, str(bend_hist)])
 	for m in modes:
 		var a: Dictionary = agg[m[0]]

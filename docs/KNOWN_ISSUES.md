@@ -2,7 +2,11 @@
 
 Open problems from the content sweep of 2026-09-12 (patients, items, containers, surgery,
 guide, monsters). Nothing here breaks a shift; each is a feel, look or robustness problem to fix.
-Integration testing of the sweep as a whole has not been done yet.
+
+The first whole-game integration pass ran on 2026-09-13: 16 headless shifts per run across both
+patients, both ailments, good and sloppy surgeons, multi-shift and mortal runs, plus the monster
+lab, the minigame self-tests and windowed screenshots. It found no break in the game itself; the
+problems it did find were in the test bot, and are fixed. Resolved items are listed at the end.
 
 ## Surgery and patients
 
@@ -14,56 +18,52 @@ Integration testing of the sweep as a whole has not been done yet.
 - **A teammate's flashlight does not light the wound.** The forceps channel darkens every light by
   depth (down to 6% at the bullet), including other players' flashlights. The design wants a
   teammate's light to help. Needs an "extra light" input to the minigame or a different darkness
-  approach.
-- **Sloppy sawing is very slow.** A sloppy saw job takes about 45 s on Bob and 60 to 65 s on the
-  seal. Raise the 0.25 per-pass progress floor in `scripts/surgery/games/saw.gd` if that plays badly.
-- **Bob's amputation line sits at the infection edge.** `limb_cut` is only about 5 cm past `limb`,
-  roughly where the infection starts, so the saw cuts through infected tissue instead of past it.
-  Move the site in `scripts/patients/bob_builder.gd` (and check the tourniquet placement band).
-- **The seal's infection shows in two styles.** The body's pink and green flipper infection is visible
-  beyond the tourniquet minigame's own projected infection decal.
-- **Minigames guess limb size.** Tourniquet, gauze and saw read the limb cross-section from the
-  patient body's tourniquet and stump props (`parts["stump"]/Rim`, the Band node). Add a contract
-  method such as `site_section(site) -> {half_up, half_side, shape}` and an infection-start distance
-  on PatientBody, then switch the minigames to it.
-- **No severed-limb hook.** Only the seal exposes `parts.limb_node`; Bob's forearm is part of a
-  skinned mesh. The saw drops the seal's copy away and relies on the body for Bob. Add a contract hook.
-- **Stirs are inferred.** The framework jolts the operator's cursor during a stir, and the forceps
-  and tourniquet detect jolts from cursor jumps. A minigame `on_jolt(offset)` callback would be cleaner.
+  approach. Best done once multiplayer can be tested for real.
+- **The infection still shows in two styles at the edges.** The tourniquet step now puts its
+  infection front exactly where the body paints its own, and its decal is wider and deeper, so the
+  seal's paddle and Bob's forearm are covered from above. At a glancing angle a little of the
+  body's green still shows low on the sides of the limb (`tools/lab_shots/fix_tq_bob_wide.png`).
+  A real fix is one infection look: the body's shader drawing the minigame's margin, or the body
+  hiding its own infection while the decal is up.
 - **Sloppy sedation and stump wrap are a bit forgiving.** Sloppy anesthetic on the seal costs 11.9
-  vitals and a sloppy stump wrap 14.0, slightly under the 15 to 25 target.
+  vitals and a sloppy stump wrap 14.0, slightly under the 15 to 25 target. The stump wrap now
+  reacts to stirs through `on_jolt`, which slips the bandage more reliably than the old
+  cursor-jump guess; re-measure before tuning.
+- **A sloppy saw on the seal still takes about 40 s** (Bob 30 s, good surgeons 15 and 21 s). It was
+  45 and 64 s; see the resolved list. Raise `FLOOR` in `scripts/surgery/games/saw.gd` further if
+  it still drags.
 
 ## Interface
 
-- **HUD overlap while operating.** Probably fixed 2026-09-12: the whole HUD had a zero size
-  (anchored full-rect without resetting offsets) and drew everything piled at the top-left.
-  Re-check while operating.
 - **Small guide tab labels at 1280x720.** Some index tabs shrink to about 10 px and long names
   drop words ("Gunshot wound" shows as "Gunshot").
 - **Guide draws on canvas layer 60**, above the post-processing layer (50). Any HUD drawn above
   60 would appear over the book.
-
-## Contract gaps to formalise in docs/CONTRACTS.md
-
-- `PatientBody.apply_flags` replaces all flags rather than merging. The game always passes the full
-  flag set, but the contract should say so.
-- Minigames put their props on render layer 20 (and the forceps on layer 2) so projected decals
-  skip them. Reserve a layer in the contract and keep cameras on the default cull mask.
-- The surgery HUD contract has no cross-section widget; the saw returns `cross_section` in
-  `hud_state()` which nothing draws yet.
 
 ## Level and tools
 
 - **The OR supply shelf is about 4.2 m from the table** (the OR template has no wall closer that
   keeps doors clear). Fine for delivery, but it makes the surgeon walk.
 - **3 of 200 generated maps have no pegboard**; on those the bone saw only spawns loose.
-- **The minigame lab only produces two seeds** (one per patient). Add a `--seed` flag to
-  `tools/minigame_lab.gd` so varied forceps channels and infection lines get exercised.
-- **Monster playtests are weak.** Shift 1 has a single Discharged and the test bot rarely meets it;
-  the Night Nurse only appears from shift 2. `tools/monster_lab.tscn -- --real --shift=N` is the
-  better monster check.
+- **The navmesh keeps a player-sized agent about 1.9 m from some containers against walls**
+  (seed 4245, `ct_44_22_0`). The game's reach rule still allows the interaction from there, so
+  it is fine for players; the test bot now falls back to that rule when it stops getting closer.
 - **The fridge hum uses its own audio player per fridge**, because `Audio` only loops its own cues.
   With many fridges in hearing range this could add up.
+- **Mortal bot runs die in shift 2.** The bot now faces the Night Nurse with its light on and backs
+  away, and logs what hit it, but it still gets caught while it walks to items with the nurse
+  behind it. `tools/monster_lab.tscn` (all scenarios pass) remains the real monster check.
+- **Headless runs log "Parameter m is null" from the gauze warmup.** It comes from the dummy
+  renderer used by `--headless` and does not happen in a window.
+
+## Testing tips
+
+- Add `--fixed-fps 60` to headless runs: the game then steps as fast as the CPU allows (a 250 s
+  shift takes about 20 s) with identical results.
+- `tools/playtest.tscn` prints a heartbeat every 30 game seconds (target, position, hands).
+- `tools/gameshot.tscn` includes `10_operating_hud`, a real operation in progress.
+- `tools/minigame_lab.tscn` takes `--seed=N` for varied forceps channels and infection lines,
+  and `--wide` for a camera that shows the body around the site.
 
 ## Performance (Radeon 890M, 1600x900, measured 2026-09-12)
 
@@ -79,3 +79,29 @@ Integration testing of the sweep as a whole has not been done yet.
 - New content must be added to `scripts/warmup.gd` (new item, patient state, monster, minigame),
   and minigames should build shaders through `Minigame.cached_shader()`, or first-use hitches come back.
 - Run-to-run noise is about +/-10%; compare with `tools/perfprobe.tscn -- --tune` (includes a repeat row).
+
+## Resolved 2026-09-13
+
+- **Sloppy sawing was very slow** (45 s Bob, 64 s seal). `FLOOR` 0.25 -> 0.45 with the tearing
+  botch rate scaled to match: now 30 s and 40 s at 16 to 19 vitals of botches, good surgeons
+  unchanged.
+- **The amputation line sat in the infection** on both patients. The infection now starts past
+  `limb_cut`: Bob's is drawn per pixel from a baked distance along the arm (his forearm has no
+  vertices between the sleeve and the hand, so vertex colours could not place the edge), the
+  seal's starts on the paddle. The tourniquet step reads the front from the body.
+- **Minigames guessed limb size** from the tourniquet and stump props. `PatientBody.site_section`
+  and `infection_start` replace that in the tourniquet, saw and gauze.
+- **No severed-limb hook.** `PatientBody.make_severed_limb(parent)`; Bob's forearm is now cut out
+  of his skinned mesh, capped and dropped away like the seal's flipper.
+- **Stirs were inferred** from cursor jumps. `Minigame.on_jolt(offset, strength, duration)`; the
+  gauze, forceps and tourniquet use it.
+- **HUD overlap while operating**: checked in a real operation, no overlap. The objective banner
+  no longer tells the operator to "aim at the table" while they are operating.
+- **Contract gaps**: `apply_flags` replacing flags, the reserved render layer
+  (`Minigame.OWN_LAYER`) and the saw's cross-section (now drawn by the surgery HUD) are in
+  `docs/CONTRACTS.md`.
+- **The minigame lab only produced two seeds**: `--seed=N`.
+- **The forceps self-test stopped after its first run** ("free a locked object"); it now
+  completes all 60 runs.
+- **Test bot**: it dithered forever between two equally near items, and stalled at containers the
+  navmesh kept it 1.9 m from. Both fixed in `tools/playtest.gd`.

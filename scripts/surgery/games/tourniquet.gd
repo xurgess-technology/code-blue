@@ -72,6 +72,7 @@ var quality := 0.0
 var _prev_buttons := 0
 var _orbit_ref := INF
 var _crank_wait := 0.0
+var _jolt_t := 0.0
 var _over_acc := 0.0
 var _lock_t := -1.0
 var _last_hint := ""
@@ -82,6 +83,9 @@ var half_up := 0.05              # limb section half sizes at the site
 var half_side := 0.05
 var sec_n := 2.2                 # superellipse exponent of the section: 2 round, 6+ boxy
 var infect_front := 0.06
+## Ideal strap centre above the front. On a real body that puts the ideal right on the site,
+## where the body draws its own tourniquet afterwards, a hand's width above the cut line.
+var band_center := BAND_CENTER
 var band_half := BAND_HALF
 var good_min := GOOD_CENTER - GOOD_HALF
 var good_max := GOOD_CENTER + GOOD_HALF
@@ -166,9 +170,8 @@ func setup(context: Dictionary) -> void:
 	_update_visuals(0.0)
 
 
-## Limb section at the site. The body builders hang a "Tourniquet" overlay on the limb with its
-## Band node `half_up` below the site; the strap mesh's width gives the side half size. Anything
-## missing falls back to the patient's limb radius.
+## Limb section at the site, from PatientBody.site_section; without a body (the self-test) it
+## falls back to the patient's limb radius.
 func _read_limb_section() -> void:
 	var r := float(ctx.get("patient", {}).get("limb_radius_m", 0.085 if _seal else 0.05))
 	half_up = r
@@ -176,21 +179,23 @@ func _read_limb_section() -> void:
 	# Bob's Kenney forearm is a box; the seal's flipper stub is a rounded oval.
 	sec_n = 2.3 if _seal else 6.0
 	var body = ctx.get("body")
-	if body == null or not is_instance_valid(body):
+	if body == null or not is_instance_valid(body) or not body.has_method("site_section"):
 		return
-	var parts = body.get("parts")
-	if not (parts is Dictionary) or not parts.has("tourniquet"):
+	var sec: Dictionary = body.site_section(String(ctx.get("step", {}).get("site", "limb")))
+	if sec.is_empty():
 		return
-	var tq: Node3D = parts["tourniquet"]
-	var band := tq.get_node_or_null("Band") as Node3D
-	if band == null:
-		return
-	if band.position.y < -0.01:
-		half_up = clampf(-band.position.y, 0.02, 0.15)
-	var strap := band.get_node_or_null("Strap") as MeshInstance3D
-	if strap != null and strap.mesh != null:
-		var aabb: AABB = strap.transform * strap.mesh.get_aabb()
-		half_side = clampf(aabb.size.z * 0.5 / (1.13 if _seal else 1.238), 0.02, 0.15)
+	half_up = clampf(float(sec.half_up), 0.02, 0.15)
+	half_side = clampf(float(sec.half_side), 0.02, 0.15)
+	sec_n = float(sec.get("shape", sec_n))
+
+
+## Where the body paints its own infection, so the strap's rule and our decal line up with it.
+## INF when there is no body; the minigame then rolls its own front.
+func _body_infection_start() -> float:
+	var body = ctx.get("body")
+	if body == null or not is_instance_valid(body) or not body.has_method("infection_start"):
+		return INF
+	return float(body.infection_start(String(ctx.get("step", {}).get("site", "limb"))))
 
 
 func _roll_infection(seed_value: int) -> void:
@@ -199,6 +204,10 @@ func _roll_infection(seed_value: int) -> void:
 	_amp = Vector3(rng.randf_range(0.004, 0.008), rng.randf_range(0.002, 0.005), rng.randf_range(0.001, 0.0025))
 	_ph = Vector3(rng.randf() * TAU, rng.randf() * TAU, rng.randf() * TAU)
 	var target := rng.randf_range(INFECT_FRONT_MIN, INFECT_FRONT_MAX)
+	var body_front := _body_infection_start()
+	if body_front < PLACE_REACH:
+		target = body_front
+		band_center = maxf(body_front, band_half + STRAP_W * 0.5 + 0.006)
 	var lowest := INF
 	for i in 121:
 		var th := lerpf(-1.3, 1.3, float(i) / 120.0)
@@ -230,9 +239,16 @@ func distance_above_infection(x: float) -> float:
 	return infect_front - x
 
 
+## The shake after a stir must not crank the windlass: drop the orbit reference until it passes.
+func on_jolt(_offset: Vector2, _strength: float, duration: float) -> void:
+	_jolt_t = duration
+	_orbit_ref = INF
+
+
 func handle_cursor(p: Vector2, buttons: int, delta: float) -> void:
 	if done:
 		return
+	_jolt_t = maxf(0.0, _jolt_t - delta)
 	cursor = p
 	var pressed := buttons & ~_prev_buttons
 	_prev_buttons = buttons
@@ -263,8 +279,8 @@ func handle_cursor(p: Vector2, buttons: int, delta: float) -> void:
 
 func _try_cinch() -> void:
 	var d := distance_above_infection(strap_x)
-	var near := BAND_CENTER - band_half
-	var far := BAND_CENTER + band_half
+	var near := band_center - band_half
+	var far := band_center + band_half
 	if d < near - 0.004:
 		misplaces += 1
 		guide = true
@@ -275,7 +291,7 @@ func _try_cinch() -> void:
 			botch(BOTCH_TOO_CLOSE, "Too close to the infection: the strap slipped off")
 		return
 	if d <= far:
-		var e := absf(d - BAND_CENTER) / band_half
+		var e := absf(d - band_center) / band_half
 		place_q = 1.0 - 0.08 * e * e
 	else:
 		place_q = clampf(0.92 - 0.6 * (d - far) / FAR_FALLOFF, 0.3, 0.92)
@@ -290,7 +306,9 @@ func _try_cinch() -> void:
 
 func _crank(p: Vector2, delta: float) -> void:
 	var rel := p - Vector2(strap_x, 0.0)
-	if rel.length() >= MIN_ORBIT_R:
+	if _jolt_t > 0.0:
+		_orbit_ref = INF
+	elif rel.length() >= MIN_ORBIT_R:
 		var a := atan2(rel.y, rel.x)
 		if _orbit_ref != INF:
 			var da := wrapf(a - _orbit_ref, -PI, PI)
@@ -362,7 +380,8 @@ func hud_state() -> Dictionary:
 			if slip > 0.0:
 				hint = "It slipped off. It has to go above the infection, in the green band."
 			elif guide:
-				hint = "Slide the strap into the green band, 3 to 7 cm above the infection, and click to cinch."
+				hint = "Slide the strap into the green band, %d to %d cm above the infection, and click to cinch." % [
+					int(round((band_center - band_half) * 100.0)), int(round((band_center + band_half) * 100.0))]
 			else:
 				hint = "Slide the strap along the limb and click to cinch it a few centimetres above the infection."
 		Stage.CRANK:
@@ -425,7 +444,7 @@ func bot_input(t: float, skill: float) -> Dictionary:
 			if sloppy and misplaces == 0:
 				target = infect_front + 0.012
 			else:
-				target = infect_front - BAND_CENTER - band_half * lerpf(0.6, 0.0, skill)
+				target = infect_front - band_center - band_half * lerpf(0.6, 0.0, skill)
 			var move_t := lerpf(1.4, 0.9, skill)
 			var k := smoothstep(0.0, move_t, _b_phase_t)
 			var x := lerpf(_b_from, target, k)
@@ -564,8 +583,6 @@ static func _mean(a: Array) -> float:
 # ======================================================================== visuals
 
 const SLEEVE_PAD := 0.003
-## Our own props render on this layer so the skin decals (cull mask 1) never paint them.
-const OWN_LAYER := 1 << 19
 
 
 func _mat(col: Color, rough := 0.5, metal := 0.0) -> StandardMaterial3D:
@@ -781,17 +798,22 @@ func _build() -> void:
 
 func _build_decals() -> void:
 	var x0 := infect_front - 0.035
-	var x1 := infect_front + 0.15
+	# Long enough to cover the whole seal paddle, so the body's own infection never shows past it.
+	var x1 := infect_front + (0.24 if _seal else 0.15)
 	# Tight across the limb so the torso beside it stays clean; the seal's paddle widens distally.
-	var wz := (_sleeve_side() * 1.12 + (0.02 if _seal else 0.004)) * 2.0
+	var wz := (_sleeve_side() * 1.12 + (0.04 if _seal else 0.02)) * 2.0
 	var h := 0.03 + half_up * 1.35
-	_decal_infect = _decal(_infection_texture(x0, x1, wz), Vector3(x1 - x0, h, wz), Vector3((x0 + x1) * 0.5, 0.03 - h * 0.5, 0), 1)
+	# Deeper, with a short lower fade, so it also covers the sides of the limb, where the body's
+	# own infection used to show through in its different style.
+	var hi := 0.03 + half_up * 1.9
+	_decal_infect = _decal(_infection_texture(x0, x1, wz), Vector3(x1 - x0, hi, wz), Vector3((x0 + x1) * 0.5, 0.03 - hi * 0.5, 0), 1)
+	_decal_infect.lower_fade = 0.08
 	var soft := _soft_texture(false)
 	_decal_blanch = _decal(soft, Vector3(0.2, h, wz), Vector3.ZERO, 0)
 	_decal_blanch.modulate = Color(0.62, 0.64, 0.68) if _seal else Color(0.96, 0.9, 0.86)
 	_decal_purple = _decal(soft, Vector3(0.2, h, wz), Vector3.ZERO, 2)
 	_decal_purple.modulate = Color(0.36, 0.1, 0.46)
-	_decal_guide = _decal(_soft_texture(true), Vector3(band_half * 2.0 + 0.004, h, wz * 0.85), Vector3(infect_front - BAND_CENTER, 0.03 - h * 0.5, 0), 3)
+	_decal_guide = _decal(_soft_texture(true), Vector3(band_half * 2.0 + 0.004, h, wz * 0.85), Vector3(infect_front - band_center, 0.03 - h * 0.5, 0), 3)
 	_decal_guide.modulate = Color(0.05, 0.9, 0.3, 0.0)
 	_decal_guide.emission_energy = 2.5
 	_decal_guide.texture_emission = _decal_guide.texture_albedo
@@ -799,7 +821,7 @@ func _build_decals() -> void:
 	_guide_lines = Node3D.new()
 	add_child(_guide_lines)
 	_guide_mat = _unshaded(Color(0.2, 1.0, 0.4, 0.0))
-	var gc := infect_front - BAND_CENTER
+	var gc := infect_front - band_center
 	for gx in [gc - band_half, gc + band_half]:
 		var path := PackedVector2Array()
 		for i in 25:

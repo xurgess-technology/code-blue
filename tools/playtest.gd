@@ -37,6 +37,9 @@ var _last_step := -1
 var _stuck_timer := 0.0
 var _last_pos := Vector3.ZERO
 var _blacklist := {}
+var _heartbeat := 30.0
+var _target_item := -1
+var _stare_t := 0.0
 
 
 func _ready() -> void:
@@ -83,7 +86,14 @@ func _physics_process(delta: float) -> void:
 		return
 	if bot.hp < last_hp:
 		hits += 1
-		_say("t=%.0f hit, hp=%d" % [elapsed, bot.hp])
+		var by := "?"
+		var near := INF
+		for m in game.monsters.values():
+			var md: float = m.global_position.distance_to(bot.global_position)
+			if md < near:
+				near = md
+				by = "%s (%s, %.1f m)" % [m.kind, Monster.State.keys()[m.state], md]
+		_say("t=%.0f hit by %s, hp=%d" % [elapsed, by, bot.hp])
 	last_hp = bot.hp
 	if not bot.alive:
 		_fail("the bot died at t=%.0f after %d hits" % [elapsed, hits])
@@ -168,10 +178,17 @@ func _play_shift(delta: float) -> void:
 		bot.drop_count += 1
 		return
 
-	# Find the nearest stack of something still short.
+	# Find the nearest stack of something still short. Keep the one already chosen while it is
+	# still wanted: re-picking every frame made the bot dither between two equidistant stacks.
 	var best: Node = null
 	var best_d := INF
+	var kept = game.world_items.get(_target_item)
+	if kept != null and is_instance_valid(kept) and short.has(kept.kind) and not _blacklist.has(_target_item):
+		best = kept
+		best_d = -1.0
 	for it in game.world_items.values():
+		if best_d < 0.0:
+			break
 		if not short.has(it.kind) or _blacklist.has(it.item_id):
 			continue
 		var d: float = it.global_position.distance_to(bot.global_position)
@@ -184,6 +201,7 @@ func _play_shift(delta: float) -> void:
 			_say("t=%.0f nothing left to fetch for %s, waiting for the supply guard" % [elapsed, str(short)])
 		bot.bot_move = Vector2.ZERO
 		return
+	_target_item = best.item_id
 	if best.state == WorldItem.State.IN_CONTAINER:
 		var ct := game.find_interactable(best.container_id)
 		if ct != null and ct.has_method("is_open") and not ct.is_open():
@@ -194,10 +212,21 @@ func _play_shift(delta: float) -> void:
 
 ## Walk within reach of a target, look at it, and press (or hold) E.
 func _go_use(id: String, pos: Vector3, hold: bool) -> void:
+	_heartbeat -= 1.0 / 60.0
+	if _heartbeat <= 0.0:
+		_heartbeat = 30.0
+		_say("t=%.0f heading for %s at %s, bot at %s, hands %s, aim '%s'" % [elapsed, id, str(pos.snappedf(0.1)),
+			str(bot.global_position.snappedf(0.1)), str([bot.slots[0].kind, bot.slots[1].kind]), bot.aim_id])
 	var flat := Vector3(pos.x, bot.global_position.y, pos.z)
 	var d := bot.global_position.distance_to(flat)
 	bot.bot_aim_id = id
-	if d > REACH:
+	# The navmesh can keep the bot just beyond REACH of something against a wall; once it has
+	# stopped getting closer, use the game's own reach rule instead.
+	var close_enough := d <= REACH
+	if not close_enough and _stuck_timer > 1.5:
+		var node := game.find_interactable(id)
+		close_enough = node != null and game._within_reach(bot, node) and d < C.INTERACT_RANGE
+	if not close_enough:
 		bot.bot_interact = false
 		_walk_to(pos)
 		_watch_stuck(id)
@@ -252,6 +281,47 @@ func _walk_to(target: Vector3) -> void:
 
 
 func _flee_if_hunted() -> bool:
+	return _stare_down_nurse() or _flee_discharged()
+
+
+## The Night Nurse only moves while nobody watches her in light: face her with the flashlight
+## on and back away, the way a player would.
+func _stare_down_nurse() -> bool:
+	if bot.operating:
+		return false
+	var nurse: Node = null
+	var best := 9.0
+	for m in game.monsters.values():
+		if m.kind != "night_nurse" or m.calm > 0.0:
+			continue
+		var d: float = m.global_position.distance_to(bot.global_position)
+		if d < best:
+			best = d
+			nurse = m
+	if nurse == null:
+		_stare_t = 0.0
+		return false
+	var q := PhysicsRayQueryParameters3D.create(bot.head.global_position, nurse.global_position + Vector3.UP * 1.4)
+	q.collision_mask = C.L_WORLD
+	if not bot.get_world_3d().direct_space_state.intersect_ray(q).is_empty():
+		return false
+	_stare_t += 1.0 / 60.0
+	if _stare_t > 12.0:
+		# Look away for a few seconds now and then so the shift still moves on.
+		if _stare_t > 15.0:
+			_stare_t = 0.0
+		return false
+	var to: Vector3 = nurse.global_position - bot.global_position
+	bot.flashlight_on = true
+	bot.bot_yaw = atan2(-to.x, -to.z)
+	bot.bot_pitch = -0.1
+	bot.bot_move = Vector2(0, 1) if best < 5.0 else Vector2.ZERO
+	bot.bot_sprint = false
+	bot.bot_interact = false
+	return true
+
+
+func _flee_discharged() -> bool:
 	var threat: Node = null
 	var best := 1e9
 	for m in game.monsters.values():

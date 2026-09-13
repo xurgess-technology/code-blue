@@ -49,7 +49,7 @@ One person chooses **Host a shift**; the lobby shows the address to share. Frien
 
 | Command (from this folder, with the console Godot binary) | What it does |
 | --- | --- |
-| `--headless --path . tools/playtest.tscn -- --god --seed=4242` | A bot plays a whole shift. `--skill=0.0` plays badly, `--ailment=` / `--patient=` pin the case, drop `--god` for a mortal run |
+| `--headless --fixed-fps 60 --path . tools/playtest.tscn -- --god --seed=4242` | A bot plays a whole shift (`--fixed-fps 60` runs it about 12x faster than real time). `--skill=0.0` plays badly, `--ailment=` / `--patient=` pin the case, drop `--god` for a mortal run |
 | `--headless --path . tools/nettest.tscn -- --role=host` then `--role=client` | Real two-process multiplayer test over ENet |
 | `--path . tools/minigame_lab.tscn -- --game=saw --patient=seal --bot=1.0` | Run one surgery minigame, interactively or with its bot |
 | `--path . tools/gameshot.tscn` | Poses the real game and saves screenshots to `tools/game_shots/` |

@@ -29,7 +29,12 @@ var anchors := {}
 ## site -> [start: Vector3, end_on_table: Vector3] body-local drip path
 var drips := {}
 ## Builder-specific nodes: "tourniquet", "stump", "dress_stump", "wound" {root, bullet, emptied}, "dress_wound", ...
+## Minigames must not read these; use site_section / infection_start / make_severed_limb.
 var parts := {}
+## limb site -> {half_up, half_side, axis_depth, shape} (see site_section)
+var sections := {}
+## limb site -> metres along the site's +X to where the painted infection begins
+var infection := {}
 ## ShaderMaterials with pallor / grey / infect / breath uniforms
 var skin_mats: Array[ShaderMaterial] = []
 var breath_amp := 0.01
@@ -102,6 +107,29 @@ func site_transform(site: String) -> Transform3D:
 	return (global_transform if is_inside_tree() else transform) * local
 
 
+## Cross-section of the limb under a limb site (`limb`, `limb_cut`), in metres:
+##   half_up: skin at the site down to the limb axis, half_side: half width across the limb (site Z),
+##   axis_depth: how far below the site origin the axis runs, shape: superellipse exponent
+##   (2 round, 6 boxy). {} when the site is not on a limb.
+func site_section(site: String) -> Dictionary:
+	return sections.get(site, {})
+
+
+## Distance along the site's +X (distal) from the site origin to where the body's own infection
+## starts. INF when the site has none. Amputation sites put it just past `limb_cut`.
+func infection_start(site: String) -> float:
+	return float(infection.get(site, INF))
+
+
+## Adds a static copy of the limb that an amputation removes, looking and posed as it is right now,
+## under `parent`, and returns it (null if this body cannot). Works whether or not the flags have
+## already removed the limb (a spectator may get the flag before its own saw finishes).
+func make_severed_limb(parent: Node) -> Node3D:
+	if parent == null:
+		return null
+	return _builder.make_severed_limb(self, parent)
+
+
 func set_vitals(v: float) -> void:
 	_vitals = clampf(v, 0.0, 100.0)
 
@@ -129,6 +157,7 @@ func set_bleeding(site: String, amount: float) -> void:
 	_bleed[site]["target"] = amount
 
 
+## Replaces the whole flag set (it does not merge): always pass every flag the case has.
 func apply_flags(flags: Dictionary) -> void:
 	_flags = flags.duplicate()
 	if flags.has("sedation"):

@@ -28,6 +28,7 @@ const WALK_AWAY_M := 3.0
 const NOISE_EVERY := 0.8
 const REBEGIN_COOLDOWN := 0.4
 const STIR_JOLT_TIME := 0.35
+const STIR_SHAKE_M := 0.09
 
 ## Automated playtests: >= 0 makes the LOCAL operator play with the minigame's bot_input.
 var bot_skill: float = -1.0
@@ -537,6 +538,8 @@ func _stir_tick(delta: float) -> Vector2:
 		_stir_amp = strength
 		_stir_dir = Vector2.RIGHT.rotated(_stir_rng.randf() * TAU)
 		_stir_flash = 1.2
+		if mg != null and mg.has_method("on_jolt"):
+			mg.on_jolt(_stir_dir * _stir_amp * STIR_SHAKE_M, strength, STIR_JOLT_TIME)
 		_body_stir(strength)
 		_audio("surgery_stir", _table_pos(), -2.0)
 		game.send_operator_report({"k": mg_key, "stir": strength, "reliable": true})
@@ -545,7 +548,7 @@ func _stir_tick(delta: float) -> Vector2:
 	_stir_jolt = maxf(0.0, _stir_jolt - delta)
 	var k := _stir_jolt / STIR_JOLT_TIME
 	var shake := _stir_dir.rotated(sin(_stir_jolt * 45.0) * 0.9)
-	return shake * _stir_amp * 0.09 * k
+	return shake * _stir_amp * STIR_SHAKE_M * k
 
 
 func _body_stir(strength: float) -> void:

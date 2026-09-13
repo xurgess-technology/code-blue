@@ -1,12 +1,16 @@
 shader_type spatial;
 // Bob: the Kenney colormap, re-dressed in a hospital gown, with pallor, infection and breathing.
 // Vertex colour channels (baked by bob_builder.gd):
-//   r = gown (1 = cloth), g = infection weight, b = breathing weight, a = skin (1 = bare skin)
+//   r = gown (1 = cloth), g = infection mask, b = breathing weight, a = skin (1 = bare skin)
+// UV2.x = distance along the removable arm (rest units); the infection grades in from
+// infect_from to infect_full along it, per pixel, because the forearm faces are long.
 
 uniform sampler2D colormap : source_color, filter_linear_mipmap;
 uniform float pallor : hint_range(0.0, 1.0) = 0.0;
 uniform float grey : hint_range(0.0, 1.0) = 0.0;
 uniform float infect : hint_range(0.0, 1.0) = 0.0;
+uniform float infect_from = 0.212;
+uniform float infect_full = 0.236;
 uniform float breath = 0.0;
 uniform vec3 breath_axis = vec3(0.0, 0.0, 1.0);
 instance uniform float is_head = 0.0;
@@ -19,6 +23,7 @@ uniform vec3 sock : source_color = vec3(0.80, 0.78, 0.62);
 
 varying vec3 mpos;
 varying vec4 vcol;
+varying float along;
 
 // Colour literals below are written as sRGB and converted, like the source_color uniforms.
 vec3 lin(vec3 c) { return pow(c, vec3(2.2)); }
@@ -33,8 +38,9 @@ float n3(vec3 p) {
 void vertex() {
 	mpos = VERTEX;
 	vcol = COLOR;
+	along = UV2.x;
 	VERTEX += breath_axis * breath * COLOR.b;
-	VERTEX += NORMAL * COLOR.g * infect * 0.012;
+	VERTEX += NORMAL * COLOR.g * smoothstep(infect_from, infect_full, UV2.x) * infect * 0.012;
 }
 
 void fragment() {
@@ -65,7 +71,7 @@ void fragment() {
 	float lum = dot(col, vec3(0.3, 0.55, 0.15));
 	col = mix(col, lin(vec3(0.62, 0.70, 0.78)) * (lum * 1.4 + 0.02), pallor * skin * 0.85);
 	// Infection: sickly green / purple mottling, dark necrotic blotches.
-	float w = vcol.g * infect;
+	float w = vcol.g * smoothstep(infect_from, infect_full, along) * infect;
 	if (w > 0.001) {
 		float m = n3(mpos * 55.0);
 		float m2 = n3(mpos * 140.0 + 3.0);

@@ -38,14 +38,14 @@ const STALL_TIME := 1.5           # a pass slower than this is not a stroke
 const LINE_TOL := 0.008           # metres off the marked line before it counts
 const LINE_SPAN := 0.025          # metres beyond the tolerance to be fully off the line
 const K_BASE := 0.034             # depth per perfect pass at resistance 1, Bob, difficulty 1
-const FLOOR := 0.25               # fraction of a pass's cut you get even when it is awful
+const FLOOR := 0.45               # fraction of a pass's cut you get even when it is awful (0.25 made a sloppy saw take a minute)
 const OFF_BOTCH_RATE := 0.2      # botch units per second fully off the line while sawing
-const TEAR_BOTCH_RATE := 0.046   # botch units per fully torn pass, times the layer factor
+const TEAR_BOTCH_RATE := 0.083   # botch units per fully torn pass, times the layer factor (scaled with FLOOR so a sloppy cut costs the same)
 const BLEED_BOTCH_RATE := 0.05    # botch units per unit of spurt
 const OFF_BOTCH := 2.0
 const TEAR_BOTCH := 1.5
 const BLEED_BOTCH := 1.0
-const SAW_LAYER := 1 << 19        # visual layer for the saw so blood decals do not paint it
+const SAW_LAYER := OWN_LAYER      # visual layer for the saw so blood decals do not paint it
 
 ## name, depth fraction where the layer ends, resistance, tearing factor, bleed factor, colour
 const LAYERS := [
@@ -166,21 +166,16 @@ func setup(context: Dictionary) -> void:
 	_update_progress()
 
 
-## The patient body exposes its stump overlay; its rim is scaled to the limb section at the cut.
+## The limb section at the cut, from PatientBody.site_section.
 func _probe_limb() -> void:
 	var body = ctx.get("body")
-	if body == null or not is_instance_valid(body) or not ("parts" in body):
+	if body == null or not is_instance_valid(body) or not body.has_method("site_section"):
 		return
-	var parts = body.get("parts")
-	if not (parts is Dictionary) or not parts.has("stump") or not (parts["stump"] is Node3D):
+	var sec: Dictionary = body.site_section(String(ctx.get("step", {}).get("site", "limb_cut")))
+	if sec.is_empty():
 		return
-	var rim := (parts["stump"] as Node3D).get_node_or_null("Rim") as Node3D
-	if rim == null:
-		return
-	var sc := rim.transform.basis.get_scale()
-	if sc.x > 0.01 and sc.x < 0.3 and sc.z > 0.01 and sc.z < 0.3:
-		hu = sc.x
-		hs = sc.z
+	hu = clampf(float(sec.half_up), 0.01, 0.3)
+	hs = clampf(float(sec.half_side), 0.01, 0.3)
 
 
 func plane_extent() -> Vector2:
@@ -417,9 +412,8 @@ func hud_state() -> Dictionary:
 		{"label": "Tempo", "value": tempo, "min": 0.0, "max": 3.2, "good_min": TEMPO_TARGET - band, "good_max": TEMPO_TARGET + band},
 		{"label": "Off line (cm)", "value": absf(bx) * 100.0, "min": 0.0, "max": 4.0, "good_min": 0.0, "good_max": line_tol * 100.0},
 		{"label": "Tearing", "value": tear, "min": 0.0, "max": 1.0, "good_min": 0.0, "good_max": 0.35},
-		{"label": "Layer: %s" % layer.name, "value": depth, "min": 0.0, "max": 1.0,
-			"good_min": 0.0 if li == 0 else float(LAYERS[li - 1].to), "good_max": float(layer.to)},
 	]
+	# Depth through the layers is drawn by the surgery HUD's cross-section strip.
 	var xs := []
 	var from := 0.0
 	for l in LAYERS:
@@ -809,6 +803,9 @@ func _place_splat(i: int) -> void:
 
 func _start_finale(body) -> void:
 	_finale = true
+	# A static copy of the limb drops away while the body shows its stump.
+	if body != null and is_instance_valid(body) and body.has_method("make_severed_limb"):
+		_severed = body.make_severed_limb(self)
 	_amputate_body(body)
 	var at := global_position
 	_audio("surgery_saw_thunk", at, 0.0, 0.03)
@@ -817,22 +814,12 @@ func _start_finale(body) -> void:
 	_spurt.restart()
 	for d in [_marker, _pool] + _guides:
 		(d as Decal).visible = false
-	# A separate limb node (the seal's flipper) can be copied and dropped away. Bob's forearm
-	# is skinned into the body, which removes it itself.
-	if body != null and is_instance_valid(body) and "parts" in body:
-		var parts = body.get("parts")
-		if parts is Dictionary and parts.get("limb_node") is Node3D:
-			var src: Node3D = parts["limb_node"]
-			_severed = src.duplicate() as Node3D
-			if _severed != null:
-				add_child(_severed)
-				_severed.global_transform = src.global_transform
-				_severed.visible = true
-				var start := _severed.transform
-				var tw := create_tween()
-				tw.set_parallel(true)
-				var end_xf := Transform3D(Basis(Vector3(0, 0, 1), -0.35 * distal) * start.basis, start.origin + Vector3(0.07 * distal, -hu * 0.6, 0.02))
-				tw.tween_property(_severed, "transform", end_xf, 0.35).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	if _severed != null:
+		var start := _severed.transform
+		var tw := create_tween()
+		tw.set_parallel(true)
+		var end_xf := Transform3D(Basis(Vector3(0, 0, 1), -0.35 * distal) * start.basis, start.origin + Vector3(0.07 * distal, -hu * 0.6, 0.02))
+		tw.tween_property(_severed, "transform", end_xf, 0.35).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 
 
 func _audio(cue: String, at, vol := 0.0, jitter := 0.0) -> void:

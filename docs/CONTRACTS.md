@@ -147,12 +147,23 @@ func set_sedation(s: float) -> void                     # 0 awake .. 1 fully und
 func stir(strength: float) -> void                      # a sudden jolt right now
 func set_bleeding(site: String, amount: float) -> void  # 0..1 blood at a site
 func apply_flags(flags: Dictionary) -> void             # idempotent: "bullet_removed", "tourniquet" (float), "amputated", "dressed", "sedation"
+                                                        # REPLACES the flag set (no merge): always pass every flag the case has
 func flatline() -> void
+func site_section(site: String) -> Dictionary           # limb sites: {half_up, half_side, axis_depth, shape}; {} elsewhere
+func infection_start(site: String) -> float             # metres along the site's +X to where the body's infection begins; INF if none
+func make_severed_limb(parent: Node) -> Node3D          # adds a static copy of the limb an amputation removes, posed where it is; may be null
 ```
 
 Sites every patient provides: `injection`, `gunshot`, `limb` (above the infection, where the
-tourniquet goes), `limb_cut` (the amputation line). The game places the body on the table and
-calls these; minigames may call `set_bleeding` and `stir` for live effects.
+tourniquet goes), `limb_cut` (the amputation line). Along the limb the order is always
+tourniquet (`limb`), then the cut (`limb_cut`), then the infection, so the saw goes through
+healthy tissue. The game places the body on the table and calls these; minigames may call
+`set_bleeding` and `stir` for live effects.
+
+`site_section`: `half_up` is skin-at-the-site to limb axis, `half_side` the half width across the
+limb (site Z), `axis_depth` how far below the site origin the axis runs, `shape` a superellipse
+exponent (2 round, 6 boxy). Minigames read limb geometry only through `site_section`,
+`infection_start` and `make_severed_limb`, never through `PatientBody.parts`.
 
 ## Surgery (surgery worker)
 
@@ -186,7 +197,16 @@ Game-side API the surgery system uses:
   to `receive_operator_report` on the host; on the host it calls it directly)
 - `game.emit_noise(pos, loudness, kind)` host
 
-Minigames extend `scripts/surgery/minigame.gd`; read that file, it is the contract.
+Minigames extend `scripts/surgery/minigame.gd`; read that file, it is the contract. Parts of it that
+are easy to miss:
+
+- `on_jolt(offset, strength, duration)` is called on the operator's machine when an underdosed
+  patient stirs; for `duration` seconds the cursor passed to `handle_cursor` carries a decaying
+  shake of up to `offset`. React there rather than inferring jolts from cursor jumps.
+- `Minigame.OWN_LAYER` (render layer 20) is reserved for a minigame's own props. Decals project
+  only onto layer 1, so nothing on layer 20 gets painted. Cameras keep the default cull mask.
+- `hud_state()` may add `cross_section: {layers: [{name, from, to, color}], depth, layer}`; the
+  surgery HUD draws it as a strip under the gauges (the saw uses it).
 `tools/minigame_lab.tscn` runs a single minigame on a stand-in patient, interactively or with its
 `bot_input()`, and can take screenshots:
 `godot --path . tools/minigame_lab.tscn -- --game=<id> [--patient=bob|seal] [--ailment=...] [--variant=...] [--bot=1.0|0.0] [--seconds=N] [--shot=res://tools/lab_shots/name.png] [--headless-report]`.

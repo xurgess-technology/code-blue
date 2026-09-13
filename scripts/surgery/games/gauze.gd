@@ -25,7 +25,6 @@ const WRAP_R_MIN := 0.035
 const WRAP_R_MAX := 0.24
 const GOOD_MIN_TPS := 0.45        # turns per second
 const GOOD_MAX_TPS := 1.5
-const JOLT_DIST := 0.06           # a cursor jump this big in one frame while wrapping is a jolt
 
 var variant := "pack"
 var stage: int = Stage.PACK
@@ -55,6 +54,7 @@ var _prev_cursor := Vector2.ZERO
 var _dir_accum := 0.0
 var _slip_accum := 0.0
 var _slip_cd := 0.0
+var _jolt_t := 0.0
 var _tight_time := 0.0
 var _miss_cd := 0.0
 var _flash := 0.0
@@ -110,22 +110,17 @@ func setup(context: Dictionary) -> void:
 	_update_visuals(0.0)
 
 
-## The patient body may expose its stump overlay; if so, wrap around its real section.
+## Wrap a stump around the real limb section at the site (PatientBody.site_section).
 func _probe_limb() -> void:
 	var body = ctx.get("body")
-	if body == null or not is_instance_valid(body) or not ("parts" in body):
+	if variant != "stump" or body == null or not is_instance_valid(body) or not body.has_method("site_section"):
 		return
-	var parts = body.get("parts")
-	if not (parts is Dictionary) or not parts.has("stump") or not (parts["stump"] is Node3D):
+	var sec: Dictionary = body.site_section(site_name)
+	if sec.is_empty():
 		return
-	var rim := (parts["stump"] as Node3D).get_node_or_null("Rim") as Node3D
-	if rim == null:
-		return
-	var sc := rim.transform.basis.get_scale()
-	if sc.x > 0.01 and sc.x < 0.3 and sc.z > 0.01 and sc.z < 0.3:
-		limb_hu = sc.x
-		limb_hs = sc.z
-		limb_axis_y = rim.transform.origin.y
+	limb_hu = clampf(float(sec.half_up), 0.01, 0.3)
+	limb_hs = clampf(float(sec.half_side), 0.01, 0.3)
+	limb_axis_y = -float(sec.get("axis_depth", limb_hu))
 
 
 func plane_extent() -> Vector2:
@@ -146,16 +141,16 @@ func handle_cursor(p: Vector2, buttons: int, delta: float) -> void:
 	if done:
 		return
 	var primary := (buttons & BUTTON_PRIMARY) != 0
-	var jump := p.distance_to(cursor)
 	cursor = p
 	pressing = primary
 	_slip_cd = maxf(0.0, _slip_cd - delta)
 	_miss_cd = maxf(0.0, _miss_cd - delta)
+	_jolt_t = maxf(0.0, _jolt_t - delta)
 	match stage:
 		Stage.PACK:
 			_pack(p, primary, delta)
 		Stage.WRAP:
-			_wrap(p, primary, jump, delta)
+			_wrap(p, primary, delta)
 	_prev_primary = primary
 	_update_progress()
 
@@ -184,7 +179,19 @@ func _pack(p: Vector2, primary: bool, delta: float) -> void:
 		_prev_valid = false
 
 
-func _wrap(p: Vector2, primary: bool, jump: float, delta: float) -> void:
+## A sudden jerk (the patient stirring) yanks a bandage that is being wound.
+func on_jolt(_offset: Vector2, _strength: float, duration: float) -> void:
+	_jolt_t = duration
+	if stage != Stage.WRAP or not pressing or wrapped <= 0.0:
+		return
+	wrapped = maxf(0.0, wrapped - 0.6)
+	if _slip_cd <= 0.0:
+		botch(2.0, "The patient jerked and the wrap slipped")
+		_slip_cd = 0.8
+		_flash = 0.5
+
+
+func _wrap(p: Vector2, primary: bool, delta: float) -> void:
 	var r := p.length()
 	var in_band := r >= WRAP_R_MIN and r <= WRAP_R_MAX
 	if not primary or not in_band:
@@ -197,13 +204,8 @@ func _wrap(p: Vector2, primary: bool, jump: float, delta: float) -> void:
 		_prev_valid = true
 		_prev_angle = a
 		return
-	# A sudden jerk (the patient stirring) yanks the bandage.
-	if jump > JOLT_DIST and wrapped > 0.0:
-		wrapped = maxf(0.0, wrapped - 0.6)
-		if _slip_cd <= 0.0:
-			botch(2.0, "The patient jerked and the wrap slipped")
-			_slip_cd = 0.8
-			_flash = 0.5
+	# While the framework shakes the cursor after a jolt, the shake is not winding.
+	if _jolt_t > 0.0:
 		_prev_angle = a
 		return
 	var da := wrapf(a - _prev_angle, -PI, PI)

@@ -52,8 +52,9 @@ class _Canvas extends Control:
 
 	func _draw_operator(font: Font, w: float, h: float, st: Dictionary, game) -> void:
 		var gauges: Array = st.get("gauges", [])
+		var xs: Dictionary = st.get("cross_section", {})
 		var pw := minf(640.0, w - 40.0)
-		var ph := 96.0 + gauges.size() * 24.0
+		var ph := 96.0 + gauges.size() * 24.0 + (24.0 if not xs.is_empty() else 0.0)
 		var x := w * 0.5 - pw * 0.5
 		var y := h - ph - 18.0
 		draw_rect(Rect2(x, y, pw, ph), Color(0, 0, 0, 0.62))
@@ -85,6 +86,31 @@ class _Canvas extends Control:
 		for g in gauges:
 			_gauge(font, bx, gy, bw, g)
 			gy += 24.0
+		if not xs.is_empty():
+			_cross_section(font, bx, gy, bw, xs)
+
+	## A cut-through-the-limb strip: one coloured segment per tissue layer, the part already cut
+	## darkened, and a marker at the current depth. From hud_state()["cross_section"]:
+	## {layers: [{name, from, to, color}], depth: 0..1, layer: index}.
+	func _cross_section(font: Font, x: float, y: float, bw: float, xs: Dictionary) -> void:
+		var layers: Array = xs.get("layers", [])
+		var depth := clampf(float(xs.get("depth", 0.0)), 0.0, 1.0)
+		var li := int(xs.get("layer", 0))
+		var lw := 120.0
+		var lname := String(layers[li].get("name", "")) if li >= 0 and li < layers.size() else ""
+		draw_string(font, Vector2(x, y + 14), ("Cut: " + lname).to_upper(), HORIZONTAL_ALIGNMENT_LEFT, lw - 8, 12, Color("c9d1d9"))
+		var bx := x + lw
+		var w := bw - lw - 56.0
+		for l in layers:
+			var a := clampf(float(l.get("from", 0.0)), 0.0, 1.0)
+			var b := clampf(float(l.get("to", 1.0)), 0.0, 1.0)
+			var col: Color = l.get("color", Color.GRAY)
+			draw_rect(Rect2(bx + w * a, y + 4, w * (b - a), 12), col.darkened(0.15))
+			draw_rect(Rect2(bx + w * a, y + 4, 1, 12), Color(0, 0, 0, 0.6))
+		draw_rect(Rect2(bx, y + 4, w * depth, 12), Color(0, 0, 0, 0.55))
+		var mx := bx + w * depth
+		draw_rect(Rect2(mx - 2, y + 1, 4, 18), Color("ffffff"))
+		draw_string(font, Vector2(bx + w + 8, y + 15), "%d%%" % roundi(depth * 100.0), HORIZONTAL_ALIGNMENT_LEFT, 48, 12, Color("eeeeee"))
 
 	func _gauge(font: Font, x: float, y: float, bw: float, g: Dictionary) -> void:
 		var label := String(g.get("label", ""))

@@ -38,6 +38,11 @@ var done: bool = false
 const BUTTON_PRIMARY := 1
 const BUTTON_SECONDARY := 2
 
+## Render layer 20, reserved for a minigame's own props (tools, straps, raised wound models).
+## Every decal, the patient's and the minigames', projects only onto layer 1 (cull_mask = 1),
+## so props here are never painted by them. Cameras keep the default cull mask.
+const OWN_LAYER := 1 << 19
+
 
 func setup(context: Dictionary) -> void:
 	ctx = context
@@ -59,6 +64,13 @@ func camera_pose() -> Dictionary:
 ## Operator only. `p` is the cursor on the plane in metres (clamped to plane_extent),
 ## `buttons` is a bitmask of BUTTON_* currently held.
 func handle_cursor(_p: Vector2, _buttons: int, _delta: float) -> void:
+	pass
+
+
+## Operator only. The patient just jerked (an underdosed stir): for the next `duration` seconds
+## the framework adds a decaying shake of up to `offset` metres to the cursor it passes to
+## handle_cursor. `strength` is 0..1. React here instead of guessing jolts from cursor jumps.
+func on_jolt(_offset: Vector2, _strength: float, _duration: float) -> void:
 	pass
 
 

@@ -4,6 +4,7 @@ extends Node3D
 ##   godot --path . tools/minigame_lab.tscn -- --game=forceps [--patient=bob|seal]
 ##         [--ailment=gunshot|amputation] [--variant=pack|stump] [--bot=1.0] [--seconds=40]
 ##         [--shot=res://tools/lab_shots/forceps.png] [--shot-at=6.0] [--flags=sedation:0.6,tourniquet:0.9]
+##         [--seed=N] [--wide]
 ##
 ## Interactive (no --bot): move the mouse over the plane, left and right mouse buttons act.
 ## With --bot: plays the minigame's own bot_input(t, skill) and prints a report. Add --headless
@@ -21,6 +22,8 @@ var seconds := 45.0
 var shot_path := ""
 var shot_at := -1.0
 var flags := {}
+var seed_value := -1
+var wide := false
 
 var mg: Node3D
 var cam: Camera3D
@@ -49,6 +52,8 @@ func _ready() -> void:
 			"seconds": seconds = float(v)
 			"shot": shot_path = v
 			"shot-at": shot_at = float(v)
+			"seed": seed_value = int(v)
+			"wide": wide = true
 			"flags":
 				for pair in v.split(",", false):
 					var pv := pair.split(":")
@@ -94,7 +99,7 @@ func _ready() -> void:
 		"patient_id": patient_id, "patient": Procedures.patient(patient_id),
 		"ailment_id": ailment_id, "step": step, "variant": variant,
 		"shift": 1, "difficulty": Procedures.difficulty(1), "flags": flags,
-		"seed": hash(game_id + patient_id), "body": body, "operator": true,
+		"seed": seed_value if seed_value >= 0 else hash(game_id + patient_id), "body": body, "operator": true,
 	})
 
 	cam = Camera3D.new()
@@ -105,6 +110,10 @@ func _ready() -> void:
 	cam.global_position = site.origin + up * float(pose.get("height", 0.55)) + back * float(pose.get("back", 0.18))
 	cam.look_at(site.origin, -back if absf(up.dot(Vector3.UP)) > 0.9 else Vector3.UP)
 	cam.fov = float(pose.get("fov", 55.0))
+	if wide:
+		# Pulled back and to the side, to judge the body around the site (infection, severed limb).
+		cam.global_position = site.origin + Vector3(0.25, 0.75, 0.55)
+		cam.look_at(site.origin, Vector3.UP)
 	cam.current = true
 
 	var layer := CanvasLayer.new()

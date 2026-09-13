@@ -33,8 +33,12 @@ const FLIPPER_DIR := Vector3(0.75, -0.17, 0.62)
 const LIMB_AT := 0.075
 const CUT_AT := 0.15
 ## Flipper stub (kept) and paddle (removable): [x, half_width, half_height]
+## The infection is painted on the paddle only, from here on, so the saw cuts healthy tissue.
+const INFECT_FROM := 0.17
+const INFECT_FULL := 0.2
 const STUB := [[-0.1, 0.09, 0.07], [0.0, 0.084, 0.062], [0.075, 0.076, 0.054], [0.15, 0.07, 0.046]]
-const PADDLE := [[0.14, 0.07, 0.046], [0.2, 0.088, 0.036], [0.27, 0.098, 0.028], [0.33, 0.094, 0.021], [0.37, 0.072, 0.016], [0.395, 0.035, 0.01]]
+## The 0.17 ring changes nothing in the shape; it gives the infection edge a vertex row.
+const PADDLE := [[0.14, 0.07, 0.046], [0.17, 0.079, 0.041], [0.2, 0.088, 0.036], [0.27, 0.098, 0.028], [0.33, 0.094, 0.021], [0.37, 0.072, 0.016], [0.395, 0.035, 0.01]]
 
 static var _cache := {}
 
@@ -88,12 +92,12 @@ static func _meshes() -> Dictionary:
 	for r in STUB:
 		stub_rings.append([r[0], r[1], r[2], 0.0, 1.0])
 	var stub := Kit.loft(stub_rings, 12, func(p: Vector3, up: float) -> Color:
-		return Color(smoothstep(0.2, -0.7, up) * 0.6, smoothstep(0.1, 0.15, p.x), 0.0, 0.8))
+		return Color(smoothstep(0.2, -0.7, up) * 0.6, 0.0, 0.0, 0.8))
 	var pad_rings := []
 	for r in PADDLE:
 		pad_rings.append([r[0], r[1], r[2], 0.0, 1.0])
 	var paddle := Kit.loft(pad_rings, 12, func(p: Vector3, up: float) -> Color:
-		return Color(smoothstep(0.2, -0.7, up) * 0.6, 1.0, 0.0, 0.8))
+		return Color(smoothstep(0.2, -0.7, up) * 0.6, smoothstep(INFECT_FROM - 0.005, INFECT_FULL, p.x), 0.0, 0.8))
 	var paddle_plain := Kit.loft(pad_rings, 12, func(p: Vector3, up: float) -> Color:
 		return Color(smoothstep(0.2, -0.7, up) * 0.6, 0.0, 0.0, 0.8))
 	var stub_plain := Kit.loft(stub_rings, 12, func(p: Vector3, up: float) -> Color:
@@ -199,6 +203,11 @@ static func build(b) -> bool:
 	b.parts["tourniquet"] = Kit.make_tourniquet(b.anchors["limb"], lu, lw, lu)
 	var cu := _stub_h(CUT_AT)
 	var cw := _stub_w(CUT_AT)
+	# Sites sit on the stub's top surface over its axis, so the axis is half_up below them.
+	b.sections["limb"] = {"half_up": lu, "half_side": lw, "axis_depth": lu, "shape": 2.3}
+	b.sections["limb_cut"] = {"half_up": cu, "half_side": cw, "axis_depth": cu, "shape": 2.3}
+	b.infection["limb"] = INFECT_FROM - LIMB_AT
+	b.infection["limb_cut"] = INFECT_FROM - CUT_AT
 	b.parts["stump"] = Kit.make_stump(b.anchors["limb_cut"], cu, cw, cu, 0.014)
 	b.parts["dress_stump"] = Kit.make_stump_dressing(b.anchors["limb_cut"], cu, cw, cu)
 	b.parts["wound"] = Kit.make_wound(b.anchors["gunshot"], 0.036)
@@ -316,3 +325,14 @@ static func set_limb_removed(b, removed: bool) -> void:
 	var n: Node3D = b.parts.get("limb_node")
 	if n != null:
 		n.visible = not removed
+
+
+static func make_severed_limb(b, parent: Node) -> Node3D:
+	var src: Node3D = b.parts.get("limb_node")
+	if src == null:
+		return null
+	var copy := src.duplicate() as Node3D
+	parent.add_child(copy)
+	copy.global_transform = src.global_transform
+	copy.visible = true
+	return copy

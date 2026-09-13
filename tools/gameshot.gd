@@ -44,6 +44,7 @@ func _ready() -> void:
 		{"name": "07_dark_no_light", "fn": _pose_dark},
 		{"name": "08_lectern_guide", "fn": _pose_lectern},
 		{"name": "09_container_open", "fn": _pose_container},
+		{"name": "10_operating_hud", "fn": _pose_operating, "settle": 140},
 	]
 	_run()
 
@@ -51,7 +52,7 @@ func _ready() -> void:
 func _run() -> void:
 	for shot in shots:
 		shot.fn.call()
-		for i in SETTLE_FRAMES:
+		for i in int(shot.get("settle", SETTLE_FRAMES)):
 			await get_tree().process_frame
 		var img := get_viewport().get_texture().get_image()
 		var path := "%s/%s.png" % [OUT_DIR, shot.name]
@@ -154,6 +155,7 @@ func _pose_dark() -> void:
 
 
 func _pose_lectern() -> void:
+	bot.bot_aim_id = ""
 	bot.set_flashlight(true)
 	var info: Dictionary = game.level_info.get("lectern", {})
 	var base: Vector3 = info.get("position", game.clock_pos() + Vector3(1.6, 0, 0))
@@ -171,3 +173,13 @@ func _pose_container() -> void:
 		var out: Vector3 = (node as Node3D).global_basis.z.normalized()
 		_look_from(p + out * 1.6, p + Vector3(0, 1.0, 0))
 		return
+
+
+## Actually operating: the surgery camera, the minigame and the surgery HUD together.
+func _pose_operating() -> void:
+	_pose_surgery()
+	var tb := game.table_pos()
+	_look_from(tb + Vector3(0.0, 0.0, 1.2), tb + Vector3(0, 1.0, 0))
+	game.surgery.bot_skill = 0.5
+	bot.bot_aim_id = "table"
+	bot.bot_press += 1

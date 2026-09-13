@@ -36,8 +36,11 @@ const LEG_BACK_DEG := 12.0
 const ELBOW := 0.2
 const TOURNIQUET_AT := 0.168
 const CUT_AT := 0.198
-const INFECT_FROM := 0.2
-const INFECT_FULL := 0.228
+## The infection starts past the cut so the saw goes through healthy tissue. The Kenney forearm
+## has no vertices between 0.145 and 0.229, so the edge is drawn per pixel from a baked UV2.x
+## (distance along the arm) rather than from vertex colours.
+const INFECT_FROM := 0.212
+const INFECT_FULL := 0.236
 const INJECT_AT := 0.2
 
 static var _cache := {}
@@ -100,6 +103,8 @@ static func build(b) -> bool:
 	sm.shader = SkinShader
 	sm.set_shader_parameter("colormap", data.colormap)
 	sm.set_shader_parameter("breath_axis", Vector3(0, 0, 1))
+	sm.set_shader_parameter("infect_from", INFECT_FROM)
+	sm.set_shader_parameter("infect_full", INFECT_FULL)
 	body_mi.material_override = sm
 	head_mi.material_override = sm
 	head_mi.set_instance_shader_parameter(&"is_head", 1.0)
@@ -134,6 +139,8 @@ static func build(b) -> bool:
 	var other_rest_inv := skel.get_bone_global_rest(other_i).affine_inverse()
 
 	b.parts["skel"] = skel
+	b.parts["body_mi"] = body_mi
+	b.parts["mesh_data"] = data
 	b.parts["bones"] = {"arm": arm_i, "other": other_i, "fore": fore_i, "head": head_i, "legl": legl_i, "legr": legr_i}
 	b.parts["base_q"] = {"arm": q_limb, "other": q_other, "leg": q_leg}
 
@@ -160,6 +167,13 @@ static func build(b) -> bool:
 	var limb: Dictionary = arm_site.call(limb_att, limb_pose, limb_rest_inv, -1.0, TOURNIQUET_AT, "limb")
 	var cut: Dictionary = arm_site.call(limb_att, limb_pose, limb_rest_inv, -1.0, CUT_AT, "limb_cut")
 	var inj: Dictionary = arm_site.call(other_att, other_pose, other_rest_inv, 1.0, INJECT_AT, "injection")
+	for pair in [["limb", limb], ["limb_cut", cut]]:
+		var sec: Dictionary = pair[1]
+		b.sections[pair[0]] = {"half_up": sec.half_up, "half_side": sec.half_side, "axis_depth": sec.half_up, "shape": 6.0}
+	# Metres along the arm per rest-arm unit: measure it on the placed sites rather than assume.
+	var metres_per_unit: float = ((cut.xf as Transform3D).origin - (limb.xf as Transform3D).origin).length() / (CUT_AT - TOURNIQUET_AT)
+	b.infection["limb"] = (INFECT_FROM - TOURNIQUET_AT) * metres_per_unit
+	b.infection["limb_cut"] = (INFECT_FROM - CUT_AT) * metres_per_unit
 
 	# Gunshot: the belly, a little toward his +Z side, on the front face of the torso.
 	var belly_a := Vector3(-0.06, 0.235, 0)
@@ -226,6 +240,35 @@ static func set_limb_removed(b, removed: bool) -> void:
 	skel.set_bone_pose_scale(fore, Vector3(0.001, 1.0, 1.0) if removed else Vector3.ONE)
 
 
+## A static copy of the forearm and hand, posed where the skinned one is right now.
+static func make_severed_limb(b, parent: Node) -> Node3D:
+	var skel: Skeleton3D = b.parts.get("skel")
+	var data: Dictionary = b.parts.get("mesh_data", {})
+	var body_mi: MeshInstance3D = b.parts.get("body_mi")
+	if skel == null or data.get("forearm_mesh") == null or body_mi == null or not skel.is_inside_tree():
+		return null
+	var mesh: ArrayMesh = data.forearm_mesh
+	var root := Node3D.new()
+	root.name = "SeveredForearm"
+	parent.add_child(root)
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	var skin_mat := (body_mi.material_override as ShaderMaterial).duplicate() as ShaderMaterial
+	skin_mat.set_shader_parameter(&"breath", 0.0)
+	mi.set_surface_override_material(0, skin_mat)
+	if mesh.get_surface_count() > 1:
+		var flesh := Kit.flesh_mat().duplicate() as StandardMaterial3D
+		flesh.cull_mode = BaseMaterial3D.CULL_DISABLED
+		mi.set_surface_override_material(1, flesh)
+	root.add_child(mi)
+	# Skinning: world = skeleton * bone global pose * bind pose * rest vertex. Before the flag
+	# removes it, the forearm bone moves exactly with the arm, so the arm's pose is the limb's.
+	var arm: int = b.parts["bones"]["arm"]
+	var bind: Transform3D = body_mi.skin.get_bind_pose(int(data.arm_bind))
+	root.global_transform = skel.global_transform * skel.get_bone_global_pose(arm) * bind
+	return root
+
+
 # -- helpers --------------------------------------------------------------------------------------
 
 ## Transform of `node` relative to `ancestor`, from local transforms (works outside the tree).
@@ -268,6 +311,67 @@ static func _arm_section(verts: PackedVector3Array, at: float) -> Dictionary:
 	return {"ztop": zmax, "cz": (zmax + zmin) * 0.5, "cy": (ymax + ymin) * 0.5, "hy": (ymax - ymin) * 0.5}
 
 
+## The part of the +Z arm past the elbow as a static mesh in rest-arm space, clipped at the elbow
+## and capped with flesh. Surface 0 is skin (same attributes as the body), surface 1 the cap.
+static func _forearm_mesh(arrays: Array, bones: PackedInt32Array, nb: int, arm_b: int, fore_b: int) -> ArrayMesh:
+	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var normals: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
+	var uvs: PackedVector2Array = arrays[Mesh.ARRAY_TEX_UV]
+	var uv2: PackedVector2Array = arrays[Mesh.ARRAY_TEX_UV2]
+	var cols: PackedColorArray = arrays[Mesh.ARRAY_COLOR]
+	var idx = arrays[Mesh.ARRAY_INDEX]
+	if not (idx is PackedInt32Array) or (idx as PackedInt32Array).is_empty():
+		idx = PackedInt32Array(range(verts.size()))
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var rim: Array[Vector3] = []
+	var on_limb := func(i: int) -> bool:
+		return bones[i * nb] == arm_b or bones[i * nb] == fore_b
+	for t in range(0, idx.size() - 2, 3):
+		var tri := [idx[t], idx[t + 1], idx[t + 2]]
+		if not (on_limb.call(tri[0]) and on_limb.call(tri[1]) and on_limb.call(tri[2])):
+			continue
+		var poly: Array = []
+		for k in 3:
+			var a: int = tri[k]
+			var b: int = tri[(k + 1) % 3]
+			var da := uv2[a].x - ELBOW
+			var db := uv2[b].x - ELBOW
+			if da >= 0.0:
+				poly.append({"p": verts[a], "n": normals[a], "uv": uvs[a], "uv2": uv2[a], "c": cols[a]})
+			if (da >= 0.0) != (db >= 0.0):
+				var f := da / (da - db)
+				var p := verts[a].lerp(verts[b], f)
+				poly.append({"p": p, "n": normals[a].lerp(normals[b], f).normalized(), "uv": uvs[a].lerp(uvs[b], f),
+					"uv2": uv2[a].lerp(uv2[b], f), "c": cols[a].lerp(cols[b], f)})
+				rim.append(p)
+		for k in range(1, poly.size() - 1):
+			for v in [poly[0], poly[k], poly[k + 1]]:
+				st.set_normal(v.n)
+				st.set_uv(v.uv)
+				st.set_uv2(v.uv2)
+				st.set_color(v.c)
+				st.add_vertex(v.p)
+	var mesh := st.commit()
+	if mesh == null or rim.is_empty():
+		return mesh
+	# Cap: a fan over the cut outline, in the arm's cross-section plane (rest arm runs along X).
+	var centre := Vector3.ZERO
+	for p in rim:
+		centre += p
+	centre /= float(rim.size())
+	rim.sort_custom(func(a: Vector3, b: Vector3) -> bool:
+		return atan2(a.z - centre.z, a.y - centre.y) < atan2(b.z - centre.z, b.y - centre.y))
+	var cap := SurfaceTool.new()
+	cap.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var n := Vector3(signf(centre.x), 0, 0)   # toward the shoulder
+	for k in rim.size():
+		for p in [centre, rim[k], rim[(k + 1) % rim.size()]]:
+			cap.set_normal(n)
+			cap.add_vertex(p)
+	return cap.commit(mesh)
+
+
 static func _front_z(verts: PackedVector3Array, x: float, y: float) -> float:
 	var z := -1.0
 	var w := 0.02
@@ -307,6 +411,8 @@ static func _mesh_data(body_mi: MeshInstance3D, head_mi: MeshInstance3D) -> Dict
 	var nb := bones.size() / verts.size()
 	var cols := PackedColorArray()
 	cols.resize(verts.size())
+	var uv2 := PackedVector2Array()
+	uv2.resize(verts.size())
 	var arm_verts := PackedVector3Array()
 	var torso_verts := PackedVector3Array()
 	for i in verts.size():
@@ -328,7 +434,8 @@ static func _mesh_data(body_mi: MeshInstance3D, head_mi: MeshInstance3D) -> Dict
 			if bone == arm_b:
 				if skin_uv and along > 0.2 and along < 0.26:
 					arm_verts.append(v)
-				c.g = smoothstep(INFECT_FROM, INFECT_FULL, along)
+				c.g = 1.0   # infection mask; the shader grades it by UV2.x
+				uv2[i] = Vector2(along, 0.0)
 				var wf := 1.0 if along > ELBOW else 0.0
 				if wf > 0.0:
 					bones[i * nb] = fore_b
@@ -340,8 +447,10 @@ static func _mesh_data(body_mi: MeshInstance3D, head_mi: MeshInstance3D) -> Dict
 	arrays[Mesh.ARRAY_BONES] = bones
 	arrays[Mesh.ARRAY_WEIGHTS] = weights
 	arrays[Mesh.ARRAY_COLOR] = cols
+	arrays[Mesh.ARRAY_TEX_UV2] = uv2
 	var body_mesh := ArrayMesh.new()
 	body_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], {}, Mesh.ARRAY_FLAG_USE_8_BONE_WEIGHTS if nb == 8 else 0)
+	var forearm_mesh := _forearm_mesh(arrays, bones, nb, arm_b, fore_b)
 
 	var harr := head_mi.mesh.surface_get_arrays(0)
 	var hv: PackedVector3Array = harr[Mesh.ARRAY_VERTEX]
@@ -365,7 +474,7 @@ static func _mesh_data(body_mi: MeshInstance3D, head_mi: MeshInstance3D) -> Dict
 		colormap = src_mat.albedo_texture
 	var d := {
 		"body_mesh": body_mesh, "head_mesh": head_mesh, "body_skin": skin, "colormap": colormap,
-		"arm_verts": arm_verts, "torso_verts": torso_verts,
+		"arm_verts": arm_verts, "torso_verts": torso_verts, "forearm_mesh": forearm_mesh, "arm_bind": arm_b,
 	}
 	_cache["bob"] = d
 	return d

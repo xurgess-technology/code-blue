@@ -44,6 +44,11 @@ static func build(b) -> bool:
 		b.anchors[s] = a
 		b._sites[s] = sites[s]
 		b.drips[s] = [sites[s].origin, Vector3(sites[s].origin.x, 0.003, sites[s].origin.z + 0.1)]
+	for s in ["limb", "limb_cut"]:
+		b.sections[s] = {"half_up": 0.05, "half_side": 0.055, "axis_depth": 0.05, "shape": 6.0}
+	# No painted infection; report it where the forearm begins, just past the cut.
+	b.infection["limb"] = 0.15
+	b.infection["limb_cut"] = 0.01
 	b.parts["tourniquet"] = Kit.make_tourniquet(b.anchors["limb"], 0.05, 0.055, 0.05)
 	b.parts["stump"] = Kit.make_stump(b.anchors["limb_cut"], 0.05, 0.055, 0.05, 0.015)
 	b.parts["dress_stump"] = Kit.make_stump_dressing(b.anchors["limb_cut"], 0.05, 0.055, 0.05)
@@ -58,3 +63,14 @@ static func animate(_b, _jolt: float, _env: float, _fidget: float, _twitch: floa
 
 static func set_limb_removed(b, removed: bool) -> void:
 	(b.parts["limb_node"] as Node3D).visible = not removed
+
+
+static func make_severed_limb(b, parent: Node) -> Node3D:
+	var src: Node3D = b.parts.get("limb_node")
+	if src == null:
+		return null
+	var copy := src.duplicate() as Node3D
+	parent.add_child(copy)
+	copy.global_transform = src.global_transform
+	copy.visible = true
+	return copy

@@ -120,7 +120,13 @@ func _draw_objective(w: float) -> void:
 				text = "BRING TO THE OR SHELF: " + ", ".join(missing)
 			else:
 				var step := Procedures.step(game.case.ailment_id, int(game.case.step_index))
-				if not step.is_empty():
+				var op_id: int = game.surgery.operator_id if game.surgery != null else 0
+				if step.is_empty() or game.surgery.is_local_operating():
+					pass   # the surgery HUD carries the step while operating
+				elif op_id != 0:
+					var op = game.players.get(op_id)
+					text = "%s IS OPERATING: %s." % [(op.player_name if op != null else "SOMEONE").to_upper(), step.label.to_upper()]
+				else:
 					text = "OPERATE: %s. AIM AT THE TABLE AND PRESS E." % step.label.to_upper()
 	if text != "":
 		_text(Vector2(0, 24), text, 15, Color("ff6a6a"), HORIZONTAL_ALIGNMENT_CENTER, w)
