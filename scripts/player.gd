@@ -719,23 +719,25 @@ func _process(_delta: float) -> void:
 ## A held stack, tinted, sized for the hands: bulky loot is carried low in front with both hands
 ## and scaled down in first person so it does not fill the screen.
 func _held_model(kind: String, count: int, first_person: bool) -> Node3D:
-	var model := ItemModels.make_tinted(kind, count)
+	var model := ItemModels.make_tinted(kind, count, first_person)
 	var fp := ItemModels.footprint(kind)
 	var biggest := maxf(fp.x, maxf(fp.y, fp.z))
 	var pivot := Node3D.new()
 	pivot.name = "Held"
 	pivot.add_child(model)
 	if Items.is_bulky(kind):
-		var limit := 0.3 if first_person else 0.55
-		var k := minf(1.0, limit / maxf(0.01, biggest))
+		var k := minf(1.0, (0.24 if first_person else 0.55) / maxf(0.01, biggest))
 		model.scale = Vector3.ONE * k
-		model.position = Vector3(-fp.x * 0.5 * k, 0.0, 0.0)
 		if first_person:
-			# Centre-low, both hands: undo most of the one-hand tilt of HeldFirstPerson.
-			pivot.position = Vector3(0.2, -0.04, 0.02)
-			pivot.rotation_degrees = Vector3(-12, -20, 0)
+			# Low in the middle of the view, held with both hands: placed in camera space, so
+			# undo HeldFirstPerson's one-handed offset and tilt.
+			var want := Transform3D(Basis.from_euler(Vector3(deg_to_rad(-6.0), deg_to_rad(18.0), 0.0)), Vector3(-0.04, -0.33, -0.58))
+			pivot.transform = _held_fp.transform.affine_inverse() * want
 		else:
-			pivot.position = Vector3(0.25, -0.15, 0.0)
+			pivot.position = Vector3(0.25, -0.12, -0.12)
+	elif first_person and Items.is_loot(kind) and biggest > 0.13:
+		# Big-but-not-bulky loot (a laptop, a wheel) would fill the screen at arm's length.
+		model.scale = Vector3.ONE * (0.13 / biggest)
 	return pivot
 
 

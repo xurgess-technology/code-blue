@@ -25,7 +25,7 @@ uniform float base = 0.035;
 
 void fragment() {
 	float facing = clamp(dot(normalize(NORMAL), normalize(VIEW)), 0.0, 1.0);
-	float edge = pow(1.0 - facing, 3.0);
+	float edge = pow(1.0 - facing, 3.5);
 	float breathe = 0.82 + 0.18 * sin(TIME * 2.1);
 	ALBEDO = tint * (edge * rim * breathe + base);
 }
@@ -60,14 +60,15 @@ static func make(kind: String, count: int = 1) -> Node3D:
 
 ## make() plus the teal (surgical) or gold (loot) rim. Use this for items in the world, in hands
 ## and on the shelf; minigames keep the plain make() for their close-up tools.
-static func make_tinted(kind: String, count: int = 1) -> Node3D:
+static func make_tinted(kind: String, count: int = 1, soft := false) -> Node3D:
 	var n := make(kind, count)
-	apply_tint(n, kind)
+	apply_tint(n, kind, soft)
 	return n
 
 
 ## The overlay material for a kind: teal for surgical supplies, gold for loot, null otherwise.
-static func tint_material(kind: String) -> Material:
+## `soft` is a fainter rim for stacks held in first person, which fill a big part of the view.
+static func tint_material(kind: String, soft := false) -> Material:
 	var key := ""
 	if ItemsDB.is_surgical(kind):
 		key = "teal"
@@ -75,8 +76,9 @@ static func tint_material(kind: String) -> Material:
 		key = "gold"
 	if key == "":
 		return null
-	if _tint_mats.has(key):
-		return _tint_mats[key]
+	var cache_key := key + ("_soft" if soft else "")
+	if _tint_mats.has(cache_key):
+		return _tint_mats[cache_key]
 	if _tint_shader == null:
 		_tint_shader = Shader.new()
 		_tint_shader.code = TINT_SHADER
@@ -85,15 +87,16 @@ static func tint_material(kind: String) -> Material:
 	var col: Color = TINT_TEAL if key == "teal" else TINT_GOLD
 	m.set_shader_parameter("tint", Vector3(col.r, col.g, col.b))
 	# Gold loot is often dark metal and plastic; teal supplies are mostly bright: even them out.
-	m.set_shader_parameter("rim", 0.75 if key == "teal" else 0.95)
-	m.set_shader_parameter("base", 0.03 if key == "teal" else 0.04)
-	_tint_mats[key] = m
+	var soft_k := 0.4 if soft else 1.0
+	m.set_shader_parameter("rim", (0.7 if key == "teal" else 0.8) * soft_k)
+	m.set_shader_parameter("base", (0.025 if key == "teal" else 0.03) * soft_k)
+	_tint_mats[cache_key] = m
 	return m
 
 
 ## Put the kind's rim on every mesh under `node` (no-op for kinds without one).
-static func apply_tint(node: Node, kind: String) -> void:
-	var mat := tint_material(kind)
+static func apply_tint(node: Node, kind: String, soft := false) -> void:
+	var mat := tint_material(kind, soft)
 	if mat == null or node == null:
 		return
 	if node is GeometryInstance3D and not (node is Label3D):

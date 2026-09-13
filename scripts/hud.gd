@@ -226,7 +226,7 @@ func _draw_hands(w: float, h: float, me) -> void:
 	var box := Vector2(112, 40)
 	var gap := 6.0
 	var x0 := w * 0.5 - (box.x * n + gap * (n - 1)) * 0.5
-	var y := h - 58.0
+	var y := h - 66.0
 	var sel_head: int = me.selected_head()
 	var rects := []
 	for i in n:
@@ -241,15 +241,17 @@ func _draw_hands(w: float, h: float, me) -> void:
 		if absi(i - t) == 1:
 			draw_rect(Rect2(a.end.x - 2, a.position.y + 12, b.position.x - a.end.x + 4, box.y - 24), Color(SLOT_GOLD, 0.55))
 		else:
-			var ya := a.end.y + 3.0
-			draw_line(Vector2(a.get_center().x, ya), Vector2(b.get_center().x, ya), Color(SLOT_GOLD, 0.6), 2.0)
+			var ya := a.position.y - 4.0
+			draw_line(Vector2(a.get_center().x, ya), Vector2(b.get_center().x, ya), Color(SLOT_GOLD, 0.75), 2.0)
+			draw_line(Vector2(a.get_center().x, ya), Vector2(a.get_center().x, a.position.y), Color(SLOT_GOLD, 0.75), 2.0)
+			draw_line(Vector2(b.get_center().x, ya), Vector2(b.get_center().x, b.position.y), Color(SLOT_GOLD, 0.75), 2.0)
 	for i in n:
 		var s: Dictionary = me.slots[i]
 		var r: Rect2 = rects[i]
 		var head: int = me.head_of(i)
 		var sel: bool = head == sel_head
 		var kind := String(me.slots[head].kind)
-		draw_rect(r, Color(0, 0, 0, 0.6 if sel else 0.4))
+		draw_rect(r, Color(0, 0, 0, 0.72 if sel else 0.55))
 		var accent := Color(0.5, 0.55, 0.6, 0.55)
 		if kind != "" and Items.is_surgical(kind):
 			accent = SLOT_TEAL
@@ -262,9 +264,11 @@ func _draw_hands(w: float, h: float, me) -> void:
 		if s.has("of"):
 			# Second half of a bulky stack: hatched.
 			for k in 6:
-				var x := r.position.x + 10.0 + k * 17.0
-				draw_line(Vector2(x, r.end.y - 6), Vector2(x + 12, r.position.y + 6), Color(SLOT_GOLD, 0.35), 1.5)
-			_text(r.position + Vector2(0, 26), "bulky", 11, Color(SLOT_GOLD, 0.8), HORIZONTAL_ALIGNMENT_CENTER, box.x)
+				var x := r.position.x + 12.0 + k * 16.0
+				draw_line(Vector2(x, r.end.y - 5), Vector2(x + 10, r.position.y + 5), Color(SLOT_GOLD, 0.18), 1.5)
+			var head_name := _fit(Items.display_name(kind), 11, box.x - 10)
+			_text(r.position + Vector2(0, 22), head_name, 11, Color(SLOT_GOLD, 0.75), HORIZONTAL_ALIGNMENT_CENTER, box.x)
+			_text(r.position + Vector2(0, 35), "(2nd slot)", 10, Color(0.75, 0.75, 0.75, 0.7), HORIZONTAL_ALIGNMENT_CENTER, box.x)
 			continue
 		if kind == "":
 			continue
@@ -294,18 +298,18 @@ func _draw_money(w: float, h: float, me) -> void:
 	if game.economy == null or not game.economy.money_visible_for(me):
 		return
 	var text := "$%s" % _grouped(int(game.money))
-	var size_px := 20
+	var size_px := 24
 	var tw := _font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size_px).x
 	var x := w - tw - 22.0
 	var y := h - 26.0
-	draw_rect(Rect2(x - 10, y - 22, tw + 20, 30), Color(0, 0, 0, 0.5))
+	draw_rect(Rect2(x - 10, y - 25, tw + 20, 34), Color(0, 0, 0, 0.62))
 	_text(Vector2(x, y), text, size_px, SLOT_GOLD)
 	var d: int = int(game.economy.last_delta)
 	if game.economy.flash > 0.0 and d != 0:
 		var a := clampf(game.economy.flash / 1.0, 0.0, 1.0)
 		var dt := ("+$%s" if d > 0 else "-$%s") % _grouped(absi(d))
-		var dw := _font.get_string_size(dt, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
-		_text(Vector2(w - dw - 22.0, y - 30), dt, 14, Color(Color("5cff8a") if d > 0 else Color("ff8a6a"), a))
+		var dw := _font.get_string_size(dt, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
+		_text(Vector2(w - dw - 22.0, y - 34), dt, 16, Color(Color("5cff8a") if d > 0 else Color("ff8a6a"), a))
 
 
 static func _grouped(v: int) -> String:

@@ -17,7 +17,7 @@ const GoldPileScript := preload("res://scripts/economy/gold_pile.gd")
 
 ## Gold bar prices: the n-th bar (0-based) costs BAR_BASE + n * BAR_STEP, rounded to $5.
 const BAR_BASE := 100
-const BAR_STEP := 8
+const BAR_STEP := 5
 ## Indoors (fallback and dev room) columns of bars stop short of a 3 m ceiling.
 const INDOOR_PILE_CAP := 2.6
 const NEAR_METRES := 9.0

@@ -243,7 +243,7 @@ func _loot_spawn() -> void:
 	for mi in held.find_children("*", "MeshInstance3D", true, false):
 		held_overlay = (mi as MeshInstance3D).material_overlay
 		break
-	_check(held_overlay == gold, "the held laptop wears the gold rim too")
+	_check(held_overlay == ItemModels.tint_material("laptop", true), "the held laptop wears the (softer) gold rim too")
 	_clear()
 
 

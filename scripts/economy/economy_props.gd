@@ -159,12 +159,12 @@ func _build_counter() -> void:
 	for i in 3:
 		var bar := MeshInstance3D.new()
 		bar.mesh = GoldPileScript.bar_mesh()
-		bar.position = Vector3(-0.35 + i * 0.1, 1.0, 0.05)
+		bar.position = Vector3(-0.42 + i * GoldPileScript.BAR_W, 1.0, 0.05)
 		bar.rotation.y = PI * 0.5
 		add_child(bar)
 	var top := MeshInstance3D.new()
 	top.mesh = GoldPileScript.bar_mesh()
-	top.position = Vector3(-0.25, 1.0 + GoldPileScript.BAR_H, 0.05)
+	top.position = Vector3(-0.42 + GoldPileScript.BAR_W, 1.0 + GoldPileScript.BAR_H, 0.05)
 	add_child(top)
 	_lamp(Vector3(0, 2.4, 0.6), Color(1.0, 0.82, 0.5), 1.1, 3.5)
 	_shape(Vector3(1.5, 1.0, 0.65), Vector3(0, 0.5, 0.02))

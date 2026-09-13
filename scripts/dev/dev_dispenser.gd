@@ -132,7 +132,7 @@ func _build_cubby() -> void:
 	var shown := ItemModels.make_tinted(kind, _batch())
 	shown.name = "Shown"
 	var fp := ItemModels.footprint(kind)
-	var k := clampf(0.36 / maxf(0.01, maxf(fp.x, maxf(fp.y, fp.z))), 0.6, 2.2)
+	var k := clampf(0.4 / maxf(0.01, maxf(fp.x, maxf(fp.y, fp.z))), 0.6, 3.5)
 	shown.scale = Vector3.ONE * k
 	shown.rotation.y = 0.5
 	shown.position = Vector3(0, 0.0, 0.02)

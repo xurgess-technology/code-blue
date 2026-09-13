@@ -9,16 +9,20 @@ extends Node3D
 ##
 ## Local frame: origin at the base centre, +Y up.
 
-const BAR_L := 0.26
-const BAR_W := 0.0867   # three side by side make a square layer
-const BAR_H := 0.056
+## Chunkier than a real 400 oz bar (25 cm) so the pile reads from across a parking lot.
+const BAR_L := 0.38
+const BAR_W := BAR_L / 3.0   # three side by side make a square layer
+const BAR_H := 0.08
 ## [cells per side (r), layers]; the layer holds 3 * r * r bars. -1 layers means forever.
-const MAIN_TIERS := [[3, 3], [2, 5], [1, -1]]
+## One wide layer, eight narrower ones (a stepped plinth by ~120 bars), then the column that
+## never stops: about 10 m at 500 bars.
+const MAIN_TIERS := [[3, 1], [2, 8], [1, -1]]
 const SIDE_TIERS := [[2, -1]]
+const SIDE_STEP := 1.35
 const SIDE_OFFSETS := [
-	Vector2(1.05, 0.0), Vector2(0.0, 1.05), Vector2(-1.05, 0.0), Vector2(0.0, -1.05),
-	Vector2(1.05, 1.05), Vector2(-1.05, 1.05), Vector2(-1.05, -1.05), Vector2(1.05, -1.05),
-	Vector2(2.1, 0.0), Vector2(0.0, 2.1), Vector2(-2.1, 0.0), Vector2(0.0, -2.1),
+	Vector2(1, 0), Vector2(0, 1), Vector2(-1, 0), Vector2(0, -1),
+	Vector2(1, 1), Vector2(-1, 1), Vector2(-1, -1), Vector2(1, -1),
+	Vector2(2, 0), Vector2(0, 2), Vector2(-2, 0), Vector2(0, -2),
 ]
 const DROP_SECONDS := 0.28
 const DROP_HEIGHT := 1.1
@@ -179,6 +183,11 @@ func _apply() -> void:
 	_label.visible = shown > 0
 	_label.text = "%d GOLD BAR%s" % [maxi(shown, _target), "" if maxi(shown, _target) == 1 else "S"]
 	_update_collision(maxi(shown, _target))
+	# The count floats just over the tallest column (under a low ceiling, at most at the cap).
+	var top := 0.0
+	for c in _column_top.keys():
+		top = maxf(top, float(_column_top[c]))
+	_label.position = Vector3(0, minf(top + 0.3, max_height + 0.25), 0)
 
 
 func _ensure(n: int) -> void:
@@ -204,9 +213,8 @@ func _update_aabb() -> void:
 	var reach := 0.6
 	for c in _column_top.keys():
 		top = maxf(top, float(_column_top[c]))
-		if int(c) > 0:
-			var o: Vector2 = SIDE_OFFSETS[(int(c) - 1) % SIDE_OFFSETS.size()]
-			reach = maxf(reach, maxf(absf(o.x), absf(o.y)) + 0.4)
+		var o := _column_origin(int(c))
+		reach = maxf(reach, maxf(absf(o.x), absf(o.y)) + 0.7)
 	# Leave room for the pile to grow a while before the next resize.
 	_mm.custom_aabb = AABB(Vector3(-reach, -0.1, -reach), Vector3(reach * 2.0, top + 2.0, reach * 2.0))
 
@@ -225,7 +233,7 @@ func _tiers() -> Array:
 
 
 func _column_origin(c: int) -> Vector2:
-	return Vector2.ZERO if c == 0 else SIDE_OFFSETS[(c - 1) % SIDE_OFFSETS.size()] * (1.0 + float((c - 1) / SIDE_OFFSETS.size()))
+	return Vector2.ZERO if c == 0 else SIDE_OFFSETS[(c - 1) % SIDE_OFFSETS.size()] * SIDE_STEP * (1.0 + float((c - 1) / SIDE_OFFSETS.size()))
 
 
 func _start_layer() -> void:
@@ -312,6 +320,6 @@ func _top_of_column(c: int, n: int) -> float:
 	var origin := _column_origin(c)
 	for i in mini(n, _xf.size()):
 		var p: Vector3 = _xf[i].origin
-		if Vector2(p.x - origin.x, p.z - origin.y).length() < 0.5:
+		if Vector2(p.x - origin.x, p.z - origin.y).length() < 0.7:
 			top = maxf(top, p.y + BAR_H)
 	return top
