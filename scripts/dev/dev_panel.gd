@@ -206,8 +206,12 @@ func _build() -> void:
 	ailments.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var p2 := _row(col)
 	_button(p2, "Put on the table", func(): _req("patient", {"patient": pids[patients.selected], "ailment": aids[ailments.selected]}))
-	_button(p2, "Clear table", func(): _req("clear_patient"))
-	_button(p2, "Phone call", func(): _req("phone"))
+	_button(p2, "Clear tables", func(): _req("clear_patient"))
+	# loop: the shift loop's phone call (game.dev_phone_call), the extra patient and the grace skip.
+	var p2b := _row(col)
+	_button(p2b, "Phone call", func(): _req("phone"))
+	_button(p2b, "Extra patient", func(): _req("extra_patient"))
+	_button(p2b, "Skip grace", func(): _req("skip_grace"))
 	var p3 := _row(col)
 	_label(p3, "Vitals", 13, Color.WHITE).custom_minimum_size.x = 44
 	var vit := HSlider.new()
@@ -344,13 +348,16 @@ func _refresh() -> void:
 		gfx.select(int(main.quality))
 	(_c["monster_count"] as Label).text = "%d alive" % game.monsters.size()
 	(_c["money_label"] as Label).text = "Team money $%d, %d gold bars (next $%d)." % [int(game.money), int(game.gold_bars), int(game.gold_bar_price())]
-	if game.case.is_empty():
-		(_c["case_label"] as Label).text = "Table empty."
-	else:
-		var step := Procedures.step(game.case.ailment_id, int(game.case.step_index))
-		(_c["case_label"] as Label).text = "%s, %s. Step %d: %s. Shelf: %s" % [
-			Procedures.patient(game.case.patient_id).name, Procedures.ailment(game.case.ailment_id).name,
-			int(game.case.step_index) + 1, step.get("label", "done"), _shelf_text()]
+	# loop: every case, one line each.
+	var lines := []
+	for c in game.cases:
+		if String(c.get("patient_id", "")) == "player":
+			continue
+		var step := Procedures.step(c.ailment_id, int(c.step_index))
+		lines.append("%s, %s (%s, table %d, vitals %d). Step %d: %s." % [
+			Procedures.patient(c.patient_id).name, Procedures.ailment(c.ailment_id).name, String(c.state),
+			int(c.table), int(c.vitals), int(c.step_index) + 1, step.get("label", "done")])
+	(_c["case_label"] as Label).text = ("Tables empty." if lines.is_empty() else "\n".join(lines)) + "\nShelf: " + _shelf_text()
 	_refresh_bots(dev)
 
 

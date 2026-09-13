@@ -119,8 +119,10 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 - **Monsters wander into the entrance building and the neutral area.** They only *spawn* on wing
   hallways, but `Monster.random_nav_point` picks any point of the one navigation region, so a
   Discharged can stroll into the lobby or the parking lot. `HospitalBuilder.zone_of(info, pos)`
-  tells where a point is; the loop (wave 2) should reject non-wing wander targets, or the builder
-  could split the navigation mesh into regions per zone with their own navigation layers.
+  tells where a point is. Loop (wave 2): wander targets inside the entrance building or the
+  neutral area are now rejected (`game.monster_may_wander_to`, one hook in `random_nav_point`), but
+  noise (surgery monitors, footsteps) and chases still lead monsters into the OR and outside, and
+  the Night Nurse's own movement was not checked. Nothing leashes a monster back out afterwards.
 - **Furniture in the open has no collider.** Chairs, IV stands, bins, plants, bed trays, coat
   racks and the like stand where an agent following the navigation mesh would catch on them, so
   they are visual only: players walk through them and dropped items fall through them. Blocking
@@ -169,11 +171,6 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 
 ## Inventory and money (sweep 2 wave 2)
 
-- **Hands are emptied at every new lobby.** `start_lobby` -> `revive_full()` clears the slots, so
-  loot still carried when a shift ends is lost (money and the pile are kept). The loop worker's
-  neutral-area flow should decide whether carried loot survives the walk out.
-- **Loot only spawns in `begin_shift()`**, after the supplies. The new shift loop will want it
-  spawned when the hospital is built or entered (`game.spawn_loot()`).
 - **The neutral-area mode is untested:** the hospital branch was not merged. The sell bin and shop
   attach an aim box (2.4 x 1.7 x 1.8 m and 1.6 x 1.8 x 1.6 m) and a sign at the spots; if the
   hospital's dumpster or van is larger than that box, its own collider hides the interactable
@@ -206,6 +203,47 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   inventory, but worth watching.
 - **Money readout is a corner number** until wave 3's minimal HUD (shown near the sell bin, shop
   or pile, while aiming at them, or for 4 s after a change).
+
+## Shift loop and patients (sweep 2 wave 2)
+
+- **The minimal HUD has no objective line**, so "the phone is ringing", "a patient is on the way"
+  and "clock out now" only reach players as short messages (and the ring itself).
+  `loop.objective_text()` still produces the line if a later HUD or the OR monitor wants it.
+- **The paycheck screen covers the view for 6 s** (the old win overlay, 72% black) and the game
+  over screen for 8 s. Nothing can hurt you then (monsters are gone), but it is a long blackout.
+- **Paramedics are primitives** (capsule medics with hi-vis bands, a box gurney), have no
+  collision and walk through players, furniture and each other; two crews at once overlap at the
+  table. The patient's body on the gurney does not breathe (vitals fixed at 70).
+- **The extra call rings once per shift**, 45 to 150 s after the first patient is on the table,
+  even if the team is about to clock out; if the team clocks out first there is no extra call.
+  The shift has no other pacing: a team that never answers still gets the first patient (the
+  answering machine), and clocking out is the only way to end a shift besides game over.
+- **A dead patient's penalty clamps money at $0** (`add_money` without the `debt:` prefix), so a
+  broke team loses nothing for a death.
+- **The next shift keeps the hospital and its layout** but not what was dropped there: untouched
+  spawner items are removed at clock-in, and every container closes. Items players dropped stay.
+  The guide stays wherever it was left.
+- **The fallback second table** (levels without `level_info.tables`, e.g. the dev room) is placed
+  by a fixed list of offsets and a tile or distance check; in the dev room it stands 0.35 m from
+  the pen barrier. The navigation mesh does not know about it.
+- **Answering needs the phone in reach within 8 s** or the answering machine takes the first call;
+  the extra call needs someone within 20 s. Big maps may make the extra call hard to catch.
+- **Subtitles show to everyone regardless of distance**, bottom centre (top while operating).
+- **Nettest bots still teleport**, so `full_shift_lag` checks replication of the loop (clock,
+  phone, crew, clock-out, pay), not walking; `tools/looptest.tscn` and the playtest walk it.
+- **The dev room's Clear tables** also sends any crew on its way back; a crew mid-walk with no case
+  turns around.
+- **The player table's operation is only mirrored into `game.cases`** (`mirror: true`): the
+  downed worker's `player_surgery.gd` still owns it and replicates it in `pt`, so its state crosses
+  the wire twice. The integration wave can move it onto a real case and a surgery system from
+  `game.surgeries`. On fallback levels clients do not append the player table to
+  `level_info.tables`, so the mirror's `table` index only resolves on the host there.
+- **`full_shift_lag` fails** (120 ms, 40 ms jitter, 3% loss): after the hospital merge the lagged
+  clients stop receiving updates early in the shift and the host plays alone until the timeout;
+  the coordinator saw the same with `deliver` on main before the loop landed. Every unlagged
+  scenario passes, `two_patients` included. Clock-in now spawns about 70 loot stacks at once (the
+  same burst `begin_shift` had), which makes one big delta; splitting large deltas across ticks is
+  one thing to try (networking section of `game.gd`). Not investigated further by the loop worker.
 
 ## OR screen and minimal HUD (sweep 2 wave 3)
 

@@ -94,9 +94,8 @@ class _Canvas extends Control:
 	## else game.case.
 	func _case_of(game) -> Dictionary:
 		var sys = hud.system
-		var c = sys.get("case") if "case" in sys else null
-		if c is Dictionary and not c.is_empty():
-			return c
+		if sys.has_method("_case"):   # loop: this table's case
+			return sys._case()
 		return game.case if game.case is Dictionary else {}
 
 	func _vitals_of(game, case_d: Dictionary) -> float:
@@ -129,13 +128,17 @@ class _Canvas extends Control:
 
 	func _draw_spectator(font: Font, w: float, h: float, st: Dictionary, game) -> void:
 		var view = game.viewed_player() if game.has_method("viewed_player") else game.local_player()
-		if view == null or view.global_position.distance_to(game.table_pos()) > SPECTATE_RANGE:
+		var sys = hud.system
+		var table_at: Vector3 = sys._table_pos() if sys.has_method("_table_pos") else game.table_pos()
+		if view == null or view.global_position.distance_to(table_at) > SPECTATE_RANGE:
 			return
 		var text := "%s is operating: %s  %d%%" % [String(st.get("operator_name", "Someone")),
 			String(st.get("step_label", st.get("title", ""))), roundi(clampf(float(st.get("progress", 0.0)), 0.0, 1.0) * 100.0)]
 		drawn.append("spectator")
 		var tw := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
-		var y := h - 196.0
+		# loop: one line per table being operated on, stacked.
+		var slot: int = maxi(0, game.surgeries.find(sys)) if "surgeries" in game else 0
+		var y := h - 196.0 - 26.0 * slot
 		draw_rect(Rect2(w * 0.5 - tw * 0.5 - 10, y - 15, tw + 20, 21), Color(0, 0, 0, 0.45))
 		draw_string(font, Vector2(0, y), text, HORIZONTAL_ALIGNMENT_CENTER, w, 12,
 			Color("ff6a6a") if bool(st.get("stirring", false)) else Color("5ce0d0"))

@@ -38,6 +38,7 @@ var _last_pos := Vector3.ZERO
 var _shelf_before := 0
 var _delivering := false
 var _op_key := ""
+var _op_table := -1
 var _gave := false
 
 
@@ -57,6 +58,7 @@ func set_order(new_order: String, kind: String = "", target: String = "", owner:
 		owner_id = owner
 	_delivering = false
 	_op_key = ""
+	_op_table = -1
 	_gave = false
 	_stuck = 0.0
 	_path = PackedVector3Array()
@@ -204,17 +206,32 @@ func _fetch(delta: float, kind: String) -> void:
 
 
 func _operate(delta: float) -> void:
-	if game.case.is_empty():
+	# loop: pick a table with a patient nobody else is operating on, and stick with it.
+	var c: Dictionary = game.case_on_table(_op_table) if _op_table >= 0 else {}
+	if _op_key == "" and (c.is_empty() or String(c.get("state", "")) != "on_table"):
+		_op_table = -1
+		for t in game.patient_tables:
+			var tc: Dictionary = game.case_on_table(int(t.index))
+			var sys = game.surgery_for_table(int(t.index))
+			if not tc.is_empty() and String(tc.state) == "on_table" and String(tc.patient_id) != "player" \
+					and sys != null and (int(sys.operator_id) == 0 or int(sys.operator_id) == p.peer_id):
+				_op_table = int(t.index)
+				c = tc
+				break
+	if c.is_empty():
+		if _op_key != "":
+			_done("finished the step")
+			return
 		_halt()
 		status = "no patient on the table"
 		return
-	var key := "%s|%s|%d" % [game.case.patient_id, game.case.ailment_id, int(game.case.step_index)]
+	var key := "%d|%s|%s|%d" % [int(c.id), c.patient_id, c.ailment_id, int(c.step_index)]
 	if _op_key == "":
 		_op_key = key
-	if key != _op_key:
+	if key != _op_key or String(c.state) != "on_table":
 		_done("finished the step")
 		return
-	var step := Procedures.step(game.case.ailment_id, int(game.case.step_index))
+	var step := Procedures.step(c.ailment_id, int(c.step_index))
 	if step.is_empty():
 		_done("nothing left to do")
 		return
@@ -230,7 +247,7 @@ func _operate(delta: float) -> void:
 		return
 	status = "walking to the table"
 	p.set_meta("bot_skill", skill)
-	_go_use("table", game.table_pos(), delta)
+	_go_use(game.table_interact_id(_op_table), game.table_position(_op_table), delta)
 
 
 ## downed hook: find a downed player, hold E to lift them, walk to the player table and lay them on it.

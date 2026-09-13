@@ -71,10 +71,12 @@ func _draw() -> void:
 	if game.paused:
 		_overlay(w, h, "PAUSED", "Esc to resume, Q to walk out." if not Net.solo else "The night shift waits for no one.", "", Color("c9d1d9"))
 	elif game.phase == Game.Phase.LOST:
-		_overlay(w, h, "FLATLINE", game.message, "Back to the clock-in room in %d" % ceili(game.end_timer), Color("ff2a2a"))
+		# loop: a team failure ends the run.
+		_overlay(w, h, "GAME OVER", game.message, "Money and gold reset. A new run starts in %d" % ceili(game.end_timer), Color("ff2a2a"))
 	elif game.phase == Game.Phase.WON:
-		_overlay(w, h, "PATIENT STABILIZED", "Shift %d complete. Punch out." % game.shift,
-			"Shift %d starts in %d" % [game.shift + 1, ceili(game.end_timer)], Color("5cff8a"))
+		# loop: clocked out, the paycheck.
+		_overlay(w, h, "SHIFT %d COMPLETE" % game.shift, String(game.loop.pay_note),
+			"Walk out to sell and shop, then clock in for shift %d (%d)" % [game.shift + 1, ceili(game.end_timer)], Color("5cff8a"))
 
 
 func _text(pos: Vector2, s: String, size_px: int, col: Color, align := HORIZONTAL_ALIGNMENT_LEFT, width := -1.0) -> void:
@@ -286,6 +288,9 @@ func _draw_holds(w: float, h: float) -> void:
 	if game.phase == Game.Phase.LOBBY and game.punch > 0.0:
 		progress = game.punch
 		label = "CLOCKING IN"
+	elif game.phase == Game.Phase.SHIFT and game.punch > 0.0:
+		progress = game.punch   # loop: clocking out
+		label = "CLOCKING OUT"
 	elif me != null and me.carry_hold > 0.0:   # downed hook
 		progress = clampf(me.carry_hold / Game.CARRY_HOLD, 0.0, 1.0)
 		label = "LIFTING"
