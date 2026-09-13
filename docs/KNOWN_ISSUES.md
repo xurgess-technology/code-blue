@@ -206,8 +206,9 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 
 ## Shift loop and patients (sweep 2 wave 2)
 
-- **The case panel on the HUD stacks one panel per patient** on the right edge; with two full
-  panels it reaches about 330 px down at 720p. `orscreen` replaces it with the OR wall monitor.
+- **The minimal HUD has no objective line**, so "the phone is ringing", "a patient is on the way"
+  and "clock out now" only reach players as short messages (and the ring itself).
+  `loop.objective_text()` still produces the line if a later HUD or the OR monitor wants it.
 - **The paycheck screen covers the view for 6 s** (the old win overlay, 72% black) and the game
   over screen for 8 s. Nothing can hurt you then (monsters are gone), but it is a long blackout.
 - **Paramedics are primitives** (capsule medics with hi-vis bands, a box gurney), have no
