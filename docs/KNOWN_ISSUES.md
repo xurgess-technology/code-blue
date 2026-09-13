@@ -25,12 +25,13 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   body's green still shows low on the sides of the limb (`tools/lab_shots/fix_tq_bob_wide.png`).
   A real fix is one infection look: the body's shader drawing the minigame's margin, or the body
   hiding its own infection while the decal is up.
-- **The work lamp blows out close skin (sweep 2, minigames).** In `--look=or` lab shots Bob's
-  forearm and the saw/tourniquet/anesthetic sites render near white with bloom
-  (`tools/lab_shots/c_anes_good_0.8.png`), which washes out the in-world colour cues on skin (the
-  tourniquet's green skin glow barely shows; the strap's own glow carries it). The lamp is in
-  `scripts/surgery/surgery_system.gd` (energy 2.2, 0.4 m away); check a real game shot and dim it
-  or its spot attenuation for close cameras.
+- **The work lamp is tuned for the game, still bright in the lab (sweep 2, orscreen).** Energy 2.2
+  -> 0.5 with a steeper falloff (attenuation 1.0, 40 degree cone). In the real OR
+  (`tools/game_shots/10_operating_hud.png`) skin keeps its colour and the cues read. The minigame
+  lab's `--look=or` room adds a 1.6-energy ceiling light 2.8 m up, so lab close-ups of Bob's
+  forearm (tourniquet, anesthetic) still bleach near the centre; that is the lab's light, not the
+  lamp (energy 0 looks almost the same). The lab now builds the lamp through
+  `SurgerySystem.make_work_lamp()`.
 - **Sloppy forceps varies by channel (sweep 2).** Bot 0.0 loses 10-22.5 vitals over 12 channels
   (mean 15.8) and some lab seeds only 5-8 (short, gentle channels). Wall tears are discrete
   (2.5 each, at most one per 0.9 s), so the total follows how long the sloppy hand spends on bends.
@@ -234,6 +235,30 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   phone, crew, clock-out, pay), not walking; `tools/looptest.tscn` and the playtest walk it.
 - **The dev room's Clear tables** also sends any crew on its way back; a crew mid-walk with no case
   turns around.
+
+## OR screen and minimal HUD (sweep 2 wave 3)
+
+- **The monitor reads from a few metres, not from the far end of the OR.** On the hospital's
+  2.2 x 1.3 m mount the vitals number and the green / red supply ticks read from about 9 m at
+  1280x720 (`tools/game_shots/12_orscreen_door.png`); names, step labels and counts need about
+  4-5 m. Two patients side by side halve the type (`18_orscreen_two_cases.png`). A bigger mount
+  (hospital) or a "far mode" that drops to vitals + current step past ~6 m would help.
+- **Several patients are only tested synthetically.** `game.cases` does not exist on this branch;
+  the model's multi-case, incoming, dead and player-case paths are covered by fake game objects in
+  `tools/orscreentest.gd` and the gameshot poses use `or_screen.model_override`. Re-run
+  `tools/orscreentest.tscn` and `gameshot --only=orscreen` once `loop` is merged. Per-table
+  operators need `game.surgery_for_table(t)` (else only the first case shows who operates).
+- **The ECG sweeps at the refresh rate** (12 Hz close, 5 Hz beyond 7 m), so it moves in small
+  steps up close. Raising `REFRESH_NEAR_HZ` costs a 1024x~580 2D viewport redraw each time.
+- **Stamina bar and controls line kept.** The minimal HUD brief lists only slots, prompt, health,
+  messages, money, the surgery hint, FPS and pause. A thin stamina bar under the hearts (only
+  while stamina is not full) and the first-45-seconds controls line were kept because nothing in
+  the world shows them; delete `_draw_health`'s stamina block or `_draw_hint` to drop them. The
+  flashlight label and the party list are gone.
+- **Lobby guidance now comes from the message line only.** With the objective banner gone, the
+  "hold E at the time clock" instruction is the lobby message (6 s) plus the clock's interact
+  prompt; the monitor's idle screen says "clock in to start the shift" but it is in the OR. The
+  `loop` worker's phone/flow should carry any new objective in the world or in messages.
 
 ## Testing tips
 

@@ -614,6 +614,58 @@ loop.pay_for(case, shift) -> int   # stable 200 (+25/shift), extra stable 300 (+
   devtest's loop hooks, nettest `deliver`, `surgery`, `late_join`, `full_shift_lag`, `economy`
   (loot kept through a shift) and `two_patients`.
 
+## OR screen and minimal HUD (orscreen worker, sweep 2 wave 3)
+
+The OR wall monitor (`scripts/orscreen/`) is derived locally on every machine from state that is
+already replicated (`game.cases` or `game.case` / `game.vitals`, `game.shelf`, the surgery
+operator); it adds nothing to the snapshot.
+
+```gdscript
+game.or_screen                          # scripts/orscreen/or_screen.gd, child "ORScreen" of Game
+game.or_screen.mounted() -> bool        # a monitor exists in the current level
+game.or_screen.placement                # "level_info" | "wall" | "floating"
+game.or_screen.screen_centre() / screen_normal()   # world; the glass faces screen_normal()
+game.or_screen.model                    # the last model drawn (see below)
+game.or_screen.refresh_now()            # rebuild and redraw at once
+game.or_screen.set_enabled(on)          # hide it and stop refreshing (perf A/B)
+game.or_screen.model_override = {...}   # test seam: draw this model instead of the game's
+OrScreenModel.build(game) -> Dictionary # scripts/orscreen/or_screen_model.gd, pure
+```
+
+- Placement: every new `game.level` gets a monitor two physics frames later, at
+  `level_info.or_screen` (centre of the glass on the wall, `yaw` facing -Z into the room, as the
+  hospital builds it; the glass is laid onto the hospital's own `or_screen_mount` piece), else on
+  the flattest wall facing the tables found by ray casts (the dev room), else floating near the
+  table.
+- Model: `{mode: "idle" | "cases", phase, shift, lobby, panels: [{id, table, patient_id,
+  patient_name, ailment_id, ailment_name, code, state, vitals, level: "ok" | "low" | "critical",
+  steps: [{label, item, item_name, state: "done" | "current" | "todo"}], current, supplies:
+  [{kind, name, need, have, ok}], ready, operator, progress}]}`. Supplies are
+  `Procedures.remaining_requirements` against the shared shelf, handed out to cases in order
+  (tools are not used up). Cases come from `game.cases` (the `loop` contract in `docs/SWEEP2.md`)
+  when that exists, else the legacy single case; player cases show the Player's name. The operator
+  comes from `game.surgery_for_table(table)` when the game has it, else `game.surgery` for the
+  first case.
+- Cost: the SubViewport renders only on request, at 12 Hz within 7 m and 5 Hz beyond, and never
+  while the glass is out of the live camera's view or past 22 m. Its OmniLight (`Glow`, energy
+  0.16, green / amber / red from the worst case) re-tints at 4 Hz. Registered in `Warmup`.
+- HUD (`scripts/hud.gd`): only the slot bar, crosshair + interact prompt + hold progress, the
+  player's hearts (+ stamina while not full), messages and the dead banner, the money readout, the
+  first-seconds controls line, the lobby host address and the pause / end overlays. `hud.drawn`
+  lists the element ids the last frame drew. Anything new about the case, the steps or supplies
+  belongs on the monitor, not the HUD.
+- Surgery HUD (`scripts/surgery/surgery_hud.gd`): the operator sees one slim strip, step n/N and
+  title, the patient's vitals as a number (`case.vitals` of the system's own case when it has
+  one), the one-line hint and "Esc / E: step away". Gauges and the progress bar are gone;
+  `cross_section` is still drawn above the strip when a minigame returns it. Spectators keep the
+  small "X is operating" line.
+- Work lamp: `SurgerySystem.make_work_lamp()` and the `LAMP_*` constants in
+  `scripts/surgery/surgery_system.gd` (energy 0.5); the minigame lab uses the same function.
+- Tests: `tools/orscreentest.tscn` (headless shift + synthetic cases),
+  `tools/gameshot.tscn -- --only=orscreen [--tag=1600]` (shots 11-20),
+  `tools/perfprobe.tscn -- --orscreen` (OR view and close-up with the monitor on and off) and the
+  perfprobe `--ab` row `no OR screen`.
+
 ## Networking (net worker, sweep 2)
 
 `Net` autoload (`scripts/net.gd`):

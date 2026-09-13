@@ -2,7 +2,8 @@ extends CanvasLayer
 ## The surgery view's overlay, created by the surgery system. Same look as scripts/hud.gd:
 ## the fallback font, dark translucent panels, red / green / amber.
 ##
-## Local operator: step title, hint, progress bar and the minigame's gauges at the bottom.
+## Local operator: a slim strip with the step title, the patient's vitals as a number and the hint
+## (minimal HUD, sweep 2 orscreen: no gauges, no progress bar).
 ## Anyone else near the table: one small "Bob is operating: Remove the bullet 40%" line.
 
 const SPECTATE_RANGE := 6.0
@@ -28,11 +29,14 @@ func _process(_delta: float) -> void:
 class _Canvas extends Control:
 	var hud = null
 	var _t := 0.0
+	## What the last frame drew: "operator", "cross_section", "spectator" (tests read it).
+	var drawn := PackedStringArray()
 
 	func _process(delta: float) -> void:
 		_t += delta
 
 	func _draw() -> void:
+		drawn = PackedStringArray()
 		if hud == null or hud.system == null or hud.system.game == null:
 			return
 		var sys = hud.system
@@ -50,44 +54,54 @@ class _Canvas extends Control:
 		else:
 			_draw_spectator(font, w, h, st, game)
 
+	## ORSCREEN (minimal HUD): one slim strip at the bottom. The step title with the patient's vitals as
+	## a small number, and the one-line hint. No gauges (the minigames show what is right in the
+	## world) and no progress bar; the OR wall monitor carries the checklist and supplies.
 	func _draw_operator(font: Font, w: float, h: float, st: Dictionary, game) -> void:
-		var gauges: Array = st.get("gauges", [])
+		drawn.append("operator")
 		var xs: Dictionary = st.get("cross_section", {})
-		var pw := minf(640.0, w - 40.0)
-		var ph := 96.0 + gauges.size() * 24.0 + (24.0 if not xs.is_empty() else 0.0)
+		var pw := minf(620.0, w - 40.0)
+		var ph := 48.0
 		var x := w * 0.5 - pw * 0.5
-		var y := h - ph - 18.0
-		draw_rect(Rect2(x, y, pw, ph), Color(0, 0, 0, 0.62))
-		draw_rect(Rect2(x, y, 4, ph), Color("5ce0d0"))
-		var idx := int(st.get("step_index", 0)) + 1   # loop: this table's case
-		var total := int(st.get("steps", 0))
-		draw_string(font, Vector2(x + 16, y + 22), "STEP %d/%d: %s" % [idx, total, String(st.get("title", "")).to_upper()],
-			HORIZONTAL_ALIGNMENT_LEFT, pw - 32, 15, Color("f0e6c8"))
-		draw_string(font, Vector2(x + pw - 16 - 150, y + 22), "ESC / E: step away", HORIZONTAL_ALIGNMENT_RIGHT, 150, 11, Color("777777"))
+		var y := h - ph - 16.0
+		draw_rect(Rect2(x, y, pw, ph), Color(0, 0, 0, 0.42))
+		draw_rect(Rect2(x, y, 3, ph), Color(0.36, 0.88, 0.82, 0.8))
+		var case_d: Dictionary = _case_of(game)
+		var idx := int(case_d.get("step_index", 0)) + 1
+		var total := Procedures.steps(String(case_d.get("ailment_id", ""))).size()
+		var v: float = maxf(0.0, _vitals_of(game, case_d))
+		var vcol := Color("5cff8a") if v > 50.0 else (Color("ffd35c") if v > 25.0 else Color(1, 0.16, 0.16, 0.7 + 0.3 * sin(_t * 9.0)))
+		var vtxt := "VITALS %d" % ceili(v)
+		var vw := font.get_string_size(vtxt, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
+		var title := "%d/%d  %s" % [idx, total, String(st.get("title", "")).to_upper()] if total > 0 else String(st.get("title", "")).to_upper()
+		draw_string(font, Vector2(x + 14, y + 19), title, HORIZONTAL_ALIGNMENT_LEFT, pw - vw - 44, 14, Color(0.94, 0.9, 0.78, 0.95))
+		draw_string(font, Vector2(x + pw - vw - 14, y + 19), vtxt, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, vcol)
 		var hint := String(st.get("hint", ""))
-		var hint_col := Color("c9d1d9")
+		var hint_col := Color(0.79, 0.82, 0.85, 0.9)
 		if bool(st.get("stirring", false)):
 			hint = "The patient is stirring! " + hint
 			hint_col = Color(1, 0.42, 0.42, 0.75 + 0.25 * sin(_t * 14.0))
-		draw_string(font, Vector2(x + 16, y + 44), hint, HORIZONTAL_ALIGNMENT_LEFT, pw - 32, 13, hint_col)
-		# Progress
-		var bx := x + 16
-		var bw := pw - 32
-		var by := y + 56
-		var pr := clampf(float(st.get("progress", 0.0)), 0.0, 1.0)
-		draw_rect(Rect2(bx, by, bw, 10), Color("2a2f36"))
-		draw_rect(Rect2(bx, by, bw * pr, 10), Color("5cff8a"))
-		draw_string(font, Vector2(bx, by + 26), "PROGRESS %d%%" % roundi(pr * 100.0), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("aaaaaa"))
-		var v: float = maxf(0.0, float(st.get("vitals", 100.0)))
-		var vcol := Color("5cff8a") if v > 50.0 else (Color("ffd35c") if v > 25.0 else Color("ff2a2a"))
-		draw_string(font, Vector2(bx, by + 26), "VITALS %d%%" % ceili(v), HORIZONTAL_ALIGNMENT_RIGHT, bw, 12, vcol)
-		# Gauges
-		var gy := by + 36
-		for g in gauges:
-			_gauge(font, bx, gy, bw, g)
-			gy += 24.0
+		var esc := "Esc / E: step away"
+		var ew := font.get_string_size(esc, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
+		draw_string(font, Vector2(x + 14, y + 38), hint, HORIZONTAL_ALIGNMENT_LEFT, pw - ew - 44, 13, hint_col)
+		draw_string(font, Vector2(x + pw - ew - 14, y + 38), esc, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.6, 0.6, 0.6, 0.7))
 		if not xs.is_empty():
-			_cross_section(font, bx, gy, bw, xs)
+			drawn.append("cross_section")
+			draw_rect(Rect2(x, y - 30, pw, 26), Color(0, 0, 0, 0.42))
+			_cross_section(font, x + 14, y - 30, pw - 28, xs)
+
+	## The case being operated on: the system's own when it has one (per-table surgery, `loop`),
+	## else game.case.
+	func _case_of(game) -> Dictionary:
+		var sys = hud.system
+		if sys.has_method("_case"):   # loop: this table's case
+			return sys._case()
+		return game.case if game.case is Dictionary else {}
+
+	func _vitals_of(game, case_d: Dictionary) -> float:
+		if case_d.has("vitals"):
+			return float(case_d.vitals)
+		return float(game.get("vitals")) if game.get("vitals") != null else 100.0
 
 	## A cut-through-the-limb strip: one coloured segment per tissue layer, the part already cut
 	## darkened, and a marker at the current depth. From hud_state()["cross_section"]:
@@ -112,47 +126,19 @@ class _Canvas extends Control:
 		draw_rect(Rect2(mx - 2, y + 1, 4, 18), Color("ffffff"))
 		draw_string(font, Vector2(bx + w + 8, y + 15), "%d%%" % roundi(depth * 100.0), HORIZONTAL_ALIGNMENT_LEFT, 48, 12, Color("eeeeee"))
 
-	func _gauge(font: Font, x: float, y: float, bw: float, g: Dictionary) -> void:
-		var label := String(g.get("label", ""))
-		var lo := float(g.get("min", 0.0))
-		var hi := float(g.get("max", 1.0))
-		var span := maxf(1e-5, hi - lo)
-		var value := float(g.get("value", 0.0))
-		var gmin := float(g.get("good_min", lo))
-		var gmax := float(g.get("good_max", hi))
-		var lw := 120.0
-		draw_string(font, Vector2(x, y + 14), label.to_upper(), HORIZONTAL_ALIGNMENT_LEFT, lw - 8, 12, Color("c9d1d9"))
-		var bx := x + lw
-		var w := bw - lw - 56.0
-		draw_rect(Rect2(bx, y + 4, w, 12), Color("2a2f36"))
-		var full_good := gmin <= lo + 1e-4 and gmax >= hi - 1e-4
-		var good := value >= gmin and value <= gmax
-		if full_good:
-			# A plain meter (progress-like): fill it.
-			draw_rect(Rect2(bx, y + 4, w * clampf((value - lo) / span, 0.0, 1.0), 12), Color("7ad0c0"))
-		else:
-			var z0 := clampf((gmin - lo) / span, 0.0, 1.0)
-			var z1 := clampf((gmax - lo) / span, 0.0, 1.0)
-			draw_rect(Rect2(bx + w * z0, y + 4, w * (z1 - z0), 12), Color(0.36, 1.0, 0.54, 0.4))
-			var mx := bx + w * clampf((value - lo) / span, 0.0, 1.0)
-			var col := Color("ffffff") if good else (Color("ffd35c") if value < gmin else Color("ff6a6a"))
-			draw_rect(Rect2(mx - 2, y + 1, 4, 18), col)
-		var unit := absf(lo) < 1e-4 and absf(hi - 1.0) < 1e-4
-		var num := "%d%%" % roundi(value * 100.0) if unit else ("%.2f" % value if span <= 3.0 else "%.1f" % value)
-		draw_string(font, Vector2(bx + w + 8, y + 15), num, HORIZONTAL_ALIGNMENT_LEFT, 48, 12,
-			Color("eeeeee") if good or full_good else Color("ffd35c"))
-
 	func _draw_spectator(font: Font, w: float, h: float, st: Dictionary, game) -> void:
 		var view = game.viewed_player() if game.has_method("viewed_player") else game.local_player()
 		var sys = hud.system
-		if view == null or view.global_position.distance_to(sys._table_pos()) > SPECTATE_RANGE:
+		var table_at: Vector3 = sys._table_pos() if sys.has_method("_table_pos") else game.table_pos()
+		if view == null or view.global_position.distance_to(table_at) > SPECTATE_RANGE:
 			return
 		var text := "%s is operating: %s  %d%%" % [String(st.get("operator_name", "Someone")),
 			String(st.get("step_label", st.get("title", ""))), roundi(clampf(float(st.get("progress", 0.0)), 0.0, 1.0) * 100.0)]
-		var tw := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
+		drawn.append("spectator")
+		var tw := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x
 		# loop: one line per table being operated on, stacked.
 		var slot: int = maxi(0, game.surgeries.find(sys)) if "surgeries" in game else 0
-		var y := h - 196.0 - 28.0 * slot
-		draw_rect(Rect2(w * 0.5 - tw * 0.5 - 12, y - 17, tw + 24, 24), Color(0, 0, 0, 0.55))
-		draw_string(font, Vector2(0, y), text, HORIZONTAL_ALIGNMENT_CENTER, w, 13,
+		var y := h - 196.0 - 26.0 * slot
+		draw_rect(Rect2(w * 0.5 - tw * 0.5 - 10, y - 15, tw + 20, 21), Color(0, 0, 0, 0.45))
+		draw_string(font, Vector2(0, y), text, HORIZONTAL_ALIGNMENT_CENTER, w, 12,
 			Color("ff6a6a") if bool(st.get("stirring", false)) else Color("5ce0d0"))
