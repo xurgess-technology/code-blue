@@ -41,8 +41,8 @@ const LINTEL_Y := 2.25
 const FENCE_H := 1.9
 const CANOPY_Y := 3.15
 
-const OUTDOOR_LIGHT_RANGE := 15.0
-const OUTDOOR_LIGHT_ENERGY := 2.4
+const OUTDOOR_LIGHT_RANGE := 19.0
+const OUTDOOR_LIGHT_ENERGY := 3.6
 
 const TILE_FLOOR_ROOMS := ["restroom", "morgue", "or", "janitor_closet", "lab", "radiology", "locker_room"]
 const WARM_FLOOR_ROOMS := ["lobby", "break_room", "waiting_room", "cafeteria", "office"]
@@ -343,6 +343,68 @@ static func _build_surfaces(gen: Dictionary, geo: GeoChunks) -> void:
 				geo.quad(cx, cy, "facade", Vector3(x0, y, z0), Vector3(x1, y, z0), Vector3(x1, y, z1), Vector3(x0, y, z1),
 						Vector2(x0, z0), Vector2(x1, z0), Vector2(x1, z1), Vector2(x0, z1))
 	_canopy(geo, gen)
+	_ground_paint(geo, gen)
+
+
+## Parking stall lines, the ambulance bay box, a crossing from the main doors and a square
+## where the gold bars go: flat quads just above the asphalt.
+static func _ground_paint(geo: GeoChunks, gen: Dictionary) -> void:
+	var spots: Dictionary = gen.spots
+	if not spots.has("stalls"):
+		return
+	var white := StandardMaterial3D.new()
+	white.albedo_color = Color(0.78, 0.78, 0.74)
+	white.roughness = 0.85
+	var yellow := StandardMaterial3D.new()
+	yellow.albedo_color = Color(0.8, 0.6, 0.1)
+	yellow.roughness = 0.85
+	geo.mats["paint_white"] = white
+	geo.mats["paint_yellow"] = yellow
+	var y := 0.012
+	var strip := func(mat: String, a: Vector2, b: Vector2, width: float) -> void:
+		var pa := _w(a)
+		var pb := _w(b)
+		var dir := (pb - pa).normalized()
+		var side := Vector3(-dir.z, 0, dir.x) * width * 0.5
+		var cx := int(a.x) / CHUNK
+		var cy := int(a.y) / CHUNK
+		var v0 := pa - side + Vector3(0, y, 0)
+		var v1 := pb - side + Vector3(0, y, 0)
+		var v2 := pb + side + Vector3(0, y, 0)
+		var v3 := pa + side + Vector3(0, y, 0)
+		# Wound so the face looks up.
+		if (v1 - v0).cross(v3 - v0).y < 0.0:
+			geo.quad(cx, cy, mat, v0, v1, v2, v3, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO)
+		else:
+			geo.quad(cx, cy, mat, v0, v3, v2, v1, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO)
+	var seen := {}
+	for s in spots.stalls:
+		var p: Vector2 = s.pos
+		for dx in [-1.0, 1.0]:
+			var key := "%.2f,%.2f" % [p.x + dx, p.y]
+			if seen.has(key):
+				continue
+			seen[key] = true
+			strip.call("paint_white", Vector2(p.x + dx, p.y - 1.5), Vector2(p.x + dx, p.y + 1.5), 0.1)
+	if spots.has("bay_marking"):
+		var c: Vector2 = spots.bay_marking.pos
+		var hw := 1.7
+		var hh := 3.4
+		var corners := [c + Vector2(-hw, -hh), c + Vector2(hw, -hh), c + Vector2(hw, hh), c + Vector2(-hw, hh)]
+		for i in 4:
+			strip.call("paint_yellow", corners[i], corners[(i + 1) % 4], 0.15)
+		for k in 5:
+			var t := -hh + 0.6 + k * 1.4
+			strip.call("paint_yellow", c + Vector2(-hw, t), c + Vector2(hw, t + 0.9), 0.12)
+	if spots.has("entrance") and spots.has("gold_pile"):
+		var e: Vector2 = spots.entrance.pos
+		for k in 7:
+			var x := e.x - 1.8 + k * 0.6
+			strip.call("paint_white", Vector2(x, e.y + 3.4), Vector2(x, e.y + 5.2), 0.3)
+		var g: Vector2 = spots.gold_pile.pos
+		var q := [g + Vector2(-1.5, -1.3), g + Vector2(1.5, -1.3), g + Vector2(1.5, 1.3), g + Vector2(-1.5, 1.3)]
+		for i in 4:
+			strip.call("paint_yellow", q[i], q[(i + 1) % 4], 0.15)
 
 
 static func _is_archway(gen: Dictionary, tx: int, ty: int) -> bool:
@@ -759,10 +821,14 @@ static func _build_lights(root: Node3D, gen: Dictionary, info: Dictionary) -> vo
 			node.add_to_group("fixture")
 			node.set_meta("mode", mode)
 			node.set_meta("tile", tile)
+			var bulb: OmniLight3D = node.get_node("Bulb")
 			if mode == 2:
 				# A dead fixture never lights anything: keep its panel, drop the light itself.
-				var bulb: OmniLight3D = node.get_node("Bulb")
 				bulb.visible = false
+			elif l.get("bright", false):
+				bulb.light_energy = LIGHT_ENERGY * 1.7
+				bulb.omni_range = LIGHT_RANGE * 1.35
+				bulb.light_color = Color(0.96, 0.98, 1.0)
 		lights_root.add_child(node)
 		out.append({"tile": tile, "position": pos, "mode": mode, "node": node})
 	info["lights"] = out

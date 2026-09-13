@@ -195,7 +195,10 @@ static func build(st: S, ox: int, oy: int, north_wings: int) -> void:
 	put.call("security_camera", 12.95, 3.3, WEST)
 
 	# ---- lights -------------------------------------------------------------------------
-	for p in [Vector2i(3, 6), Vector2i(7, 7), Vector2i(4, 11), Vector2i(16, 6), Vector2i(21, 6), Vector2i(18, 10),
-			Vector2i(25, 8), Vector2i(5, 16), Vector2i(14, 16), Vector2i(22, 16), Vector2i(4, 1), Vector2i(11, 2),
-			Vector2i(17, 1), Vector2i(23, 2), Vector2i(11, 6), Vector2i(11, 11)]:
+	# The OR is always lit, and brighter than anywhere else: the one room that still works.
+	for p in [Vector2i(16, 6), Vector2i(21, 6), Vector2i(18, 10)]:
+		st.lights.append({"tile": Vector2i(ox + p.x, oy + p.y), "zone": z, "mode": 0, "bright": true})
+	for p in [Vector2i(3, 6), Vector2i(7, 7), Vector2i(4, 11), Vector2i(25, 8), Vector2i(5, 16), Vector2i(14, 16),
+			Vector2i(22, 16), Vector2i(4, 1), Vector2i(11, 2), Vector2i(17, 1), Vector2i(23, 2), Vector2i(11, 6),
+			Vector2i(11, 11)]:
 		st.lights.append({"tile": Vector2i(ox + p.x, oy + p.y), "zone": z, "mode": -1})

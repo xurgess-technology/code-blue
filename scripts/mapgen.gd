@@ -53,7 +53,7 @@ const DIRS: Array[Vector2i] = [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0),
 const PROP_CHARS := {}
 
 ## Fixture states per zone: [steady, flicker] cumulative chances, the rest are dead.
-const LIGHTS_ENTRANCE := [0.72, 0.94]
+const LIGHTS_ENTRANCE := [0.86, 1.0]
 ## Wings by depth 1..4.
 const LIGHTS_WING := [[0.36, 0.66], [0.27, 0.62], [0.19, 0.58], [0.12, 0.54]]
 
@@ -214,17 +214,38 @@ static func _assign_kinds(gens: Array, defs: Array, rng: Rng) -> Array:
 			["lab", n - 1], ["radiology", n], ["morgue", n]]
 	for sp in special:
 		want.append({"wing": by_depth[clampi(int(sp[1]), 1, n)], "kind": sp[0], "roam": true})
-	# Biggest rooms first: they have the fewest slots to choose from.
-	want.sort_custom(func(a, b):
-		var aa := int(Rooms.KINDS[a.kind].w[0]) * int(Rooms.KINDS[a.kind].d[0])
-		var ba := int(Rooms.KINDS[b.kind].w[0]) * int(Rooms.KINDS[b.kind].d[0])
-		return aa > ba or (aa == ba and String(a.kind) < String(b.kind)))
 	var map_counts := {}
 	var wing_counts: Array = []
 	for i in n:
 		wing_counts.append({})
 	var missing: Array = []
-	for w in want:
+	while not want.is_empty():
+		# The most constrained room next: the one with the fewest free slots that suit it
+		# exactly, bigger rooms first on a tie.
+		var wi := 0
+		var best_n := 1 << 30
+		var best_area := -1
+		# The rooms every wing needs go first; the map's special rooms can move to another wing.
+		var any_fixed := false
+		for cand in want:
+			if not cand.roam:
+				any_fixed = true
+				break
+		for i in want.size():
+			var cand: Dictionary = want[i]
+			if any_fixed and cand.roam:
+				continue
+			var fits := 0
+			for slot in gens[cand.wing].slots:
+				if String(slot.kind) == "" and _fits(cand.kind, WingGen.slot_wd(slot), 0, 0, 0):
+					fits += 1
+			var area := int(Rooms.KINDS[cand.kind].w[0]) * int(Rooms.KINDS[cand.kind].d[0])
+			if fits < best_n or (fits == best_n and area > best_area):
+				best_n = fits
+				best_area = area
+				wi = i
+		var w: Dictionary = want[wi]
+		want.remove_at(wi)
 		var order: Array = [w.wing]
 		if w.roam:
 			# Nearest depth first.
@@ -255,7 +276,12 @@ static func _assign_kinds(gens: Array, defs: Array, rng: Rng) -> Array:
 			if done:
 				break
 		if not done:
-			missing.append("%s: %s" % [defs[w.wing].id, w.kind])
+			# No free slot suits it: split the widest free slot of the wing in two and try again.
+			if int(w.get("splits", 0)) < 3 and _split_slot(gens[w.wing], w.kind):
+				w["splits"] = int(w.get("splits", 0)) + 1
+				want.append(w)
+			else:
+				missing.append("%s: %s" % [defs[w.wing].id, w.kind])
 	# Filler, weighted by depth.
 	for gi in n:
 		var depth := int(defs[gi].depth)
@@ -291,6 +317,36 @@ static func _assign_kinds(gens: Array, defs: Array, rng: Rng) -> Array:
 			map_counts[kind] = int(map_counts.get(kind, 0)) + 1
 			wing_counts[gi][kind] = int(wing_counts[gi].get(kind, 0)) + 1
 	return missing
+
+
+## Split the widest free slot of a wing (along its door wall) into two with a wall between, so
+## a small room that found no slot gets one. The first part is sized for `kind`.
+static func _split_slot(g: RefCounted, kind: String) -> bool:
+	var best: Dictionary = {}
+	var best_w := 0
+	for slot in g.slots:
+		if String(slot.kind) != "":
+			continue
+		var wd: Vector2i = WingGen.slot_wd(slot)
+		if wd.x >= 7 and wd.x > best_w and wd.y >= maxi(3, int(Rooms.KINDS[kind].d[0]) - 1):
+			best_w = wd.x
+			best = slot
+	if best.is_empty():
+		return false
+	var r: Rect2i = best.rect
+	var f: Vector2i = best.front
+	var w1 := clampi(int(Rooms.KINDS[kind].w[1]), 3, best_w - 4)
+	var a: Rect2i
+	var b: Rect2i
+	if f.x == 0:
+		a = Rect2i(r.position.x, r.position.y, w1, r.size.y)
+		b = Rect2i(r.position.x + w1 + 1, r.position.y, r.size.x - w1 - 1, r.size.y)
+	else:
+		a = Rect2i(r.position.x, r.position.y, r.size.x, w1)
+		b = Rect2i(r.position.x, r.position.y + w1 + 1, r.size.x, r.size.y - w1 - 1)
+	best.rect = a
+	g.slots.append({"rect": b, "front": f, "kind": "", "wing": best.wing})
+	return true
 
 
 ## Player spawns are stamped by the entrance; here: tool spawn candidates in wing rooms and

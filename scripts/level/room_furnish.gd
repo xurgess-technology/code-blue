@@ -13,7 +13,7 @@ const Rng := preload("res://scripts/level/rng.gd")
 ## a door (0 = door). weight: how often it fills leftover frontage. label: the sign over the door.
 const KINDS := {
 	"patient_room": {"w": [3, 6], "d": [3, 4], "weight": 26.0, "open": 0, "label": "WARD"},
-	"supply_closet": {"w": [3, 4], "d": [3, 3], "weight": 7.0, "open": 0, "label": "SUPPLY"},
+	"supply_closet": {"w": [3, 5], "d": [3, 4], "weight": 7.0, "open": 0, "label": "SUPPLY"},
 	"pharmacy": {"w": [4, 7], "d": [4, 5], "weight": 1.5, "open": 0, "label": "PHARMACY"},
 	"nurse_station": {"w": [4, 6], "d": [3, 4], "weight": 2.5, "open": 3, "label": "NURSES"},
 	"waiting_room": {"w": [5, 8], "d": [4, 5], "weight": 0.8, "open": 3, "label": "WAITING"},

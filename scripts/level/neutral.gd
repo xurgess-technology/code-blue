@@ -44,8 +44,8 @@ static func build(st: S, door_x: float, oy: int, rng: Rng) -> Rect2i:
 			st.set_keep(ox + c, oy + r)
 
 	# ---- sidewalk, canopy, bollards ------------------------------------------------------
-	st.spots["canopy"] = {"rect": Rect2(at.call(13.0, 0.0), Vector2(20.0, 3.6))}
-	for c in [13.4, 19.4, 25.6, 32.6]:
+	st.spots["canopy"] = {"rect": Rect2(at.call(12.0, 0.0), Vector2(20.0, 3.6))}
+	for c in [12.4, 18.6, 25.4, 31.6]:
 		put.call("bollard", c, 3.4, SOUTH, {"canopy_post": true})
 	for c in range(2, 13, 2):
 		put.call("bollard", c + 0.5, 3.2, SOUTH)
@@ -110,8 +110,9 @@ static func build(st: S, door_x: float, oy: int, rng: Rng) -> Rect2i:
 
 	# ---- street lights: bright, warm, steady ------------------------------------------------
 	var lamps := [
-		[Vector2(0.4, 4.5), E], [Vector2(0.4, 16.8), E], [Vector2(12.0, 10.5), SOUTH],
+		[Vector2(0.4, 4.5), E], [Vector2(0.4, 16.8), E], [Vector2(5.0, 10.5), SOUTH], [Vector2(12.0, 10.5), SOUTH],
 		[Vector2(43.6, 4.5), WEST], [Vector2(43.6, 16.8), WEST], [Vector2(25.0, 17.6), N],
+		[Vector2(36.6, 10.0), WEST], [Vector2(17.0, 17.6), N], [Vector2(33.0, 17.6), N],
 	]
 	for l in lamps:
 		put.call("street_light", l[0].x, l[0].y, l[1], {"lamp": true})

@@ -79,6 +79,7 @@ func _ready() -> void:
 		{"name": "pharmacy, containers open", "setup": _containers},
 		{"name": "OR, patient + stocked shelf", "setup": _or_view},
 		{"name": "operating: bone saw, bloody", "setup": _operating_saw},
+		{"name": "neutral area outside", "setup": _neutral},  # HOSPITAL HOOK: sweep 2 neutral area
 	]
 	for q in _qualities:
 		main.set_quality(q, false)
@@ -164,6 +165,19 @@ func _or_view() -> void:
 	game.shelf_node.show_stock(game.shelf)
 	var t := game.table_pos()
 	_look(t + Vector3(0.8, 0, 3.0), t + Vector3.UP * 1.0)
+
+
+## HOSPITAL HOOK: the parking lot outside the main doors, looking back at the building across
+## the lot (street lights, cars, the van). Skipped on levels without a neutral area.
+func _neutral() -> void:
+	var n: Dictionary = game.level_info.get("neutral", {})
+	if n.is_empty():
+		return
+	if game.surgery.camera() != null:
+		game.surgery.end(bot)
+	var gold: Vector3 = n.gold_pile.position
+	var ent: Vector3 = game.level_info.entrance.position
+	_look(gold + (gold - ent).normalized() * 8.0 + Vector3(-5.0, 0, 0), ent + Vector3(0, 2.0, 0))
 
 
 ## The heaviest thing surgery does: the saw with a weak tourniquet (blood decals, particles),
