@@ -235,8 +235,6 @@ const MODELS := {
 	# ---- hospital (sweep 2, hospital worker) ------------------------------
 	# Room furniture, vehicles and outdoor props for the entrance building, the wings and
 	# the neutral area. Offsets centre each footprint and put its base on the floor.
-Godot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org
-
 	"hosp/toilet": {
 		"path": "res://assets/models/hospital/kenney_furniture/toilet.glb", "scale": 1.750, "yaw": 180, "x": 0.273, "y": -0.000, "z": 0.418,
 		"note": "Kenney Furniture Kit toilet. Size 0.55 x 0.79 x 0.84 m.",
