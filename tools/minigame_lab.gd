@@ -4,7 +4,13 @@ extends Node3D
 ##   godot --path . tools/minigame_lab.tscn -- --game=forceps [--patient=bob|seal]
 ##         [--ailment=gunshot|amputation] [--variant=pack|stump] [--bot=1.0] [--seconds=40]
 ##         [--shot=res://tools/lab_shots/forceps.png] [--shot-at=6.0] [--flags=sedation:0.6,tourniquet:0.9]
-##         [--seed=N] [--wide]
+##         [--seed=N] [--wide] [--nohud] [--look=or] [--selftest=<game>]
+##
+## --flags with sedation under 0.75 makes the patient stir the way the surgery system does.
+## --look=or lights it like the game: the hospital environment and post effects, a dim ceiling
+##   light and the surgery system's work lamp on the camera (the default lab light is much brighter).
+## --nohud hides the lab's text overlay (to judge a screenshot without the hint).
+## --selftest=<game> runs that minigame's static self_test() and quits.
 ##
 ## Interactive (no --bot): move the mouse over the plane, left and right mouse buttons act.
 ## With --bot: plays the minigame's own bot_input(t, skill) and prints a report. Add --headless
@@ -24,11 +30,25 @@ var shot_at := -1.0
 var flags := {}
 var seed_value := -1
 var wide := false
+var self_test := ""
+var nohud := false
+var look := ""
+
+# Stirs, the way scripts/surgery/surgery_system.gd makes them when sedation is under 0.75.
+const STIR_JOLT_TIME := 0.35
+const STIR_SHAKE_M := 0.09
+var _stir_rng := RandomNumberGenerator.new()
+var _stir_timer := 1.5
+var _stir_jolt := 0.0
+var _stir_dir := Vector2.RIGHT
+var _stir_amp := 0.0
+var stir_count := 0
 
 var mg: Node3D
 var cam: Camera3D
 var body: Node3D
 var site := Transform3D()
+var step_site := ""
 var t := 0.0
 var botch_total := 0.0
 var botch_count := 0
@@ -54,17 +74,26 @@ func _ready() -> void:
 			"shot-at": shot_at = float(v)
 			"seed": seed_value = int(v)
 			"wide": wide = true
+			"selftest": self_test = v
+			"nohud": nohud = true
+			"look": look = v
 			"flags":
 				for pair in v.split(",", false):
 					var pv := pair.split(":")
 					if pv.size() == 2:
 						flags[pv[0]] = float(pv[1])
 
+	if self_test != "":
+		_run_self_test.call_deferred()
+		return
 	if ailment_id == "":
-		ailment_id = "amputation" if game_id in ["tourniquet", "saw"] else "gunshot"
+		ailment_id = "amputation" if game_id in ["tourniquet", "saw"] or variant == "stump" else "gunshot"
 	var step := _find_step()
 	if variant == "" and step.has("variant"):
 		variant = step.variant
+	# The stump dressing comes after the saw: show the limb already off unless told otherwise.
+	if game_id == "gauze" and variant == "stump" and not flags.has("amputated"):
+		flags["amputated"] = true
 
 	_build_room()
 	body = BodyScript.create(patient_id)
@@ -78,6 +107,7 @@ func _ready() -> void:
 		body.apply_flags(flags)
 	await get_tree().process_frame
 	site = body.site_transform(step.site) if body.has_method("site_transform") else Transform3D(Basis(), Vector3(0, 1.2, 0))
+	step_site = String(step.site)
 
 	var path: String = Procedures.MINIGAME_SCRIPTS.get(game_id, "")
 	if path == "" or not ResourceLoader.exists(path):
@@ -115,6 +145,16 @@ func _ready() -> void:
 		cam.global_position = site.origin + Vector3(0.25, 0.75, 0.55)
 		cam.look_at(site.origin, Vector3.UP)
 	cam.current = true
+	if look == "or":
+		# The surgery system's work lamp (scripts/surgery/surgery_system.gd), riding on the camera.
+		var work := SpotLight3D.new()
+		work.light_color = Color(1.0, 0.97, 0.9)
+		work.light_energy = 2.2
+		work.spot_range = 2.5
+		work.spot_angle = 32.0
+		work.spot_attenuation = 0.6
+		work.shadow_enabled = false
+		cam.add_child(work)
 
 	var layer := CanvasLayer.new()
 	add_child(layer)
@@ -124,6 +164,8 @@ func _ready() -> void:
 	_hud.add_theme_color_override("font_outline_color", Color.BLACK)
 	_hud.add_theme_constant_override("outline_size", 6)
 	layer.add_child(_hud)
+	_hud.visible = not nohud
+	_stir_rng.seed = hash("lab_stir") + seed_value
 	print("[lab] game=%s patient=%s ailment=%s variant=%s bot=%s" % [game_id, patient_id, ailment_id, variant, str(bot_skill)])
 
 
@@ -135,6 +177,18 @@ func _find_step() -> Dictionary:
 
 
 func _build_room() -> void:
+	if look == "or":
+		add_child(Look.make_environment())
+		add_child(Look.make_post_layer())
+		Look.apply_quality(self, Look.QUALITY_MEDIUM)
+		var ceiling := OmniLight3D.new()
+		ceiling.position = Vector3(0.0, 2.8, 0.4)
+		ceiling.light_energy = 1.6
+		ceiling.omni_range = 5.0
+		ceiling.shadow_enabled = true
+		add_child(ceiling)
+		_add_table()
+		return
 	var env := WorldEnvironment.new()
 	var e := Environment.new()
 	e.background_mode = Environment.BG_COLOR
@@ -153,6 +207,10 @@ func _build_room() -> void:
 	lamp.spot_range = 6.0
 	lamp.shadow_enabled = true
 	add_child(lamp)
+	_add_table()
+
+
+func _add_table() -> void:
 	var table := MeshInstance3D.new()
 	var bm := BoxMesh.new()
 	bm.size = Vector3(2.0, 0.9, 1.0)
@@ -169,17 +227,21 @@ func _physics_process(delta: float) -> void:
 	if mg == null:
 		return
 	t += delta
+	# Follow the site as the body breathes and stirs, as the surgery system's _place_mg does.
+	if body != null and body.has_method("site_transform") and step_site != "":
+		mg.global_transform = body.site_transform(step_site).orthonormalized()
 	if not mg.done:
+		var shake := _stir_tick(delta)
 		if bot_skill >= 0.0:
 			var inp: Dictionary = mg.bot_input(t, bot_skill)
-			mg.handle_cursor(_clamp(inp.get("cursor", Vector2.ZERO)), int(inp.get("buttons", 0)), delta)
+			mg.handle_cursor(_clamp(inp.get("cursor", Vector2.ZERO) + shake), int(inp.get("buttons", 0)), delta)
 		elif cam != null:
 			var hit = MinigameBase.screen_to_plane(cam, get_viewport().get_mouse_position(), mg.global_transform)
 			if hit != null:
 				var b := 0
 				if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT): b |= MinigameBase.BUTTON_PRIMARY
 				if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT): b |= MinigameBase.BUTTON_SECONDARY
-				mg.handle_cursor(_clamp(hit), b, delta)
+				mg.handle_cursor(_clamp(hit + shake), b, delta)
 	mg.tick(delta)
 	# Round-trip the net state every frame so a broken apply_net_state shows up in the lab.
 	mg.apply_net_state(mg.net_state())
@@ -191,8 +253,50 @@ func _physics_process(delta: float) -> void:
 	if over:
 		print("[lab] ------------------------------------------")
 		print("[lab] result=%s finished_at=%.1f botches=%d vitals_cost=%.1f progress=%.2f flags=%s" % [
-			"DONE" if finished_at >= 0.0 else "UNFINISHED", finished_at, botch_count, botch_total, mg.progress, str(result)])
+			"DONE" if finished_at >= 0.0 else "UNFINISHED", finished_at, botch_count, botch_total, mg.progress, str(result)] + ("  stirs=%d" % stir_count if stir_count > 0 else ""))
 		get_tree().quit(0 if finished_at >= 0.0 else 1)
+
+
+## Mirrors the surgery system: an underdosed patient jerks now and then, which calls on_jolt,
+## shakes the cursor for a moment and jolts the body.
+func _stir_tick(delta: float) -> Vector2:
+	var sed := float(flags.get("sedation", 1.0))
+	if game_id == "anesthetic" or sed >= 0.75:
+		return Vector2.ZERO
+	_stir_timer -= delta
+	if _stir_timer <= 0.0:
+		_stir_timer = lerpf(2.5, 11.0, clampf(sed, 0.0, 0.75) / 0.75) * _stir_rng.randf_range(0.7, 1.3)
+		var strength := clampf((0.75 - sed) / 0.75, 0.0, 1.0) * 0.8 + 0.2
+		_stir_jolt = STIR_JOLT_TIME
+		_stir_amp = strength
+		_stir_dir = Vector2.RIGHT.rotated(_stir_rng.randf() * TAU)
+		stir_count += 1
+		mg.on_jolt(_stir_dir * _stir_amp * STIR_SHAKE_M, strength, STIR_JOLT_TIME)
+		if body != null and body.has_method("stir"):
+			body.stir(strength)
+		print("[lab] t=%.1f stir %.2f" % [t, strength])
+	if _stir_jolt <= 0.0:
+		return Vector2.ZERO
+	_stir_jolt = maxf(0.0, _stir_jolt - delta)
+	var k := _stir_jolt / STIR_JOLT_TIME
+	return _stir_dir.rotated(sin(_stir_jolt * 45.0) * 0.9) * _stir_amp * STIR_SHAKE_M * k
+
+
+## `--selftest=<game>`: runs that minigame's static self_test() headless and quits.
+func _run_self_test() -> void:
+	var path: String = Procedures.MINIGAME_SCRIPTS.get(self_test, "")
+	var script := load(path) as GDScript if path != "" else null
+	if script == null:
+		push_error("No minigame '%s'" % self_test)
+		get_tree().quit(2)
+		return
+	var started := Time.get_ticks_msec()
+	if self_test == "forceps":
+		script.call("self_test", self, 12)
+	else:
+		script.call("self_test")
+	print("[lab] self-test %s took %d ms" % [self_test, Time.get_ticks_msec() - started])
+	get_tree().quit(0)
 
 
 func _clamp(p: Vector2) -> Vector2:
@@ -205,6 +309,8 @@ func _draw_hud() -> void:
 	var text := "%s\n%s\nprogress %d%%   botches %d (%.1f vitals)" % [h.get("title", ""), h.get("hint", ""), int(float(h.get("progress", mg.progress)) * 100), botch_count, botch_total]
 	for g in h.get("gauges", []):
 		text += "\n%s: %.2f  (good %.2f..%.2f)" % [g.label, float(g.value), float(g.good_min), float(g.good_max)]
+	if not h.get("cross_section", {}).is_empty():
+		text += "\n(cross-section strip)"
 	_hud.text = text
 
 

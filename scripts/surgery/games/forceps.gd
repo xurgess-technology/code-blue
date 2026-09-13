@@ -5,16 +5,21 @@ extends "res://scripts/surgery/minigame.gd"
 ## with the slug lodged at the far end. The forceps tips follow the cursor and are pinned inside
 ## the channel.
 ##
+## Nothing to read off a gauge and no hidden speed limit: the wound shows what is right.
+##
 ## ENTER   bring the tips to the opening; they drop into the wound.
-## SEEK    follow the channel down. Pushing past a wall or moving faster than SPEED_MAX is
-##         scraping: a flinch, a spurt of blood, HIT_COST once per contact, then a steady rate.
-##         The channel gets darker the deeper it goes.
-## GRIP    over the bullet and roughly still, hold primary: the jaws close on the slug. Closing
-##         anywhere else closes on nothing; let go and try again.
-## EXTRACT keep holding primary and draw it back to the opening. The slug makes the tool wider,
-##         so the free margin is smaller and the speed limit is lower. Letting go (or ramming a
-##         wall hard) drops it and it slides back down the channel. Leaving the opening with
-##         the slug in the jaws finishes: {"bullet_removed": true}, and it clinks into the dish.
+## SEEK    follow the channel down. Flesh drags on the tool: the tips follow the cursor at a
+##         walking pace, so rushing only makes them lag, it never hurts. Brushing a wall is free.
+##         Forcing the tips into a wall makes it flush red under them and the patient wince;
+##         keep forcing (or shove hard, e.g. cutting across a bend) and the wall tears: a spurt
+##         of blood, a flinch and TEAR_COST vitals. The bullet glints in the dark channel.
+## GRIP    when the tips are close enough the glint turns into a green ring: hold primary and the
+##         jaws close on the slug. Closing anywhere else closes on nothing; let go and try again.
+## EXTRACT keep holding primary and draw it back; the opening glows green. The slug makes the
+##         tool wider, so the walls are closer. Letting go, or tearing a wall, drops it and it
+##         slides back down the channel. Leaving the opening with the slug in the jaws finishes:
+##         {"bullet_removed": true}, and it clinks into the dish.
+## A stir's shake never tears (the framework's on_jolt); the drag keeps the tips from flying off.
 ##
 ## Tip positions are in plane metres. The channel is a polyline sampled every SAMPLE metres;
 ## s is the arc length from the opening (s = 0) to the bullet end (s = length).
@@ -36,8 +41,7 @@ const TOOL_R_OPEN := 0.0028    # half-width of the open jaws
 const BULLET_R := 0.0045
 const BULLET_LEN := 0.012
 const TOOL_R_GRIP := 0.0058    # half-width of jaws holding the slug
-const GRAB_R := 0.008          # tip within this of the slug centre can grip
-const GRAB_SPEED := 0.04       # and moving slower than this
+const GRAB_R := 0.012          # tip within this of the slug centre can grip
 const JAW_CLOSE_RATE := 3.5
 const JAW_OPEN_RATE := 6.0
 const JAW_ON_BULLET := 0.62
@@ -45,20 +49,16 @@ const ARM_LEN := 0.125
 const TOOL_PITCH := deg_to_rad(48.0)
 
 # Rules -----------------------------------------------------------------------
-const SPEED_MAX_OPEN := 0.10   # m/s
-const SPEED_MAX_GRIP := 0.07
+const TIP_SPEED_OPEN := 0.12   # m/s the tips can move through flesh; the cursor may run ahead
+const TIP_SPEED_GRIP := 0.09
 const SPEED_TAU := 0.12
-const JOLT_DIST := 0.015       # a cursor jump bigger than this in one frame is a teleport, not speed
-const CONTACT_PEN := 0.0004
-const HIT_COST := 1.0
-const HIT_COOLDOWN := 0.6
-const SCRAPE_RATE := 3.2       # vitals per second at 3 mm past the wall
-const SPEED_RATE := 2.2        # vitals per second when too fast
-const DROP_PEN := 0.006        # grinding the slug this hard into a wall...
-const DROP_TIME := 0.35        # ...for this long makes it slip out of the jaws
+const PUSH_SOFT := 0.0035      # the hand this far past a wall: the wall flushes and strains
+const PUSH_HARD := 0.010       # this far: it tears at once
+const STRAIN_TIME := 0.35      # straining a wall this long tears it
+const TEAR_COST := 2.5
+const TEAR_COOLDOWN := 0.9
 const SLIDE_BACK := 0.022
 const SLIDE_SPEED := 0.05
-const EMIT_CHUNK := 0.75
 
 # Channel data
 var pts := PackedVector2Array()
@@ -80,21 +80,16 @@ var empty_closed := false
 var bullet_s := 0.13
 var slide_target := 0.13
 var speed := 0.0
-var contact := false
-var scraping := false
-var too_fast := false
-var hits := 0
+var push := 0.0                # how far the hand is forcing the tips past a wall, metres
+var strain := 0.0
+var hits := 0                  # tears
 var drops := 0
 var damage := 0.0
 var stage: int = Stage.OUTSIDE
-var _last_cursor = null
+var _last_tip = null
 var _jolt_t := 0.0
-var _hit_cd := 0.0
-var _spurt_cd := 0.0
-var _acc := 0.0
-var _acc_reason := ""
+var _tear_cd := 0.0
 var _time := 0.0
-var _grind := 0.0
 
 # Display state (written by the operator's simulation and by apply_net_state)
 var _d_tip := Vector2.ZERO
@@ -105,6 +100,8 @@ var _d_bullet_s := 0.13
 var _d_stage: int = Stage.OUTSIDE
 var _d_hits := 0
 var _d_damage := 0.0
+var _d_push := 0.0             # 0..1 how hard a wall is being forced
+var _d_empty := false
 
 # Visuals
 var _vis_tip := Vector2.ZERO
@@ -136,6 +133,15 @@ var _splats: Array[Node3D] = []
 var _splat_mat: StandardMaterial3D
 var _drop_mesh: SphereMesh
 var _splat_mesh: CylinderMesh
+var _press: MeshInstance3D
+var _press_mat: StandardMaterial3D
+var _press_vis := 0.0
+var _glint: MeshInstance3D
+var _glint_mat: StandardMaterial3D
+var _mouth: MeshInstance3D
+var _mouth_mat: StandardMaterial3D
+var _cue_t := 0.0
+var _tear_flash := 0.0
 
 # Bot
 var _b_last_t := -1.0
@@ -429,17 +435,34 @@ func tool_radius() -> float:
 	return TOOL_R_GRIP if gripped else TOOL_R_OPEN
 
 
-func speed_max() -> float:
-	return SPEED_MAX_GRIP if gripped else SPEED_MAX_OPEN
+func tip_speed() -> float:
+	return TIP_SPEED_GRIP if gripped else TIP_SPEED_OPEN
 
 
 func bullet_pos() -> Vector2:
 	return point_at(bullet_s)
 
 
-## The stir's shake still drags the tip into the walls; it just does not count as rushing.
+## The tips are close enough to the slug for the jaws to take it.
+func in_reach() -> bool:
+	return inside and not gripped and tip.distance_to(bullet_pos()) < GRAB_R and absf(bullet_s - slide_target) < 0.001
+
+
+## A stir's shake drags the tips about but never tears a wall.
 func on_jolt(_offset: Vector2, _strength: float, duration: float) -> void:
-	_jolt_t = duration
+	_jolt_t = duration + 0.15
+
+
+## How far the hand at p is forcing the tips past a wall near arc length s_guess (0 when inside
+## the channel, or when it is leaving through the opening).
+func wall_push(p: Vector2, s_guess: float) -> float:
+	var pr := project(p, s_guess)
+	var lim := hw_at(pr.s) - tool_radius()
+	if pr.d <= lim:
+		return 0.0
+	if pr.s <= MOUTH_S and (p - pts[0]).dot(-tangent_at(0.0)) > 0.0:
+		return 0.0
+	return pr.d - lim
 
 
 func handle_cursor(p: Vector2, buttons: int, delta: float) -> void:
@@ -448,71 +471,53 @@ func handle_cursor(p: Vector2, buttons: int, delta: float) -> void:
 	delta = maxf(delta, 1e-4)
 	_time += delta
 	var primary := (buttons & BUTTON_PRIMARY) != 0
-
-	# Cursor speed; the framework's shake after a stir, or a teleporting mouse, is not speed.
 	_jolt_t = maxf(0.0, _jolt_t - delta)
-	var raw := 0.0
-	if _last_cursor != null and _jolt_t <= 0.0:
-		var mv: float = (p - _last_cursor).length()
-		raw = mv / delta if mv < JOLT_DIST else 0.0
-	_last_cursor = p
-	speed = lerpf(speed, raw, 1.0 - exp(-delta / SPEED_TAU))
+	_tear_cd = maxf(0.0, _tear_cd - delta)
 
-	var pen := 0.0
+	push = 0.0
 	if not inside:
 		tip = p
 		if p.distance_to(pts[0]) < hw_at(0.0) - tool_radius():
 			inside = true
 			tip_s = 0.0
-			speed = minf(speed, speed_max() * 0.5)
 	else:
-		var pr := project(p, tip_s)
+		# Flesh drags on the tool: the tips move toward the hand at a capped speed.
+		var step_to := tip + (p - tip).limit_length(tip_speed() * delta)
+		var pr := project(step_to, tip_s)
 		tip_s = pr.s
 		var lim := hw_at(tip_s) - tool_radius()
+		var blocked := false
 		if pr.d <= lim:
-			tip = p
-		elif tip_s <= MOUTH_S:
+			tip = step_to
+		elif tip_s <= MOUTH_S and (step_to - pts[0]).dot(-tangent_at(0.0)) > 0.0:
 			inside = false
-			tip = p
+			tip = step_to
 			if gripped:
 				_complete()
 				return
 		else:
-			pen = pr.d - lim
 			tip = pr.centre + pr.dir * lim
+			blocked = true
+		if inside:
+			push = wall_push(p, tip_s)
+			if blocked:
+				# The hand dragging the tips into the wall they are stopped against, e.g. cutting a bend.
+				push = maxf(push, (p - tip).dot(pr.dir))
 
-	# Scraping: past a wall, or tearing through too fast.
-	too_fast = inside and speed > speed_max()
-	var touching := inside and pen > CONTACT_PEN
-	scraping = touching or too_fast
-	_hit_cd -= delta
-	_spurt_cd -= delta
-	if scraping:
-		var reason := "Scraped the wound channel" if touching else "Tore tissue moving too fast"
-		if not contact:
-			hits += 1
-			_spurt_cd = 0.5
-			if _hit_cd <= 0.0:
-				_add_cost(HIT_COST, reason)
-			_hit_cd = HIT_COOLDOWN
-		elif _spurt_cd <= 0.0:
-			hits += 1
-			_spurt_cd = 0.5
-		contact = true
-		var rate := 0.0
-		if touching:
-			rate += SCRAPE_RATE * clampf(pen / 0.003, 0.4, 2.0)
-		if too_fast:
-			rate += SPEED_RATE * clampf((speed / speed_max() - 1.0) * 2.0 + 0.5, 0.5, 2.0)
-		_add_cost(rate * delta, reason)
-		_grind = _grind + delta if pen > DROP_PEN else 0.0
-		if gripped and _grind > DROP_TIME:
-			_grind = 0.0
-			_drop()
+	if _last_tip != null:
+		speed = lerpf(speed, (tip - _last_tip).length() / delta, 1.0 - exp(-delta / SPEED_TAU))
+	_last_tip = tip
+
+	# Forcing a wall: it strains (flushes red), then tears. Brushing it is free; a stir never tears.
+	if _jolt_t > 0.0:
+		push = minf(push, PUSH_SOFT * 0.9)
+		strain = 0.0
+	if push > PUSH_SOFT:
+		strain += delta
+		if _tear_cd <= 0.0 and (push > PUSH_HARD or strain >= STRAIN_TIME):
+			_tear()
 	else:
-		if contact and _acc >= 0.05:
-			_flush()
-		contact = false
+		strain = maxf(0.0, strain - delta * 2.0)
 
 	# Jaws and the grip.
 	if gripped:
@@ -525,7 +530,7 @@ func handle_cursor(p: Vector2, buttons: int, delta: float) -> void:
 	if not gripped:
 		if primary and not empty_closed:
 			jaw = minf(jaw + JAW_CLOSE_RATE * delta, 1.0)
-			var over := inside and tip.distance_to(bullet_pos()) < GRAB_R and speed < GRAB_SPEED and absf(bullet_s - slide_target) < 0.001
+			var over := in_reach()
 			if over and jaw >= JAW_ON_BULLET:
 				gripped = true
 				jaw = JAW_ON_BULLET
@@ -545,7 +550,7 @@ func handle_cursor(p: Vector2, buttons: int, delta: float) -> void:
 		stage = Stage.GRIPPED
 	elif not inside:
 		stage = Stage.OUTSIDE
-	elif tip.distance_to(bullet_pos()) < GRAB_R * 1.6:
+	elif in_reach():
 		stage = Stage.AT_BULLET
 	else:
 		stage = Stage.SEEK
@@ -565,19 +570,16 @@ func _update_progress() -> void:
 		progress = clampf(0.4 * reach + extract, 0.0, 1.0)
 
 
-func _add_cost(amount: float, reason: String) -> void:
-	_acc += amount
-	_acc_reason = reason
-	if _acc >= EMIT_CHUNK:
-		_flush()
-
-
-func _flush() -> void:
-	if _acc <= 0.0:
-		return
-	damage += _acc
-	botch(_acc, _acc_reason)
-	_acc = 0.0
+func _tear() -> void:
+	hits += 1
+	strain = 0.0
+	_tear_cd = TEAR_COOLDOWN
+	damage += TEAR_COST
+	if gripped:
+		botch(TEAR_COST, "Forced the bullet into the wall: it tore and the bullet slipped")
+		_drop()
+	else:
+		botch(TEAR_COST, "Forced the forceps into the wound wall and tore it")
 
 
 func _drop() -> void:
@@ -593,9 +595,7 @@ func _complete() -> void:
 	gripped = false
 	stage = Stage.DONE
 	bullet_s = 0.0
-	if _acc >= 0.01:
-		_flush()
-	_acc = 0.0
+	push = 0.0
 	_publish()
 	finish({"bullet_removed": true})
 
@@ -609,33 +609,33 @@ func _publish() -> void:
 	_d_stage = stage
 	_d_hits = hits
 	_d_damage = damage
+	_d_push = clampf(push / PUSH_HARD, 0.0, 1.0) if push > PUSH_SOFT * 0.5 else 0.0
+	_d_empty = empty_closed and not gripped
 
 
 func hud_state() -> Dictionary:
 	var hint := ""
 	match _d_stage:
 		Stage.OUTSIDE:
-			hint = "Guide the forceps into the wound opening."
+			hint = "Bring the forceps to the wound."
 		Stage.SEEK:
-			hint = "Find the bullet: follow the channel down. Don't touch the walls."
+			hint = "Follow the channel down to the bullet."
 		Stage.AT_BULLET:
-			hint = "Grab it: hold still over the bullet and hold the left button."
+			hint = "Hold left click to grab the bullet."
 		Stage.GRIPPED:
-			hint = "Draw it out slowly, back along the channel. Let go and it slips."
+			hint = "Keep holding and pull it back out of the wound."
 		Stage.DONE:
 			hint = "Bullet removed."
-	if ctx.get("operator", false) and not done:
-		if empty_closed and not gripped and _d_stage != Stage.GRIPPED:
-			hint = "Closed on nothing. Let go, then grip over the bullet."
-		if too_fast:
-			hint = "Too fast! You are tearing tissue."
-		elif scraping:
-			hint = "You're scraping the wall!"
+	if not done and _d_stage != Stage.GRIPPED and _d_stage != Stage.DONE:
+		if _d_empty:
+			hint = "Nothing in the jaws. Let go and try again."
+	if not done and _d_push > 0.35:
+		hint = "Easy, you're forcing the wall."
 	return {
 		"title": String(ctx.get("step", {}).get("label", "Remove the bullet")),
 		"hint": hint,
 		"progress": progress,
-		"gauges": [{"label": "Tissue damage", "value": _d_damage, "min": 0.0, "max": 25.0, "good_min": 0.0, "good_max": 5.0}],
+		"gauges": [],
 	}
 
 
@@ -645,6 +645,7 @@ func net_state() -> Dictionary:
 		"i": 1 if _d_inside else 0, "j": snappedf(_d_jaw, 0.01), "g": 1 if _d_gripped else 0,
 		"b": snappedf(_d_bullet_s, 0.0001), "st": _d_stage, "h": _d_hits,
 		"dm": snappedf(_d_damage, 0.1), "p": snappedf(progress, 0.001),
+		"w": snappedf(_d_push, 0.05), "e": 1 if _d_empty else 0,
 	}
 
 
@@ -658,6 +659,8 @@ func apply_net_state(s: Dictionary) -> void:
 	_d_stage = int(s.get("st", _d_stage))
 	_d_hits = int(s.get("h", _d_hits))
 	_d_damage = float(s.get("dm", _d_damage))
+	_d_push = float(s.get("w", _d_push))
+	_d_empty = int(s.get("e", 0)) == 1
 
 
 # =============================================================================
@@ -683,10 +686,12 @@ func bot_input(t: float, skill: float) -> Dictionary:
 	_b_burst -= dt
 	if sloppy > 0.3 and _b_burst_cd <= 0.0:
 		_b_burst = 0.35
-		_b_burst_cd = _b_rng.randf_range(1.2, 2.6)
+		_b_burst_cd = _b_rng.randf_range(0.7, 1.4)
 	var burst := 2.7 if _b_burst > 0.0 else 1.0
 	var lateral := 0.0
 	var wob := sin(t * 3.1) * (0.65 + 0.35 * sin(t * 0.83 + 1.0))
+	if _b_burst > 0.0:
+		wob *= 1.8   # a jerky hand shoves sideways too
 	var cur: Vector2 = _b_cursor
 
 	match _b_phase:
@@ -701,16 +706,18 @@ func bot_input(t: float, skill: float) -> Dictionary:
 				_b_phase = "enter"
 			_b_sb = minf(_b_sb + v_in * burst * dt, bullet_s)
 			_b_sb = minf(_b_sb, tip_s + 0.006)
-			lateral = wob * (hw_at(_b_sb) - TOOL_R_OPEN) * lerpf(2.3, 0.0, sk)
+			lateral = wob * (hw_at(_b_sb) - TOOL_R_OPEN) * lerpf(3.4, 0.0, sk)
 			if _b_sb >= bullet_s - 0.0005:
 				_b_phase = "settle"
 				_b_wait = lerpf(0.15, 0.3, sk)
-			cur = cur.move_toward(point_at(_b_sb) + _normal(_b_sb) * lateral, lerpf(0.3, 0.06, sk) * dt)
+			# A sloppy hand aims ahead in a straight line, cutting the bends into the walls.
+			var aim := minf(_b_sb + sloppy * 0.03, bullet_s)
+			cur = cur.move_toward(point_at(aim) + _normal(_b_sb) * lateral, lerpf(0.3, 0.06, sk) * dt)
 		"settle":
 			_b_sb = move_toward(_b_sb, bullet_s, 0.02 * dt)
 			cur = cur.move_toward(bullet_pos(), 0.03 * dt)
 			_b_wait -= dt
-			if _b_wait <= 0.0 and speed < GRAB_SPEED * 0.6:
+			if _b_wait <= 0.0 and in_reach():
 				_b_phase = "grip"
 		"grip":
 			cur = cur.move_toward(bullet_pos(), 0.02 * dt)
@@ -731,8 +738,9 @@ func bot_input(t: float, skill: float) -> Dictionary:
 			else:
 				_b_sb = maxf(_b_sb - v_out * burst * dt, 0.0)
 				_b_sb = maxf(_b_sb, tip_s - 0.005)
-				lateral = wob * (hw_at(_b_sb) - TOOL_R_GRIP) * lerpf(2.0, 0.0, sk)
-				cur = cur.move_toward(point_at(_b_sb) + _normal(_b_sb) * lateral, lerpf(0.3, 0.05, sk) * dt)
+				lateral = wob * (hw_at(_b_sb) - TOOL_R_GRIP) * lerpf(3.0, 0.0, sk)
+				var aim_out := maxf(_b_sb - sloppy * 0.03, 0.0)
+				cur = cur.move_toward(point_at(aim_out) + _normal(_b_sb) * lateral, lerpf(0.3, 0.05, sk) * dt)
 				if sloppy > 0.5 and not _b_dropped_once and _b_sb < bullet_home * 0.5:
 					_b_dropped_once = true
 					_b_phase = "release"
@@ -807,7 +815,54 @@ func _build_visuals() -> void:
 	_splat_mesh.height = 1.0
 	_splat_mesh.radial_segments = 10
 	_splat_mesh.rings = 1
+	_build_cues()
 	_set_layers(self)
+
+
+## In-world cues instead of HUD text: a red flush where the tips force a wall, a glint on the
+## slug (a green ring once the jaws can take it) and a green glow at the opening while it is held.
+func _build_cues() -> void:
+	var sm := SphereMesh.new()
+	sm.radius = 1.0
+	sm.height = 2.0
+	sm.radial_segments = 16
+	sm.rings = 8
+	_press_mat = _cue_mat(Color(1.0, 0.1, 0.08, 0.0))
+	_press = MeshInstance3D.new()
+	_press.name = "WallFlush"
+	_press.mesh = sm
+	_press.material_override = _press_mat
+	_press.visible = false
+	add_child(_press)
+	var tm := TorusMesh.new()
+	tm.inner_radius = 0.82
+	tm.outer_radius = 1.0
+	tm.rings = 32
+	tm.ring_segments = 6
+	_glint_mat = _cue_mat(Color(1.0, 0.95, 0.8, 0.0))
+	_glint = MeshInstance3D.new()
+	_glint.name = "BulletGlint"
+	_glint.mesh = tm
+	_glint.material_override = _glint_mat
+	add_child(_glint)
+	_mouth_mat = _cue_mat(Color(0.2, 1.0, 0.4, 0.0))
+	_mouth = MeshInstance3D.new()
+	_mouth.name = "ExitGlow"
+	_mouth.mesh = tm
+	_mouth.material_override = _mouth_mat
+	_mouth.visible = false
+	add_child(_mouth)
+
+
+func _cue_mat(col: Color) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.albedo_color = col
+	m.no_depth_test = true
+	m.render_priority = 2
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	return m
 
 
 ## The patient's wound decals only project onto layer 1 (cull_mask = 1). Our raised wound model
@@ -1323,7 +1378,49 @@ func tick(delta: float) -> void:
 		body.set_bleeding("gunshot", _bleed)
 		_bleed_sent = _bleed
 		_bleed_cd = 0.2
+	_tick_cues(delta)
 	_tick_droplets(delta)
+
+
+func _tick_cues(delta: float) -> void:
+	_cue_t += delta
+	_tear_flash = maxf(0.0, _tear_flash - delta * 2.5)
+	# The wall the tips are forcing flushes red, deeper and wider the harder they push.
+	var want := _d_push if _d_inside and _d_stage != Stage.DONE else 0.0
+	_press_vis = move_toward(_press_vis, maxf(want, _tear_flash), delta * 6.0)
+	_press.visible = _press_vis > 0.02
+	if _press.visible:
+		var pr := project(_vis_tip, _vis_s)
+		var hw := hw_at(pr.s)
+		var at: Vector2 = pr.centre + pr.dir * hw * 0.95
+		_press.position = plane_to_local(at, _surface_y(pr.s, 0.95) + 0.0015)
+		var r := 0.003 + 0.006 * _press_vis
+		_press.scale = Vector3(r, 0.0006, r)
+		var c := Color(1.0, 0.45, 0.4).lerp(Color(0.95, 0.02, 0.02), _press_vis)
+		c.a = clampf(0.3 + 0.6 * _press_vis, 0.0, 0.9)
+		_press_mat.albedo_color = c
+	# The slug glints so it can be found in the dark; a steady green ring when the jaws can take it.
+	var show_glint := not _d_gripped and _d_stage != Stage.DONE
+	_glint.visible = show_glint
+	if show_glint:
+		var bp := point_at(_d_bullet_s)
+		_glint.position = plane_to_local(bp, _surface_y(_d_bullet_s, 0.0) + BULLET_R * 1.4)
+		if _d_stage == Stage.AT_BULLET:
+			var s := 0.0085 + 0.0006 * sin(_cue_t * 8.0)
+			_glint.scale = Vector3(s, s * 0.3, s)
+			_glint_mat.albedo_color = Color(0.25, 1.0, 0.45, 0.9)
+		else:
+			var beat := fmod(_cue_t * 0.9, 1.0)
+			var s2 := 0.005 + 0.006 * beat
+			_glint.scale = Vector3(s2, s2 * 0.3, s2)
+			_glint_mat.albedo_color = Color(1.0, 0.93, 0.75, 0.7 * (1.0 - beat))
+	# While the slug is held, the opening glows green: bring it here.
+	_mouth.visible = _d_gripped and _d_stage != Stage.DONE
+	if _mouth.visible:
+		var m := hw_at(0.0) * (1.35 + 0.15 * sin(_cue_t * 5.0))
+		_mouth.position = plane_to_local(pts[0], LIFT + 0.002)
+		_mouth.scale = Vector3(m, m * 0.3, m)
+		_mouth_mat.albedo_color = Color(0.25, 1.0, 0.45, 0.55 + 0.25 * sin(_cue_t * 5.0))
 
 
 func _vis_dark(s: float) -> float:
@@ -1332,8 +1429,12 @@ func _vis_dark(s: float) -> float:
 
 func _on_hit(at: Vector2) -> void:
 	_shake = 1.0
+	_tear_flash = 1.0
 	_bleed = minf(_bleed + 0.25, 1.0)
 	_sfx("surgery_forceps_scrape", -3.0, 0.1)
+	var body = ctx.get("body")
+	if body != null and is_instance_valid(body) and body.has_method("stir"):
+		body.stir(0.35)
 	var origin := plane_to_local(at, _vis_y + 0.002)
 	for i in 7:
 		var mi := MeshInstance3D.new()
@@ -1438,6 +1539,7 @@ static func self_test(parent: Node, count: int = 20) -> Dictionary:
 					if jolt_t <= 0.0 and rng.randf() < dt / 4.0:
 						jolt = Vector2.from_angle(rng.randf() * TAU) * rng.randf_range(0.02, 0.04)
 						jolt_t = 0.2
+						g.on_jolt(jolt, 0.6, 0.2)
 					if jolt_t <= 0.0:
 						jolt = Vector2.ZERO
 					c += jolt

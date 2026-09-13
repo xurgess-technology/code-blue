@@ -211,6 +211,34 @@ are easy to miss:
 `bot_input()`, and can take screenshots:
 `godot --path . tools/minigame_lab.tscn -- --game=<id> [--patient=bob|seal] [--ailment=...] [--variant=...] [--bot=1.0|0.0] [--seconds=N] [--shot=res://tools/lab_shots/name.png] [--headless-report]`.
 
+## Minigames (minigames worker, sweep 2)
+
+The five steps no longer ask the player to read gauges or match sliders; the patient and the
+tool show what is right. Conventions every step follows (and a new one, such as wave 3's
+stitches, should too):
+
+- `hud_state()` returns `gauges: []` and one short `hint` line. No step uses `cross_section`
+  any more (the HUD still draws it if given).
+- Colour language in the world: **green** = right / holds / grab it now (tourniquet strap and
+  pulse probe, gauze path ring and trail, saw guide, forceps reach ring and exit glow);
+  **amber** = works but weak (loose wrap, short saw pass, strap too high); **red** = a mistake is
+  happening (strap on the infection, rushed or off-line saw, forced wound wall); **purple / grey**
+  = too much (tourniquet too tight, overdose). Targets that must never hide (the anesthetic vein,
+  the forceps glint and rings) draw with `no_depth_test`.
+- Every botch has an in-world cause at the moment it happens (blood spurt, flinch via
+  `body.stir`, blanching, slipping strap, unwinding gauze) and a reason string naming it.
+- Timings and forgiveness targets, measured with the lab bots: skill 1.0 finishes in about
+  8-20 s with 0-2 vitals of botches; skill 0.0 in under 40 s losing about 15-25.
+- Stir shakes (`on_jolt`) never cause a botch by themselves except where the design says so
+  (gauze: a jolt while winding slips the wrap).
+- Forceps `net_state` keys: `x y i j g b st h dm p` plus `w` (0..1 how hard a wall is being
+  forced) and `e` (jaws closed on nothing). `h` counts wall tears (each one spurts on every
+  machine).
+- Each game has a static `self_test()`: `godot --headless --path . tools/minigame_lab.tscn
+  --fixed-fps 60 -- --selftest=<game>`. The lab re-places the minigame on the body's site every
+  physics frame (as `surgery_system._place_mg` does), `--flags=sedation:0.4` makes stirs, and the
+  stump variant defaults to `amputated` so the limb shows off.
+
 ## Monsters (monsters worker)
 
 `scripts/monster.gd` keeps this public surface, which the game and the test bot rely on:

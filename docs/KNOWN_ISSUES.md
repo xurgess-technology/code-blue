@@ -25,13 +25,25 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   body's green still shows low on the sides of the limb (`tools/lab_shots/fix_tq_bob_wide.png`).
   A real fix is one infection look: the body's shader drawing the minigame's margin, or the body
   hiding its own infection while the decal is up.
-- **Sloppy sedation and stump wrap are a bit forgiving.** Sloppy anesthetic on the seal costs 11.9
-  vitals and a sloppy stump wrap 14.0, slightly under the 15 to 25 target. The stump wrap now
-  reacts to stirs through `on_jolt`, which slips the bandage more reliably than the old
-  cursor-jump guess; re-measure before tuning.
-- **A sloppy saw on the seal still takes about 40 s** (Bob 30 s, good surgeons 15 and 21 s). It was
-  45 and 64 s; see the resolved list. Raise `FLOOR` in `scripts/surgery/games/saw.gd` further if
-  it still drags.
+- **The work lamp blows out close skin (sweep 2, minigames).** In `--look=or` lab shots Bob's
+  forearm and the saw/tourniquet/anesthetic sites render near white with bloom
+  (`tools/lab_shots/c_anes_good_0.8.png`), which washes out the in-world colour cues on skin (the
+  tourniquet's green skin glow barely shows; the strap's own glow carries it). The lamp is in
+  `scripts/surgery/surgery_system.gd` (energy 2.2, 0.4 m away); check a real game shot and dim it
+  or its spot attenuation for close cameras.
+- **Sloppy forceps varies by channel (sweep 2).** Bot 0.0 loses 10-22.5 vitals over 12 channels
+  (mean 15.8) and some lab seeds only 5-8 (short, gentle channels). Wall tears are discrete
+  (2.5 each, at most one per 0.9 s), so the total follows how long the sloppy hand spends on bends.
+- **The anesthetic vein floats on the seal.** It is a straight bar drawn without depth test so
+  gown folds and a fidgeting arm never hide it; on the seal's curved flank its ends hang in the
+  air a little (`tools/lab_shots/c_seal_anes_7.png`). A decal-projected vein would hug the body.
+- **Stirs cost little in most steps.** At sedation 0.4 a good surgeon loses 0 in forceps,
+  tourniquet, saw and pack and 2 in the stump wrap: the jolt is forgiven by design and only
+  shakes the tool. Underdosing still matters through the saw's bleeding and time lost.
+- **The dev room and nettest only operate the anesthetic step** (`tools/devtest.tscn`,
+  `nettest --only=surgery`). Every step's `bot_input` finishes in the lab and in all eight
+  `playtest --god` runs, but a replicated forceps/saw/gauze step is only checked by the lab's
+  per-frame `net_state` round trip.
 
 ## Interface
 
@@ -150,6 +162,11 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 - Run-to-run noise is about +/-10%; compare with `tools/perfprobe.tscn -- --tune` (includes a repeat row).
 
 ## Resolved 2026-09-13
+
+- **Minigames needed reading and slider matching (sweep 2).** All five steps have empty gauges
+  and read in the world; the forceps' hidden speed limit, "hold still" grip and damage gauge are
+  gone. Sloppy sedation (15.5 both patients), stump wrap (14-18) and saw (13.5 s Bob, 19 s seal)
+  are now inside their targets.
 
 - **Sloppy sawing was very slow** (45 s Bob, 64 s seal). `FLOOR` 0.25 -> 0.45 with the tearing
   botch rate scaled to match: now 30 s and 40 s at 16 to 19 vitals of botches, good surgeons
