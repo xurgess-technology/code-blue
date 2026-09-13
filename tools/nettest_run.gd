@@ -38,6 +38,7 @@ const SCENARIOS := [
 	{"name": "host_quit", "scenario": "host_quit", "clients": 2, "timeout": 180},
 	{"name": "host_kill", "scenario": "host_kill", "clients": 2, "timeout": 180, "may_die": [0]},
 	# Seed 4247 is the seal with an amputation: four steps, the longest case.
+	{"name": "economy", "scenario": "economy", "clients": 3, "timeout": 300, "start_after": {3: "[marker] economy_bought"}},
 	{"name": "full_shift_lag", "scenario": "full_shift", "clients": 2, "timeout": 900, "lag": true, "extra": ["--seed=4247"]},
 ]
 ## Not part of the default run: bandwidth measurements (4 players, no lag, --stats). `bandwidth`
