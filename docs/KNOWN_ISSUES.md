@@ -40,6 +40,28 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 - **Guide draws on canvas layer 60**, above the post-processing layer (50). Any HUD drawn above
   60 would appear over the book.
 
+## Settings (sweep 2, wave 1)
+
+- **Night Nurse perception uses 78 degrees for remote players.** `fov` applies only to the local
+  player's camera, and the host does not know a client's field of view, so on the host a
+  client with a wider view counts as "looking" over a slightly narrower cone than they see.
+  Replicate the fov in the player report if it matters.
+- **High brightness washes out lit areas.** At 100% dark rooms become readable (the point) but
+  corridors under working fixtures and the near-wall glow go milky; 0% is close to black in
+  unlit rooms. The curve is in `Look.apply_brightness`; re-tune after the hospital rework lands
+  (new darker wings). Default (50%) is exactly the shipped look.
+- **Held items change size with fov.** Their screen position is kept, but at 60 degrees the bone
+  saw is large and at 100 small, as with any fixed viewmodel distance. No separate viewmodel fov.
+- **Window mode is not applied to tool runs.** Settings skips window changes when the command
+  line has a `.tscn` path or window flags, so tools keep their `--resolution` window; F11 in a
+  tool only changes the saved setting. "Windowed" restores a 1600x900 centred window.
+- **The old `user://prefs.cfg` still exists.** Only its `video/quality` is migrated (once, when
+  `settings.cfg` is missing); the menu keeps name and address there. Note `Menu._save_prefs`
+  rewrites that file from scratch, which is why the quality preset used to get lost.
+- **Tools inherit the player's saved settings** (brightness, fov, volumes) from
+  `user://settings.cfg`, which every worktree shares. `settingstest` and `settingsshot` use
+  scratch files; `gameshot` and `perfprobe` do not, so reset settings before comparing looks.
+
 ## Level and tools
 
 - **The OR supply shelf is about 4.2 m from the table** (the OR template has no wall closer that
