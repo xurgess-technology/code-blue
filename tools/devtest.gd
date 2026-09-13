@@ -128,6 +128,8 @@ func _run_solo() -> void:
 	dev.request("kill_monsters")
 	await _frames(3)
 	_check(game.monsters.is_empty(), "kill all monsters")
+	await _seconds(0.5)
+	_check(game.get_node("Entities").find_children("DevTracer", "", false, false).is_empty(), "tracers clean themselves up")
 
 	# ---- a dummy
 	var did: int = dev.spawn_bot("dummy")
