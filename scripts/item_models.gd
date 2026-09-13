@@ -95,15 +95,29 @@ static func tint_material(kind: String, soft := false) -> Material:
 
 
 ## Put the kind's rim on every mesh under `node` (no-op for kinds without one).
+## Every overlay is one more draw of that mesh, so only the TINT_MAX_MESHES biggest parts of a
+## model get it: the outline reads from the big shapes, the screws and labels do not matter.
+const TINT_MAX_MESHES := 5
+
+
 static func apply_tint(node: Node, kind: String, soft := false) -> void:
 	var mat := tint_material(kind, soft)
 	if mat == null or node == null:
 		return
-	if node is GeometryInstance3D and not (node is Label3D):
-		(node as GeometryInstance3D).material_overlay = mat
-	for c in node.find_children("*", "GeometryInstance3D", true, false):
-		if not (c is Label3D):
-			(c as GeometryInstance3D).material_overlay = mat
+	var parts: Array = []
+	if node is MeshInstance3D:
+		parts.append(node)
+	parts.append_array(node.find_children("*", "MeshInstance3D", true, false))
+	var sized: Array = []
+	for p in parts:
+		var mi := p as MeshInstance3D
+		if mi.mesh == null:
+			continue
+		var s := mi.mesh.get_aabb().size * mi.scale
+		sized.append([s.x * s.y + s.y * s.z + s.x * s.z, sized.size(), mi])
+	sized.sort_custom(func(a, b): return a[0] > b[0] or (a[0] == b[0] and a[1] < b[1]))
+	for i in mini(TINT_MAX_MESHES, sized.size()):
+		(sized[i][2] as MeshInstance3D).material_overlay = mat
 
 
 ## Rough footprint so containers and shelves can space stacks out.

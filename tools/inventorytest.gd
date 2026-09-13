@@ -239,10 +239,7 @@ func _loot_spawn() -> void:
 	me.take_into("laptop", 1, 100)
 	await _frames(3)
 	var held: Node3D = me.get_node("Head/FX/Camera/HeldFirstPerson")
-	var held_overlay = null
-	for mi in held.find_children("*", "MeshInstance3D", true, false):
-		held_overlay = (mi as MeshInstance3D).material_overlay
-		break
+	var held_overlay = _overlay_of(held)
 	_check(held_overlay == ItemModels.tint_material("laptop", true), "the held laptop wears the (softer) gold rim too")
 	_clear()
 
@@ -341,7 +338,8 @@ func _newest_item() -> Node:
 
 func _overlay_of(node: Node) -> Material:
 	for mi in node.find_children("*", "MeshInstance3D", true, false):
-		return (mi as MeshInstance3D).material_overlay
+		if (mi as MeshInstance3D).material_overlay != null:
+			return (mi as MeshInstance3D).material_overlay
 	return null
 
 

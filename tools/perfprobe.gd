@@ -79,6 +79,9 @@ func _ready() -> void:
 		{"name": "pharmacy, containers open", "setup": _containers},
 		{"name": "OR, patient + stocked shelf", "setup": _or_view},
 		{"name": "operating: bone saw, bloody", "setup": _operating_saw},
+		# INVENTORY HOOK: the same view of the gold pile empty and with 500 bars.
+		{"name": "gold pile, 0 bars", "setup": func(): await _pile_view(0)},
+		{"name": "gold pile, 500 bars", "setup": func(): await _pile_view(500)},
 	]
 	for q in _qualities:
 		main.set_quality(q, false)
@@ -166,6 +169,23 @@ func _or_view() -> void:
 	_look(t + Vector3(0.8, 0, 3.0), t + Vector3.UP * 1.0)
 
 
+## INVENTORY HOOK: look at the gold pile (and the sell bin and shop behind it) with `n` bars.
+func _pile_view(n: int) -> void:
+	if game.surgery.is_local_operating():
+		game.surgery.end(bot)
+	game.gold_bars = n
+	for i in 30:
+		await get_tree().process_frame
+	var pile: Node3D = game.economy.pile
+	if pile == null:
+		return
+	var p := pile.global_position
+	var to_clock: Vector3 = game.clock_pos() - p
+	to_clock.y = 0.0
+	var from := game._floor_at(p + to_clock.normalized() * minf(3.5, to_clock.length()))
+	_look(from, p + Vector3.UP * 1.6)
+
+
 ## The heaviest thing surgery does: the saw with a weak tourniquet (blood decals, particles),
 ## with the bot actually operating through the real framework and camera.
 func _operating_saw() -> void:
@@ -230,6 +250,9 @@ func _run_ab() -> void:
 		{"name": "all omni lights hidden", "on": func(): _omni(false), "off": func(): _omni(true)},
 		{"name": "post layer hidden", "on": func(): main.post.visible = false, "off": func(): main.post.visible = true},
 		{"name": "render scale 0.5", "on": func(): get_viewport().scaling_3d_scale = 0.5, "off": func(): main.set_quality(1, false)},
+		# INVENTORY HOOK: what the teal / gold rims and the loot cost.
+		{"name": "no item rims", "on": func(): _rims(false), "off": func(): _rims(true)},
+		{"name": "loot hidden", "on": func(): _loot(false), "off": func(): _loot(true)},
 	]
 	for scen in [{"name": "OR", "setup": _or_view}, {"name": "lobby", "setup": _lobby}, {"name": "corridor", "setup": _corridor}]:
 		await scen.setup.call()
@@ -241,6 +264,24 @@ func _run_ab() -> void:
 	for r in _rows:
 		print("[perf] %-40s avg %4.0f fps  1%%low %4.0f  draws %d" % [r.name, r.fps, r.low_fps, r.draws])
 	get_tree().quit(0)
+
+
+## INVENTORY HOOK: strip / restore the item rim overlays; hide / show loot world items.
+func _rims(on: bool) -> void:
+	for g in game.find_children("*", "GeometryInstance3D", true, false):
+		var gi := g as GeometryInstance3D
+		if not on and gi.material_overlay != null:
+			gi.set_meta("perf_overlay", gi.material_overlay)
+			gi.material_overlay = null
+		elif on and gi.has_meta("perf_overlay"):
+			gi.material_overlay = gi.get_meta("perf_overlay")
+			gi.remove_meta("perf_overlay")
+
+
+func _loot(on: bool) -> void:
+	for it in game.world_items.values():
+		if Items.is_loot(it.kind):
+			it.visible = on
 
 
 func _omni(on: bool) -> void:
