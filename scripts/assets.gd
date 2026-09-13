@@ -226,6 +226,227 @@ const MODELS := {
 		"note": "CreativeTrio alarm clock via Poly Pizza. Desk clock, not a wall clock.",
 	},
 	# "prop/ivstand" is deliberately absent: no CC0 IV stand found. See ASSETS.md.
+
+	# ---- hospital (sweep 2, hospital worker) ------------------------------
+	# Room furniture, vehicles and outdoor props for the entrance building, the wings and
+	# the neutral area. Offsets centre each footprint and put its base on the floor.
+	"hosp/toilet": {
+		"path": "res://assets/models/hospital/kenney_furniture/toilet.glb", "scale": 1.750, "yaw": 180, "x": 0.273, "y": -0.000, "z": 0.418,
+		"note": "Kenney Furniture Kit toilet. Size 0.55 x 0.79 x 0.84 m.",
+	},
+	"hosp/sink_wall": {
+		"path": "res://assets/models/hospital/kenney_furniture/bathroomSink.glb", "scale": 1.550, "yaw": 180, "x": 0.263, "y": 0.620, "z": -0.225,
+		"note": "Kenney Furniture Kit bathroomSink, pedestal sink. Size 0.53 x 0.87 x 0.45 m.",
+	},
+	"hosp/mirror": {
+		"path": "res://assets/models/hospital/kenney_furniture/bathroomMirror.glb", "scale": 1.900, "yaw": 180, "x": 0.286, "y": -0.000, "z": 0.044,
+		"note": "Kenney Furniture Kit bathroomMirror. Size 0.57 x 0.83 x 0.27 m.",
+	},
+	"hosp/sink_cabinet": {
+		"path": "res://assets/models/hospital/kenney_furniture/kitchenSink.glb", "scale": 1.900, "yaw": 180, "x": 0.408, "y": -0.000, "z": -0.428,
+		"note": "Kenney Furniture Kit kitchenSink: utility / lab / scrub sink. Size 0.82 x 0.93 x 0.86 m.",
+	},
+	"hosp/chair_cushion": {
+		"path": "res://assets/models/hospital/kenney_furniture/chairModernCushion.glb", "scale": 1.900, "yaw": 180, "x": 0.190, "y": 0.000, "z": -0.190,
+		"note": "Kenney Furniture Kit chairModernCushion. Size 0.38 x 0.87 x 0.38 m.",
+	},
+	"hosp/bedside": {
+		"path": "res://assets/models/hospital/kenney_furniture/sideTableDrawers.glb", "scale": 1.500, "yaw": 180, "x": 0.386, "y": -0.000, "z": -0.148,
+		"note": "Kenney Furniture Kit sideTableDrawers: bedside cabinet. Size 0.80 x 0.58 x 0.33 m.",
+	},
+	"hosp/coffee_table": {
+		"path": "res://assets/models/hospital/kenney_furniture/tableCoffee.glb", "scale": 1.800, "yaw": 180, "x": -0.235, "y": 0.000, "z": -0.180,
+		"note": "Kenney Furniture Kit tableCoffee: magazine table. Size 1.19 x 0.41 x 0.72 m.",
+	},
+	"hosp/table": {
+		"path": "res://assets/models/hospital/kenney_furniture/table.glb", "scale": 2.300, "yaw": 180, "x": 0.968, "y": -0.000, "z": -0.514,
+		"note": "Kenney Furniture Kit table: cafeteria / break room table. Size 1.94 x 0.75 x 1.03 m.",
+	},
+	"hosp/coffee_machine": {
+		"path": "res://assets/models/hospital/kenney_furniture/kitchenCoffeeMachine.glb", "scale": 1.900, "yaw": 180, "x": 0.180, "y": -0.000, "z": -0.228,
+		"note": "Kenney Furniture Kit kitchenCoffeeMachine. Size 0.36 x 0.34 x 0.46 m.",
+	},
+	"hosp/fridge_kitchen": {
+		"path": "res://assets/models/hospital/kenney_furniture/kitchenFridgeLarge.glb", "scale": 2.000, "yaw": 180, "x": 0.520, "y": 0.000, "z": -0.278,
+		"note": "Kenney Furniture Kit kitchenFridgeLarge: break room fridge. Size 1.04 x 1.84 x 0.81 m.",
+	},
+	"hosp/microwave": {
+		"path": "res://assets/models/hospital/kenney_furniture/kitchenMicrowave.glb", "scale": 1.900, "yaw": 180, "x": 0.275, "y": -0.000, "z": -0.199,
+		"note": "Kenney Furniture Kit kitchenMicrowave. Size 0.55 x 0.34 x 0.44 m.",
+	},
+	"hosp/sofa": {
+		"path": "res://assets/models/hospital/kenney_furniture/loungeSofa.glb", "scale": 2.000, "yaw": 180, "x": 0.980, "y": -0.000, "z": -0.410,
+		"note": "Kenney Furniture Kit loungeSofa. Size 1.96 x 0.92 x 0.82 m.",
+	},
+	"hosp/armchair": {
+		"path": "res://assets/models/hospital/kenney_furniture/loungeChair.glb", "scale": 2.000, "yaw": 180, "x": 0.490, "y": -0.000, "z": -0.410,
+		"note": "Kenney Furniture Kit loungeChair. Size 0.98 x 0.92 x 0.82 m.",
+	},
+	"hosp/plant": {
+		"path": "res://assets/models/hospital/kenney_furniture/pottedPlant.glb", "scale": 2.000, "yaw": 180, "x": -0.000, "y": -0.000, "z": -0.000,
+		"note": "Kenney Furniture Kit pottedPlant. Size 0.42 x 1.31 x 0.48 m.",
+	},
+	"hosp/plant_small": {
+		"path": "res://assets/models/hospital/kenney_furniture/plantSmall1.glb", "scale": 1.900, "yaw": 180, "x": -0.000, "y": -0.000, "z": -0.000,
+		"note": "Kenney Furniture Kit plantSmall1. Size 0.18 x 0.27 x 0.18 m.",
+	},
+	"hosp/tv": {
+		"path": "res://assets/models/hospital/kenney_furniture/televisionModern.glb", "scale": 1.900, "yaw": 180, "x": -0.000, "y": -0.000, "z": -0.000,
+		"note": "Kenney Furniture Kit televisionModern: wall TV. Size 1.30 x 0.86 x 0.24 m.",
+	},
+	"hosp/keyboard": {
+		"path": "res://assets/models/hospital/kenney_furniture/computerKeyboard.glb", "scale": 1.900, "yaw": 180, "x": 0.268, "y": -0.000, "z": -0.112,
+		"note": "Kenney Furniture Kit computerKeyboard. Size 0.54 x 0.05 x 0.22 m.",
+	},
+	"hosp/laptop": {
+		"path": "res://assets/models/hospital/kenney_furniture/laptop.glb", "scale": 1.900, "yaw": 180, "x": 0.251, "y": -0.000, "z": -0.228,
+		"note": "Kenney Furniture Kit laptop. Size 0.50 x 0.31 x 0.46 m.",
+	},
+	"hosp/cabinet_tall": {
+		"path": "res://assets/models/hospital/kenney_furniture/bookcaseClosedDoors.glb", "scale": 2.100, "yaw": 180, "x": 0.420, "y": -0.000, "z": -0.263,
+		"note": "Kenney Furniture Kit bookcaseClosedDoors: tall storage cabinet. Size 0.84 x 1.78 x 0.53 m.",
+	},
+	"hosp/bookcase": {
+		"path": "res://assets/models/hospital/kenney_furniture/bookcaseOpen.glb", "scale": 2.100, "yaw": 180, "x": 0.420, "y": -0.000, "z": -0.263,
+		"note": "Kenney Furniture Kit bookcaseOpen. Size 0.84 x 1.85 x 0.53 m.",
+	},
+	"hosp/bench": {
+		"path": "res://assets/models/hospital/kenney_furniture/bench.glb", "scale": 1.900, "yaw": 180, "x": 0.380, "y": -0.000, "z": -0.190,
+		"note": "Kenney Furniture Kit bench. Size 0.76 x 0.89 x 0.38 m.",
+	},
+	"hosp/washer": {
+		"path": "res://assets/models/hospital/kenney_furniture/washer.glb", "scale": 2.000, "yaw": 180, "x": 0.390, "y": -0.000, "z": -0.310,
+		"note": "Kenney Furniture Kit washer. Size 0.78 x 0.94 x 0.78 m.",
+	},
+	"hosp/doormat": {
+		"path": "res://assets/models/hospital/kenney_furniture/rugDoormat.glb", "scale": 3.500, "yaw": 180, "x": 0.751, "y": -0.000, "z": -0.415,
+		"note": "Kenney Furniture Kit rugDoormat. Size 1.50 x 0.04 x 0.83 m.",
+	},
+	"hosp/radio": {
+		"path": "res://assets/models/hospital/kenney_furniture/radio.glb", "scale": 1.600, "yaw": 180, "x": 0.252, "y": -0.000, "z": -0.078,
+		"note": "Kenney Furniture Kit radio. Size 0.50 x 0.37 x 0.16 m.",
+	},
+	"hosp/box_closed": {
+		"path": "res://assets/models/hospital/kenney_furniture/cardboardBoxClosed.glb", "scale": 2.200, "yaw": 180, "x": 0.234, "y": -0.000, "z": -0.234,
+		"note": "Kenney Furniture Kit cardboardBoxClosed. Size 0.47 x 0.62 x 0.47 m.",
+	},
+	"hosp/box_open": {
+		"path": "res://assets/models/hospital/kenney_furniture/cardboardBoxOpen.glb", "scale": 2.200, "yaw": 180, "x": 0.234, "y": -0.000, "z": -0.234,
+		"note": "Kenney Furniture Kit cardboardBoxOpen. Size 0.82 x 0.62 x 0.47 m.",
+	},
+	"hosp/coat_rack": {
+		"path": "res://assets/models/hospital/kenney_furniture/coatRackStanding.glb", "scale": 2.200, "yaw": 180, "x": -0.000, "y": -0.000, "z": -0.000,
+		"note": "Kenney Furniture Kit coatRackStanding. Size 0.60 x 1.69 x 0.60 m.",
+	},
+	"hosp/books": {
+		"path": "res://assets/models/hospital/kenney_furniture/books.glb", "scale": 1.900, "yaw": 180, "x": 0.143, "y": -0.000, "z": -0.090,
+		"note": "Kenney Furniture Kit books. Size 0.29 x 0.20 x 0.18 m.",
+	},
+	"hosp/ambulance": {
+		"path": "res://assets/models/hospital/kenney_car/ambulance.glb", "scale": 1.450, "yaw": 180, "x": -0.000, "y": -0.000, "z": -0.036,
+		"note": "Kenney Car Kit ambulance. Size 2.18 x 2.61 x 4.71 m.",
+	},
+	"hosp/van": {
+		"path": "res://assets/models/hospital/kenney_car/van.glb", "scale": 1.450, "yaw": 180, "x": -0.000, "y": -0.000, "z": -0.036,
+		"note": "Kenney Car Kit van: the shop van. Size 2.18 x 1.96 x 3.99 m.",
+	},
+	"hosp/sedan": {
+		"path": "res://assets/models/hospital/kenney_car/sedan.glb", "scale": 1.450, "yaw": 180, "x": -0.000, "y": -0.000, "z": -0.036,
+		"note": "Kenney Car Kit sedan. Size 2.18 x 1.88 x 3.70 m.",
+	},
+	"hosp/suv": {
+		"path": "res://assets/models/hospital/kenney_car/suv.glb", "scale": 1.450, "yaw": 180, "x": -0.000, "y": -0.000, "z": -0.000,
+		"note": "Kenney Car Kit suv. Size 2.18 x 1.89 x 3.92 m.",
+	},
+	"hosp/hatchback": {
+		"path": "res://assets/models/hospital/kenney_car/hatchback-sports.glb", "scale": 1.450, "yaw": 180, "x": -0.000, "y": -0.000, "z": -0.036,
+		"note": "Kenney Car Kit hatchback-sports. Size 1.89 x 1.60 x 4.13 m.",
+	},
+	"hosp/cone": {
+		"path": "res://assets/models/hospital/kenney_car/cone.glb", "scale": 1.200, "yaw": 180, "x": -0.000, "y": -0.000, "z": -0.000,
+		"note": "Kenney Car Kit cone. Size 0.57 x 0.71 x 0.57 m.",
+	},
+	"hosp/street_light": {
+		"path": "res://assets/models/hospital/kenney_roads/light-square.glb", "scale": 9.000, "yaw": 180, "x": -0.000, "y": -0.000, "z": -0.844,
+		"note": "Kenney City Kit Roads light-square. Size 0.45 x 5.40 x 2.14 m.",
+	},
+	"hosp/dumpster": {
+		"path": "res://assets/models/hospital/kenney_roads/dumpster.glb", "scale": 6.500, "yaw": 180, "x": 0.049, "y": -0.000, "z": 0.000,
+		"note": "Kenney City Kit Roads dumpster: the sell bin. Size 1.79 x 1.36 x 2.41 m.",
+	},
+	"hosp/barrier": {
+		"path": "res://assets/models/hospital/kenney_roads/construction-barrier.glb", "scale": 6.500, "yaw": 180, "x": -0.000, "y": -0.000, "z": -0.000,
+		"note": "Kenney City Kit Roads construction-barrier. Size 0.88 x 0.84 x 1.46 m.",
+	},
+	"hosp/register": {
+		"path": "res://assets/models/hospital/kenney_market/cash-register.glb", "scale": 1.600, "yaw": 180, "x": 0.040, "y": -0.000, "z": 0.040,
+		"note": "Kenney Mini Market cash-register: cafeteria till. Size 1.36 x 0.95 x 1.36 m.",
+	},
+	"hosp/vending": {
+		"path": "res://assets/models/hospital/kenney_market/bottle-return.glb", "scale": 1.800, "yaw": 180, "x": -0.000, "y": 0.000, "z": -0.051,
+		"note": "Kenney Mini Market bottle-return: corridor vending machine. Size 0.81 x 1.97 x 0.87 m.",
+	},
+	"hosp/bucket": {
+		"path": "res://assets/models/hospital/kenney_survival/bucket.glb", "scale": 2.500, "yaw": 180, "x": -0.000, "y": -0.000, "z": -0.000,
+		"note": "Kenney Survival Kit bucket: mop bucket. Size 0.36 x 0.48 x 0.36 m.",
+	},
+	"hosp/school_chair": {
+		"path": "res://assets/models/hospital/polyhaven/SchoolChair_01/SchoolChair_01.gltf", "scale": 0.920, "yaw": 180, "x": -0.000, "y": 0.002, "z": -0.000,
+		"note": "Poly Haven SchoolChair_01: waiting / cafeteria chair. Size 0.52 x 0.93 x 0.62 m.",
+	},
+	"hosp/wet_floor": {
+		"path": "res://assets/models/hospital/polyhaven/WetFloorSign_01/WetFloorSign_01.gltf", "scale": 1.000, "yaw": 180, "x": -0.000, "y": -0.002, "z": -0.014,
+		"note": "Poly Haven WetFloorSign_01. Size 0.30 x 0.63 x 0.36 m.",
+	},
+	"hosp/covered_car": {
+		"path": "res://assets/models/hospital/polyhaven/covered_car/covered_car.gltf", "scale": 1.000, "yaw": 180, "x": 0.048, "y": -0.000, "z": 0.024,
+		"note": "Poly Haven covered_car. Size 1.79 x 1.41 x 4.38 m.",
+	},
+	"hosp/filing_cabinet": {
+		"path": "res://assets/models/hospital/polyhaven/drawer_cabinet/drawer_cabinet.gltf", "scale": 0.800, "yaw": 180, "x": -0.000, "y": -0.000, "z": -0.003,
+		"note": "Poly Haven drawer_cabinet: filing cabinet. Size 0.91 x 1.51 x 0.39 m.",
+	},
+	"hosp/microscope": {
+		"path": "res://assets/models/hospital/polyhaven/industrial_microscope/industrial_microscope.gltf", "scale": 1.000, "yaw": 180, "x": 0.014, "y": 0.002, "z": -0.082,
+		"note": "Poly Haven industrial_microscope. Size 0.21 x 0.46 x 0.50 m.",
+	},
+	"hosp/extinguisher": {
+		"path": "res://assets/models/hospital/polyhaven/korean_fire_extinguisher_01/korean_fire_extinguisher_01.gltf", "scale": 1.000, "yaw": 180, "x": 0.000, "y": 0.000, "z": 0.060,
+		"note": "Poly Haven korean_fire_extinguisher_01. Size 0.28 x 0.66 x 0.37 m.",
+	},
+	"hosp/medical_box": {
+		"path": "res://assets/models/hospital/polyhaven/medical_box/medical_box.gltf", "scale": 1.000, "yaw": 180, "x": -0.000, "y": -0.000, "z": 0.003,
+		"note": "Poly Haven medical_box. Size 0.53 x 0.10 x 0.35 m.",
+	},
+	"hosp/office_desk": {
+		"path": "res://assets/models/hospital/polyhaven/metal_office_desk/metal_office_desk.gltf", "scale": 0.950, "yaw": 180, "x": -0.000, "y": -0.000, "z": 0.004,
+		"note": "Poly Haven metal_office_desk. Size 1.90 x 0.75 x 0.90 m.",
+	},
+	"hosp/security_camera": {
+		"path": "res://assets/models/hospital/polyhaven/security_camera_01/security_camera_01.gltf", "scale": 1.000, "yaw": 180, "x": 0.000, "y": 0.025, "z": -0.027,
+		"note": "Poly Haven security_camera_01. Size 0.17 x 0.29 x 0.55 m.",
+	},
+	"hosp/steel_shelves": {
+		"path": "res://assets/models/hospital/polyhaven/steel_frame_shelves_02/steel_frame_shelves_02.gltf", "scale": 1.000, "yaw": 180, "x": 0.000, "y": 0.001, "z": -0.000,
+		"note": "Poly Haven steel_frame_shelves_02. Size 0.59 x 2.14 x 0.50 m.",
+	},
+	"hosp/tool_cart": {
+		"path": "res://assets/models/hospital/polyhaven/tool_cart/tool_cart.gltf", "scale": 1.000, "yaw": 180, "x": -0.021, "y": 0.004, "z": -0.008,
+		"note": "Poly Haven tool_cart: instrument cart. Size 1.27 x 0.96 x 0.75 m.",
+	},
+	"hosp/wall_phone": {
+		"path": "res://assets/models/hospital/polyhaven/vintage_telephone_wall_clock/vintage_telephone_wall_clock.gltf", "scale": 1.000, "yaw": 180, "x": -0.005, "y": 0.074, "z": 0.096,
+		"note": "Poly Haven vintage_telephone_wall_clock: break room phone. Size 0.34 x 0.50 x 0.19 m.",
+	},
+	"hosp/wall_clock": {
+		"path": "res://assets/models/hospital/polyhaven/wall_clock/wall_clock.gltf", "scale": 1.000, "yaw": 180, "x": -0.000, "y": 0.160, "z": 0.024,
+		"note": "Poly Haven wall_clock. Size 0.32 x 0.32 x 0.05 m.",
+	},
+	"hosp/wheelchair": {
+		"path": "res://assets/models/hospital/polyhaven/wheelchair_01/wheelchair_01.gltf", "scale": 1.000, "yaw": 180, "x": -0.002, "y": -0.006, "z": 0.060,
+		"note": "Poly Haven wheelchair_01. Size 0.82 x 1.10 x 1.09 m.",
+	},
+	# ---- end hospital ------------------------------------------------------
 }
 
 ## key -> texture-set folder + material tuning. All maps are optional; whichever
@@ -251,6 +472,12 @@ const MATERIALS := {
 		"dir": "res://assets/textures/concrete", "uv_scale": 2.0,
 		"note": "ambientCG Concrete034.",
 	},
+	# ---- hospital (sweep 2) ----
+	"mat/asphalt": {"dir": "res://assets/textures/asphalt", "uv_scale": 0.25, "note": "Poly Haven asphalt_02 - parking lot."},
+	"mat/pavement": {"dir": "res://assets/textures/pavement", "uv_scale": 0.5, "note": "Poly Haven concrete_pavement - sidewalk."},
+	"mat/linoleum": {"dir": "res://assets/textures/linoleum", "uv_scale": 0.5, "note": "Poly Haven old_linoleum_flooring_01 - corridor floor."},
+	"mat/tile_floor": {"dir": "res://assets/textures/tile_floor", "uv_scale": 0.6, "note": "Poly Haven worn_tile_floor - restroom, morgue, OR floor."},
+	# ---- end hospital ----
 	"mat/metal": {
 		"dir": "res://assets/textures/metal", "uv_scale": 2.0, "metallic": 1.0,
 		"note": "ambientCG MetalPlates001 — brushed steel.",

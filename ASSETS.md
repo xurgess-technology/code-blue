@@ -169,6 +169,94 @@ leaves that slot empty.
 
 ---
 
+## Hospital (sweep 2, hospital worker) — `assets/models/hospital/`, `assets/textures/`
+
+Furniture, vehicles and outdoor props for the entrance building, the wings and the neutral
+area, all CC0 1.0. Registered in `scripts/assets.gd` under `hosp/*` (models) and `mat/*`
+(textures); `scripts/level/piece_factory.gd` maps each furniture kind to a key and builds a
+primitive when the key does not resolve, so every file here can go missing without breaking the
+level. Offsets in `assets.gd` centre each footprint on the origin and put the base on the floor;
+every entry carries `yaw: 180` (glTF front is +Z). Sizes are after scaling.
+
+| Source | Licence | Pack / asset pages |
+| --- | --- | --- |
+| Kenney (kenney.nl) | CC0 1.0 (each pack's `License.txt` is kept next to its files) | Furniture Kit <https://kenney.nl/assets/furniture-kit>, Car Kit <https://kenney.nl/assets/car-kit>, City Kit Roads <https://kenney.nl/assets/city-kit-roads>, Mini Market <https://kenney.nl/assets/mini-market>, Survival Kit <https://kenney.nl/assets/survival-kit> |
+| Poly Haven (polyhaven.com) | CC0 1.0 <https://polyhaven.com/license> | one page per asset, `https://polyhaven.com/a/<asset>`; the 1K glTF download, textures in the asset's `textures/` folder |
+
+| Key | File | Source | Size (m) | Used for |
+| --- | --- | --- | --- | --- |
+| `hosp/toilet` | `kenney_furniture/toilet.glb` | Kenney Furniture Kit | 0.55 × 0.79 × 0.84 | inside restroom stalls |
+| `hosp/sink_wall` | `kenney_furniture/bathroomSink.glb` | Kenney Furniture Kit | 0.53 × 0.87 × 0.45 | restroom, patient room, locker room sinks |
+| `hosp/mirror` | `kenney_furniture/bathroomMirror.glb` | Kenney Furniture Kit | 0.57 × 0.83 × 0.27 | above restroom sinks |
+| `hosp/sink_cabinet` | `kenney_furniture/kitchenSink.glb` | Kenney Furniture Kit | 0.82 × 0.93 × 0.86 | scrub sinks |
+| `hosp/chair_cushion` | `kenney_furniture/chairModernCushion.glb` | Kenney Furniture Kit | 0.38 × 0.87 × 0.38 | visitor chairs |
+| `hosp/bedside` | `kenney_furniture/sideTableDrawers.glb` | Kenney Furniture Kit | 0.80 × 0.58 × 0.33 | bedside cabinets |
+| `hosp/coffee_table` | `kenney_furniture/tableCoffee.glb` | Kenney Furniture Kit | 1.19 × 0.41 × 0.72 | magazine tables |
+| `hosp/table` | `kenney_furniture/table.glb` | Kenney Furniture Kit | 1.94 × 0.75 × 1.03 | cafeteria and break room tables |
+| `hosp/coffee_machine` | `kenney_furniture/kitchenCoffeeMachine.glb` | Kenney Furniture Kit | 0.36 × 0.34 × 0.46 | break room counter |
+| `hosp/fridge_kitchen` | `kenney_furniture/kitchenFridgeLarge.glb` | Kenney Furniture Kit | 1.04 × 1.84 × 0.81 | break room fridge |
+| `hosp/microwave` | `kenney_furniture/kitchenMicrowave.glb` | Kenney Furniture Kit | 0.55 × 0.34 × 0.44 | break room counter |
+| `hosp/sofa` | `kenney_furniture/loungeSofa.glb` | Kenney Furniture Kit | 1.96 × 0.92 × 0.82 | break room |
+| `hosp/armchair` | `kenney_furniture/loungeChair.glb` | Kenney Furniture Kit | 0.98 × 0.92 × 0.82 | registered, not placed yet |
+| `hosp/plant` | `kenney_furniture/pottedPlant.glb` | Kenney Furniture Kit | 0.42 × 1.31 × 0.48 | plants |
+| `hosp/plant_small` | `kenney_furniture/plantSmall1.glb` | Kenney Furniture Kit | 0.18 × 0.27 × 0.18 | on desks |
+| `hosp/tv` | `kenney_furniture/televisionModern.glb` | Kenney Furniture Kit | 1.30 × 0.86 × 0.24 | wall TVs |
+| `hosp/keyboard` | `kenney_furniture/computerKeyboard.glb` | Kenney Furniture Kit | 0.54 × 0.05 × 0.22 | desks, consoles |
+| `hosp/laptop` | `kenney_furniture/laptop.glb` | Kenney Furniture Kit | 0.50 × 0.31 × 0.46 | lab islands |
+| `hosp/cabinet_tall` | `kenney_furniture/bookcaseClosedDoors.glb` | Kenney Furniture Kit | 0.84 × 1.78 × 0.53 | storage cabinets |
+| `hosp/bookcase` | `kenney_furniture/bookcaseOpen.glb` | Kenney Furniture Kit | 0.84 × 1.85 × 0.53 | offices |
+| `hosp/bench` | `kenney_furniture/bench.glb` | Kenney Furniture Kit | 0.76 × 0.89 × 0.38 | registered; benches are primitives (the model is too short) |
+| `hosp/washer` | `kenney_furniture/washer.glb` | Kenney Furniture Kit | 0.78 × 0.94 × 0.78 | registered, not placed yet |
+| `hosp/doormat` | `kenney_furniture/rugDoormat.glb` | Kenney Furniture Kit | 1.50 × 0.04 × 0.83 | lobby |
+| `hosp/radio` | `kenney_furniture/radio.glb` | Kenney Furniture Kit | 0.50 × 0.37 × 0.16 | break room counter |
+| `hosp/box_closed` | `kenney_furniture/cardboardBoxClosed.glb` | Kenney Furniture Kit | 0.47 × 0.62 × 0.47 | box stacks, shop crates |
+| `hosp/box_open` | `kenney_furniture/cardboardBoxOpen.glb` | Kenney Furniture Kit | 0.82 × 0.62 × 0.47 | shop table |
+| `hosp/coat_rack` | `kenney_furniture/coatRackStanding.glb` | Kenney Furniture Kit | 0.60 × 1.69 × 0.60 | offices |
+| `hosp/books` | `kenney_furniture/books.glb` | Kenney Furniture Kit | 0.29 × 0.20 × 0.18 | magazine tables |
+| `hosp/ambulance` | `kenney_car/ambulance.glb` | Kenney Car Kit | 2.18 × 2.61 × 4.71 | the ambulance bay |
+| `hosp/van` | `kenney_car/van.glb` | Kenney Car Kit | 2.18 × 1.96 × 3.99 | the shop van |
+| `hosp/sedan` | `kenney_car/sedan.glb` | Kenney Car Kit | 2.18 × 1.88 × 3.70 | parked cars |
+| `hosp/suv` | `kenney_car/suv.glb` | Kenney Car Kit | 2.18 × 1.89 × 3.92 | parked cars |
+| `hosp/hatchback` | `kenney_car/hatchback-sports.glb` | Kenney Car Kit | 1.89 × 1.60 × 4.13 | parked cars |
+| `hosp/cone` | `kenney_car/cone.glb` | Kenney Car Kit | 0.57 × 0.71 × 0.57 | traffic cones |
+| `hosp/street_light` | `kenney_roads/light-square.glb` | Kenney City Kit Roads | 0.45 × 5.40 × 2.14 | street lamps |
+| `hosp/dumpster` | `kenney_roads/dumpster.glb` | Kenney City Kit Roads | 1.79 × 1.36 × 2.41 | the sell bin |
+| `hosp/barrier` | `kenney_roads/construction-barrier.glb` | Kenney City Kit Roads | 0.88 × 0.84 × 1.46 | barriers |
+| `hosp/register` | `kenney_market/cash-register.glb` | Kenney Mini Market | 1.36 × 0.95 × 1.36 | cafeteria till |
+| `hosp/vending` | `kenney_market/bottle-return.glb` | Kenney Mini Market | 0.81 × 1.97 × 0.87 | vending machines |
+| `hosp/bucket` | `kenney_survival/bucket.glb` | Kenney Survival Kit | 0.36 × 0.48 × 0.36 | mop buckets |
+| `hosp/school_chair` | `polyhaven/SchoolChair_01/` | Poly Haven SchoolChair_01 | 0.52 × 0.93 × 0.62 | cafeteria chairs |
+| `hosp/wet_floor` | `polyhaven/WetFloorSign_01/` | Poly Haven WetFloorSign_01 | 0.30 × 0.63 × 0.36 | wet floor signs |
+| `hosp/covered_car` | `polyhaven/covered_car/` | Poly Haven covered_car | 1.79 × 1.41 × 4.38 | parked cars |
+| `hosp/filing_cabinet` | `polyhaven/drawer_cabinet/` | Poly Haven drawer_cabinet | 0.91 × 1.51 × 0.39 | offices |
+| `hosp/microscope` | `polyhaven/industrial_microscope/` | Poly Haven industrial_microscope | 0.21 × 0.46 × 0.50 | lab benches |
+| `hosp/extinguisher` | `polyhaven/korean_fire_extinguisher_01/` | Poly Haven korean_fire_extinguisher_01 | 0.28 × 0.66 × 0.37 | hallway walls |
+| `hosp/medical_box` | `polyhaven/medical_box/` | Poly Haven medical_box | 0.53 × 0.10 × 0.35 | shop table |
+| `hosp/office_desk` | `polyhaven/metal_office_desk/` | Poly Haven metal_office_desk | 1.90 × 0.75 × 0.90 | offices |
+| `hosp/security_camera` | `polyhaven/security_camera_01/` | Poly Haven security_camera_01 | 0.17 × 0.29 × 0.55 | hallway cameras |
+| `hosp/steel_shelves` | `polyhaven/steel_frame_shelves_02/` | Poly Haven steel_frame_shelves_02 | 0.59 × 2.14 × 0.50 | supply and janitor closets |
+| `hosp/tool_cart` | `polyhaven/tool_cart/` | Poly Haven tool_cart | 1.27 × 0.96 × 0.75 | instrument carts |
+| `hosp/wall_phone` | `polyhaven/vintage_telephone_wall_clock/` | Poly Haven vintage_telephone_wall_clock | 0.34 × 0.50 × 0.19 | the break room phone |
+| `hosp/wall_clock` | `polyhaven/wall_clock/` | Poly Haven wall_clock | 0.32 × 0.32 × 0.05 | wall clocks |
+| `hosp/wheelchair` | `polyhaven/wheelchair_01/` | Poly Haven wheelchair_01 | 0.82 × 1.10 × 1.09 | wheelchairs |
+
+| Key | Folder | Poly Haven asset | uv1_scale | Used for |
+| --- | --- | --- | --- | --- |
+| `mat/asphalt` | `textures/asphalt/` | asphalt_02 | 0.25 | the parking lot |
+| `mat/pavement` | `textures/pavement/` | concrete_pavement | 0.5 | the sidewalk under the canopy |
+| `mat/linoleum` | `textures/linoleum/` | old_linoleum_flooring_01 | 0.5 | hallways and most rooms |
+| `mat/tile_floor` | `textures/tile_floor/` | worn_tile_floor | 0.6 | restrooms, morgue, OR, lab, radiology, janitor and locker rooms |
+
+Kenney files keep the pack's external `Textures/colormap.png` next to them. Poly Haven glTFs keep
+their 1K `_diff` / `_nor_gl` / `_arm` JPGs. Nothing was modified. The hospital-specific pieces
+no CC0 model exists for (hospital bed, IV stand, gurney, OR table, surgical lamp, CT scanner,
+morgue fridges, autopsy table, lockers, stalls, pharmacy and lab furniture, carts, signs) are
+primitives in `piece_factory.gd`. Pulled earlier and removed again because nothing used them:
+Poly Haven street_lamp_01 and sparse_grass, Kenney chair, kitchenBar(End), kitchenCabinetUpper,
+freezer, shelf-boxes, shelf-end, light-curved, barrel and the car kit box.
+
+---
+
 ## Keys that do not resolve
 
 The game asks for these; they return `null` and the caller must keep its

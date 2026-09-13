@@ -2,11 +2,20 @@ class_name HospitalBuilder
 extends RefCounted
 ## Builds the runtime 3D level from a MapGen dictionary. Pure code, no .tscn, headless-safe.
 ##
-## Everything visual is a primitive stand-in built by a small `_make_*()` factory. The asset
-## agent replaces those one at a time: each factory first asks the `Assets` autoload for a
-## model under a stable key (see ASSET_KEYS) and only falls back to primitives when it has none.
+## Geometry (floors, ceilings, walls, lintels, the fence and the entrance canopy) is merged into
+## one mesh per material per CHUNK x CHUNK tiles, so the renderer can cull it. Furniture is drawn
+## as MultiMeshes, one per mesh per chunk (scripts/level/piece_factory.gd), with box colliders
+## from scripts/level/piece_defs.gd. Containers, fixtures, signs and the navigation mesh are
+## built here too. `info` gets every key listed in docs/CONTRACTS.md ("Hospital").
+##
+## Maps without furniture data (hand-made tile maps in tools) go through the legacy builder.
 
 const MG := preload("res://scripts/mapgen.gd")
+const S := preload("res://scripts/level/level_state.gd")
+const Defs := preload("res://scripts/level/piece_defs.gd")
+const Factory := preload("res://scripts/level/piece_factory.gd")
+const Rooms := preload("res://scripts/level/room_furnish.gd")
+const Legacy := preload("res://scripts/level/legacy_builder.gd")
 const FridgeScript := preload("res://scripts/containers/med_fridge.gd")
 const DrawerUnitScript := preload("res://scripts/containers/drawer_unit.gd")
 const StationScript := preload("res://scripts/containers/station_drawers.gd")
@@ -14,233 +23,105 @@ const TraumaBagScript := preload("res://scripts/containers/trauma_bag.gd")
 const PegboardScript := preload("res://scripts/containers/pegboard.gd")
 const GUIDE_MODELS_PATH := "res://scripts/guide/guide_models.gd"
 
-## Rooms where nothing is ever placed loose and nothing needed may spawn.
-const SAFE_ROOMS := ["or", "anteroom", "clockin"]
-## Share of beds that get an over-bed tray table.
-const BED_TRAY_EVERY := 5
-const CORRIDOR_FLOOR_ANCHORS := 8
+## Places where nothing a case needs is placed and monsters never spawn.
+const SAFE_ROOMS := ["or", "break_room", "locker_room", "lobby", "entrance", "neutral", "anteroom", "clockin"]
 
-## Assets autoload keys each factory asks for before falling back to primitives.
-## `prop/ivstand` and `light_fixture` do not exist in the asset pack (see ASSETS.md),
-## so those two are always the primitive versions.
-const ASSET_KEYS := {
-	"bed": "prop/bed", "cabinet": "prop/cabinet", "operating_table": "prop/table_op",
-	"time_clock": "prop/clock", "gurney": "prop/gurney",
-	"wheelchair": "prop/wheelchair", "vending": "prop/vending", "bin": "prop/bin",
-	"locker": "prop/locker", "screen": "prop/screen",
-	"floor": "mat/floor", "wall": "mat/wall", "ceiling": "mat/ceiling",
-}
-
-## Deliberately dim and sparse: the hospital should read as half-abandoned, with
-## pools of light and long dark stretches between them, not as a working ward.
+## Kept for perception.gd and tools/monster_lab.gd.
 const LIGHT_RANGE := 5.2
 const LIGHT_ENERGY := 1.15
-## Share of fixtures that are steady / flickering / dead. Most are dead.
-const LIGHT_STEADY_CHANCE := 0.30
-const LIGHT_FLICKER_CHANCE := 0.62   # cumulative: 0.30..0.62 flicker, the rest are dead
-const MAX_SIGNS := 40
-const NAV_AGENT_RADIUS := 0.45
-const SIGN_H := 2.45
+## A whole number of navigation cells (0.25 m), so the baker does not round it and warn.
+const NAV_AGENT_RADIUS := 0.5
+const SIGN_H := 2.62
+const MAX_SIGNS := 90
 
-const DEPARTMENTS := [
-	"RADIOLOGY", "WARD A", "WARD B", "SUPPLY", "ONCOLOGY", "ICU",
-	"PHARMACY", "LAB", "PATHOLOGY", "RECOVERY", "ADMIN", "THEATRE",
-]
+const CHUNK := 12
+## Furniture past this distance is not drawn (the fog has swallowed it by then).
+const FURNITURE_RANGE := 36.0
+const LINTEL_Y := 2.25
+const FENCE_H := 1.9
+const CANOPY_Y := 3.15
+
+const OUTDOOR_LIGHT_RANGE := 19.0
+const OUTDOOR_LIGHT_ENERGY := 3.6
+
+const TILE_FLOOR_ROOMS := ["restroom", "morgue", "or", "janitor_closet", "lab", "radiology", "locker_room"]
+const WARM_FLOOR_ROOMS := ["lobby", "break_room", "waiting_room", "cafeteria", "office"]
+const TILE_WALL_ROOMS := ["restroom", "or", "morgue"]
+
+const WING_LABELS := {"west": "WEST WING", "east": "EAST WING", "north": "NORTH WING",
+		"north_west": "NORTH WING A", "north_east": "NORTH WING B"}
+
+static var _mat_cache := {}
+
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-## Build the level. `info` is filled with:
+## Build the level. `info` is filled with (world units, metres, +Y up):
 ##   player_spawns / tool_spawns / monster_spawns : Array[Vector3]
-##   table / clock : Vector3
-##   lights : Array[Dictionary] ({tile, position, mode, node})
+##   table (first patient table) / table_yaw / clock : Vector3 / float
+##   lights : Array[{tile, position, mode, node}]
 ##   size : Vector2i, rows : PackedStringArray, nav_region : NavigationRegion3D
-##   containers : Array[{id, type, room_kind, node, position, slots}]
-##   loose_anchors : Array[{position, yaw, surface, room_kind}]
-##   shelf / lectern : {position, yaw} (floor point about 0.25 m off the wall, yaw faces the room)
-##   lectern_node : the lectern StaticBody3D
+##   containers : Array[{id, type, room_kind, wing, depth, node, position, slots}]
+##   loose_anchors : Array[{position, yaw, surface, room_kind, wing, depth}]
+##   shelf / lectern : {position, yaw}; lectern_node
+##   tables, or_screen, phone, entrance, entrance_rect, ambulance, neutral, neutral_rect,
+##   wings, rooms, zones: see docs/CONTRACTS.md ("Hospital")
 static func build(gen: Dictionary, info: Dictionary) -> Node3D:
+	if not gen.has("furniture"):
+		return Legacy.build(gen, info)
 	var rows: PackedStringArray = gen.rows
 	var h := rows.size()
 	var w: int = rows[0].length()
 	var seed: int = gen.get("seed", 0)
-
 	var root := Node3D.new()
 	root.name = "Hospital"
-
 	info["size"] = Vector2i(w, h)
 	info["rows"] = rows
-	var player_spawns: Array[Vector3] = []
-	var tool_spawns: Array[Vector3] = []
-	var monster_spawns: Array[Vector3] = []
-	var table_tiles: Array[Vector2i] = []
-	info["table"] = Vector3.ZERO
-	info["clock"] = Vector3.ZERO
 
-	# ---- floor / ceiling -------------------------------------------------
-	var floor_st := SurfaceTool.new()
-	floor_st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var ceil_st := SurfaceTool.new()
-	ceil_st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for ty in h:
-		for tx in w:
-			if _at(rows, tx, ty) == "#":
-				continue
-			_floor_quad(floor_st, tx, ty, 0.0, true)
-			_floor_quad(ceil_st, tx, ty, C.WALL_H, false)
-	floor_st.generate_tangents()
-	ceil_st.generate_tangents()
-	var floor_mi := MeshInstance3D.new()
-	floor_mi.name = "Floor"
-	floor_mi.mesh = floor_st.commit()
-	floor_mi.material_override = _surface_mat("mat/floor", Color(0.30, 0.32, 0.33), 0.9)
-	root.add_child(floor_mi)
-	var ceil_mi := MeshInstance3D.new()
-	ceil_mi.name = "Ceiling"
-	ceil_mi.mesh = ceil_st.commit()
-	ceil_mi.material_override = _surface_mat("mat/ceiling", Color(0.20, 0.21, 0.22), 0.95)
-	root.add_child(ceil_mi)
-
-	# ---- walls -----------------------------------------------------------
-	var wall_st := SurfaceTool.new()
-	wall_st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var wall_faces := PackedVector3Array()
-	for ty in h:
-		for tx in w:
-			if _at(rows, tx, ty) != "#":
-				continue
-			for d in MG.DIRS:
-				var nx := tx + d.x
-				var ny := ty + d.y
-				if nx < 0 or ny < 0 or nx >= w or ny >= h:
-					continue
-				if _at(rows, nx, ny) == "#":
-					continue  # never emit a face between two wall tiles
-				_wall_quad(wall_st, wall_faces, tx, ty, d)
-	wall_st.generate_tangents()
-	var wall_mi := MeshInstance3D.new()
-	wall_mi.name = "Walls"
-	wall_mi.mesh = wall_st.commit()
-	wall_mi.material_override = _surface_mat("mat/wall", Color(0.52, 0.55, 0.53), 0.85)
-	root.add_child(wall_mi)
-
-	# ---- world collision -------------------------------------------------
+	var geo := GeoChunks.new()
+	_build_surfaces(gen, geo)
 	var body := StaticBody3D.new()
 	body.name = "WorldCollision"
 	body.collision_layer = C.L_WORLD
 	body.collision_mask = 0
-	var wall_shape := CollisionShape3D.new()
-	var concave := ConcavePolygonShape3D.new()
-	concave.set_faces(wall_faces)
-	wall_shape.shape = concave
-	wall_shape.name = "WallTrimesh"
-	body.add_child(wall_shape)
-	body.add_child(_box_shape(
-		Vector3(w * C.TILE, 0.4, h * C.TILE),
-		Vector3(w * C.TILE * 0.5, -0.2, h * C.TILE * 0.5), "FloorBox"))
-	body.add_child(_box_shape(
-		Vector3(w * C.TILE, 0.4, h * C.TILE),
-		Vector3(w * C.TILE * 0.5, C.WALL_H + 0.2, h * C.TILE * 0.5), "CeilingBox"))
 	root.add_child(body)
+	geo.commit(root, body, w, h)
 
-	# ---- furniture, props, markers --------------------------------------
-	var furniture := Node3D.new()
-	furniture.name = "Furniture"
-	root.add_child(furniture)
-	var room_at := _room_lookup(gen.get("rooms", []))
-	var anchors: Array = []
-	for ty in h:
-		for tx in w:
-			var c := _at(rows, tx, ty)
-			match c:
-				"P":
-					player_spawns.append(C.tile_to_world(tx, ty))
-				"T":
-					tool_spawns.append(C.tile_to_world(tx, ty))
-				"M":
-					monster_spawns.append(C.tile_to_world(tx, ty))
-				"b":
-					var bed := _make_bed()
-					_add_piece(furniture, bed, C.tile_to_world(tx, ty), 0.0)
-					if absi(tx * 7 + ty * 13 + seed) % BED_TRAY_EVERY == 0:
-						var rk := _kind_at(room_at, tx, ty)
-						if not SAFE_ROOMS.has(rk):
-							_add_bed_tray(furniture, bed, Vector2i(tx, ty), rk, anchors)
-				"c":
-					_add_piece(furniture, _make_cabinet(), C.tile_to_world(tx, ty), _wall_facing(rows, tx, ty))
-				"K":
-					var pk := C.tile_to_world(tx, ty)
-					info["clock"] = pk
-					_add_piece(furniture, _make_time_clock(), pk, _wall_facing(rows, tx, ty))
-				"C":
-					# downed (sweep 2 wave 3): the Re-Gen Pod is gone; its tile holds a locker.
-					_add_piece(furniture, _make_locker(), C.tile_to_world(tx, ty), _wall_facing(rows, tx, ty))
-				"O":
-					table_tiles.append(Vector2i(tx, ty))
-	if table_tiles.size() >= 2:
-		var a := table_tiles[0]
-		var b := table_tiles[table_tiles.size() - 1]
-		var mid := C.tile_to_world((a.x + b.x) * 0.5, (a.y + b.y) * 0.5)
-		info["table"] = mid
-		_add_piece(furniture, _make_operating_table(), mid, 0.0)
+	_build_furniture(root, gen, info)
+	_build_containers(root, gen, info)
+	_add_floor_anchors(gen, info)
+	_build_landmarks(root, gen, info)
+	_build_lights(root, gen, info)
+	root.add_child(_build_signs(gen))
+	_fill_contract(gen, info)
 
-	var props_root := Node3D.new()
-	props_root.name = "Props"
-	root.add_child(props_root)
-	for p in gen.get("props", []):
-		var t: Vector2i = p.tile
-		var node := _make_prop(p.kind)
-		if node != null:
-			var yaw := _yaw_from_prop_rot(float(p.rot))
-			_add_piece(props_root, node, C.tile_to_world(t.x, t.y), yaw)
-			if p.kind == "gurney" and not SAFE_ROOMS.has(_kind_at(room_at, t.x, t.y)):
-				anchors.append({"position": C.tile_to_world(t.x, t.y, _surface_top(node)), "yaw": yaw,
-						"surface": "gurney", "room_kind": _kind_at(room_at, t.x, t.y)})
-
-	_build_containers(root, gen, info, room_at, anchors)
-	_add_floor_anchors(gen, room_at, anchors)
-	info["loose_anchors"] = anchors
-	_place_shelf_and_lectern(root, gen, info)
-
-	info["player_spawns"] = player_spawns
-	info["tool_spawns"] = tool_spawns
-	info["monster_spawns"] = monster_spawns
-
-	# ---- lights ----------------------------------------------------------
-	var lights_root := Node3D.new()
-	lights_root.name = "Lights"
-	root.add_child(lights_root)
-	var lrng := MG.Rng.new((seed ^ 0x5f356495) & 0xFFFFFFFF)
-	var light_info: Array[Dictionary] = []
-	for l in gen.get("lights", []):
-		var roll := lrng.nextf()
-		var mode := 0 if roll < LIGHT_STEADY_CHANCE else (1 if roll < LIGHT_FLICKER_CHANCE else 2)
-		var pos := C.tile_to_world(l.x, l.y)
-		var node := _make_light_fixture(mode, ((seed * 73856093) ^ (l.x * 19349663) ^ (l.y * 83492791)) & 0x7FFFFFFF)
-		node.name = "Fixture_%d_%d" % [l.x, l.y]
-		node.position = pos
-		node.add_to_group("fixture")
-		node.set_meta("mode", mode)
-		node.set_meta("tile", l)
-		lights_root.add_child(node)
-		light_info.append({"tile": l, "position": pos, "mode": mode, "node": node})
-	info["lights"] = light_info
-
-	# ---- signage ---------------------------------------------------------
-	root.add_child(_build_signs(rows, w, h, seed))
-
-	# ---- navigation ------------------------------------------------------
-	var nav := _build_nav(rows, w, h)
+	var nav := _build_nav(gen, info)
 	root.add_child(nav)
 	info["nav_region"] = nav
-
 	return root
 
 
+## Which part of the map a world position is in: a wing id, "entrance", "neutral", or "".
+static func zone_of(info: Dictionary, p: Vector3) -> String:
+	var z: Dictionary = info.get("zones", {})
+	if z.is_empty():
+		return ""
+	var t := C.world_to_tile(p)
+	var wd: int = z.width
+	if t.x < 0 or t.y < 0 or t.x >= wd or t.y >= int(z.height):
+		return ""
+	return String(z.names.get(int((z.grid as PackedByteArray)[t.y * wd + t.x]), ""))
+
+
 # ---------------------------------------------------------------------------
-# Geometry helpers
+# Helpers
 # ---------------------------------------------------------------------------
+
+static func _w(p: Vector2, y := 0.0) -> Vector3:
+	return Vector3(p.x * C.TILE, y, p.y * C.TILE)
+
 
 static func _at(rows: PackedStringArray, x: int, y: int) -> String:
 	if x < 0 or y < 0 or y >= rows.size() or x >= rows[y].length():
@@ -248,469 +129,559 @@ static func _at(rows: PackedStringArray, x: int, y: int) -> String:
 	return rows[y][x]
 
 
-static func _walkable(rows: PackedStringArray, x: int, y: int) -> bool:
-	return MG.is_walkable_char(_at(rows, x, y))
+static func _open_char(c: String) -> bool:
+	return MG.is_walkable_char(c)
 
 
-## One tile of floor (up = true) or ceiling. UVs are in world metres: the Assets PBR
-## sets carry their own uv1_scale (~2 repeats per metre) and expect world-unit UVs.
-static func _floor_quad(st: SurfaceTool, tx: int, ty: int, y: float, up: bool) -> void:
-	var x0 := tx * C.TILE
-	var x1 := x0 + C.TILE
-	var z0 := ty * C.TILE
-	var z1 := z0 + C.TILE
-	var a := Vector3(x0, y, z0)
-	var b := Vector3(x1, y, z0)
-	var c := Vector3(x1, y, z1)
-	var d := Vector3(x0, y, z1)
-	var ua := Vector2(x0, z0)
-	var ub := Vector2(x1, z0)
-	var uc := Vector2(x1, z1)
-	var ud := Vector2(x0, z1)
-	var n := Vector3.UP if up else Vector3.DOWN
-	if up:
-		_tri(st, a, b, c, ua, ub, uc, n)
-		_tri(st, a, c, d, ua, uc, ud, n)
-	else:
-		_tri(st, a, c, b, ua, uc, ub, n)
-		_tri(st, a, d, c, ua, ud, uc, n)
+static func _room_of(gen: Dictionary, x: int, y: int) -> Dictionary:
+	var w: int = gen.width
+	if x < 0 or y < 0 or x >= w or y >= int(gen.height):
+		return {}
+	var ri: int = (gen.room_at as PackedInt32Array)[y * w + x]
+	return gen.rooms[ri] if ri >= 0 else {}
 
 
-## The face of wall tile (tx, ty) that looks toward its open neighbour in direction `d`.
-static func _wall_quad(st: SurfaceTool, faces: PackedVector3Array, tx: int, ty: int, d: Vector2i) -> void:
-	var n := Vector3(d.x, 0.0, d.y)
-	var r := n.cross(Vector3.UP)
-	var mid := C.tile_to_world(tx, ty) + n * (C.TILE * 0.5)
-	var p0 := mid - r * (C.TILE * 0.5)
-	var v0 := Vector3(p0.x, 0.0, p0.z)
-	var v1 := v0 + r * C.TILE
-	var v2 := v1 + Vector3(0.0, C.WALL_H, 0.0)
-	var v3 := v0 + Vector3(0.0, C.WALL_H, 0.0)
-	# World-metre UVs, continuous along the wall run: u is the distance along the wall,
-	# v is the height (0 at the ceiling, WALL_H at the floor).
-	var u0 := v0.x * absf(r.x) + v0.z * absf(r.z)
-	var u1 := u0 + (C.TILE if (r.x + r.z) > 0.0 else -C.TILE)
-	var t0 := Vector2(u0, C.WALL_H)
-	var t1 := Vector2(u1, C.WALL_H)
-	var t2 := Vector2(u1, 0.0)
-	var t3 := Vector2(u0, 0.0)
-	_tri(st, v0, v1, v2, t0, t1, t2, n)
-	_tri(st, v0, v2, v3, t0, t2, t3, n)
-	faces.append_array([v0, v1, v2, v0, v2, v3])
+static func _zone(gen: Dictionary, x: int, y: int) -> int:
+	var w: int = gen.width
+	if x < 0 or y < 0 or x >= w or y >= int(gen.height):
+		return S.ZONE_NONE
+	return (gen.zone as PackedByteArray)[y * w + x]
 
 
-static func _tri(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3,
-		ua: Vector2, ub: Vector2, uc: Vector2, n: Vector3) -> void:
-	st.set_normal(n)
-	st.set_uv(ua)
-	st.add_vertex(a)
-	st.set_normal(n)
-	st.set_uv(ub)
-	st.add_vertex(b)
-	st.set_normal(n)
-	st.set_uv(uc)
-	st.add_vertex(c)
+## The place kind of a tile: its room's kind, or "corridor" (wing hallway), "entrance", "neutral".
+static func place_kind(gen: Dictionary, x: int, y: int) -> String:
+	var r := _room_of(gen, x, y)
+	if not r.is_empty():
+		return String(r.kind)
+	var z := _zone(gen, x, y)
+	if z == S.ZONE_ENTRANCE:
+		return "entrance"
+	if z == S.ZONE_OUTDOOR:
+		return "neutral"
+	return "corridor"
 
 
-static func _box_shape(size: Vector3, pos: Vector3, nm: String) -> CollisionShape3D:
+static func _wing_of(gen: Dictionary, x: int, y: int) -> Dictionary:
+	var z := _zone(gen, x, y)
+	for wd in gen.wings:
+		if int(wd.zone) == z:
+			return {"wing": String(wd.id), "depth": int(wd.depth)}
+	if z == S.ZONE_ENTRANCE:
+		return {"wing": "entrance", "depth": 0}
+	if z == S.ZONE_OUTDOOR:
+		return {"wing": "neutral", "depth": 0}
+	return {"wing": "", "depth": 0}
+
+
+static func _assets() -> Node:
+	return Factory.assets_node()
+
+
+## A tiling PBR set from the Assets autoload (optionally tinted), or a flat placeholder.
+static func surface_mat(key: String, albedo: Color, rough: float, tint := Color.WHITE) -> Material:
+	var ck := "%s|%s" % [key, tint.to_html()]
+	if _mat_cache.has(ck):
+		return _mat_cache[ck]
+	var out: Material = null
+	var a := _assets()
+	if a != null and a.has(key):
+		var m = a.material(key)
+		if m is StandardMaterial3D:
+			out = m
+			if tint != Color.WHITE:
+				var d: StandardMaterial3D = (m as StandardMaterial3D).duplicate()
+				d.albedo_color = tint
+				out = d
+	if out == null:
+		var fb := StandardMaterial3D.new()
+		fb.albedo_color = albedo * tint
+		fb.roughness = rough
+		out = fb
+	_mat_cache[ck] = out
+	return out
+
+
+static func _box_shape(size: Vector3, xf: Transform3D, nm: String) -> CollisionShape3D:
 	var cs := CollisionShape3D.new()
 	var bs := BoxShape3D.new()
 	bs.size = size
 	cs.shape = bs
-	cs.position = pos
+	cs.transform = xf
 	cs.name = nm
 	return cs
 
 
-static func _mat(albedo: Color, rough := 0.8, emission := Color.BLACK, emission_energy := 0.0) -> StandardMaterial3D:
-	var m := StandardMaterial3D.new()
-	m.albedo_color = albedo
-	m.roughness = rough
-	m.metallic = 0.0
-	if emission_energy > 0.0:
-		m.emission_enabled = true
-		m.emission = emission
-		m.emission_energy_multiplier = emission_energy
-	return m
+# ---------------------------------------------------------------------------
+# Surfaces: floors, ceilings, walls, lintels, fence, canopy
+# ---------------------------------------------------------------------------
+
+## Merged geometry, bucketed by chunk and material.
+class GeoChunks extends RefCounted:
+	var buckets := {}   # "cx,cy|mat" -> SurfaceTool
+	var mats := {}      # mat key -> Material
+	var faces := PackedVector3Array()
+
+	func st_for(cx: int, cy: int, mat: String) -> SurfaceTool:
+		var k := "%d,%d|%s" % [cx, cy, mat]
+		if not buckets.has(k):
+			var st := SurfaceTool.new()
+			st.begin(Mesh.PRIMITIVE_TRIANGLES)
+			buckets[k] = st
+		return buckets[k]
+
+	## Quad a-b-c-d (clockwise seen from the front), UVs in world metres.
+	func quad(cx: int, cy: int, mat: String, a: Vector3, b: Vector3, c: Vector3, d: Vector3,
+			ua: Vector2, ub: Vector2, uc: Vector2, ud: Vector2, collide := false) -> void:
+		var st := st_for(cx, cy, mat)
+		var n := (c - a).cross(b - a).normalized()
+		for v in [[a, ua], [b, ub], [c, uc], [a, ua], [c, uc], [d, ud]]:
+			st.set_normal(n)
+			st.set_uv(v[1])
+			st.add_vertex(v[0])
+		if collide:
+			faces.append_array([a, b, c, a, c, d])
+
+	func commit(root: Node3D, body: StaticBody3D, w: int, h: int) -> void:
+		var holder := Node3D.new()
+		holder.name = "Geometry"
+		root.add_child(holder)
+		var keys := buckets.keys()
+		keys.sort()
+		for k in keys:
+			var st: SurfaceTool = buckets[k]
+			st.generate_tangents()
+			var mi := MeshInstance3D.new()
+			mi.name = String(k).replace(",", "_").replace("|", "_")
+			mi.mesh = st.commit()
+			mi.material_override = mats.get(String(k).get_slice("|", 1))
+			holder.add_child(mi)
+		var wall_shape := CollisionShape3D.new()
+		var concave := ConcavePolygonShape3D.new()
+		concave.set_faces(faces)
+		wall_shape.shape = concave
+		wall_shape.name = "WallTrimesh"
+		body.add_child(wall_shape)
+		var bs := BoxShape3D.new()
+		bs.size = Vector3(w * C.TILE, 0.4, h * C.TILE)
+		var fl := CollisionShape3D.new()
+		fl.shape = bs
+		fl.position = Vector3(w * C.TILE * 0.5, -0.2, h * C.TILE * 0.5)
+		fl.name = "FloorBox"
+		body.add_child(fl)
+		var cl := CollisionShape3D.new()
+		cl.shape = bs
+		cl.position = Vector3(w * C.TILE * 0.5, C.WALL_H + 0.2, h * C.TILE * 0.5)
+		cl.name = "CeilingBox"
+		body.add_child(cl)
 
 
-static func _box(size: Vector3, pos: Vector3, col: Color, rough := 0.8) -> MeshInstance3D:
-	var mi := MeshInstance3D.new()
-	var bm := BoxMesh.new()
-	bm.size = size
-	mi.mesh = bm
-	mi.position = pos
-	mi.material_override = _mat(col, rough)
-	return mi
+static func _build_surfaces(gen: Dictionary, geo: GeoChunks) -> void:
+	var rows: PackedStringArray = gen.rows
+	var h := rows.size()
+	var w: int = rows[0].length()
+	var nr: Rect2i = gen.get("neutral_rect", Rect2i())
+	var T := C.TILE
+	geo.mats["linoleum"] = surface_mat("mat/linoleum", Color(0.42, 0.44, 0.40), 0.8)
+	geo.mats["floor"] = surface_mat("mat/floor", Color(0.46, 0.44, 0.40), 0.85)
+	geo.mats["tile"] = surface_mat("mat/tile_floor", Color(0.55, 0.56, 0.54), 0.6)
+	geo.mats["asphalt"] = surface_mat("mat/asphalt", Color(0.16, 0.16, 0.17), 0.95)
+	geo.mats["pavement"] = surface_mat("mat/pavement", Color(0.4, 0.4, 0.38), 0.9)
+	geo.mats["ceiling"] = surface_mat("mat/ceiling", Color(0.30, 0.31, 0.31), 0.95)
+	geo.mats["wall"] = surface_mat("mat/wall", Color(0.62, 0.64, 0.60), 0.85)
+	geo.mats["wall_low"] = surface_mat("mat/wall", Color(0.62, 0.64, 0.60), 0.85, Color(0.62, 0.78, 0.70))
+	geo.mats["wall_tile"] = surface_mat("mat/wall_tile", Color(0.72, 0.74, 0.72), 0.5)
+	geo.mats["facade"] = surface_mat("mat/concrete", Color(0.42, 0.42, 0.40), 0.9)
+
+	for ty in h:
+		for tx in w:
+			var c := rows[ty][tx]
+			var cx := tx / CHUNK
+			var cy := ty / CHUNK
+			var x0 := tx * T
+			var z0 := ty * T
+			var x1 := x0 + T
+			var z1 := z0 + T
+			if _open_char(c):
+				var fkey := "linoleum"
+				if c == ",":
+					fkey = "pavement" if ty - nr.position.y < 4 else "asphalt"
+				else:
+					var kind := place_kind(gen, tx, ty)
+					if TILE_FLOOR_ROOMS.has(kind):
+						fkey = "tile"
+					elif WARM_FLOOR_ROOMS.has(kind) or kind == "entrance":
+						fkey = "floor"
+				geo.quad(cx, cy, fkey, Vector3(x0, 0, z0), Vector3(x1, 0, z0), Vector3(x1, 0, z1), Vector3(x0, 0, z1),
+						Vector2(x0, z0), Vector2(x1, z0), Vector2(x1, z1), Vector2(x0, z1))
+				if c != ",":
+					var y := C.WALL_H
+					geo.quad(cx, cy, "ceiling", Vector3(x0, y, z0), Vector3(x0, y, z1), Vector3(x1, y, z1), Vector3(x1, y, z0),
+							Vector2(x0, z0), Vector2(x0, z1), Vector2(x1, z1), Vector2(x1, z0))
+				if c == "+" or _is_archway(gen, tx, ty):
+					_lintel(geo, gen, tx, ty)
+				continue
+			# Solid: faces toward open neighbours.
+			var fence := c == "="
+			for d in MG.DIRS:
+				var nx: int = tx + d.x
+				var ny: int = ty + d.y
+				var nc := _at(rows, nx, ny)
+				if not _open_char(nc):
+					continue
+				var mat := "wall"
+				var outdoor := nc == ","
+				if outdoor:
+					mat = "facade"
+				elif TILE_WALL_ROOMS.has(place_kind(gen, nx, ny)):
+					mat = "wall_tile"
+				var top := FENCE_H if fence else (C.WALL_H + (1.2 if outdoor else 0.0))
+				var split := 0.0 if (outdoor or mat == "wall_tile") else 1.05
+				_wall_face(geo, cx, cy, tx, ty, d, 0.0, split, "wall_low", false)
+				_wall_face(geo, cx, cy, tx, ty, d, split, top, mat, false)
+				_collision_face(geo, rows, tx, ty, d, maxf(top, C.WALL_H))
+			if fence:
+				var y := FENCE_H
+				geo.quad(cx, cy, "facade", Vector3(x0, y, z0), Vector3(x1, y, z0), Vector3(x1, y, z1), Vector3(x0, y, z1),
+						Vector2(x0, z0), Vector2(x1, z0), Vector2(x1, z1), Vector2(x0, z1))
+	_canopy(geo, gen)
+	_ground_paint(geo, gen)
 
 
-static func _cyl(radius: float, height: float, pos: Vector3, col: Color, rough := 0.6) -> MeshInstance3D:
-	var mi := MeshInstance3D.new()
-	var cm := CylinderMesh.new()
-	cm.top_radius = radius
-	cm.bottom_radius = radius
-	cm.height = height
-	cm.radial_segments = 10
-	mi.mesh = cm
-	mi.position = pos
-	mi.material_override = _mat(col, rough)
-	return mi
-
-
-## Wrap a factory's visual node in a StaticBody3D with a box collider and drop it in the world.
-static func _add_piece(parent: Node3D, piece: Node3D, pos: Vector3, rot: float) -> void:
-	var size: Vector3 = piece.get_meta("collider_size", Vector3(1.0, 1.0, 1.0))
-	var cy: float = piece.get_meta("collider_y", size.y * 0.5)
-	var sb := StaticBody3D.new()
-	sb.name = piece.name
-	sb.collision_layer = C.L_WORLD
-	sb.collision_mask = 0
-	sb.position = pos
-	sb.rotation.y = rot
-	sb.add_child(piece)
-	sb.add_child(_box_shape(size, Vector3(0.0, cy, 0.0), "Shape"))
-	parent.add_child(sb)
-
-
-## Godot yaw that points a wall-hugging piece away from the wall it touches.
-## Models (and the primitives here) face -Z at yaw 0.
-static func _wall_facing(rows: PackedStringArray, tx: int, ty: int) -> float:
-	if _at(rows, tx, ty - 1) == "#":
-		return PI          # wall to the north -> face south
-	if _at(rows, tx, ty + 1) == "#":
-		return 0.0         # wall to the south -> face north
-	if _at(rows, tx - 1, ty) == "#":
-		return -PI / 2.0   # wall to the west -> face east
-	return PI / 2.0        # wall to the east -> face west
-
-
-## MapGen prop rotations use the TS screen convention (0 = +X, +PI/2 = +Z). Convert to a
-## Godot yaw for a model whose forward is -Z.
-static func _yaw_from_prop_rot(rot: float) -> float:
-	return -(rot + PI / 2.0)
-
-
-## A tiling PBR set from the Assets autoload, or a flat placeholder. The asset materials are
-## cached and shared, so they are used as-is; only the fallback is tuned here (one repeat per
-## map tile, which is what a placeholder texture would want).
-static func _surface_mat(key: String, albedo: Color, rough: float) -> Material:
-	var loop := Engine.get_main_loop()
-	if loop is SceneTree:
-		var a = (loop as SceneTree).root.get_node_or_null("Assets")
-		if a != null and a.has_method("material") and a.has_method("has") and a.call("has", key):
-			var m = a.call("material", key)
-			if m is Material:
-				return m
-	var fallback := _mat(albedo, rough)
-	fallback.uv1_scale = Vector3.ONE / C.TILE
-	return fallback
-
-
-## Transform of `node` relative to `root` (both out of the tree, so no global_transform).
-static func _rel_xform(root: Node3D, node: Node3D) -> Transform3D:
-	var t := Transform3D.IDENTITY
-	var n := node
-	while n != null and n != root:
-		t = n.transform * t
-		n = n.get_parent() as Node3D
-	return t
-
-
-## Union of every mesh AABB under `root`, in root space.
-static func _mesh_aabb(root: Node3D) -> AABB:
-	var out := AABB()
-	var first := true
-	for child in root.find_children("*", "MeshInstance3D", true, false):
-		var mi := child as MeshInstance3D
-		if mi.mesh == null:
-			continue
-		var box := _rel_xform(root, mi) * mi.mesh.get_aabb()
-		if first:
-			out = box
-			first = false
-		else:
-			out = out.merge(box)
-	return out
-
-
-## Size a spawned model's box collider from its own geometry. The footprint is capped at one
-## tile so an oversized model never seals off the tile next door.
-static func _fit_collider(root: Node3D) -> void:
-	var box := _mesh_aabb(root)
-	if box.size.y <= 0.0:
-		root.set_meta("collider_size", Vector3(0.8, 1.0, 0.8))
-		root.set_meta("collider_y", 0.5)
+## Parking stall lines, the ambulance bay box, a crossing from the main doors and a square
+## where the gold bars go: flat quads just above the asphalt.
+static func _ground_paint(geo: GeoChunks, gen: Dictionary) -> void:
+	var spots: Dictionary = gen.spots
+	if not spots.has("stalls"):
 		return
-	var cap := C.TILE * 0.95
-	root.set_meta("collider_size", Vector3(
-		clampf(box.size.x, 0.2, cap), maxf(box.size.y, 0.2), clampf(box.size.z, 0.2, cap)))
-	root.set_meta("collider_y", box.position.y + box.size.y * 0.5)
+	var white := StandardMaterial3D.new()
+	white.albedo_color = Color(0.78, 0.78, 0.74)
+	white.roughness = 0.85
+	var yellow := StandardMaterial3D.new()
+	yellow.albedo_color = Color(0.8, 0.6, 0.1)
+	yellow.roughness = 0.85
+	geo.mats["paint_white"] = white
+	geo.mats["paint_yellow"] = yellow
+	var y := 0.012
+	var strip := func(mat: String, a: Vector2, b: Vector2, width: float) -> void:
+		var pa := _w(a)
+		var pb := _w(b)
+		var dir := (pb - pa).normalized()
+		var side := Vector3(-dir.z, 0, dir.x) * width * 0.5
+		var cx := int(a.x) / CHUNK
+		var cy := int(a.y) / CHUNK
+		var v0 := pa - side + Vector3(0, y, 0)
+		var v1 := pb - side + Vector3(0, y, 0)
+		var v2 := pb + side + Vector3(0, y, 0)
+		var v3 := pa + side + Vector3(0, y, 0)
+		# Wound so the face looks up.
+		if (v1 - v0).cross(v3 - v0).y < 0.0:
+			geo.quad(cx, cy, mat, v0, v1, v2, v3, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO)
+		else:
+			geo.quad(cx, cy, mat, v0, v3, v2, v1, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO)
+	var seen := {}
+	for s in spots.stalls:
+		var p: Vector2 = s.pos
+		for dx in [-1.0, 1.0]:
+			var key := "%.2f,%.2f" % [p.x + dx, p.y]
+			if seen.has(key):
+				continue
+			seen[key] = true
+			strip.call("paint_white", Vector2(p.x + dx, p.y - 1.5), Vector2(p.x + dx, p.y + 1.5), 0.1)
+	if spots.has("bay_marking"):
+		var c: Vector2 = spots.bay_marking.pos
+		var hw := 1.7
+		var hh := 3.4
+		var corners := [c + Vector2(-hw, -hh), c + Vector2(hw, -hh), c + Vector2(hw, hh), c + Vector2(-hw, hh)]
+		for i in 4:
+			strip.call("paint_yellow", corners[i], corners[(i + 1) % 4], 0.15)
+		for k in 5:
+			var t := -hh + 0.6 + k * 1.4
+			strip.call("paint_yellow", c + Vector2(-hw, t), c + Vector2(hw, t + 0.9), 0.12)
+	if spots.has("entrance") and spots.has("gold_pile"):
+		var e: Vector2 = spots.entrance.pos
+		for k in 7:
+			var x := e.x - 1.8 + k * 0.6
+			strip.call("paint_white", Vector2(x, e.y + 3.4), Vector2(x, e.y + 5.2), 0.3)
+		var g: Vector2 = spots.gold_pile.pos
+		var q := [g + Vector2(-1.5, -1.3), g + Vector2(1.5, -1.3), g + Vector2(1.5, 1.3), g + Vector2(-1.5, 1.3)]
+		for i in 4:
+			strip.call("paint_yellow", q[i], q[(i + 1) % 4], 0.15)
 
 
-## Wrap an Assets model in a piece node with a collider fitted to it. Null when the key
-## does not resolve, so every factory can fall through to its primitive.
-static func _asset_piece(key: String, nm: String) -> Node3D:
-	var a := _asset(key)
-	if a == null:
-		return null
-	var n := Node3D.new()
-	n.name = nm
-	n.add_child(a)
-	_fit_collider(n)
-	return n
+static func _is_archway(gen: Dictionary, tx: int, ty: int) -> bool:
+	if not gen.has("_archways"):
+		var set := {}
+		for r in gen.rooms:
+			for t in r.get("open", []):
+				set[t] = true
+		gen["_archways"] = set
+	return (gen._archways as Dictionary).has(Vector2i(tx, ty))
 
 
-## Assets autoload lookup, safe when the autoload is missing (unit tests, tools).
-static func _asset(key: String) -> Node3D:
-	var loop := Engine.get_main_loop()
-	if loop is SceneTree:
-		var a = (loop as SceneTree).root.get_node_or_null("Assets")
-		if a != null and a.has_method("spawn"):
-			if a.has_method("has") and not a.call("has", key):
-				return null
-			var n = a.call("spawn", key)
-			if n is Node3D:
-				return n
-	return null
+## A vertical face on the boundary of the tile centred at `centre`, facing `n`, from y0 to y1.
+static func _vface(geo: GeoChunks, cx: int, cy: int, mat: String, centre: Vector3, n: Vector3, y0: float, y1: float, collide: bool) -> void:
+	if y1 - y0 <= 0.001:
+		return
+	var r := n.cross(Vector3.UP)
+	var mid := centre + n * (C.TILE * 0.5)
+	var p0 := mid - r * (C.TILE * 0.5)
+	var v0 := Vector3(p0.x, y0, p0.z)
+	var v1 := v0 + r * C.TILE
+	var v2 := v1 + Vector3(0.0, y1 - y0, 0.0)
+	var v3 := v0 + Vector3(0.0, y1 - y0, 0.0)
+	# World-metre UVs, continuous along a wall run; v counts down from the ceiling.
+	var u0 := v0.x * absf(r.x) + v0.z * absf(r.z)
+	var u1 := u0 + (C.TILE if (r.x + r.z) > 0.0 else -C.TILE)
+	geo.quad(cx, cy, mat, v0, v1, v2, v3, Vector2(u0, C.WALL_H - y0), Vector2(u1, C.WALL_H - y0),
+			Vector2(u1, C.WALL_H - y1), Vector2(u0, C.WALL_H - y1), collide)
 
 
-# ---------------------------------------------------------------------------
-# Furniture factories - the asset agent replaces the bodies of these.
-# Each returns a visual-only Node3D with `collider_size` / `collider_y` metadata.
-# ---------------------------------------------------------------------------
-
-static func _piece(nm: String, size: Vector3, cy := -1.0) -> Node3D:
-	var n := Node3D.new()
-	n.name = nm
-	n.set_meta("collider_size", size)
-	n.set_meta("collider_y", size.y * 0.5 if cy < 0.0 else cy)
-	return n
+## One wall face of solid tile (tx, ty) looking toward direction d, from height y0 to y1.
+static func _wall_face(geo: GeoChunks, cx: int, cy: int, tx: int, ty: int, d: Vector2i, y0: float, y1: float, mat: String, collide: bool) -> void:
+	_vface(geo, cx, cy, mat, C.tile_to_world(tx, ty), Vector3(d.x, 0.0, d.y), y0, y1, collide)
 
 
-static func _make_bed() -> Node3D:
-	var a := _asset_piece("prop/bed", "Bed")
-	if a != null:
-		return a
-	var n := _piece("Bed", Vector3(0.95, 0.7, 1.35))
-	n.add_child(_box(Vector3(0.9, 0.12, 1.3), Vector3(0, 0.55, 0), Color(0.85, 0.86, 0.88), 0.5))
-	n.add_child(_box(Vector3(0.8, 0.1, 1.15), Vector3(0, 0.63, 0), Color(0.72, 0.76, 0.80), 0.9))
-	n.add_child(_box(Vector3(0.85, 0.45, 0.08), Vector3(0, 0.75, -0.62), Color(0.55, 0.57, 0.60), 0.4))
-	n.add_child(_box(Vector3(0.85, 0.30, 0.08), Vector3(0, 0.67, 0.62), Color(0.55, 0.57, 0.60), 0.4))
-	for sx in [-0.35, 0.35]:
-		for sz in [-0.55, 0.55]:
-			n.add_child(_cyl(0.04, 0.5, Vector3(sx, 0.25, sz), Color(0.40, 0.42, 0.45)))
-	return n
+## Non-blocking pieces within (agent radius - player radius) of a wall keep their collider.
+## Nothing the factory builds is that flat today, so this is off; kept for thin wall pieces.
+const FLAT_PIECE_COLLIDERS := false
+
+## Furniture colliders stop this far (metres) short of tiles the navigation mesh keeps.
+const FURNITURE_INSET := 0.18
+
+## Collision chamfer at outside wall corners (door jambs, hallway corners, pillars), metres.
+const CORNER_CHAMFER := 0.18
 
 
-static func _make_cabinet() -> Node3D:
-	var a := _asset_piece("prop/cabinet", "Cabinet")
-	if a != null:
-		return a
-	var n := _piece("Cabinet", Vector3(1.2, 1.7, 1.0))
-	n.add_child(_box(Vector3(1.15, 1.65, 0.95), Vector3(0, 0.83, 0), Color(0.62, 0.63, 0.60), 0.7))
-	for y in [0.45, 1.0, 1.45]:
-		n.add_child(_box(Vector3(0.5, 0.04, 0.06), Vector3(0.0, y, -0.49), Color(0.30, 0.31, 0.33), 0.3))
-	return n
+## The collision for one wall face: the visual face, cut back at outside corners, with a
+## 45-degree chamfer across each corner. Bodies sliding along a wall into a doorway glance off
+## the chamfer instead of catching on the jamb.
+static func _collision_face(geo: GeoChunks, rows: PackedStringArray, tx: int, ty: int, d: Vector2i, top: float) -> void:
+	var n := Vector3(d.x, 0.0, d.y)
+	var r := n.cross(Vector3.UP)
+	var ri := Vector2i(roundi(r.x), roundi(r.z))
+	var mid := C.tile_to_world(tx, ty) + n * (C.TILE * 0.5)
+	var k0 := mid - r * (C.TILE * 0.5)
+	var k1 := mid + r * (C.TILE * 0.5)
+	var open := func(x: int, y: int) -> bool:
+		return _open_char(_at(rows, x, y))
+	var c := CORNER_CHAMFER
+	var convex0: bool = open.call(tx - ri.x, ty - ri.y) and open.call(tx + d.x - ri.x, ty + d.y - ri.y)
+	var convex1: bool = open.call(tx + ri.x, ty + ri.y) and open.call(tx + d.x + ri.x, ty + d.y + ri.y)
+	var a := k0 + r * c if convex0 else k0
+	var b := k1 - r * c if convex1 else k1
+	var up := Vector3(0.0, top, 0.0)
+	geo.faces.append_array([a, b, b + up, a, b + up, a + up])
+	if convex1:
+		# The corner's other face starts c back along -n; join the two with a slanted face.
+		var p := k1 - r * c
+		var q := k1 - n * c
+		geo.faces.append_array([p, q, q + up, p, q + up, p + up])
 
 
-static func _make_operating_table() -> Node3D:
-	var a := _asset_piece("prop/table_op", "OperatingTable")
-	if a != null:
-		return a
-	var n := _piece("OperatingTable", Vector3(2.4, 1.0, 1.1))
-	n.add_child(_box(Vector3(2.2, 0.14, 0.95), Vector3(0, 0.95, 0), Color(0.78, 0.82, 0.84), 0.35))
-	n.add_child(_box(Vector3(0.5, 0.75, 0.5), Vector3(0, 0.38, 0), Color(0.45, 0.47, 0.50), 0.4))
-	n.add_child(_cyl(0.45, 0.12, Vector3(0, 0.06, 0), Color(0.35, 0.37, 0.40)))
-	n.add_child(_box(Vector3(0.5, 0.05, 0.5), Vector3(0.0, 2.55, 0.0), Color(0.9, 0.9, 0.85), 0.2))
-	return n
+## Solid wall, a doorway or an archway: anything a lintel continues.
+static func _wallish(gen: Dictionary, x: int, y: int) -> bool:
+	var c := _at(gen.rows, x, y)
+	return not _open_char(c) or c == "+" or _is_archway(gen, x, y)
 
 
-## The asset clock is a small desk alarm clock, so it gets a primitive shelf to stand on.
-static func _make_time_clock() -> Node3D:
-	var n := _piece("TimeClock", Vector3(0.8, 1.2, 0.6), 1.1)
-	var model := _asset("prop/clock")
-	if model != null:
-		n.add_child(_box(Vector3(0.6, 1.25, 0.3), Vector3(0, 0.62, 0), Color(0.34, 0.36, 0.40), 0.7))
-		model.position = Vector3(0, 1.25, 0)
-		n.add_child(model)
-		_fit_collider(n)
-		return n
-	n.add_child(_box(Vector3(0.55, 0.8, 0.35), Vector3(0, 1.35, 0), Color(0.30, 0.32, 0.36), 0.6))
-	var face := _box(Vector3(0.38, 0.28, 0.06), Vector3(0.0, 1.55, -0.19), Color(0.05, 0.08, 0.06), 0.2)
-	face.material_override = _mat(Color(0.05, 0.10, 0.07), 0.2, Color(0.2, 1.0, 0.5), 1.6)
-	n.add_child(face)
-	n.add_child(_box(Vector3(0.30, 0.06, 0.10), Vector3(0.0, 1.18, -0.16), Color(0.6, 0.6, 0.6), 0.4))
-	return n
+## The wall above a doorway: a box from LINTEL_Y to the ceiling across the door tile.
+static func _lintel(geo: GeoChunks, gen: Dictionary, tx: int, ty: int) -> void:
+	var along_x := _wallish(gen, tx - 1, ty) or _wallish(gen, tx + 1, ty)
+	var along_z := _wallish(gen, tx, ty - 1) or _wallish(gen, tx, ty + 1)
+	if along_x and along_z:
+		along_x = _wallish(gen, tx - 1, ty) and _wallish(gen, tx + 1, ty)
+	var cx := tx / CHUNK
+	var cy := ty / CHUNK
+	var T := C.TILE
+	var x0 := tx * T
+	var z0 := ty * T
+	var x1 := x0 + T
+	var z1 := z0 + T
+	var y0 := LINTEL_Y
+	geo.quad(cx, cy, "wall", Vector3(x0, y0, z0), Vector3(x0, y0, z1), Vector3(x1, y0, z1), Vector3(x1, y0, z0),
+			Vector2(x0, z0), Vector2(x0, z1), Vector2(x1, z1), Vector2(x1, z0))
+	var centre := C.tile_to_world(tx, ty)
+	var normals := [Vector3(0, 0, -1), Vector3(0, 0, 1)] if along_x else [Vector3(-1, 0, 0), Vector3(1, 0, 0)]
+	for n in normals:
+		_vface(geo, cx, cy, "wall", centre, n, y0, C.WALL_H, false)
 
 
-# ---------------------------------------------------------------------------
-# Prop factories. Primitives face -Z, the same way spawned models do.
-# ---------------------------------------------------------------------------
 
-static func _make_prop(kind: String) -> Node3D:
-	match kind:
-		"gurney": return _make_gurney()
-		"wheelchair": return _make_wheelchair()
-		"ivstand": return _make_ivstand()
-		"vending": return _make_vending()
-		"bin": return _make_bin()
-		"locker": return _make_locker()
-		"screen": return _make_screen()
-	return null
-
-
-static func _make_gurney() -> Node3D:
-	var a := _asset_piece("prop/gurney", "Gurney")
-	if a != null:
-		return a
-	var n := _piece("Gurney", Vector3(0.7, 0.9, 1.3))
-	n.set_meta("surface_top", 0.83)
-	n.add_child(_box(Vector3(0.62, 0.1, 1.25), Vector3(0, 0.72, 0), Color(0.70, 0.73, 0.76), 0.4))
-	n.add_child(_box(Vector3(0.5, 0.08, 1.1), Vector3(0, 0.79, 0), Color(0.55, 0.62, 0.66), 0.9))
-	n.add_child(_box(Vector3(0.55, 0.35, 0.06), Vector3(0, 0.9, 0.6), Color(0.5, 0.52, 0.55), 0.4))
-	for sx in [-0.25, 0.25]:
-		for sz in [-0.5, 0.5]:
-			n.add_child(_cyl(0.06, 0.62, Vector3(sx, 0.34, sz), Color(0.38, 0.40, 0.42)))
-	return n
-
-
-static func _make_wheelchair() -> Node3D:
-	var a := _asset_piece("prop/wheelchair", "Wheelchair")
-	if a != null:
-		return a
-	var n := _piece("Wheelchair", Vector3(0.8, 1.0, 0.8))
-	n.add_child(_box(Vector3(0.5, 0.07, 0.5), Vector3(0, 0.48, 0), Color(0.22, 0.24, 0.28), 0.8))
-	n.add_child(_box(Vector3(0.5, 0.55, 0.07), Vector3(0, 0.76, 0.22), Color(0.22, 0.24, 0.28), 0.8))
-	for sx in [-0.32, 0.32]:
-		var wheel := _cyl(0.3, 0.05, Vector3(sx, 0.3, 0.0), Color(0.15, 0.15, 0.17))
-		wheel.rotation.z = PI / 2.0
-		n.add_child(wheel)
-	n.add_child(_cyl(0.02, 0.4, Vector3(0.0, 0.95, 0.2), Color(0.45, 0.46, 0.5)))
-	return n
-
-
-## No CC0 IV stand exists (see ASSETS.md), so this one is always the primitive.
-static func _make_ivstand() -> Node3D:
-	var n := _piece("IVStand", Vector3(0.4, 1.9, 0.4))
-	n.add_child(_cyl(0.18, 0.05, Vector3(0, 0.03, 0), Color(0.35, 0.36, 0.38)))
-	n.add_child(_cyl(0.025, 1.75, Vector3(0, 0.9, 0), Color(0.72, 0.74, 0.78), 0.3))
-	n.add_child(_box(Vector3(0.16, 0.26, 0.1), Vector3(0.11, 1.6, 0), Color(0.85, 0.88, 0.75, 0.9), 0.2))
-	return n
-
-
-static func _make_vending() -> Node3D:
-	var a := _asset_piece("prop/vending", "Vending")
-	if a != null:
-		return a
-	var n := _piece("Vending", Vector3(1.0, 1.9, 0.75))
-	n.add_child(_box(Vector3(0.95, 1.85, 0.7), Vector3(0, 0.93, 0), Color(0.20, 0.28, 0.34), 0.6))
-	var glass := _box(Vector3(0.62, 1.25, 0.05), Vector3(-0.12, 1.05, -0.36), Color(0.4, 0.6, 0.7), 0.2)
-	glass.material_override = _mat(Color(0.15, 0.35, 0.40), 0.2, Color(0.4, 0.85, 0.95), 0.8)
-	n.add_child(glass)
-	n.add_child(_box(Vector3(0.18, 0.5, 0.05), Vector3(0.33, 1.2, -0.36), Color(0.1, 0.1, 0.12), 0.5))
-	return n
-
-
-static func _make_bin() -> Node3D:
-	var a := _asset_piece("prop/bin", "Bin")
-	if a != null:
-		return a
-	var n := _piece("Bin", Vector3(0.7, 0.9, 0.7))
-	n.add_child(_cyl(0.31, 0.8, Vector3(0, 0.4, 0), Color(0.25, 0.30, 0.28), 0.8))
-	n.add_child(_cyl(0.33, 0.06, Vector3(0, 0.83, 0), Color(0.15, 0.19, 0.18), 0.6))
-	return n
-
-
-static func _make_locker() -> Node3D:
-	var a := _asset_piece("prop/locker", "Locker")
-	if a != null:
-		return a
-	var n := _piece("Locker", Vector3(0.95, 1.9, 0.65))
-	n.add_child(_box(Vector3(0.9, 1.85, 0.6), Vector3(0, 0.93, 0), Color(0.33, 0.40, 0.42), 0.7))
-	n.add_child(_box(Vector3(0.04, 1.7, 0.02), Vector3(0.0, 0.93, -0.31), Color(0.18, 0.22, 0.24), 0.5))
-	n.add_child(_box(Vector3(0.3, 0.06, 0.03), Vector3(0.0, 1.75, -0.32), Color(0.75, 0.76, 0.7), 0.4))
-	return n
-
-
-## The asset screen is a desk monitor; lift it to wall height so it reads as a ward display.
-static func _make_screen() -> Node3D:
-	var model := _asset("prop/screen")
-	if model != null:
-		var m := Node3D.new()
-		m.name = "Screen"
-		model.position = Vector3(0, 1.45, 0)
-		m.add_child(model)
-		_fit_collider(m)
-		return m
-	var n := _piece("Screen", Vector3(1.1, 0.8, 0.25), 1.7)
-	n.add_child(_box(Vector3(1.05, 0.72, 0.08), Vector3(0, 1.7, 0), Color(0.12, 0.13, 0.15), 0.4))
-	var glow := _box(Vector3(0.95, 0.6, 0.03), Vector3(0, 1.7, -0.06), Color(0.1, 0.3, 0.3), 0.2)
-	glow.material_override = _mat(Color(0.08, 0.22, 0.25), 0.2, Color(0.3, 0.8, 0.9), 1.2)
-	n.add_child(glow)
-	n.add_child(_cyl(0.03, 0.5, Vector3(0, 1.2, 0.02), Color(0.3, 0.31, 0.33)))
-	return n
-
-
-static func _make_light_fixture(mode: int, light_seed: int) -> Node3D:
-	var n := Node3D.new()
-	n.name = "Fixture"
-	var panel: MeshInstance3D = null
-	var a := _asset("light_fixture")
-	if a != null:
-		n.add_child(a)
-		for child in a.find_children("Panel", "MeshInstance3D", true, false):
-			panel = child
-			break
-	else:
-		panel = MeshInstance3D.new()
-		var bm := BoxMesh.new()
-		bm.size = Vector3(C.TILE * 0.62, 0.06, C.TILE * 0.62)
-		panel.mesh = bm
-		panel.position = Vector3(0, C.WALL_H - 0.05, 0)
-		panel.name = "Panel"
-		var lit := mode != 2
-		panel.material_override = _mat(
-			Color(0.85, 0.88, 0.85) if lit else Color(0.25, 0.26, 0.25), 0.35,
-			Color(1.0, 0.97, 0.90), 2.4 if lit else 0.0)
-		n.add_child(panel)
-	var bulb := OmniLight3D.new()
-	bulb.name = "Bulb"
-	bulb.position = Vector3(0, C.WALL_H - 0.35, 0)
-	bulb.omni_range = LIGHT_RANGE
-	bulb.light_energy = 0.0 if mode == 2 else LIGHT_ENERGY
-	bulb.light_color = Color(1.0, 0.96, 0.90)
-	# Punchier in fog than in air: this is what makes each fixture read as a
-	# hanging pool of light rather than a flat wash on the floor.
-	bulb.light_volumetric_fog_energy = 2.0
-	bulb.shadow_enabled = false  # the flashlight is the only shadow caster
-	# The flicker system finds fixtures by group and reads these off the light itself.
-	bulb.add_to_group("fixture")
-	bulb.set_meta("mode", mode)
-	bulb.set_meta("seed", light_seed)
-	if panel != null:
-		bulb.set_meta("panel", panel)
-	n.add_child(bulb)
-	return n
+static func _canopy(geo: GeoChunks, gen: Dictionary) -> void:
+	var c: Dictionary = gen.spots.get("canopy", {})
+	if c.is_empty():
+		return
+	var r: Rect2 = c.rect
+	var p0 := _w(r.position)
+	var p1 := _w(r.end)
+	var cx := int(r.get_center().x) / CHUNK
+	var cy := int(r.get_center().y) / CHUNK
+	var y0 := CANOPY_Y
+	var y1 := CANOPY_Y + 0.35
+	var q := func(a: Vector3, b: Vector3, cc: Vector3, d: Vector3) -> void:
+		geo.quad(cx, cy, "facade", a, b, cc, d, Vector2(a.x, a.z + a.y), Vector2(b.x, b.z + b.y), Vector2(cc.x, cc.z + cc.y), Vector2(d.x, d.z + d.y))
+	# Top, underside, front and sides.
+	q.call(Vector3(p0.x, y1, p0.z), Vector3(p1.x, y1, p0.z), Vector3(p1.x, y1, p1.z), Vector3(p0.x, y1, p1.z))
+	q.call(Vector3(p0.x, y0, p0.z), Vector3(p0.x, y0, p1.z), Vector3(p1.x, y0, p1.z), Vector3(p1.x, y0, p0.z))
+	q.call(Vector3(p0.x, y0, p1.z), Vector3(p0.x, y1, p1.z), Vector3(p1.x, y1, p1.z), Vector3(p1.x, y0, p1.z))
+	q.call(Vector3(p0.x, y0, p0.z), Vector3(p0.x, y1, p0.z), Vector3(p0.x, y1, p1.z), Vector3(p0.x, y0, p1.z))
+	q.call(Vector3(p1.x, y0, p1.z), Vector3(p1.x, y1, p1.z), Vector3(p1.x, y1, p0.z), Vector3(p1.x, y0, p0.z))
 
 
 # ---------------------------------------------------------------------------
-# Containers, loose anchors, OR shelf spot, lectern
+# Furniture
 # ---------------------------------------------------------------------------
 
-## tile key (y * 4096 + x) -> room dictionary, for every tile inside a room.
-static func _room_lookup(rooms: Array) -> Dictionary:
-	var out := {}
-	for r in rooms:
-		for y in range(r.y, r.y + r.h):
-			for x in range(r.x, r.x + r.w):
-				out[y * 4096 + x] = r
-	return out
+static func _build_furniture(root: Node3D, gen: Dictionary, info: Dictionary) -> void:
+	var holder := Node3D.new()
+	holder.name = "Furniture"
+	root.add_child(holder)
+	var batches := {}     # "cx,cy" -> {mesh -> PackedTransforms Array}
+	var bodies := {}      # "cx,cy" -> StaticBody3D
+	var anchors: Array = []
+	var count := 0
+	for e in gen.furniture:
+		var kind: String = e.kind
+		if e.get("canopy_post", false):
+			kind = "canopy_post"
+		var p: Vector2 = e.pos
+		var pos := _w(p, float(e.get("y", 0.0)))
+		var xf := Transform3D(Basis(Vector3.UP, float(e.yaw)), pos)
+		var ck := "%d,%d" % [int(p.x) / CHUNK, int(p.y) / CHUNK]
+		if not batches.has(ck):
+			batches[ck] = {}
+		var b: Dictionary = batches[ck]
+		for part in Factory.parts(kind):
+			var mesh: Mesh = part.mesh
+			if not b.has(mesh):
+				b[mesh] = []
+			(b[mesh] as Array).append(xf * (part.xform as Transform3D))
+		var support := Rect2()
+		var support_top := -1.0
+		if _solid_piece(gen, kind, p, float(e.yaw)):
+			if not bodies.has(ck):
+				var sb := StaticBody3D.new()
+				sb.name = "Collide_" + ck.replace(",", "_")
+				sb.collision_layer = C.L_WORLD
+				sb.collision_mask = 0
+				holder.add_child(sb)
+				bodies[ck] = sb
+			var s := Defs.size(kind)
+			var fp := Defs.footprint_rect(kind, p, float(e.yaw))
+			var tiles := Defs.blocked_tiles(kind, p, float(e.yaw))
+			if Defs.blocks(kind) and not tiles.is_empty():
+				# Never let the collider reach into a tile the navigation mesh keeps: clip it to
+				# the tiles the piece blocks (an overhang of a few centimetres stays visual only).
+				var cover := Rect2(Vector2(tiles[0]), Vector2.ONE)
+				for tt in tiles:
+					cover = cover.merge(Rect2(Vector2(tt), Vector2.ONE))
+				# ...and keep it FURNITURE_INSET back from tiles that stay open, so an agent cutting a
+				# corner of its navigation path does not catch on the box.
+				var inset := FURNITURE_INSET / C.TILE
+				var rows: PackedStringArray = gen.rows
+				var blk: PackedByteArray = gen.blocked
+				var gw: int = gen.width
+				var open_at := func(x: int, y: int) -> bool:
+					return _open_char(_at(rows, x, y)) and blk[y * gw + x] == 0
+				var x0 := int(cover.position.x)
+				var y0 := int(cover.position.y)
+				var x1 := int(cover.end.x) - 1
+				var y1 := int(cover.end.y) - 1
+				var left := false
+				var right := false
+				var top := false
+				var bottom := false
+				for yy in range(y0, y1 + 1):
+					left = left or open_at.call(x0 - 1, yy)
+					right = right or open_at.call(x1 + 1, yy)
+				for xx in range(x0, x1 + 1):
+					top = top or open_at.call(xx, y0 - 1)
+					bottom = bottom or open_at.call(xx, y1 + 1)
+				cover = Rect2(cover.position + Vector2(inset if left else 0.0, inset if top else 0.0),
+						cover.size - Vector2((inset if left else 0.0) + (inset if right else 0.0), (inset if top else 0.0) + (inset if bottom else 0.0)))
+				var clip := fp.intersection(cover)
+				if clip.size.x > 0.07 and clip.size.y > 0.07:
+					fp = clip
+			var centre := _w(fp.get_center(), s.y * 0.5 + float(e.get("y", 0.0)))
+			var box := Vector3(fp.size.x * C.TILE, s.y, fp.size.y * C.TILE)
+			(bodies[ck] as StaticBody3D).add_child(_box_shape(box, Transform3D(Basis.IDENTITY, centre), "S%d" % count))
+			support = fp
+			support_top = s.y + float(e.get("y", 0.0))
+		var t := Vector2i(int(floor(p.x)), int(floor(p.y)))
+		var pk := place_kind(gen, t.x, t.y)
+		if int(e.room) >= 0:
+			pk = String(gen.rooms[int(e.room)].kind)
+		var wi := _wing_of(gen, t.x, t.y)
+		for a in Defs.anchors(kind):
+			var ap: Vector3 = xf * (a[0] as Vector3)
+			# Only where the collider really is under it, or the item falls through.
+			if not support.grow(-0.04).has_point(Vector2(ap.x, ap.z) / C.TILE) or absf(ap.y - support_top) > 0.06:
+				continue
+			anchors.append({"position": ap, "yaw": float(e.yaw), "surface": String(a[1]), "room_kind": pk,
+					"wing": wi.wing, "depth": wi.depth})
+		count += 1
+	var keys := batches.keys()
+	keys.sort()
+	for ck in keys:
+		var b: Dictionary = batches[ck]
+		var i := 0
+		for mesh in b.keys():
+			var xfs: Array = b[mesh]
+			var mm := MultiMesh.new()
+			mm.transform_format = MultiMesh.TRANSFORM_3D
+			mm.mesh = mesh
+			mm.instance_count = xfs.size()
+			for k in xfs.size():
+				mm.set_instance_transform(k, xfs[k])
+			var mmi := MultiMeshInstance3D.new()
+			mmi.name = "MM_%s_%d" % [String(ck).replace(",", "_"), i]
+			mmi.multimesh = mm
+			mmi.visibility_range_end = FURNITURE_RANGE
+			mmi.visibility_range_end_margin = 4.0
+			holder.add_child(mmi)
+			i += 1
+	info["loose_anchors"] = anchors
+	info["furniture_count"] = count
 
 
-static func _kind_at(room_at: Dictionary, x: int, y: int) -> String:
-	var r = room_at.get(y * 4096 + x, null)
-	return "corridor" if r == null else String(r.kind)
+## Does a piece get a collider? Blocking pieces do (the navigation mesh leaves their tiles out).
+## Other pieces only when they are flat against a wall, closer to it than the gap a navigation
+## agent's body keeps (agent radius minus player radius): anything that stands further out is
+## where a monster or bot following the mesh edge would catch on it, so chairs, bins, plants and
+## IV stands have no collider. See docs/KNOWN_ISSUES.md.
+static func _solid_piece(gen: Dictionary, kind: String, p: Vector2, yaw: float) -> bool:
+	if not Defs.collides(kind):
+		return false
+	if Defs.blocks(kind):
+		return not Defs.blocked_tiles(kind, p, yaw).is_empty()
+	if not FLAT_PIECE_COLLIDERS:
+		return false
+	var r := Defs.footprint_rect(kind, p, yaw)
+	var margin := (NAV_AGENT_RADIUS - C.PLAYER_RADIUS) / C.TILE
+	var rows: PackedStringArray = gen.rows
+	var solid := func(x: int, y: int) -> bool:
+		return not _open_char(_at(rows, x, y))
+	var x0 := int(floor(r.position.x + 0.001))
+	var x1 := int(floor(r.end.x - 0.001))
+	var y0 := int(floor(r.position.y + 0.001))
+	var y1 := int(floor(r.end.y - 0.001))
+	var cx := int(floor(p.x))
+	var cy := int(floor(p.y))
+	# North wall: the face at y = y0, the piece reaching no further than the margin from it.
+	if solid.call(cx, y0 - 1) and r.end.y - y0 <= margin:
+		return true
+	if solid.call(cx, y1 + 1) and (y1 + 1) - r.position.y <= margin:
+		return true
+	if solid.call(x0 - 1, cy) and r.end.x - x0 <= margin:
+		return true
+	if solid.call(x1 + 1, cy) and (x1 + 1) - r.position.x <= margin:
+		return true
+	return false
 
+
+# ---------------------------------------------------------------------------
+# Containers and anchors
+# ---------------------------------------------------------------------------
 
 ## World transform of a wall-standing piece: origin on the floor at the wall face, -Z into the room.
 static func _site_xform(tile: Vector2i, wall: Vector2i) -> Transform3D:
@@ -719,20 +690,12 @@ static func _site_xform(tile: Vector2i, wall: Vector2i) -> Transform3D:
 	return Transform3D(Basis(Vector3.UP, yaw), pos)
 
 
-## Top of the flat surface of a furniture piece: explicit meta for primitives, else the collider top.
-static func _surface_top(piece: Node3D) -> float:
-	if piece.has_meta("surface_top"):
-		return float(piece.get_meta("surface_top"))
-	var size: Vector3 = piece.get_meta("collider_size", Vector3.ONE)
-	var cy: float = piece.get_meta("collider_y", size.y * 0.5)
-	return cy + size.y * 0.5
-
-
-static func _build_containers(root: Node3D, gen: Dictionary, info: Dictionary, room_at: Dictionary, anchors: Array) -> void:
+static func _build_containers(root: Node3D, gen: Dictionary, info: Dictionary) -> void:
 	var holder := Node3D.new()
 	holder.name = "Containers"
 	root.add_child(holder)
 	var entries: Array = []
+	var anchors: Array = info.loose_anchors
 	for s in gen.get("containers", []):
 		var tile: Vector2i = s.tile
 		var type: String = s.type
@@ -760,194 +723,145 @@ static func _build_containers(root: Node3D, gen: Dictionary, info: Dictionary, r
 			continue
 		node.transform = xf
 		holder.add_child(node)
+		var wi := _wing_of(gen, tile.x, tile.y)
 		for c in list:
 			var ct: Node3D = c
 			entries.append({
 				"id": String(ct.get_meta("interact_id")), "type": type, "room_kind": String(s.room_kind),
+				"wing": wi.wing, "depth": wi.depth,
 				"node": ct, "position": (xf * ct.transform).origin if ct != node else xf.origin,
 				"slots": ct.slot_count(),
 			})
 		for a in node.get_meta("anchors", []):
 			var t: Transform3D = xf * (a.xform as Transform3D)
 			anchors.append({"position": t.origin, "yaw": xf.basis.get_euler().y, "surface": a.surface,
-					"room_kind": String(s.room_kind)})
+					"room_kind": String(s.room_kind), "wing": wi.wing, "depth": wi.depth})
 	info["containers"] = entries
 
 
-static func _add_bed_tray(parent: Node3D, bed: Node3D, tile: Vector2i, room_kind: String, anchors: Array) -> void:
-	var top := maxf(_surface_top(bed) + 0.3, 0.92)
-	var n := _piece("BedTray", Vector3(0.66, 0.05, 0.4), top - 0.025)
-	var steel := _mat(Color(0.62, 0.65, 0.68), 0.35)
-	steel.metallic = 0.7
-	var add := func(size: Vector3, pos: Vector3) -> void:
-		var b := _box(size, pos, Color.WHITE)
-		b.material_override = steel
-		n.add_child(b)
-	add.call(Vector3(0.62, 0.025, 0.38), Vector3(0.0, top - 0.0125, 0.0))
-	add.call(Vector3(0.62, 0.02, 0.01), Vector3(0.0, top + 0.01, -0.19))
-	add.call(Vector3(0.62, 0.02, 0.01), Vector3(0.0, top + 0.01, 0.19))
-	add.call(Vector3(0.04, top, 0.04), Vector3(0.62, top * 0.5, 0.0))
-	add.call(Vector3(0.3, 0.012, 0.04), Vector3(0.47, top - 0.03, 0.0))
-	add.call(Vector3(0.08, 0.03, 0.46), Vector3(0.62, 0.015, 0.0))
-	var pos := C.tile_to_world(tile.x, tile.y) + Vector3(-0.05, 0.0, 0.3)
-	_add_piece(parent, n, pos, 0.0)
-	anchors.append({"position": pos + Vector3(0.0, top, 0.0), "yaw": 0.0, "surface": "tray", "room_kind": room_kind})
-
-
-## Floor edges: a spot or two against a wall in each ordinary room, plus some along corridors.
-static func _add_floor_anchors(gen: Dictionary, room_at: Dictionary, anchors: Array) -> void:
+## Floor spots against walls: one or two per wing room, a few along each wing's hallways.
+static func _add_floor_anchors(gen: Dictionary, info: Dictionary) -> void:
 	var rows: PackedStringArray = gen.rows
-	var seed: int = gen.get("seed", 0)
-	var rng := MG.Rng.new((seed ^ 0x3c6ef372) & 0xFFFFFFFF)
-	var blocked := {}
+	var w: int = gen.width
+	var h: int = gen.height
+	var rng := MG.Rng.new((int(gen.seed) ^ 0x3c6ef372) & 0xFFFFFFFF)
+	var anchors: Array = info.loose_anchors
+	var blocked: PackedByteArray = gen.blocked
+	var used := {}
 	for s in gen.get("containers", []):
-		var t: Vector2i = s.tile
-		var d: Vector2i = s.wall
-		blocked[t.y * 4096 + t.x] = true
-		blocked[(t.y - d.y) * 4096 + (t.x - d.x)] = true
+		used[s.tile] = true
+		used[(s.tile as Vector2i) - (s.wall as Vector2i)] = true
 	var edge_dir := func(x: int, y: int) -> Vector2i:
-		if _at(rows, x, y) != "." or blocked.has(y * 4096 + x):
+		if _at(rows, x, y) != "." or blocked[y * w + x] != 0 or used.has(Vector2i(x, y)):
 			return Vector2i.ZERO
 		for dy in range(-1, 2):
 			for dx in range(-1, 2):
 				var c := _at(rows, x + dx, y + dy)
-				if c == "+" or c == "T" or MG.PROP_CHARS.has(c):
+				if c == "+" or c == "T" or c == "M":
 					return Vector2i.ZERO
 		for d in MG.DIRS:
-			if _at(rows, x + d.x, y + d.y) == "#" and _walkable(rows, x - d.x, y - d.y):
+			if _at(rows, x + d.x, y + d.y) == "#" and _open_char(_at(rows, x - d.x, y - d.y)) and blocked[(y - d.y) * w + x - d.x] == 0:
 				return d
 		return Vector2i.ZERO
-	var add := func(x: int, y: int, d: Vector2i, kind: String) -> void:
+	var add := func(x: int, y: int, d: Vector2i) -> void:
 		var pos := C.tile_to_world(x, y) + Vector3(d.x, 0.0, d.y) * (C.TILE * 0.5 - 0.24)
-		anchors.append({"position": pos, "yaw": atan2(float(d.x), float(d.y)), "surface": "floor", "room_kind": kind})
-	for r in gen.get("rooms", []):
-		if SAFE_ROOMS.has(r.kind):
+		var wi := _wing_of(gen, x, y)
+		anchors.append({"position": pos, "yaw": atan2(float(d.x), float(d.y)), "surface": "floor",
+				"room_kind": place_kind(gen, x, y), "wing": wi.wing, "depth": wi.depth})
+	for r in gen.rooms:
+		if SAFE_ROOMS.has(String(r.kind)):
 			continue
 		var cands: Array = []
 		for y in range(r.y, r.y + r.h):
 			for x in range(r.x, r.x + r.w):
 				var d: Vector2i = edge_dir.call(x, y)
-				if d != Vector2i.ZERO and room_at.get((y - d.y) * 4096 + (x - d.x), null) == r:
+				if d != Vector2i.ZERO:
 					cands.append([x, y, d])
 		rng.shuffle(cands)
 		var want := 2 if r.w * r.h >= 30 else 1
 		for i in mini(want, cands.size()):
-			add.call(cands[i][0], cands[i][1], cands[i][2], String(r.kind))
-	var corr: Array = []
-	for y in rows.size():
-		for x in rows[0].length():
-			if room_at.has(y * 4096 + x):
-				continue
-			var d: Vector2i = edge_dir.call(x, y)
-			if d != Vector2i.ZERO:
-				corr.append([x, y, d])
-	rng.shuffle(corr)
-	var placed: Array[Vector2i] = []
-	for c in corr:
-		if placed.size() >= CORRIDOR_FLOOR_ANCHORS:
-			break
-		var p := Vector2i(c[0], c[1])
-		var ok := true
-		for q in placed:
-			if absi(p.x - q.x) + absi(p.y - q.y) < 10:
-				ok = false
-				break
-		if ok:
-			placed.append(p)
-			add.call(p.x, p.y, c[2], "corridor")
-
-
-## Wall spots in a room: [tile, wall dir] for floor tiles with a room-bounding wall and no door beside them.
-static func _wall_spots(rows: PackedStringArray, r: Dictionary) -> Array:
-	var out: Array = []
-	for y in range(r.y, r.y + r.h):
-		for x in range(r.x, r.x + r.w):
-			if _at(rows, x, y) != ".":
-				continue
-			var door := false
-			for d in MG.DIRS:
-				if _at(rows, x + d.x, y + d.y) == "+":
-					door = true
-			if door:
-				continue
-			for d in MG.DIRS:
-				var nx: int = x + d.x
-				var ny: int = y + d.y
-				if _at(rows, nx, ny) == "#" and not (nx >= r.x and nx < r.x + r.w and ny >= r.y and ny < r.y + r.h):
-					out.append([Vector2i(x, y), d])
-	return out
-
-
-static func _spot(tile: Vector2i, d: Vector2i, off_wall: float) -> Dictionary:
-	var pos := C.tile_to_world(tile.x, tile.y) + Vector3(d.x, 0.0, d.y) * (C.TILE * 0.5 - off_wall)
-	return {"position": pos, "yaw": atan2(float(d.x), float(d.y))}
-
-
-static func _place_shelf_and_lectern(root: Node3D, gen: Dictionary, info: Dictionary) -> void:
-	var rows: PackedStringArray = gen.rows
-	var table: Vector3 = info.get("table", Vector3.ZERO)
-	for r in gen.get("rooms", []):
-		if r.kind == "or" and not info.has("shelf"):
-			# The wall spot nearest the table that keeps the doorways clear.
-			var best: Dictionary = {}
-			var best_d := INF
-			for s in _wall_spots(rows, r):
-				var spot := _spot(s[0], s[1], 0.25)
-				var dd: float = Vector2(spot.position.x - table.x, spot.position.z - table.z).length()
-				if dd < best_d - 0.001:
-					best_d = dd
-					best = spot
-			if not best.is_empty():
-				info["shelf"] = best
-		elif r.kind == "clockin" and not info.has("lectern"):
-			var keep: Array[Vector2i] = []
-			var doors: Array[Vector2i] = []
-			for y in range(r.y - 1, r.y + r.h + 1):
-				for x in range(r.x - 1, r.x + r.w + 1):
-					var c := _at(rows, x, y)
-					if c == "P" or c == "K" or c == "C":
-						keep.append(Vector2i(x, y))
-					elif c == "+":
-						doors.append(Vector2i(x, y))
-			var center := Vector2(r.x + r.w * 0.5, r.y + r.h * 0.5)
-			var best_tile := Vector2i(-1, -1)
-			var best_wall := Vector2i.ZERO
-			var best_d := INF
-			for s in _wall_spots(rows, r):
-				var t: Vector2i = s[0]
-				var ok := true
-				for k in keep:
-					if absi(k.x - t.x) + absi(k.y - t.y) < 2:
-						ok = false
-				for dr in doors:
-					if absi(dr.x - t.x) + absi(dr.y - t.y) < 3:
-						ok = false
-				if not ok:
+			add.call(cands[i][0], cands[i][1], cands[i][2])
+	for wd in gen.wings:
+		var corr: Array = []
+		var rr: Rect2i = wd.rect
+		for y in range(rr.position.y, rr.end.y):
+			for x in range(rr.position.x, rr.end.x):
+				if _zone(gen, x, y) != int(wd.zone) or not _room_of(gen, x, y).is_empty():
 					continue
-				var dd := Vector2(t.x + 0.5, t.y + 0.5).distance_to(center)
-				if dd < best_d - 0.001:
-					best_d = dd
-					best_tile = t
-					best_wall = s[1]
-			if best_tile.x >= 0:
-				var spot := _spot(best_tile, best_wall, 0.3)
-				info["lectern"] = spot
-				var lectern := _make_lectern()
-				var sb := StaticBody3D.new()
-				sb.name = "Lectern"
-				sb.collision_layer = C.L_WORLD
-				sb.collision_mask = 0
-				sb.position = spot.position
-				sb.rotation.y = spot.yaw
-				sb.add_child(lectern)
-				_fit_collider(lectern)
-				var size: Vector3 = lectern.get_meta("collider_size")
-				sb.add_child(_box_shape(size, Vector3(0.0, lectern.get_meta("collider_y"), 0.0), "Shape"))
-				root.add_child(sb)
-				info["lectern_node"] = sb
+				var d: Vector2i = edge_dir.call(x, y)
+				if d != Vector2i.ZERO:
+					corr.append([x, y, d])
+		rng.shuffle(corr)
+		var placed: Array[Vector2i] = []
+		var want := 2 + int(wd.depth)
+		for c in corr:
+			if placed.size() >= want:
+				break
+			var p := Vector2i(c[0], c[1])
+			var ok := true
+			for q in placed:
+				if absi(p.x - q.x) + absi(p.y - q.y) < 10:
+					ok = false
+					break
+			if ok:
+				placed.append(p)
+				add.call(p.x, p.y, c[2])
 
 
-## The guide worker's lectern when it exists, else a simple wooden reading stand.
+# ---------------------------------------------------------------------------
+# Landmarks: clock, lectern, tables, shelf and markers
+# ---------------------------------------------------------------------------
+
+static func _build_landmarks(root: Node3D, gen: Dictionary, info: Dictionary) -> void:
+	var spots: Dictionary = gen.spots
+	var rows: PackedStringArray = gen.rows
+	var player_spawns: Array[Vector3] = []
+	var tool_spawns: Array[Vector3] = []
+	var monster_spawns: Array[Vector3] = []
+	for ty in rows.size():
+		var row := rows[ty]
+		for tx in row.length():
+			match row[tx]:
+				"P": player_spawns.append(C.tile_to_world(tx, ty))
+				"T": tool_spawns.append(C.tile_to_world(tx, ty))
+				"M": monster_spawns.append(C.tile_to_world(tx, ty))
+	info["player_spawns"] = player_spawns
+	info["tool_spawns"] = tool_spawns
+	info["monster_spawns"] = monster_spawns
+
+	var tables: Array = []
+	for t in spots.get("tables", []):
+		tables.append({"position": _w(t.pos), "yaw": float(t.yaw), "kind": String(t.kind)})
+	info["tables"] = tables
+	info["table"] = Vector3.ZERO
+	info["table_yaw"] = 0.0
+	for t in tables:
+		if t.kind == "patient":
+			info["table"] = t.position
+			info["table_yaw"] = t.yaw
+			break
+	info["clock"] = _w(spots.clock.pos) if spots.has("clock") else Vector3.ZERO
+	if spots.has("shelf"):
+		info["shelf"] = {"position": _w(spots.shelf.pos), "yaw": float(spots.shelf.yaw)}
+	if spots.has("lectern"):
+		var spot := {"position": _w(spots.lectern.pos), "yaw": float(spots.lectern.yaw)}
+		info["lectern"] = spot
+		var lectern := _make_lectern()
+		var sb := StaticBody3D.new()
+		sb.name = "Lectern"
+		sb.collision_layer = C.L_WORLD
+		sb.collision_mask = 0
+		sb.position = spot.position
+		sb.rotation.y = spot.yaw
+		sb.add_child(lectern)
+		Legacy._fit_collider(lectern)
+		var size: Vector3 = lectern.get_meta("collider_size")
+		sb.add_child(_box_shape(size, Transform3D(Basis.IDENTITY, Vector3(0.0, lectern.get_meta("collider_y"), 0.0)), "Shape"))
+		root.add_child(sb)
+		info["lectern_node"] = sb
+
+
+## The guide worker's lectern when it exists, else the legacy wooden stand.
 static func _make_lectern() -> Node3D:
 	if ResourceLoader.exists(GUIDE_MODELS_PATH):
 		var s = load(GUIDE_MODELS_PATH)
@@ -958,235 +872,279 @@ static func _make_lectern() -> Node3D:
 					if n is Node3D:
 						return n
 					break
+	return Legacy._make_lectern()
+
+
+# ---------------------------------------------------------------------------
+# Lights
+# ---------------------------------------------------------------------------
+
+static func _build_lights(root: Node3D, gen: Dictionary, info: Dictionary) -> void:
+	var lights_root := Node3D.new()
+	lights_root.name = "Lights"
+	root.add_child(lights_root)
+	var seed: int = gen.get("seed", 0)
+	var out: Array[Dictionary] = []
+	for l in gen.lights:
+		var tile: Vector2i = l.tile
+		var mode := int(l.mode)
+		var kind: String = l.get("kind", "")
+		var node: Node3D
+		var pos: Vector3
+		if kind == "street" or kind == "canopy":
+			pos = _w(l.pos, 5.05 if kind == "street" else CANOPY_Y - 0.05)
+			node = _make_outdoor_light(kind)
+			node.name = "Outdoor_%d_%d" % [tile.x, tile.y]
+			node.position = pos
+		else:
+			pos = C.tile_to_world(tile.x, tile.y)
+			node = Legacy._make_light_fixture(mode, ((seed * 73856093) ^ (tile.x * 19349663) ^ (tile.y * 83492791)) & 0x7FFFFFFF)
+			node.name = "Fixture_%d_%d" % [tile.x, tile.y]
+			node.position = pos
+			node.add_to_group("fixture")
+			node.set_meta("mode", mode)
+			node.set_meta("tile", tile)
+			var bulb: OmniLight3D = node.get_node("Bulb")
+			if mode == 2:
+				# A dead fixture never lights anything: keep its panel, drop the light itself.
+				bulb.visible = false
+			elif l.get("bright", false):
+				bulb.light_energy = LIGHT_ENERGY * 1.7
+				bulb.omni_range = LIGHT_RANGE * 1.35
+				bulb.light_color = Color(0.96, 0.98, 1.0)
+		lights_root.add_child(node)
+		out.append({"tile": tile, "position": pos, "mode": mode, "node": node})
+	info["lights"] = out
+
+
+## Sodium street lamps and the canopy downlights: steady, warm, long reach. Not "fixture"s, so
+## they never flicker.
+static func _make_outdoor_light(kind: String) -> Node3D:
 	var n := Node3D.new()
-	n.name = "LecternFallback"
-	var wood := Color(0.29, 0.2, 0.13)
-	n.add_child(_box(Vector3(0.45, 0.05, 0.4), Vector3(0, 0.025, 0), wood))
-	n.add_child(_box(Vector3(0.12, 1.0, 0.12), Vector3(0, 0.52, 0), wood))
-	var top := _box(Vector3(0.52, 0.04, 0.4), Vector3(0, 1.08, 0), wood)
-	top.rotation.x = -0.3
-	n.add_child(top)
+	var bulb := OmniLight3D.new()
+	bulb.name = "Bulb"
+	bulb.omni_range = OUTDOOR_LIGHT_RANGE if kind == "street" else 7.0
+	bulb.light_energy = OUTDOOR_LIGHT_ENERGY if kind == "street" else 1.6
+	bulb.light_color = Color(1.0, 0.78, 0.52) if kind == "street" else Color(0.95, 0.95, 1.0)
+	bulb.light_volumetric_fog_energy = 0.35
+	bulb.shadow_enabled = false
+	bulb.distance_fade_enabled = true
+	bulb.distance_fade_begin = 55.0
+	bulb.distance_fade_length = 10.0
+	bulb.set_meta("mode", 0)
+	n.add_child(bulb)
+	if kind == "canopy":
+		var panel := MeshInstance3D.new()
+		panel.name = "Panel"
+		var bm := BoxMesh.new()
+		bm.size = Vector3(0.9, 0.04, 0.9)
+		panel.mesh = bm
+		panel.material_override = Legacy._mat(Color(0.9, 0.9, 0.9), 0.3, Color(1, 1, 1), 2.0)
+		n.add_child(panel)
 	return n
 
 
 # ---------------------------------------------------------------------------
-# Signage
+# Signs
 # ---------------------------------------------------------------------------
 
-static func _build_signs(rows: PackedStringArray, w: int, h: int, seed: int) -> Node3D:
+static func _build_signs(gen: Dictionary) -> Node3D:
 	var root := Node3D.new()
 	root.name = "Signs"
 	var cache := {}
 	var count := 0
-
-	# Exit signs where the outer ring turns a corner (the ends of each ring run).
-	var exits := [
-		Vector2i(2, 2), Vector2i(w - 3, 2), Vector2i(2, h - 3), Vector2i(w - 3, h - 3),
-	]
-	for e in exits:
+	var er: Rect2i = gen.entrance_rect
+	# Wing names over the entrance building's doorways into each wing.
+	for wd in gen.wings:
+		var entry: Array = wd.entry
+		var mid := (Vector2(entry[0]) + Vector2(entry[1])) * 0.5 + Vector2(0.5, 0.5)
+		var dir: Vector2i = wd.dir
+		var f := Vector2(-dir.x, -dir.y)
+		var pos := _w(mid - f * 0.51, SIGN_H)
+		root.add_child(_sign_node(WING_LABELS.get(String(wd.id), String(wd.id).to_upper()), pos, Defs.yaw_facing(-f), cache, "wing"))
+		count += 1
+	# Exit over the main doors, inside; "EMERGENCY" outside.
+	var ent: Dictionary = gen.spots.get("entrance", {})
+	if not ent.is_empty():
+		var p: Vector2 = ent.pos
+		root.add_child(_sign_node("EXIT", _w(p + Vector2(0, -0.51), SIGN_H), Defs.yaw_facing(Vector2(0, 1)), cache, "exit"))
+		root.add_child(_sign_node("EMERGENCY", _w(p + Vector2(0, 0.52), 3.6), Defs.yaw_facing(Vector2(0, -1)), cache, "emergency"))
+		count += 2
+	# Room names over their doors, on the hallway side.
+	for r in gen.rooms:
 		if count >= MAX_SIGNS:
 			break
-		if not _walkable(rows, e.x, e.y):
+		if int(r.zone) == S.ZONE_ENTRANCE and String(r.kind) != "or" and String(r.kind) != "break_room":
 			continue
-		var yaw := 0.0 if e.x < w / 2 else PI
-		root.add_child(_sign_node("EXIT", C.tile_to_world(e.x, e.y), yaw, cache, true))
+		var label: String = Rooms.KINDS.get(r.kind, {}).get("label", "")
+		if String(r.kind) == "or":
+			label = "OPERATING"
+		elif String(r.kind) == "break_room":
+			label = "STAFF ONLY"
+		if label == "":
+			continue
+		var door := Vector2i(-1, -1)
+		var f := Vector2.ZERO
+		if not (r.doors as Array).is_empty():
+			door = r.doors[0]
+		elif not (r.get("open", []) as Array).is_empty():
+			var op: Array = r.open
+			door = op[op.size() / 2]
+		if door.x < 0:
+			continue
+		for d in MG.DIRS:
+			var inside := door + d
+			if not _room_of(gen, inside.x, inside.y).is_empty() and int(_room_of(gen, inside.x, inside.y).id) == int(r.id):
+				f = Vector2(-d.x, -d.y)
+				break
+		if f == Vector2.ZERO:
+			continue
+		var pos := _w(Vector2(door) + Vector2(0.5, 0.5) + f * 0.51, SIGN_H)
+		root.add_child(_sign_node(label, pos, Defs.yaw_facing(-f), cache, "room"))
 		count += 1
-
-	# Department names over doors, sampled evenly so the budget is never blown.
-	var doors: Array[Vector2i] = []
-	for ty in range(1, h - 1):
-		for tx in range(1, w - 1):
-			if _at(rows, tx, ty) == "+":
-				doors.append(Vector2i(tx, ty))
-	var budget := MAX_SIGNS - count
-	if doors.size() > 0 and budget > 0:
-		var step := maxi(1, int(ceil(float(doors.size()) / float(budget))))
-		var i := 0
-		while i < doors.size() and count < MAX_SIGNS:
-			var d := doors[i]
-			# A door in a north/south wall run faces along Z; otherwise along X.
-			var horizontal_run := _at(rows, d.x - 1, d.y) == "#" or _at(rows, d.x + 1, d.y) == "#"
-			var yaw := 0.0 if horizontal_run else PI / 2.0
-			var text: String = DEPARTMENTS[(d.x * 31 + d.y * 17 + seed) % DEPARTMENTS.size()]
-			root.add_child(_sign_node(text, C.tile_to_world(d.x, d.y), yaw, cache, false))
-			count += 1
-			i += step
 	return root
 
 
-static func _sign_node(text: String, pos: Vector3, yaw: float, cache: Dictionary, is_exit: bool) -> Node3D:
+static func _sign_node(text: String, pos: Vector3, yaw: float, cache: Dictionary, style: String) -> Node3D:
 	var n := Node3D.new()
 	n.name = "Sign_" + text.replace(" ", "_")
-	n.position = Vector3(pos.x, SIGN_H, pos.z)
+	n.position = pos
 	n.rotation.y = yaw
 	var mi := MeshInstance3D.new()
 	var qm := QuadMesh.new()
-	qm.size = Vector2(0.9, 0.26) if not is_exit else Vector2(0.7, 0.26)
+	var wide := clampf(0.2 + text.length() * 0.085, 0.6, 1.4)
+	qm.size = Vector2(wide, 0.26)
+	if style == "emergency":
+		qm.size = Vector2(2.6, 0.55)
 	mi.mesh = qm
-	var key := text + ("|exit" if is_exit else "|dept")
-	var tex: ImageTexture = cache.get(key, null)
-	if tex == null:
-		var fg := Color(0.85, 1.0, 0.88) if is_exit else Color(0.92, 0.94, 0.96)
-		var bg := Color(0.03, 0.22, 0.08) if is_exit else Color(0.06, 0.09, 0.14)
-		tex = _text_texture(text, fg, bg)
-		cache[key] = tex
-	var m := StandardMaterial3D.new()
-	m.albedo_texture = tex
-	m.emission_enabled = true
-	m.emission_texture = tex
-	m.emission = Color(0.25, 1.0, 0.45) if is_exit else Color(0.55, 0.75, 1.0)
-	m.emission_energy_multiplier = 1.8
-	m.cull_mode = BaseMaterial3D.CULL_DISABLED
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mi.material_override = m
+	var key := text + "|" + style
+	var mat: StandardMaterial3D = cache.get(key, null)
+	if mat == null:
+		var fg := Color(0.92, 0.94, 0.96)
+		var bg := Color(0.06, 0.09, 0.14)
+		var glow := Color(0.55, 0.75, 1.0)
+		match style:
+			"exit":
+				fg = Color(0.85, 1.0, 0.88)
+				bg = Color(0.03, 0.22, 0.08)
+				glow = Color(0.25, 1.0, 0.45)
+			"emergency":
+				fg = Color(1.0, 0.95, 0.92)
+				bg = Color(0.45, 0.03, 0.03)
+				glow = Color(1.0, 0.3, 0.25)
+			"wing":
+				bg = Color(0.04, 0.16, 0.18)
+				glow = Color(0.5, 0.9, 0.85)
+		var tex := Legacy._text_texture(text, fg, bg, int(wide * 190.0) if style != "emergency" else 384, 56 if style != "emergency" else 82)
+		mat = StandardMaterial3D.new()
+		mat.albedo_texture = tex
+		mat.emission_enabled = true
+		mat.emission_texture = tex
+		mat.emission = glow
+		mat.emission_energy_multiplier = 1.6 if style != "room" else 0.9
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		cache[key] = mat
+	mi.material_override = mat
 	n.add_child(mi)
 	return n
 
 
-## Rasterise a short label into an ImageTexture with the fallback font. CPU only, so it
-## works under --headless where no rendering device is available.
-static func _text_texture(text: String, fg: Color, bg: Color, iw := 192, ih := 56) -> ImageTexture:
-	var img := Image.create(iw, ih, false, Image.FORMAT_RGBA8)
-	img.fill(bg)
-	var font := ThemeDB.fallback_font
-	var ts := TextServerManager.get_primary_interface()
-	if font != null and ts != null:
-		var rids := font.get_rids()
-		if rids.size() > 0:
-			var rid: RID = rids[0]
-			var fsize := 34
-			var glyphs: Array[int] = []
-			var total := 0.0
-			for i in text.length():
-				var gi := ts.font_get_glyph_index(rid, fsize, text.unicode_at(i), 0)
-				glyphs.append(gi)
-				total += ts.font_get_glyph_advance(rid, fsize, gi).x
-			var pen := Vector2(maxf(2.0, (iw - total) * 0.5), ih * 0.5 + fsize * 0.36)
-			for gi in glyphs:
-				_blit_glyph(img, ts, rid, fsize, gi, pen, fg)
-				pen.x += ts.font_get_glyph_advance(rid, fsize, gi).x
-	return ImageTexture.create_from_image(img)
+# ---------------------------------------------------------------------------
+# The contract keys (docs/CONTRACTS.md, "Hospital")
+# ---------------------------------------------------------------------------
 
-
-static func _blit_glyph(img: Image, ts: TextServer, rid: RID, fsize: int, glyph: int,
-		pen: Vector2, fg: Color) -> void:
-	var sz := Vector2i(fsize, 0)
-	var uv := ts.font_get_glyph_uv_rect(rid, sz, glyph)
-	if uv.size.x <= 0.0 or uv.size.y <= 0.0:
-		return
-	var tex_idx := ts.font_get_glyph_texture_idx(rid, sz, glyph)
-	if tex_idx < 0:
-		return
-	var atlas: Image = ts.font_get_texture_image(rid, sz, tex_idx)
-	if atlas == null or atlas.is_empty():
-		return
-	var off := ts.font_get_glyph_offset(rid, sz, glyph)
-	if atlas.get_format() != Image.FORMAT_RGBA8:
-		atlas.convert(Image.FORMAT_RGBA8)
-	var gx := int(uv.position.x)
-	var gy := int(uv.position.y)
-	var gw := int(uv.size.x)
-	var gh := int(uv.size.y)
-	for y in gh:
-		for x in gw:
-			var sxp := gx + x
-			var syp := gy + y
-			if sxp < 0 or syp < 0 or sxp >= atlas.get_width() or syp >= atlas.get_height():
-				continue
-			var src := atlas.get_pixel(sxp, syp)
-			# Mono/greyscale atlases store coverage in the colour channels.
-			var cov: float = src.a if src.a < 1.0 else maxf(src.r, maxf(src.g, src.b))
-			if cov <= 0.02:
-				continue
-			var dx := int(pen.x + off.x) + x
-			var dy := int(pen.y + off.y) + y
-			if dx < 0 or dy < 0 or dx >= img.get_width() or dy >= img.get_height():
-				continue
-			img.set_pixel(dx, dy, img.get_pixel(dx, dy).lerp(fg, cov))
+static func _fill_contract(gen: Dictionary, info: Dictionary) -> void:
+	var spots: Dictionary = gen.spots
+	if spots.has("or_screen"):
+		var o: Dictionary = spots.or_screen
+		info["or_screen"] = {"position": _w(o.pos, float(o.height)), "yaw": float(o.yaw), "size": o.size}
+	if spots.has("phone"):
+		info["phone"] = {"position": _w(spots.phone.pos, float(spots.phone.height)), "yaw": float(spots.phone.yaw)}
+	if spots.has("entrance"):
+		info["entrance"] = {"position": _w(spots.entrance.pos), "yaw": float(spots.entrance.yaw)}
+	var er: Rect2i = gen.entrance_rect
+	info["entrance_rect"] = Rect2(Vector2(er.position) * C.TILE, Vector2(er.size) * C.TILE)
+	var nr: Rect2i = gen.neutral_rect
+	info["neutral_rect"] = Rect2(Vector2(nr.position) * C.TILE, Vector2(nr.size) * C.TILE)
+	if spots.has("ambulance"):
+		info["ambulance"] = {"position": _w(spots.ambulance.pos), "yaw": float(spots.ambulance.yaw),
+				"vehicle": _w(spots.ambulance.vehicle)}
+	var spawns: Array = []
+	for p in spots.get("neutral_spawns", []):
+		spawns.append(_w(p))
+	var neutral := {"spawn_points": spawns}
+	if spots.has("shop"):
+		neutral["shop"] = {"position": _w(spots.shop.pos), "yaw": float(spots.shop.yaw), "vehicle": _w(spots.shop.vehicle)}
+	if spots.has("sell_bin"):
+		neutral["sell_bin"] = {"position": _w(spots.sell_bin.pos), "yaw": float(spots.sell_bin.yaw), "front": _w(spots.sell_bin.front)}
+	if spots.has("gold_pile"):
+		neutral["gold_pile"] = {"position": _w(spots.gold_pile.pos)}
+	info["neutral"] = neutral
+	var wings: Array = []
+	var names := {S.ZONE_ENTRANCE: "entrance", S.ZONE_OUTDOOR: "neutral"}
+	for wd in gen.wings:
+		var r: Rect2i = wd.rect
+		wings.append({"id": String(wd.id), "rect": Rect2(Vector2(r.position) * C.TILE, Vector2(r.size) * C.TILE),
+				"depth": int(wd.depth), "tile_rect": r})
+		names[int(wd.zone)] = String(wd.id)
+	info["wings"] = wings
+	var rooms: Array = []
+	for r in gen.rooms:
+		var doors: Array = []
+		for d in r.doors:
+			doors.append(C.tile_to_world(d.x, d.y))
+		for d in r.get("open", []):
+			doors.append(C.tile_to_world(d.x, d.y))
+		rooms.append({"id": int(r.id), "kind": String(r.kind), "wing": String(r.wing), "depth": int(r.depth),
+				"rect": Rect2(Vector2(r.x, r.y) * C.TILE, Vector2(r.w, r.h) * C.TILE),
+				"tiles": Rect2i(r.x, r.y, r.w, r.h), "doors": doors})
+	info["rooms"] = rooms
+	info["zones"] = {"grid": gen.zone, "width": int(gen.width), "height": int(gen.height), "names": names}
 
 
 # ---------------------------------------------------------------------------
 # Navigation
 # ---------------------------------------------------------------------------
 
-## A NavigationRegion3D over the walkable tiles. Baked from a polygon soup we build here
-## (never from the editor), with a hand-rolled fallback when no baking backend is present.
-static func _build_nav(rows: PackedStringArray, w: int, h: int) -> NavigationRegion3D:
+## One NavigationRegion3D over every open tile, with furniture that blocks movement cut out.
+static func _build_nav(gen: Dictionary, info: Dictionary) -> NavigationRegion3D:
 	var region := NavigationRegion3D.new()
 	region.name = "Nav"
 	var nm := NavigationMesh.new()
 	nm.agent_radius = NAV_AGENT_RADIUS
-	# agent_height is snapped to whole cell_height units by the baker; 1.75 = 7 cells.
 	nm.agent_height = 1.75
 	nm.agent_max_climb = 0.25
 	nm.agent_max_slope = 45.0
-	# Match the project's default 3D navigation map cell size so the region merges cleanly.
 	nm.cell_size = 0.25
 	nm.cell_height = 0.25
 	nm.geometry_parsed_geometry_type = NavigationMesh.PARSED_GEOMETRY_MESH_INSTANCES
-
+	var rows: PackedStringArray = gen.rows
+	var w: int = gen.width
+	var h: int = gen.height
+	var blocked: PackedByteArray = gen.blocked
 	var faces := PackedVector3Array()
 	for ty in h:
 		for tx in w:
-			if not _walkable(rows, tx, ty):
+			if not _open_char(rows[ty][tx]) or blocked[ty * w + tx] != 0:
 				continue
 			var x0 := tx * C.TILE
 			var x1 := x0 + C.TILE
 			var z0 := ty * C.TILE
 			var z1 := z0 + C.TILE
-			var a := Vector3(x0, 0.0, z0)
-			var b := Vector3(x1, 0.0, z0)
-			var c := Vector3(x1, 0.0, z1)
-			var d := Vector3(x0, 0.0, z1)
-			faces.append_array([a, b, c, a, c, d])
-
+			faces.append_array([Vector3(x0, 0, z0), Vector3(x1, 0, z0), Vector3(x1, 0, z1),
+					Vector3(x0, 0, z0), Vector3(x1, 0, z1), Vector3(x0, 0, z1)])
 	var baked := false
 	if ClassDB.class_exists("NavigationMeshSourceGeometryData3D"):
 		var src: NavigationMeshSourceGeometryData3D = NavigationMeshSourceGeometryData3D.new()
 		src.add_faces(faces, Transform3D.IDENTITY)
+		# Furniture that does not fill its tiles (chairs, carts, gurneys along a wall) is left in
+		# the navigation mesh on purpose: cut out, even exactly, it split rooms into islands the
+		# baker could not join. Agents slide past it on its colliders.
 		NavigationServer3D.bake_from_source_geometry_data(nm, src)
 		baked = nm.get_polygon_count() > 0
 		if baked:
-			_drop_nav_to_floor(nm)
+			Legacy._drop_nav_to_floor(nm)
 	if not baked:
-		_nav_from_tiles(nm, rows, w, h)
+		Legacy._nav_from_tiles(nm, rows, w, h)
 	region.navigation_mesh = nm
 	return region
-
-
-## Recast lifts the baked surface by a voxel or two; put it back on the floor plane.
-static func _drop_nav_to_floor(nm: NavigationMesh) -> void:
-	var vs := nm.get_vertices()
-	if vs.is_empty():
-		return
-	var min_y := vs[0].y
-	for v in vs:
-		min_y = minf(min_y, v.y)
-	if absf(min_y) < 0.001:
-		return
-	for i in vs.size():
-		vs[i] = Vector3(vs[i].x, vs[i].y - min_y, vs[i].z)
-	nm.set_vertices(vs)
-
-
-## Fallback: one convex quad per walkable tile, corners shared so the tiles stitch together.
-static func _nav_from_tiles(nm: NavigationMesh, rows: PackedStringArray, w: int, h: int) -> void:
-	nm.clear_polygons()
-	var verts := PackedVector3Array()
-	var index := {}
-	var polys: Array = []
-	for ty in h:
-		for tx in w:
-			if not _walkable(rows, tx, ty):
-				continue
-			var ids := PackedInt32Array()
-			for c in [Vector2i(tx, ty), Vector2i(tx + 1, ty), Vector2i(tx + 1, ty + 1), Vector2i(tx, ty + 1)]:
-				var key: int = c.y * (w + 1) + c.x
-				if not index.has(key):
-					index[key] = verts.size()
-					verts.append(Vector3(c.x * C.TILE, 0.0, c.y * C.TILE))
-				ids.append(index[key])
-			polys.append(ids)
-	nm.set_vertices(verts)
-	for p in polys:
-		nm.add_polygon(p)

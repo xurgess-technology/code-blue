@@ -3,26 +3,33 @@ extends RefCounted
 ## Decides where every item stack starts a shift (see docs/CONTRACTS.md, "Item spawning").
 ##
 ## Rules `plan()` guarantees, all checked by tools/spawncheck.gd:
-##   - every consumable the ailment needs totals more than Procedures.requirements(), in at
-##     least two stacks at two different places (different container units / anchors);
-##   - every needed tool exists at least once;
-##   - nothing needed spawns in the OR, its anterooms or the clock-in room;
+##   - every consumable the ailment needs totals at least twice Procedures.requirements(), in
+##     at least four stacks at different places (different container units / anchors);
+##   - every needed tool exists at least twice;
+##   - every wing holds at least one stack of something the case needs;
+##   - nothing needed spawns in the entrance building (OR, scrub room, break room, locker room,
+##     lobby, its halls) or the neutral area outside;
 ##   - at least one needed item is far (FAR_M) from the table;
 ##   - items the ailment does not need spawn too, as red herrings;
 ##   - stack counts are inside Items batch ranges; one stack per container slot and per anchor;
 ##   - choice between container types and loose surfaces follows Items.ITEMS[kind].found;
 ##   - the same seed, shift, ailment and level always give the same plan.
+## Extra needed stacks lean toward the deeper wings.
 ##
 ## Entries: {kind, count, container_id ("" when loose), slot, anchor (-1 when in a container)}.
+## Levels without wings (the fallback ward, tool levels) count as one wing.
 
 const ItemsData := preload("res://scripts/items.gd")
 const ProceduresData := preload("res://scripts/procedures.gd")
 
-const SAFE_ROOMS := ["or", "anteroom", "clockin"]
+const SAFE_ROOMS := ["or", "scrub_room", "break_room", "locker_room", "lobby", "entrance", "neutral", "anteroom", "clockin"]
 ## Horizontal metres from the table that count as "far".
 const FAR_M := 24.0
 ## Stacks of one kind try to stay at least this far apart.
 const SPREAD_M := 12.0
+## Needed supply, as a multiple of the old amounts.
+const TOOL_COPIES := 2
+const CONSUMABLE_STACKS := [4, 6]
 
 
 static func plan(seed_value: int, shift: int, ailment_id: String, info: Dictionary) -> Array:
@@ -34,7 +41,6 @@ static func plan(seed_value: int, shift: int, ailment_id: String, info: Dictiona
 	var used := {}
 	var out: Array = []
 
-	# Needed kinds first, in a stable order, so they get the pick of the locations.
 	var needed: Array = []
 	var herrings: Array = []
 	for kind in ItemsData.SURGICAL:
@@ -42,31 +48,67 @@ static func plan(seed_value: int, shift: int, ailment_id: String, info: Dictiona
 			needed.append(kind)
 		else:
 			herrings.append(kind)
-	var far_kind: String = needed[rng.randi_range(0, needed.size() - 1)] if not needed.is_empty() else ""
 
+	# Every needed stack, interleaved by kind so the first few cover every kind.
+	var per_kind := {}
+	var longest := 0
 	for kind in needed:
-		var counts := _needed_counts(kind, int(need[kind]), rng)
-		var placed: Array[Vector3] = []
-		var units := {}
-		for i in counts.size():
-			var must_far: bool = kind == far_kind and i == 0
-			var loc := _choose(kind, locs, used, units, placed, rng, table, must_far, true)
-			if loc.is_empty():
-				continue
-			_take(loc, used, units, placed)
-			out.append(_entry(kind, counts[i], loc))
+		per_kind[kind] = _needed_counts(kind, int(need[kind]), rng)
+		longest = maxi(longest, (per_kind[kind] as Array).size())
+	var stacks: Array = []
+	for i in longest:
+		for kind in needed:
+			var counts: Array = per_kind[kind]
+			if i < counts.size():
+				stacks.append({"kind": kind, "count": counts[i], "first": i == 0})
+
+	# Which wing each stack aims for: one for every wing first, then weighted toward depth.
+	var wings := _wings(locs)
+	var order: Array = wings.keys()
+	order.sort()
+	_shuffle(order, rng)
+	var targets: Array = []
+	for i in stacks.size():
+		if i < order.size():
+			targets.append(order[i])
+		else:
+			targets.append(_weighted_wing(wings, order, rng))
+	# The stack sent to the deepest wing is the one that must be far from the table.
+	var far_i := -1
+	var far_depth := -1
+	for i in mini(stacks.size(), order.size()):
+		if int(wings[order[i]]) > far_depth:
+			far_depth = int(wings[order[i]])
+			far_i = i
+	if far_i < 0 and not stacks.is_empty():
+		far_i = 0
+
+	var placed := {}
+	var units := {}
+	for i in stacks.size():
+		var s: Dictionary = stacks[i]
+		var kind: String = s.kind
+		if not placed.has(kind):
+			placed[kind] = [] as Array[Vector3]
+			units[kind] = {}
+		var loc := _choose(kind, locs, used, units[kind], placed[kind], rng, table, i == far_i, true, targets[i])
+		if loc.is_empty():
+			continue
+		var pl: Array[Vector3] = placed[kind]
+		_take(loc, used, units[kind], pl)
+		out.append(_entry(kind, int(s.count), loc))
 
 	for kind in herrings:
 		var copies := 1
 		if ItemsData.is_consumable(kind):
 			copies = rng.randi_range(1, 2)
-		var placed: Array[Vector3] = []
-		var units := {}
+		var pl: Array[Vector3] = []
+		var un := {}
 		for i in copies:
-			var loc := _choose(kind, locs, used, units, placed, rng, table, false, true)
+			var loc := _choose(kind, locs, used, un, pl, rng, table, false, true, "")
 			if loc.is_empty():
 				continue
-			_take(loc, used, units, placed)
+			_take(loc, used, un, pl)
 			out.append(_entry(kind, _batch(kind, rng), loc))
 	return out
 
@@ -109,7 +151,7 @@ static func shortfall_plan(seed_value: int, need: Dictionary, have: Dictionary, 
 # Locations
 # ---------------------------------------------------------------------------
 
-## Every place a stack can go: [{key, unit, container_id, slot, anchor, type, room_kind, position}].
+## Every place a stack can go: [{key, unit, container_id, slot, anchor, type, room_kind, wing, depth, position}].
 ## `type` is a container type, or "loose:<surface>" for an anchor.
 static func _locations(info: Dictionary) -> Array:
 	var out: Array = []
@@ -127,13 +169,47 @@ static func _locations(info: Dictionary) -> Array:
 		var unit := "%s_%s_%s" % [parts[0], parts[1], parts[2]] if parts.size() >= 4 else id
 		for s in n:
 			out.append({"key": "%s:%d" % [id, s], "unit": unit, "container_id": id, "slot": s, "anchor": -1,
-					"type": String(c.type), "room_kind": String(c.get("room_kind", "")), "position": pos})
+					"type": String(c.type), "room_kind": String(c.get("room_kind", "")),
+					"wing": String(c.get("wing", "")), "depth": int(c.get("depth", 1)), "position": pos})
 	var anchors: Array = info.get("loose_anchors", [])
 	for i in anchors.size():
 		var a: Dictionary = anchors[i]
 		out.append({"key": "anchor:%d" % i, "unit": "anchor:%d" % i, "container_id": "", "slot": 0, "anchor": i,
-				"type": "loose:" + String(a.surface), "room_kind": String(a.get("room_kind", "")), "position": a.position})
+				"type": "loose:" + String(a.surface), "room_kind": String(a.get("room_kind", "")),
+				"wing": String(a.get("wing", "")), "depth": int(a.get("depth", 1)), "position": a.position})
 	return out
+
+
+## Wing id -> depth, for every wing a needed item could go in.
+static func _wings(locs: Array) -> Dictionary:
+	var out := {}
+	for loc in locs:
+		if SAFE_ROOMS.has(loc.room_kind):
+			continue
+		out[String(loc.wing)] = maxi(1, int(loc.depth))
+	return out
+
+
+static func _weighted_wing(wings: Dictionary, order: Array, rng: RandomNumberGenerator) -> String:
+	if order.is_empty():
+		return ""
+	var total := 0.0
+	for w in order:
+		total += 1.0 + 0.6 * float(wings[w])
+	var roll := rng.randf() * total
+	for w in order:
+		roll -= 1.0 + 0.6 * float(wings[w])
+		if roll <= 0.0:
+			return w
+	return order[order.size() - 1]
+
+
+static func _shuffle(arr: Array, rng: RandomNumberGenerator) -> void:
+	for i in range(arr.size() - 1, 0, -1):
+		var j := rng.randi_range(0, i)
+		var t = arr[i]
+		arr[i] = arr[j]
+		arr[j] = t
 
 
 static func _legal(kind: String, loc: Dictionary, used: Dictionary) -> bool:
@@ -155,12 +231,15 @@ static func _flat_dist(a: Vector3, b: Vector3) -> float:
 
 
 ## Weighted pick: first a category from `found` (only categories with a free legal spot),
-## then a spot inside it, preferring spots away from this kind's other stacks.
+## then a spot inside it, preferring spots away from this kind's other stacks. `wing` ("" for
+## any) narrows the search to one wing while that wing still has a legal spot.
 static func _choose(kind: String, locs: Array, used: Dictionary, units: Dictionary, placed: Array[Vector3],
-		rng: RandomNumberGenerator, table: Vector3, must_far: bool, distinct_units: bool) -> Dictionary:
+		rng: RandomNumberGenerator, table: Vector3, must_far: bool, distinct_units: bool, wing: String) -> Dictionary:
 	var pools := {}
 	for loc in locs:
 		if not _legal(kind, loc, used):
+			continue
+		if wing != "" and String(loc.wing) != wing:
 			continue
 		if distinct_units and units.has(loc.unit):
 			continue
@@ -171,10 +250,16 @@ static func _choose(kind: String, locs: Array, used: Dictionary, units: Dictiona
 			pools[cat] = []
 		pools[cat].append(loc)
 	if pools.is_empty():
+		if must_far and wing != "":
+			var anywhere := _choose(kind, locs, used, units, placed, rng, table, true, distinct_units, "")
+			if not anywhere.is_empty() and _flat_dist(anywhere.position, table) >= FAR_M:
+				return anywhere
 		if must_far:
-			return _choose(kind, locs, used, units, placed, rng, table, false, distinct_units)
+			return _choose(kind, locs, used, units, placed, rng, table, false, distinct_units, wing)
 		if distinct_units:
-			return _choose(kind, locs, used, units, placed, rng, table, false, false)
+			return _choose(kind, locs, used, units, placed, rng, table, false, false, wing)
+		if wing != "":
+			return _choose(kind, locs, used, units, placed, rng, table, false, true, "")
 		return {}
 	var found: Dictionary = ItemsData.def(kind).get("found", {})
 	var cats := pools.keys()
@@ -245,20 +330,21 @@ static func _batch(kind: String, rng: RandomNumberGenerator) -> int:
 	return rng.randi_range(int(b[0]), int(b[1]))
 
 
-## Stack sizes for a needed kind: tools are one; consumables are two or three batches whose
-## total is always more than the procedure uses.
+## Stack sizes for a needed kind: tools come TOOL_COPIES times; consumables in 4 to 6 batches
+## totalling at least twice what the procedure uses.
 static func _needed_counts(kind: String, need: int, rng: RandomNumberGenerator) -> Array[int]:
 	var out: Array[int] = []
 	if not ItemsData.is_consumable(kind):
-		out.append(1)
+		for i in TOOL_COPIES:
+			out.append(1)
 		return out
-	var stacks := rng.randi_range(2, 3)
+	var stacks := rng.randi_range(CONSUMABLE_STACKS[0], CONSUMABLE_STACKS[1])
 	var total := 0
 	for i in stacks:
 		var c := _batch(kind, rng)
 		out.append(c)
 		total += c
-	while total <= need:
+	while total < need * 2:
 		var c := _batch(kind, rng)
 		out.append(c)
 		total += c

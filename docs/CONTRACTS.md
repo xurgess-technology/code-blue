@@ -93,11 +93,17 @@ state anywhere else. Opening calls `game.emit_noise(pos, 0.5, "container")` on t
 `HospitalBuilder.build(gen, info)` additionally fills:
 
 ```gdscript
-info["containers"]    = [{id, type, room_kind, node}]
-info["loose_anchors"] = [{position: Vector3, yaw: float, surface: "counter"|"tray"|"gurney"|"floor", room_kind: String}]
-info["shelf"]         = {position: Vector3, yaw: float}   # OR supply shelf, near the table
-info["lectern"]       = {position: Vector3, yaw: float}   # in the clock-in room
+info["containers"]    = [{id, type, room_kind, wing, depth, node, position, slots}]
+info["loose_anchors"] = [{position: Vector3, yaw: float, surface: "counter"|"tray"|"gurney"|"floor", room_kind: String, wing, depth}]
+info["shelf"]         = {position: Vector3, yaw: float}   # OR supply shelf, near the tables
+info["lectern"]       = {position: Vector3, yaw: float}   # in the break room
 ```
+
+Sweep 2: which room kinds a container type stands in is `CONTAINER_ROOMS` in
+`scripts/level/room_furnish.gd` (`Items.CONTAINER_TYPES[type].rooms` still names the old kinds
+and is not used for placement). Every wing has a supply closet (medicine fridge, drawer unit,
+often a pegboard), a nurse station (station drawers, a trauma bag), a janitor closet (pegboard)
+and at least one trauma bag on a hallway wall.
 
 ## Item spawning (containers worker)
 
@@ -110,11 +116,14 @@ static func shortfall_plan(seed: int, need: Dictionary, have: Dictionary, info: 
 # `occupied` is {"ct_id:slot": true, "anchor:<i>": true}; `avoid` is an Array[Vector3] to stay far from.
 ```
 
-Rules: every consumable gets more than `Procedures.requirements()` in total, split across at least
-two locations; every needed tool exists at least once; nothing needed spawns in the OR, its
-anterooms or the clock-in room; at least one needed item is far from the table; items the
-current ailment does not need also spawn as red herrings; spawn counts respect `Items` batch
-sizes; deterministic from the seed. The game instantiates `WorldItem`s from the plan.
+Rules (sweep 2): every needed consumable totals at least twice `Procedures.requirements()`, in
+4 to 6 stacks at different places; every needed tool exists twice; every wing holds at least one
+stack of something the case needs, and extra stacks lean toward deeper wings; nothing needed
+spawns in `ItemSpawner.SAFE_ROOMS` (the entrance building's rooms and halls, the neutral area);
+at least one needed item is far from the table; items the current ailment does not need also
+spawn as red herrings; spawn counts respect `Items` batch sizes; deterministic from the seed.
+Levels without `wing` on their containers and anchors count as one wing. The game instantiates
+`WorldItem`s from the plan. `tools/spawncheck.gd` checks all of it.
 
 ## World items (main session)
 
@@ -286,6 +295,71 @@ static func make_lectern() -> Node3D     # visual only, origin at the floor
 The main scene opens the guide when the local player presses R while holding the guide or
 looking at it. While it is open the mouse is visible and the player cannot move; in co-op the
 world keeps running.
+
+## Hospital (hospital worker, sweep 2 wave 1)
+
+`MapGen.generate(seed)` (`scripts/mapgen.gd`, parts in `scripts/level/`) lays out one floor:
+an entrance building (28 x 20 tiles: main hall, break room, locker room, OR, scrub room, lobby),
+three or four wings around it (`west`, `north` or `north_west` + `north_east`, `east`) and the
+neutral area outside the main doors. `HospitalBuilder.build(gen, info)` builds it and fills
+`info`. Maps without furniture data (hand-made tile maps, `tools/monster_lab.gd`) go through
+`scripts/level/legacy_builder.gd` with the old keys only.
+
+Tiles: `#` wall, `.` indoor floor, `+` doorway, `,` outdoor ground, `=` the fence, `P` player
+spawn, `T` tool spawn, `M` monster spawn. Walkable: `. + , P T M`. Doorways are open (no door
+leaves) and one tile wide; open rooms (nurse station, waiting room, cafeteria) have archways.
+
+`level_info`, world metres, +Y up; positions are on the floor unless noted:
+
+```gdscript
+# kept from before
+player_spawns: Array[Vector3]   # 4, in the break room (the current loop starts there;
+                                # wave 2 moves the start to neutral.spawn_points)
+tool_spawns, monster_spawns     # monster spawns: wing hallways only, never inside entrance_rect or the neutral area
+table: Vector3                  # == tables[0].position, the first patient table; table_pos() still returns it
+table_yaw: float                # the tables' long axis runs along X (0.0)
+clock: Vector3                  # break room; clock_pos() unchanged (downed removed the Re-Gen Pod)
+shelf, lectern: {position, yaw}; lectern_node
+lights: [{tile, position, mode, node}]   # node's child OmniLight3D "Bulb"; street lamps and canopy lights are
+                                         # included (mode 0) but are not in group "fixture" and never flicker
+containers, loose_anchors       # see Containers; both carry wing and depth
+rows, size, nav_region          # nav_region: one NavigationRegion3D over the whole map
+# new
+tables: [{position: Vector3, yaw: float, kind: "patient" | "player"}]   # 2 patient tables, then the player table, all in the OR
+or_screen: {position: Vector3 (centre of the screen, on the OR wall, at its height), yaw (faces into the OR), size: Vector2 (2.2 x 1.3)}
+phone: {position: Vector3 (the wall phone, at its height, on the break room wall), yaw (faces into the room)}
+entrance: {position (just outside the main doors), yaw (faces out)}
+entrance_rect: Rect2            # world XZ of the whole entrance building, walls included
+ambulance: {position (by the canopy, where paramedics get out), yaw (faces the doors), vehicle: Vector3 (the parked ambulance)}
+neutral: {spawn_points: [Vector3] (8, around the gold pile), shop: {position (the van's open rear), yaw (faces away from the van), vehicle},
+          sell_bin: {position (the dumpster), yaw, front: Vector3 (where to stand)}, gold_pile: {position}}
+neutral_rect: Rect2             # world XZ of the fenced neutral area
+wings: [{id, rect: Rect2 (world XZ), depth: int, tile_rect: Rect2i}]   # depth 1 = shallowest; deeper = bigger area
+rooms: [{id, kind, wing, depth, rect: Rect2 (world XZ, interior), tiles: Rect2i, doors: [Vector3]}]
+zones: {grid, width, height, names}   # HospitalBuilder.zone_of(info, pos) -> wing id, "entrance", "neutral" or ""
+```
+
+- Room kinds: `or`, `scrub_room`, `break_room`, `locker_room`, `lobby` (wing `"entrance"`,
+  depth 0) and `patient_room`, `supply_closet`, `pharmacy`, `nurse_station`, `waiting_room`,
+  `restroom`, `office`, `lab`, `radiology`, `morgue`, `janitor_closet`, `cafeteria`. Anchors and
+  containers outside rooms report `room_kind` `"corridor"` (wing hallways), `"entrance"` or
+  `"neutral"`.
+- Deeper wings are bigger (depth is ordered by area), darker (`MapGen.LIGHTS_WING`: fewer steady
+  fixtures, more dead ones) and get more of the needed supply. The OR's fixtures are always on
+  and brighter; entrance fixtures are mostly steady.
+- Furniture is data (`gen.furniture`: kind, tile-space position, yaw, room), sized in
+  `scripts/level/piece_defs.gd` and drawn by `scripts/level/piece_factory.gd` (Assets model or
+  primitive) as MultiMeshes per 12-tile chunk. Pieces that `block` fill their tiles (the
+  navigation mesh leaves them out). Other pieces only get a collider when they stand against a
+  wall; a chair or plant in the open has none, so agents on the navigation mesh never snag.
+  Wall corners have chamfered colliders.
+- Monsters are placed only on wing hallways, but they still wander anywhere on the navigation
+  mesh (`Monster.random_nav_point`). Keeping them out of the entrance or the neutral area is the
+  loop's call (`zone_of` tells where a position is).
+- Tests: `tools/mapcheck.gd` (hundreds of seeds: `MapGen.validate` plus builds with contract keys,
+  navigation coverage, paths from the neutral area to the OR and every wing, every container and
+  anchor in reach), `tools/spawncheck.gd`, and windowed screenshots with
+  `godot --path . tools/hospitalshot.tscn --resolution 1280x720 -- --seed=N [--only=a,b]`.
 
 ## Settings (settings worker, sweep 2)
 

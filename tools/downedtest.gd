@@ -70,8 +70,17 @@ func _hospital() -> void:
 	_check(Items.is_surgical("suture_kit") and ItemModels.tint_material("suture_kit") != null, "suture kits are surgical and tinted teal")
 	_check(not game.player_table.is_empty() and game.find_interactable("player_table") != null, "a player table stands in the OR (%s)" % str(game.player_table))
 	if not game.player_table.is_empty():
-		var d := Vector2(game.player_table.position.x - game.table_pos().x, game.player_table.position.z - game.table_pos().z).length()
-		_check(d > 2.0 and d < 4.5, "the fallback player table is beside the OR table (%.1f m)" % d)
+		var entry := {}
+		for tb in game.level_info.get("tables", []):
+			if String(tb.get("kind", "")) == "player":
+				entry = tb
+		if entry.is_empty():
+			var d := Vector2(game.player_table.position.x - game.table_pos().x, game.player_table.position.z - game.table_pos().z).length()
+			_check(d > 2.0 and d < 4.5, "the fallback player table is beside the OR table (%.1f m)" % d)
+		else:
+			_check(game.player_table.position.distance_to(entry.position) < 0.01 and game.level.find_child("PlayerTable", true, false) == null,
+				"the level's own player table is used, no extra model (top %.2f m)" % float(game.player_table.top))
+			_check(float(game.player_table.top) > 0.7 and float(game.player_table.top) < 1.2, "the player table top was found on the level's table")
 	_check(Procedures.patient_ailments() == ["amputation", "gunshot"] and not Procedures.patient_ailments().has("stitches"), "patients never roll stitches")
 
 	# 0 HP downs.

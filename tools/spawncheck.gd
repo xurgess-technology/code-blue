@@ -89,13 +89,14 @@ func _loc_of(e: Dictionary, info: Dictionary, by_id: Dictionary) -> Dictionary:
 		if c.is_empty():
 			return {}
 		return {"key": "%s:%d" % [e.container_id, e.slot], "unit": "%s_%s_%s" % Array(String(e.container_id).split("_")).slice(0, 3),
-				"type": c.type, "room_kind": c.room_kind, "position": c.position, "slots": c.slots}
+				"type": c.type, "room_kind": c.room_kind, "position": c.position, "slots": c.slots,
+				"wing": String(c.get("wing", ""))}
 	var anchors: Array = info.loose_anchors
 	if e.anchor < 0 or e.anchor >= anchors.size():
 		return {}
 	var a: Dictionary = anchors[e.anchor]
 	return {"key": "anchor:%d" % e.anchor, "unit": "anchor:%d" % e.anchor, "type": "loose:" + a.surface,
-			"room_kind": a.room_kind, "position": a.position, "slots": 1}
+			"room_kind": a.room_kind, "position": a.position, "slots": 1, "wing": String(a.get("wing", ""))}
 
 
 func _legal_for(kind: String, loc: Dictionary) -> bool:
@@ -145,6 +146,7 @@ func _check_plan(seed: int, ailment: String, info: Dictionary, p: Array, gen: Di
 	var loose := 0
 	var far_needed := false
 	var far_best := 0.0
+	var needed_wings := {}
 	for e in p:
 		if not ItemsData.exists(e.kind):
 			_fail("%s: unknown kind %s" % [tag, e.kind])
@@ -173,8 +175,9 @@ func _check_plan(seed: int, ailment: String, info: Dictionary, p: Array, gen: Di
 			units[e.kind] = {}
 		units[e.kind][loc.unit] = true
 		if need.has(e.kind):
-			if ["or", "anteroom", "clockin"].has(loc.room_kind):
+			if Spawner.SAFE_ROOMS.has(loc.room_kind):
 				_fail("%s: needed %s spawns in the %s" % [tag, e.kind, loc.room_kind])
+			needed_wings[String(loc.wing)] = int(needed_wings.get(String(loc.wing), 0)) + 1
 			var d := _flat(loc.position, table)
 			far_best = maxf(far_best, d)
 			if d >= Spawner.FAR_M:
@@ -182,13 +185,17 @@ func _check_plan(seed: int, ailment: String, info: Dictionary, p: Array, gen: Di
 	for kind in need.keys():
 		var have: int = int(totals.get(kind, 0))
 		if ItemsData.is_consumable(kind):
-			if have <= int(need[kind]):
-				_fail("%s: %s totals %d, needs more than %d" % [tag, kind, have, need[kind]])
-			if units.get(kind, {}).size() < 2:
-				_fail("%s: %s is in fewer than two places" % [tag, kind])
+			if have < int(need[kind]) * 2:
+				_fail("%s: %s totals %d, needs at least twice %d" % [tag, kind, have, need[kind]])
+			if units.get(kind, {}).size() < Spawner.CONSUMABLE_STACKS[0]:
+				_fail("%s: %s is in only %d places" % [tag, kind, units.get(kind, {}).size()])
 			_count("surplus " + kind + " (" + ailment + ")", have - int(need[kind]))
-		elif have < 1:
-			_fail("%s: needed tool %s is missing" % [tag, kind])
+		elif have < Spawner.TOOL_COPIES:
+			_fail("%s: needed tool %s exists only %d times" % [tag, kind, have])
+	for wd in info.get("wings", []):
+		if int(needed_wings.get(String(wd.id), 0)) < 1:
+			_fail("%s: wing %s holds nothing the case needs" % [tag, wd.id])
+		_count("needed stacks in a depth-%d wing" % int(wd.depth), int(needed_wings.get(String(wd.id), 0)))
 	for kind in ItemsData.SURGICAL:
 		if not need.has(kind) and int(totals.get(kind, 0)) < 1:
 			_fail("%s: no red herring %s" % [tag, kind])
@@ -244,7 +251,7 @@ func _check_shortfall(seed: int, ailment: String, info: Dictionary, p: Array) ->
 		used[loc.key] = true
 		if not _legal_for(e.kind, loc):
 			_fail("%s: %s in illegal %s" % [tag, e.kind, loc.type])
-		if ["or", "anteroom", "clockin"].has(loc.room_kind):
+		if Spawner.SAFE_ROOMS.has(loc.room_kind):
 			_fail("%s: %s restored into the %s" % [tag, e.kind, loc.room_kind])
 		var b: Array = ItemsData.def(e.kind).batch
 		if e.count < int(b[0]) or e.count > int(b[1]):
@@ -256,12 +263,12 @@ func _check_shortfall(seed: int, ailment: String, info: Dictionary, p: Array) ->
 		for c in info.containers:
 			for s in c.slots:
 				var l := {"key": "%s:%d" % [c.id, s], "type": c.type, "position": c.position, "room_kind": c.room_kind}
-				if not prior.has(l.key) and _legal_for(e.kind, l) and not ["or", "anteroom", "clockin"].has(c.room_kind):
+				if not prior.has(l.key) and _legal_for(e.kind, l) and not Spawner.SAFE_ROOMS.has(c.room_kind):
 					ds.append(minf(_flat(c.position, avoid[0]), _flat(c.position, avoid[1])))
 		for i in info.loose_anchors.size():
 			var a: Dictionary = info.loose_anchors[i]
 			var l := {"type": "loose:" + a.surface}
-			if not prior.has("anchor:%d" % i) and _legal_for(e.kind, l) and not ["or", "anteroom", "clockin"].has(a.room_kind):
+			if not prior.has("anchor:%d" % i) and _legal_for(e.kind, l) and not Spawner.SAFE_ROOMS.has(a.room_kind):
 				ds.append(minf(_flat(a.position, avoid[0]), _flat(a.position, avoid[1])))
 		ds.sort()
 		if ds.size() > 0:
