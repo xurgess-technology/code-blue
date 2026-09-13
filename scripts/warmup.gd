@@ -90,6 +90,20 @@ static func run(game: Node) -> void:
 	# DEV HOOK (scripts/dev): the dev gun, its tracers and the target dummy.
 	DevGun.warm(shelf)
 
+	# LOOP HOOK: a paramedic crew with its gurney, and the break-room phone.
+	var crew: Node3D = (load("res://scripts/loop/crew.gd") as GDScript).create("", "")
+	crew.scale = Vector3.ONE * 0.4
+	crew.position = Vector3(1.2, -0.6, -1.2)
+	shelf.add_child(crew)
+	var ph: Node3D = (load("res://scripts/loop/phone.gd") as GDScript).create()
+	ph.remove_from_group("interactable")   # only a look-alike: never the real "phone"
+	ph.remove_meta("interact_id")
+	for n in ph.find_children("*", "CollisionObject3D", true, false):
+		n.queue_free()
+	ph.position = Vector3(-1.2, -0.6, -1.0)
+	shelf.add_child(ph)
+	ph.set_ringing(true)
+
 	# Every surgery minigame, set up on a patient the way the surgery system does it
 	var games := []
 	for ail in Procedures.AILMENTS.keys():

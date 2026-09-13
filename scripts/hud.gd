@@ -55,10 +55,11 @@ func _draw() -> void:
 	if game.paused:
 		_overlay(w, h, "PAUSED", "Esc to resume, Q to walk out." if not Net.solo else "The night shift waits for no one.", "", Color("c9d1d9"))
 	elif game.phase == Game.Phase.LOST:
-		_overlay(w, h, "FLATLINE", game.message, "Back to the clock-in room in %d" % ceili(game.end_timer), Color("ff2a2a"))
+		# loop: a team failure ends the run.
+		_overlay(w, h, "GAME OVER", game.message, "Money and gold reset. A new run starts in %d" % ceili(game.end_timer), Color("ff2a2a"))
 	elif game.phase == Game.Phase.WON:
-		_overlay(w, h, "PATIENT STABILIZED", "Shift %d complete. Punch out." % game.shift,
-			"Shift %d starts in %d" % [game.shift + 1, ceili(game.end_timer)], Color("5cff8a"))
+		_overlay(w, h, "SHIFT %d COMPLETE" % game.shift, String(game.loop.pay_note),
+			"Walk out to sell and shop, then clock in for shift %d (%d)" % [game.shift + 1, ceili(game.end_timer)], Color("5cff8a"))
 
 
 func _text(pos: Vector2, s: String, size_px: int, col: Color, align := HORIZONTAL_ALIGNMENT_LEFT, width := -1.0) -> void:
@@ -108,68 +109,49 @@ func _heart(at: Vector2, col: Color) -> void:
 	draw_colored_polygon(PackedVector2Array([at + Vector2(-7.4, -0.4), at + Vector2(7.4, -0.4), at + Vector2(0, 8)]), col)
 
 
-## What the team still has to do, in one line.
+## What the team still has to do, in one line (loop: scripts/loop/shift_loop.gd writes it).
 func _draw_objective(w: float) -> void:
-	var text := ""
-	match game.phase:
-		Game.Phase.LOBBY:
-			text = "SHIFT %d. AIM AT THE TIME CLOCK AND HOLD E TO CLOCK IN." % game.shift
-		Game.Phase.SHIFT:
-			if game.case.is_empty():
-				return
-			var missing := _missing_supplies()
-			if not missing.is_empty():
-				text = "BRING TO THE OR SHELF: " + ", ".join(missing)
-			else:
-				var step := Procedures.step(game.case.ailment_id, int(game.case.step_index))
-				var op_id: int = game.surgery.operator_id if game.surgery != null else 0
-				if step.is_empty() or game.surgery.is_local_operating():
-					pass   # the surgery HUD carries the step while operating
-				elif op_id != 0:
-					var op = game.players.get(op_id)
-					text = "%s IS OPERATING: %s." % [(op.player_name if op != null else "SOMEONE").to_upper(), step.label.to_upper()]
-				else:
-					text = "OPERATE: %s. AIM AT THE TABLE AND PRESS E." % step.label.to_upper()
+	var text: String = game.loop.objective_text() if game.loop != null else ""
 	if text != "":
 		_text(Vector2(0, 24), text, 15, Color("ff6a6a"), HORIZONTAL_ALIGNMENT_CENTER, w)
 	if game.phase == Game.Phase.LOBBY and host_info != "":
 		_text(Vector2(0, 46), host_info, 14, Color("5ce0d0"), HORIZONTAL_ALIGNMENT_CENTER, w)
 
 
-## Items the remaining steps need that are not on the shelf yet, as "Anesthetic x1" labels.
-func _missing_supplies() -> Array:
-	var need := Procedures.remaining_requirements(game.case.ailment_id, int(game.case.step_index))
-	var out := []
-	for kind in Items.SURGICAL:
-		if not need.has(kind):
-			continue
-		var short: int = int(need[kind]) - game.shelf_count(kind)
-		if short <= 0:
-			continue
-		out.append(Items.display_name(kind) + (" x%d" % short if Items.is_consumable(kind) else ""))
-	return out
-
-
+## loop: one panel per patient on a table, stacked down the right edge.
 func _draw_case_panel(w: float) -> void:
-	if game.phase != Game.Phase.SHIFT or game.case.is_empty():
+	if game.phase != Game.Phase.SHIFT:
 		return
-	var pt := Procedures.patient(game.case.patient_id)
-	var ail := Procedures.ailment(game.case.ailment_id)
-	var steps := Procedures.steps(game.case.ailment_id)
-	var cur := int(game.case.step_index)
+	var y0 := 12.0
+	for c in game.cases:
+		if int(c.get("table", -1)) < 0 or String(c.get("patient_id", "")) == "player" or String(c.get("state", "")) == "incoming":
+			continue
+		y0 = _draw_one_case(w, y0, c) + 10.0
+
+
+func _draw_one_case(w: float, y0: float, c: Dictionary) -> float:
+	var pt := Procedures.patient(c.patient_id)
+	var ail := Procedures.ailment(c.ailment_id)
+	var steps := Procedures.steps(c.ailment_id)
+	var cur := int(c.step_index)
+	var state := String(c.get("state", "on_table"))
+	var compact := state != "on_table"
 	var x := w - 318.0
-	var panel_h := 124.0 + steps.size() * 22.0
-	draw_rect(Rect2(x - 12, 12, 318, panel_h), Color(0, 0, 0, 0.58))
-	_text(Vector2(x, 32), String(pt.full_name).to_upper().substr(0, 30), 15, Color("dddddd"))
-	_text(Vector2(x, 50), "%s (%s)" % [ail.name, ail.code], 13, Color("ff8a6a"))
-	_text(Vector2(x, 67), Procedures.blurb(game.case.patient_id, game.case.ailment_id).substr(0, 44), 11, Color("8a9aa0"))
-	var v: float = maxf(0.0, game.vitals)
+	var panel_h := 60.0 if compact else 124.0 + steps.size() * 22.0
+	draw_rect(Rect2(x - 12, y0, 318, panel_h), Color(0, 0, 0, 0.58))
+	_text(Vector2(x, y0 + 20), String(pt.full_name).to_upper().substr(0, 30) + ("  (EXTRA)" if bool(c.get("optional", false)) else ""), 15, Color("dddddd"))
+	_text(Vector2(x, y0 + 38), "%s (%s)" % [ail.name, ail.code], 13, Color("ff8a6a"))
+	if compact:
+		_text(Vector2(x, y0 + 54), "STABLE" if state == "stable" else "DECEASED", 13, Color("5cff8a") if state == "stable" else Color("ff6a6a"))
+		return y0 + panel_h
+	_text(Vector2(x, y0 + 55), Procedures.blurb(c.patient_id, c.ailment_id).substr(0, 44), 11, Color("8a9aa0"))
+	var v: float = maxf(0.0, float(c.get("vitals", 100.0)))
 	var pulse: float = 1.0 if v > 30.0 else 0.7 + 0.3 * sin(_t * 10.0)
-	draw_rect(Rect2(x, 76, 290, 12), Color("2a2f36"))
+	draw_rect(Rect2(x, y0 + 64, 290, 12), Color("2a2f36"))
 	var vcol := Color("5cff8a") if v > 50.0 else (Color("ffd35c") if v > 25.0 else Color(1, 0.16, 0.16, pulse))
-	draw_rect(Rect2(x, 76, 290 * v / 100.0, 12), vcol)
-	_text(Vector2(x, 104), "VITALS %d%%    %d BPM" % [ceili(v), roundi(40 + v * 0.6 + sin(_t * 8.0) * 2.0)], 13, Color("eeeeee"))
-	var y := 128.0
+	draw_rect(Rect2(x, y0 + 64, 290 * v / 100.0, 12), vcol)
+	_text(Vector2(x, y0 + 92), "VITALS %d%%    %d BPM" % [ceili(v), roundi(40 + v * 0.6 + sin(_t * 8.0) * 2.0)], 13, Color("eeeeee"))
+	var y := y0 + 116.0
 	for i in steps.size():
 		var s: Dictionary = steps[i]
 		var needed: int = maxi(1, int(s.uses))
@@ -182,6 +164,7 @@ func _draw_case_panel(w: float) -> void:
 			var item_text := "%s %d/%d" % [Items.display_name(s.item), mini(on_shelf, needed), needed]
 			_text(Vector2(x + 190, y), item_text, 11, have_col)
 		y += 22.0
+	return y0 + panel_h
 
 
 func _draw_crosshair(w: float, h: float) -> void:
@@ -340,6 +323,9 @@ func _draw_holds(w: float, h: float) -> void:
 	if game.phase == Game.Phase.LOBBY and game.punch > 0.0:
 		progress = game.punch
 		label = "CLOCKING IN"
+	elif game.phase == Game.Phase.SHIFT and game.punch > 0.0:
+		progress = game.punch   # loop: clocking out
+		label = "CLOCKING OUT"
 	elif game.phase == Game.Phase.SHIFT and game.pod > 0.0:
 		progress = game.pod
 		label = "RE-GEN POD"

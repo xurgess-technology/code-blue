@@ -1,12 +1,16 @@
 extends Node
-## Headless play-through of a whole shift, the way a player would do it: clock in, find
-## the supplies the case needs (opening containers on the way), carry them to the OR
-## shelf, then operate step by step until the patient is stable.
+## Headless play-through of whole shifts, the way a player would do it (sweep 2 loop): walk to
+## the time clock and clock in, wait out the grace period, answer the break-room phone, find
+## the supplies the case needs (opening containers on the way) while the paramedics wheel the
+## patient in, carry them to the OR shelf, operate step by step until every patient is stable,
+## then clock out and get paid.
 ##
-##   godot --headless --path . tools/playtest.tscn -- [--god] [--seed=N] [--shifts=N]
-##         [--skill=1.0] [--ailment=gunshot|amputation] [--patient=bob|seal]
+##   godot --headless --fixed-fps 60 --path . tools/playtest.tscn -- [--god] [--seed=N] [--shifts=N]
+##         [--skill=1.0] [--ailment=gunshot|amputation] [--patient=bob|seal] [--extra]
+##         [--skip-grace]
 ##
-## Exits 0 only if every requested shift reached the win screen.
+## `--extra` answers the mid-shift call and saves the extra patient too (otherwise it is declined).
+## Exits 0 only if every requested shift was clocked out with every accepted patient stable.
 
 const MAX_SECONDS := 1500.0
 const REACH := 1.9
@@ -40,6 +44,12 @@ var _blacklist := {}
 var _heartbeat := 30.0
 var _target_item := -1
 var _stare_t := 0.0
+var take_extra := false
+var skip_grace := false
+var _was_phase := -1
+var _money_before := 0
+var _logged_call := ""
+var _extra_seen := false
 
 
 func _ready() -> void:
@@ -53,6 +63,8 @@ func _ready() -> void:
 			"seed": fixed_seed = int(v)
 			"ailment": force_ailment = v
 			"patient": force_patient = v
+			"extra": take_extra = true
+			"skip-grace": skip_grace = true
 
 	main = load("res://scenes/main.tscn").instantiate()
 	add_child(main)
@@ -99,52 +111,93 @@ func _physics_process(delta: float) -> void:
 		_fail("the bot died at t=%.0f after %d hits" % [elapsed, hits])
 		return
 
+	var entered := game.phase != _was_phase
+	_was_phase = game.phase
 	match game.phase:
 		Game.Phase.LOBBY:
-			_lobby_forced = false
+			if entered:
+				_force_case()
+				_money_before = game.money
 			_go_use("clock", game.clock_pos(), true)
 		Game.Phase.SHIFT:
-			if not _lobby_forced:
-				_lobby_forced = true
-				_force_case()
-			if not game.case.is_empty() and int(game.case.step_index) != _last_step:
-				_last_step = int(game.case.step_index)
-				_say("t=%.0f case %s/%s step %d vitals %.0f shelf %s" % [elapsed, game.case.patient_id, game.case.ailment_id, _last_step, game.vitals, str(game.shelf)])
+			if entered and skip_grace:
+				game.dev_skip_grace()
+			_log_cases()
 			if not god and _flee_if_hunted():
+				return
+			if _handle_phone():
+				return
+			if game.loop.can_clock_out() and not (take_extra and not game.loop.extra_done):
+				for c in game.cases:
+					if String(c.state) == "dead":
+						_fail("%s died at t=%.0f" % [c.patient_id, elapsed])
+						return
+				_go_use("clock", game.clock_pos(), true)
 				return
 			_play_shift(delta)
 		Game.Phase.WON:
+			if not entered:
+				return
 			shifts_won += 1
-			_say("t=%.0f WON shift %d (vitals %.0f, %d hits)" % [elapsed, game.shift, game.vitals, hits])
+			_say("t=%.0f CLOCKED OUT of shift %d: %s money $%d -> $%d (%d hits)" % [elapsed, game.shift, game.loop.pay_note, _money_before, game.money, hits])
+			if game.money <= _money_before:
+				_fail("clocked out without being paid")
+				return
+			if take_extra:
+				_say("extra patient this shift: %s" % ("saved" if _extra_seen else "missed the call"))
+			_extra_seen = false
 			if shifts_won >= want_shifts:
 				_finish(true)
-			else:
-				set_physics_process(false)
-				await get_tree().create_timer(C.END_SCREEN_SECONDS + 0.5).timeout
-				set_physics_process(true)
 		Game.Phase.LOST:
-			_fail("lost at t=%.0f: %s" % [elapsed, game.message])
+			_fail("game over at t=%.0f: %s" % [elapsed, game.message])
 
 
-## Tests can pin the case so both ailments and both patients get covered.
+## Tests can pin the case so both ailments and both patients get covered: the first call brings
+## exactly that patient.
 func _force_case() -> void:
 	if force_ailment == "" and force_patient == "":
 		return
-	if force_ailment != "":
-		game.case.ailment_id = force_ailment
-	if force_patient != "":
-		game.case.patient_id = force_patient
-	game.shelf = {}
-	game._apply_case_locally()
-	game._clear_items()
-	game._spawn_supplies()
+	var roll := Procedures.roll(game.seed_value, game.shift)
+	game.loop.force_first = {"patient_id": force_patient if force_patient != "" else roll.patient,
+		"ailment_id": force_ailment if force_ailment != "" else roll.ailment}
+
+
+func _log_cases() -> void:
+	var sig := "%s|%s" % [game.loop.call_state, game.loop.call_kind]
+	if sig != _logged_call:
+		_logged_call = sig
+		_say("t=%.0f phone %s %s" % [elapsed, game.loop.call_state if game.loop.call_state != "" else "quiet", game.loop.call_kind])
+	var steps := 0
+	for c in game.cases:
+		steps += int(c.step_index) * 10 + (1 if String(c.state) == "on_table" else 0) + (100 if String(c.state) == "stable" else 0)
+		if bool(c.get("optional", false)) and String(c.state) == "stable":
+			_extra_seen = true
+	steps += game.cases.size() * 1000
+	if steps != _last_step:
+		_last_step = steps
+		var parts := []
+		for c in game.cases:
+			parts.append("%s/%s t%d %s step %d vit %.0f" % [c.patient_id, c.ailment_id, int(c.table), c.state, int(c.step_index), float(c.vitals)])
+		_say("t=%.0f cases: %s | shelf %s" % [elapsed, "; ".join(parts), str(game.shelf)])
+
+
+## Answer the ringing phone when it is the first call, or the extra one with --extra. True while
+## walking to it.
+func _handle_phone() -> bool:
+	if game.loop.call_state != "ringing" or game.loop.phone == null or bot.operating:
+		return false
+	if game.loop.call_kind == "extra" and not take_extra:
+		return false
+	_go_use("phone", game.loop.phone.global_position, false)
+	return true
 
 
 func _play_shift(delta: float) -> void:
-	if game.case.is_empty():
-		return
 	_log_timer -= delta
-	var need := Procedures.remaining_requirements(game.case.ailment_id, int(game.case.step_index))
+	var need: Dictionary = game._live_requirements()
+	if need.is_empty() and not bot.operating:
+		bot.bot_move = Vector2.ZERO
+		return
 	var short := {}
 	for kind in need.keys():
 		var s: int = int(need[kind]) - game.shelf_count(kind)
@@ -166,10 +219,13 @@ func _play_shift(delta: float) -> void:
 			return
 
 	if short.is_empty():
-		# Everything is on the shelf: operate.
-		if "bot_skill" in game.surgery:
-			game.surgery.bot_skill = skill
-		_go_use("table", game.table_pos(), false)
+		# Everything is on the shelf: operate on a patient who is on a table.
+		game.surgery_bot_skill = skill
+		for c in game.cases:
+			if String(c.state) == "on_table" and String(c.patient_id) != "player":
+				_go_use(game.table_interact_id(int(c.table)), game.table_position(int(c.table)), false)
+				return
+		bot.bot_move = Vector2.ZERO   # the patient is still on the way
 		return
 
 	# Hands full of things we do not need: set one down (the first slot holding a stack).

@@ -1,6 +1,8 @@
 extends Node
-## The in-world surgery framework. One per game; the contract is in docs/CONTRACTS.md
-## ("Surgery") and scripts/surgery/minigame.gd.
+## The in-world surgery framework. One per patient table (loop, sweep 2): `table_index` is the
+## table (index into level_info.tables) whose case it operates on, through
+## game.case_on_table(table_index). The contract is in docs/CONTRACTS.md ("Surgery") and
+## scripts/surgery/minigame.gd.
 ##
 ## Flow
 ##   Every machine builds the current step's minigame on the patient as soon as the step
@@ -13,6 +15,7 @@ extends Node
 ##     {"k": step_key, "finished": result, "ms": {...}}            immediately, reliable
 ##     {"k": step_key, "stir": strength, "reliable": true}         the patient jerked
 ##     {"k": step_key, "ms": {...}, "exit": true}                  operator stepped away
+##   Every report also carries "tb": table_index, so the host routes it to this table's system.
 ##   The host applies botches and completion to the game, keeps the latest minigame state
 ##   and relays it in net_state() {"op", "k", "ms", "sc", "ss"}; spectators apply "ms" to
 ##   their own copy of the minigame so they see the tool move. Progress lives in "ms", so
@@ -31,9 +34,20 @@ const STIR_JOLT_TIME := 0.35
 const STIR_SHAKE_M := 0.09
 
 ## Automated playtests: >= 0 makes the LOCAL operator play with the minigame's bot_input.
-var bot_skill: float = -1.0
+## loop: shared by every table's system (stored on the game as `surgery_bot_skill`).
+var bot_skill: float:
+	get:
+		return float(game.get("surgery_bot_skill")) if game != null and game.get("surgery_bot_skill") != null else _own_bot_skill
+	set(value):
+		if game != null and game.get("surgery_bot_skill") != null:
+			game.set("surgery_bot_skill", value)
+		else:
+			_own_bot_skill = value
+var _own_bot_skill: float = -1.0
 
 var game: Node = null
+## loop: the table this system operates at (index into level_info.tables); -1 when unused.
+var table_index: int = 0
 
 # ---- replicated (host authoritative) ----
 var operator_id: int = 0
@@ -132,7 +146,7 @@ func _reset() -> void:
 # =============================================================================== host API
 
 func can_begin(player) -> String:
-	if game == null or not ("case" in game) or game.case.is_empty():
+	if game == null or _case().is_empty():
 		return "Nobody is on the table."
 	var s := _step()
 	if s.is_empty():
@@ -142,6 +156,11 @@ func can_begin(player) -> String:
 	if operator_id != 0:
 		var p = game.players.get(operator_id)
 		return "%s is already operating." % (p.player_name if p != null else "Someone")
+	# loop: one table at a time.
+	if "surgeries" in game:
+		for other in game.surgeries:
+			if other != self and int(other.operator_id) == int(player.peer_id):
+				return "You are operating at the other table."
 	var needed: int = maxi(1, int(s.get("uses", 0)))
 	if game.shelf_count(String(s.item)) < needed:
 		if needed > 1:
@@ -173,6 +192,31 @@ func operator_peer() -> int:
 	return operator_id
 
 
+## loop: the case finished (stable or dead) while someone operated: they step back.
+func end_current() -> void:
+	if operator_id != 0:
+		_end_operation()
+
+
+## The case on this system's table while it can be operated on ({} otherwise). Live dictionary.
+func _case() -> Dictionary:
+	if game == null:
+		return {}
+	if game.has_method("case_on_table"):
+		var c: Dictionary = game.case_on_table(table_index)
+		if c.is_empty() or String(c.get("state", "on_table")) != "on_table" or String(c.get("patient_id", "")) == "player":
+			return {}
+		return c
+	return game.get("case") if game.get("case") is Dictionary else {}
+
+
+func _body():
+	if game == null:
+		return null
+	var b = game.body_for_table(table_index) if game.has_method("body_for_table") else game.get("patient_body")
+	return b if b != null and is_instance_valid(b) else null
+
+
 func _end_operation() -> void:
 	if operator_id != 0:
 		_exit_times[operator_id] = float(game.world_time)
@@ -193,7 +237,7 @@ func receive_operator_report(peer_id: int, report: Dictionary) -> void:
 				mg.apply_net_state(ms)
 		for b in report.get("botches", []):
 			if b is Array and b.size() >= 2:
-				game.surgery_botch(float(b[0]), String(b[1]))
+				game.surgery_botch(float(b[0]), String(b[1]), table_index)
 		if report.has("stir"):
 			_stir_count += 1
 			_stir_strength = float(report.stir)
@@ -205,7 +249,7 @@ func receive_operator_report(peer_id: int, report: Dictionary) -> void:
 			var result = report.get("finished")
 			operator_id = 0
 			_last_operator = 0
-			game.surgery_step_done(result if result is Dictionary else {})
+			game.surgery_step_done(result if result is Dictionary else {}, table_index)
 	if report.has("exit") and peer_id == operator_id:
 		_end_operation()
 
@@ -295,7 +339,7 @@ func _monitor(delta: float) -> void:
 	_beep_timer -= delta
 	if _beep_timer > 0.0:
 		return
-	var v: float = clampf(float(game.get("vitals")) if game.get("vitals") != null else 100.0, 0.0, 100.0)
+	var v: float = clampf(float(_case().get("vitals", 100.0)), 0.0, 100.0)
 	_beep_timer = lerpf(0.38, 0.85, v / 100.0)
 	var cue := "surgery_beep" if v > 50.0 else ("surgery_beep_low" if v > 25.0 else "surgery_beep_crit")
 	_audio(cue, _table_pos(), -5.0)
@@ -304,16 +348,18 @@ func _monitor(delta: float) -> void:
 # =============================================================================== minigame lifecycle
 
 func _step() -> Dictionary:
-	if game == null or not ("case" in game) or game.case.is_empty():
+	var c := _case()
+	if c.is_empty():
 		return {}
-	return Procedures.step(String(game.case.get("ailment_id", "")), int(game.case.get("step_index", 0)))
+	return Procedures.step(String(c.get("ailment_id", "")), int(c.get("step_index", 0)))
 
 
 func _current_key() -> String:
 	var s := _step()
 	if s.is_empty():
 		return ""
-	return "%s|%s|%d" % [game.case.get("patient_id", ""), game.case.get("ailment_id", ""), int(game.case.get("step_index", 0))]
+	var c := _case()
+	return "%d|%s|%s|%d" % [int(c.get("id", 0)), c.get("patient_id", ""), c.get("ailment_id", ""), int(c.get("step_index", 0))]
 
 
 func _sync_minigame() -> void:
@@ -362,19 +408,20 @@ func _spawn_mg() -> void:
 	_place_mg()
 	mg.botched.connect(_on_botched)
 	mg.finished.connect(_on_finished)
-	if not ("flags" in game.case) or not (game.case.get("flags") is Dictionary):
-		game.case["flags"] = {}
-	var body = game.patient_body if ("patient_body" in game) and game.patient_body != null and is_instance_valid(game.patient_body) else null
+	var c := _case()
+	if not (c.get("flags") is Dictionary):
+		c["flags"] = {}
+	var body = _body()
 	var shift := int(game.shift)
 	mg.setup({
-		"patient_id": String(game.case.get("patient_id", "")),
-		"patient": Procedures.patient(String(game.case.get("patient_id", ""))),
-		"ailment_id": String(game.case.get("ailment_id", "")),
+		"patient_id": String(c.get("patient_id", "")),
+		"patient": Procedures.patient(String(c.get("patient_id", ""))),
+		"ailment_id": String(c.get("ailment_id", "")),
 		"step": step,
 		"variant": String(step.get("variant", "")),
 		"shift": shift,
 		"difficulty": Procedures.difficulty(shift),
-		"flags": game.case.flags,
+		"flags": c.flags,
 		"seed": hash("%s|%d" % [mg_key, int(game.get("seed_value") if game.get("seed_value") != null else 0)]),
 		"body": body,
 		"operator": false,
@@ -393,7 +440,7 @@ func _free_mg() -> void:
 
 func _site_transform() -> Transform3D:
 	var site := String(_mg_step.get("site", ""))
-	var body = game.get("patient_body")
+	var body = _body()
 	if body != null and is_instance_valid(body) and body.has_method("site_transform") \
 			and (not body.has_method("has_site") or body.has_site(site)):
 		var xf: Transform3D = body.site_transform(site)
@@ -407,9 +454,11 @@ func _place_mg() -> void:
 
 
 func _table_pos() -> Vector3:
+	if game.has_method("table_position"):
+		return game.table_position(table_index)
 	if game.has_method("table_pos"):
 		return game.table_pos()
-	var body = game.get("patient_body")
+	var body = _body()
 	return body.global_position if body != null and is_instance_valid(body) else Vector3.ZERO
 
 
@@ -439,14 +488,14 @@ func _stop_local_operating(send_state: bool) -> void:
 	if mg != null and is_instance_valid(mg):
 		mg.ctx["operator"] = false
 		if send_state:
-			game.send_operator_report({"k": mg_key, "ms": mg.net_state(), "reliable": true})
+			game.send_operator_report({"k": mg_key, "ms": mg.net_state(), "reliable": true, "tb": table_index})
 
 
 func local_operator_exit() -> void:
 	if not _local_op:
 		return
 	_exit_requested = true
-	var report := {"k": mg_key, "exit": true}
+	var report := {"k": mg_key, "exit": true, "tb": table_index}
 	if mg != null and not mg.done:
 		report["ms"] = mg.net_state()
 	_local_op = false
@@ -492,7 +541,7 @@ func _drive(delta: float) -> void:
 	_report_accum += delta
 	if _report_accum >= REPORT_INTERVAL and not mg.done:
 		_report_accum = 0.0
-		game.send_operator_report({"k": mg_key, "ms": mg.net_state()})
+		game.send_operator_report({"k": mg_key, "ms": mg.net_state(), "tb": table_index})
 
 
 ## DEV HOOK (scripts/dev): a dev room bot (a Player with is_bot, simulated by the host) operates
@@ -540,7 +589,7 @@ func _on_botched(amount: float, reason: String) -> void:
 	if not _local_op or mg == null:
 		return
 	_audio("surgery_botch", null, -6.0)
-	game.send_operator_report({"k": mg_key, "botches": [[amount, reason]]})
+	game.send_operator_report({"k": mg_key, "botches": [[amount, reason]], "tb": table_index})
 
 
 func _on_finished(result: Dictionary) -> void:
@@ -556,13 +605,13 @@ func _on_finished(result: Dictionary) -> void:
 	_local_op = false
 	_cam_dir = -1
 	mg.ctx["operator"] = false
-	game.send_operator_report({"k": key, "finished": result, "ms": state})
+	game.send_operator_report({"k": key, "finished": result, "ms": state, "tb": table_index})
 
 
 # ---- stirring: an underdosed patient jerks, which shakes the operator's hand
 
 func _sedation() -> float:
-	var flags = game.case.get("flags", {}) if "case" in game else {}
+	var flags = _case().get("flags", {})
 	return float(flags.get("sedation", 1.0)) if flags is Dictionary else 1.0
 
 
@@ -590,7 +639,7 @@ func _stir_tick(delta: float) -> Vector2:
 			mg.on_jolt(_stir_dir * _stir_amp * STIR_SHAKE_M, strength, STIR_JOLT_TIME)
 		_body_stir(strength)
 		_audio("surgery_stir", _table_pos(), -2.0)
-		game.send_operator_report({"k": mg_key, "stir": strength, "reliable": true})
+		game.send_operator_report({"k": mg_key, "stir": strength, "reliable": true, "tb": table_index})
 	if _stir_jolt <= 0.0:
 		return Vector2.ZERO
 	_stir_jolt = maxf(0.0, _stir_jolt - delta)
@@ -600,7 +649,7 @@ func _stir_tick(delta: float) -> Vector2:
 
 
 func _body_stir(strength: float) -> void:
-	var body = game.get("patient_body")
+	var body = _body()
 	if body != null and is_instance_valid(body) and body.has_method("stir"):
 		body.stir(strength)
 
@@ -666,6 +715,11 @@ func hud_state() -> Dictionary:
 	st["local"] = _local_op
 	st["stirring"] = _stir_flash > 0.0
 	st["step_label"] = String(_mg_step.get("label", ""))
+	st["table"] = table_index
+	var c := _case()
+	st["step_index"] = int(c.get("step_index", 0))
+	st["steps"] = Procedures.steps(String(c.get("ailment_id", ""))).size()
+	st["vitals"] = float(c.get("vitals", 100.0))
 	if not st.has("title"):
 		st["title"] = st.step_label
 	return st

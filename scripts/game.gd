@@ -18,18 +18,42 @@ const SUPPLY_CHECK_SECONDS := 3.0
 
 signal phase_changed(phase: int)
 signal notice(text: String, seconds: float)
+## loop (sweep 2): a case was added, removed, moved onto a table, advanced a step or finished.
+## Not emitted for vitals changes. Every machine.
+signal cases_changed
 
 # ---- replicated state ----
 var phase: int = Phase.MENU
 var seed_value: int = 0
 var shift: int = 1
 var world_time: float = 0.0
-var vitals: float = 100.0
 var punch: float = 0.0
 var pod: float = 0.0
 var end_timer: float = 0.0
-## The patient and ailment on the table this shift: {patient_id, ailment_id, step_index, flags}.
-var case: Dictionary = {}
+## loop (sweep 2): every patient this shift, host authoritative and replicated. Each case is
+##   {id, table (index into level_info.tables, -1 on the gurney), patient_id ("bob"|"seal"|
+##    "player"), player_id (player cases), ailment_id, step_index, flags, vitals,
+##    state ("incoming"|"on_table"|"stable"|"dead"), optional (the extra patient)}
+## Change it through add_case / finish_case / remove_case (host).
+var cases: Array = []
+## Alias of the first patient case (not a "player" case), {} when there is none. Reading returns
+## the live dictionary; assigning replaces that case's patient, ailment, step and flags (or puts
+## a new case on the first patient table), and assigning {} removes it. Kept for code written
+## against the single-patient game.
+var case: Dictionary:
+	get:
+		return _alias_case()
+	set(value):
+		_set_alias_case(value)
+## Alias of the first patient case's vitals (100 when there is none).
+var vitals: float:
+	get:
+		var c := _alias_case()
+		return float(c.get("vitals", 100.0)) if not c.is_empty() else 100.0
+	set(value):
+		var c := _alias_case()
+		if not c.is_empty():
+			c["vitals"] = value
 ## The OR supply shelf: item kind -> count.
 var shelf: Dictionary = {}
 ## Team money in dollars (inventory, sweep 2). Host authoritative, replicated, survives shifts;
@@ -44,8 +68,28 @@ var level_info: Dictionary = {}
 var players: Dictionary = {}      # peer id -> Player
 var monsters: Dictionary = {}     # monster id -> Monster
 var world_items: Dictionary = {}  # item id -> WorldItem
-var patient_body: Node3D = null
-var surgery: Node = null
+## loop: the PatientBody on the first patient case's table, or null.
+var patient_body: Node3D:
+	get:
+		var c := _alias_case()
+		return body_for_table(int(c.get("table", -1))) if not c.is_empty() else null
+	set(_value):
+		pass
+## loop: one surgery system per patient table (scripts/surgery/surgery_system.gd), in the order of
+## `patient_tables`. `surgery` is whichever the local player is operating at (or its camera is
+## still blending back from), else the first patient case's table's, else the first.
+var surgeries: Array = []
+var surgery: Node:
+	get:
+		return _surgery_view()
+	set(_value):
+		pass
+## loop: the patient tables: [{index (into level_info.tables), position, yaw}].
+var patient_tables: Array = []
+## loop: bot operators (tests) use this skill on every table; < 0 means a human plays.
+var surgery_bot_skill: float = -1.0
+## loop: the shift loop (scripts/loop/shift_loop.gd), child "Loop": grace, phone, paramedics, pay.
+var loop: Node = null
 var shelf_node: Node3D = null
 var message: String = ""
 var message_timer: float = 0.0
@@ -67,8 +111,11 @@ var _footstep_acc: Dictionary = {}
 var _supply_timer: float = 0.0
 var _botch_say_timer: float = 0.0
 var _complication_timer: float = 0.0
-var _case_key: String = ""
-var _flags_key: String = ""
+var _next_case_id: int = 1
+var _bodies: Dictionary = {}          # table index -> {key, fk, dead, node}
+var _cases_sig: String = ""
+var _dev_case_clear: Dictionary = {}  # host, dev room: case id -> world_time to clear it
+var _shift_item_ids: Dictionary = {}  # host: items the spawners put in the hospital this run
 
 const PlayerScene := preload("res://scripts/player.gd")
 const MonsterScript := preload("res://scripts/monster.gd")
@@ -80,6 +127,8 @@ const SurgeryScript := preload("res://scripts/surgery/surgery_system.gd")
 const DevRoomScript := preload("res://scripts/dev/dev_room.gd")
 const EconomyScript := preload("res://scripts/economy/economy.gd")
 const LootSpawnerScript := preload("res://scripts/economy/loot_spawner.gd")
+const LoopScript := preload("res://scripts/loop/shift_loop.gd")
+const TablesScript := preload("res://scripts/loop/tables.gd")
 ## A fragile piece of loot that gets dropped violently keeps this share of its value.
 const LOOT_CRACK_KEEPS := 0.55
 
@@ -91,10 +140,11 @@ func _ready() -> void:
 	_entities = Node3D.new()
 	_entities.name = "Entities"
 	add_child(_entities)
-	surgery = SurgeryScript.new()
-	surgery.name = "Surgery"
-	add_child(surgery)
-	surgery.setup(self)
+	_ensure_surgeries(1)
+	loop = LoopScript.new()
+	loop.name = "Loop"
+	add_child(loop)
+	loop.setup(self)
 	# DEV HOOK: the dev room lives on every machine at the same path so its RPCs line up.
 	dev = DevRoomScript.new()
 	dev.name = "Dev"
@@ -142,6 +192,7 @@ func start_session(first_seed: int) -> void:
 
 func end_session(reason: String) -> void:
 	_clear_case()
+	loop.reset()
 	_clear_items()
 	_clear_monsters()
 	_clear_level()
@@ -156,7 +207,9 @@ func end_session(reason: String) -> void:
 		notice.emit(reason, 6.0)
 
 
-## Build the hospital for a shift and put everyone in the clock-in room.
+## Build the hospital for a run and put everyone at the start (the neutral area outside, or the
+## clock-in room on levels without one). loop: the hospital is kept for the whole run; later
+## shifts go through _to_next_shift() instead, and only a new run (or a joining client) builds.
 func start_lobby(new_seed: int, new_shift: int) -> void:
 	seed_value = new_seed
 	shift = new_shift
@@ -168,10 +221,10 @@ func start_lobby(new_seed: int, new_shift: int) -> void:
 	if was_dev and not dev_mode:
 		dev.reset_state()
 	_clear_case()
+	loop.reset()
 	_clear_items()
 	_clear_monsters()
 	_build_level(new_seed)
-	vitals = 100.0
 	punch = 0.0
 	pod = 0.0
 	end_timer = 0.0
@@ -195,49 +248,159 @@ func start_lobby(new_seed: int, new_shift: int) -> void:
 	if dev_mode:
 		dev.on_enter()  # DEV HOOK: no clock-in; the room is always "on shift"
 	else:
-		say("Shift %d. Hold E at the time clock when everyone is ready." % shift, 6.0)
+		say(loop.lobby_message(), 6.0)
 	if is_host() and Net.active:
 		_rpc_shift.rpc(seed_value, shift, phase, _net_seq)
 
 
-## Host only: the patient arrives, supplies scatter, monsters wake up.
+## Host: the time clock. The shift's hospital fills up (loot, monsters; supplies come with each
+## accepted patient) and the grace period starts; the phone rings when it runs out.
+func clock_in() -> void:
+	if not is_host() or phase != Phase.LOBBY:
+		return
+	_populate_shift_world()
+	_set_phase(Phase.SHIFT)
+	loop.on_clock_in()
+	_sound("punch")
+	say(loop.clock_in_message(), 5.0)
+	if Net.active:
+		_rpc_shift.rpc(seed_value, shift, phase, _net_seq)
+
+
+## Host: a shortcut for tools and tests written against the old game: clock in and put this
+## shift's first patient straight onto the first patient table, with no grace, call or paramedics.
 func begin_shift() -> void:
 	if not is_host():
 		return
-	var roll := Procedures.roll(seed_value, shift)
-	case = {"patient_id": roll.patient, "ailment_id": roll.ailment, "step_index": 0, "flags": {}}
-	vitals = 100.0
-	shelf = {}
-	_apply_case_locally()
-	_spawn_supplies()
-	spawn_loot()
-	_spawn_monsters()
-	_set_phase(Phase.SHIFT)
-	_broadcast("sound", {"cue": "punch"})
-	Audio.play("punch")
-	var pt := Procedures.patient(case.patient_id)
-	var ail := Procedures.ailment(case.ailment_id)
-	say("Incoming: %s. %s. %s" % [pt.full_name, ail.name, Procedures.blurb(case.patient_id, case.ailment_id)], 8.0)
+	if phase == Phase.LOBBY:
+		_populate_shift_world()
+		_set_phase(Phase.SHIFT)
+	loop.on_clock_in()
+	loop.skip_to_first_patient_on_table()
+	_sound("punch")
+	var c := _alias_case()
+	if not c.is_empty():
+		var pt := Procedures.patient(c.patient_id)
+		var ail := Procedures.ailment(c.ailment_id)
+		say("Incoming: %s. %s. %s" % [pt.full_name, ail.name, Procedures.blurb(c.patient_id, c.ailment_id)], 8.0)
 	if Net.active:
 		_rpc_shift.rpc(seed_value, shift, phase, _net_seq)
+
+
+## Host: fresh loot and monsters for a new shift in the run's hospital. What the spawners left in
+## the hospital last shift and nobody touched goes away, and every container closes again.
+func _populate_shift_world() -> void:
+	_clear_case()
+	for id in _shift_item_ids.keys():
+		var it = world_items.get(id)
+		if it != null and is_instance_valid(it):
+			it.queue_free()
+			world_items.erase(id)
+	_shift_item_ids.clear()
+	for n in get_tree().get_nodes_in_group("container"):
+		if n.has_method("is_open") and n.is_open():
+			n.set_open(false, false)
+	spawn_loot()
+	_spawn_monsters()
 
 
 func _set_phase(p: int) -> void:
 	if phase == p:
 		return
+	if not is_host() and p == Phase.LOBBY and (phase == Phase.WON or phase == Phase.SHIFT or phase == Phase.LOST):
+		# loop: a client reaching the next shift's lobby in the same hospital. If I was dead or
+		# waiting to join, I get up at the start (I own my position; the host revives me too).
+		var me := local_player()
+		if me != null and (not me.alive or waiting_peers.has(me.peer_id)):
+			_respawn_at_start(me)
+		loop.reset()
 	phase = p
 	phase_changed.emit(p)
 
 
+## Legacy entry point kept for tests: `won` clocks the team out (pay as usual, then the next
+## shift's lobby), otherwise it is a team failure (game over).
 func _end_shift(won: bool, text: String) -> void:
-	_set_phase(Phase.WON if won else Phase.LOST)
-	end_timer = C.END_SCREEN_SECONDS
-	Audio.sting("saved" if won else "flatline")
-	if not won and patient_body != null and patient_body.has_method("flatline"):
-		patient_body.flatline()
-	say(text, C.END_SCREEN_SECONDS)
+	if not is_host():
+		return
+	if won:
+		loop.clock_out(true)
+	else:
+		game_over(text)
+
+
+## Host: the team clocked out. A short paycheck screen, then the next shift's lobby in the same
+## hospital: nobody is moved, hands are kept, monsters are gone.
+func finish_shift(text: String, seconds: float) -> void:
+	if not is_host():
+		return
+	_clear_monsters()
+	punch = 0.0
+	_set_phase(Phase.WON)
+	end_timer = seconds
+	Audio.sting("saved")
+	say(text, seconds)
 	if Net.active:
 		_rpc_shift.rpc(seed_value, shift, phase, _net_seq)
+
+
+## Host: everyone is down or dead during a shift. Game over: after the screen, money and the gold
+## pile reset and a new run starts in a new hospital.
+func game_over(text: String) -> void:
+	if not is_host() or phase == Phase.LOST:
+		return
+	for c in cases:
+		if String(c.state) == "on_table" or String(c.state) == "incoming":
+			c.state = "dead"
+	_apply_cases_locally()
+	loop.on_game_over()
+	punch = 0.0
+	_set_phase(Phase.LOST)
+	end_timer = loop.GAME_OVER_SECONDS
+	Audio.sting("flatline")
+	say(text, end_timer)
+	if Net.active:
+		_rpc_shift.rpc(seed_value, shift, phase, _net_seq)
+
+
+## Host: from the paycheck screen to the next shift's lobby, same hospital. The dead and the late
+## joiners get up at the start; the living stay where they are with what they carry.
+func _to_next_shift() -> void:
+	shift += 1
+	_clear_case()
+	loop.reset()
+	punch = 0.0
+	end_timer = 0.0
+	for p in players.values():
+		if not p.alive or waiting_peers.has(p.peer_id):
+			_respawn_at_start(p)
+	waiting_peers.clear()
+	_set_phase(Phase.LOBBY)
+	say(loop.lobby_message(), 6.0)
+	if Net.active:
+		_rpc_shift.rpc(seed_value, shift, phase, _net_seq)
+
+
+## Host (dev panel "Phone call"): an incoming patient right now, paramedics already on the way.
+func dev_phone_call() -> void:
+	loop.dev_phone_call()
+
+
+## Host (dev panel "Extra patient"): the optional extra call rings now (in the dev room, which has
+## no phone, the extra patient is accepted and wheeled to the other table).
+func dev_extra_patient() -> void:
+	loop.dev_extra_patient()
+
+
+## Host (dev panel "Skip grace"): the grace period ends now and the phone rings.
+func dev_skip_grace() -> void:
+	loop.skip_grace()
+
+
+## Host: after game over, a new run: broke, shift 1, a new hospital.
+func _new_run() -> void:
+	reset_money()
+	start_lobby(seed_value + 7919, 1)
 
 
 func say(text: String, seconds: float = 3.0) -> void:
@@ -384,14 +547,118 @@ func _clear_level() -> void:
 		level.queue_free()
 	level = null
 	shelf_node = null
+	patient_tables = []
 
 
+## Where players start a run and get up after dying: the neutral area outside when the level has
+## one (loop), else the level's player spawns.
 func spawn_points() -> Array:
+	var neutral: Dictionary = level_info.get("neutral", {})
+	var spots: Array = neutral.get("spawn_points", [])
+	if not spots.is_empty():
+		return spots
 	return level_info.get("player_spawns", [Vector3.ZERO])
 
 
+## The first patient table (level_info.table).
 func table_pos() -> Vector3:
 	return level_info.get("table", Vector3.ZERO)
+
+
+# ---- tables (loop, sweep 2) ----
+
+## Position of a table by its index into level_info.tables (the first patient table for -1).
+func table_position(index: int) -> Vector3:
+	for t in patient_tables:
+		if int(t.index) == index:
+			return t.position
+	var all: Array = level_info.get("tables", [])
+	if index >= 0 and index < all.size():
+		return all[index].get("position", table_pos())
+	return table_pos()
+
+
+func table_yaw_of(index: int) -> float:
+	for t in patient_tables:
+		if int(t.index) == index:
+			return float(t.yaw)
+	return _table_yaw()
+
+
+## The interact_id of a patient table's aim proxy: "table" for the first, "table_<index>" after.
+func table_interact_id(index: int) -> String:
+	if patient_tables.is_empty() or int(patient_tables[0].index) == index:
+		return "table"
+	return "table_%d" % index
+
+
+## The index of the first patient table nobody lies on or is being wheeled to, or -1.
+func free_patient_table() -> int:
+	for t in patient_tables:
+		if case_on_table(int(t.index)).is_empty() and not loop.table_reserved(int(t.index)):
+			return int(t.index)
+	return -1
+
+
+func surgery_for_table(index: int) -> Node:
+	for i in patient_tables.size():
+		if int(patient_tables[i].index) == index and i < surgeries.size():
+			return surgeries[i]
+	return null
+
+
+func body_for_table(index: int) -> Node3D:
+	var e: Dictionary = _bodies.get(index, {})
+	var n = e.get("node")
+	return n if n != null and is_instance_valid(n) else null
+
+
+func _surgery_view() -> Node:
+	for s in surgeries:
+		if s.camera() != null:
+			return s
+	var c := _alias_case()
+	if not c.is_empty():
+		var s := surgery_for_table(int(c.get("table", -1)))
+		if s != null:
+			return s
+	return surgeries[0] if not surgeries.is_empty() else null
+
+
+## Host: `p` stops operating at every table (hit, shoved, gone).
+func end_operations(p: Node) -> void:
+	for s in surgeries:
+		s.end(p)
+
+
+func _ensure_surgeries(n: int) -> void:
+	while surgeries.size() < n:
+		var s: Node = SurgeryScript.new()
+		s.name = "Surgery" if surgeries.is_empty() else "Surgery%d" % surgeries.size()
+		add_child(s)
+		s.setup(self)
+		surgeries.append(s)
+	for i in surgeries.size():
+		surgeries[i].table_index = int(patient_tables[i].index) if i < patient_tables.size() else -1
+
+
+## The patient tables: level_info.tables (kind "patient") when the level has them; otherwise the
+## level's one table plus a second one this places beside it (level_info.tables is then filled in
+## with both, and `tables_fallback` set).
+func _setup_tables() -> void:
+	patient_tables = []
+	var all: Array = level_info.get("tables", [])
+	if all.is_empty():
+		all = [{"position": table_pos(), "yaw": _table_yaw(), "kind": "patient"}]
+		level_info["tables"] = all
+		level_info["tables_fallback"] = true
+		var second: Dictionary = TablesScript.place_second(self, level, table_pos(), _table_yaw(), level_info)
+		if not second.is_empty():
+			all.append(second)
+	for i in all.size():
+		if String(all[i].get("kind", "patient")) == "patient":
+			patient_tables.append({"index": i, "position": all[i].get("position", table_pos()), "yaw": float(all[i].get("yaw", 0.0))})
+	_ensure_surgeries(maxi(1, patient_tables.size()))
 
 
 func clock_pos() -> Vector3:
@@ -412,15 +679,23 @@ func _add_landmarks() -> void:
 	shelf_node.rotation.y = float(sinfo.get("yaw", 0.0))
 	shelf_node.show_stock(shelf)
 
+	# loop: the patient tables (a second one beside the first on levels with only one) and the
+	# break-room phone, before the economy looks for free floor.
+	_setup_tables()
+	if not dev_mode:
+		loop.on_level_built(level, level_info)
+
 	# inventory: the sell bin, the shop and the gold pile (placed once physics has the level).
 	economy.on_level_built(level, level_info)
 
 	_add_proxy("clock", clock_pos() + Vector3.UP * 1.1, 0.7, C.PUNCH_SECONDS,
-		func(p): return "Hold E: clock in" if phase == Phase.LOBBY else "")
+		func(p): return loop.clock_prompt(p))
 	_add_proxy("pod", pod_pos() + Vector3.UP * 1.1, 0.8, C.POD_SECONDS,
 		func(p): return _pod_prompt())
-	_add_proxy("table", table_pos() + Vector3.UP * 1.1, 1.2, 0.0,
-		func(p): return _table_prompt(p))
+	for t in patient_tables:
+		var ti := int(t.index)
+		_add_proxy(table_interact_id(ti), (t.position as Vector3) + Vector3.UP * 1.1, 1.2, 0.0,
+			func(p): return _table_prompt(p, ti))
 
 
 class Proxy extends Area3D:
@@ -462,25 +737,42 @@ func _pod_prompt() -> String:
 	return "!Re-Gen Pod: nobody to revive"
 
 
-func _table_prompt(p) -> String:
-	if phase != Phase.SHIFT or case.is_empty():
+func _table_prompt(p, table_index: int) -> String:
+	if phase != Phase.SHIFT:
 		return ""
-	var step := Procedures.step(case.ailment_id, int(case.step_index))
-	if step.is_empty():
+	var c := case_on_table(table_index)
+	if c.is_empty() or String(c.get("patient_id", "")) == "player":
 		return ""
-	var why: String = surgery.can_begin(p)
+	var pname: String = Procedures.patient(String(c.patient_id)).get("name", "The patient")
+	if String(c.state) == "stable":
+		return "!%s is stable." % pname
+	if String(c.state) == "dead":
+		return "!%s did not make it." % pname
+	var step := Procedures.step(c.ailment_id, int(c.step_index))
+	var sys := surgery_for_table(table_index)
+	if step.is_empty() or sys == null:
+		return ""
+	var why: String = sys.can_begin(p)
 	if why != "":
 		return "!" + why
 	return "Operate: %s" % step.label
 
 
 func _proxy_used(id: String, p: Node) -> void:
-	if id == "table" and phase == Phase.SHIFT:
-		var why: String = surgery.can_begin(p)
+	if not id.begins_with("table") or phase != Phase.SHIFT:
+		return
+	for t in patient_tables:
+		if table_interact_id(int(t.index)) != id:
+			continue
+		var sys := surgery_for_table(int(t.index))
+		if sys == null:
+			return
+		var why: String = sys.can_begin(p)
 		if why == "":
-			surgery.begin(p)
+			sys.begin(p)
 		else:
 			tell(p, why)
+		return
 
 
 func find_interactable(id: String) -> Node:
@@ -524,7 +816,7 @@ func _sync_players() -> void:
 			if is_host():
 				# net: a leaver's supplies land where they stood; an operation pauses for someone else.
 				var dropped := _drop_hands_in_place(gone)
-				surgery.end(gone)
+				end_operations(gone)
 				_net_acks.erase(id)
 				_net_keyframe_at.erase(id)
 				waiting_peers.erase(id)
@@ -611,16 +903,88 @@ func _clear_items() -> void:
 		if is_instance_valid(it):
 			it.queue_free()
 	world_items.clear()
+	_shift_item_ids.clear()
 	_next_item_id = 0
 
 
+## Host: the supplies for the first patient case (legacy name).
 func _spawn_supplies() -> void:
-	var plan: Array = SpawnerScript.plan(seed_value, shift, case.ailment_id, level_info)
+	var c := _alias_case()
+	if not c.is_empty():
+		spawn_supplies_for(c)
+
+
+## Host (loop): supplies for a newly accepted case. The shift's first case gets the spawner's full
+## plan; a later one tops the hospital up so everything every live case still needs exists again,
+## plus that case's own requirements on top (the same guard the softlock check uses).
+func spawn_supplies_for(c: Dictionary) -> void:
+	if not is_host() or c.is_empty() or String(c.get("patient_id", "")) == "player":
+		return
+	var others := 0
+	for o in cases:
+		if int(o.id) != int(c.get("id", -1)) and String(o.get("patient_id", "")) != "player":
+			others += 1
+	if others == 0:
+		for e in SpawnerScript.plan(seed_value, shift, String(c.ailment_id), level_info):
+			_spawn_from_plan(e)
+		return
+	var need := _live_requirements()
+	for kind in Procedures.requirements(String(c.ailment_id)).keys():
+		need[kind] = int(need.get(kind, 0)) + int(Procedures.requirements(String(c.ailment_id))[kind])
+	var have := {}
+	for kind in need.keys():
+		have[kind] = supply_count(kind)
+	var plan: Array = SpawnerScript.shortfall_plan(seed_value + 7907 * int(c.get("id", 1)) + shift * 97, need, have,
+		level_info, _occupied_spots(), _avoid_points())
 	for e in plan:
 		_spawn_from_plan(e)
 
 
+## What every live patient case (incoming or on a table) still needs, summed: kind -> count.
+func _live_requirements() -> Dictionary:
+	var need := {}
+	for c in cases:
+		var st := String(c.get("state", ""))
+		if (st != "incoming" and st != "on_table") or String(c.get("patient_id", "")) == "player":
+			continue
+		var r := Procedures.remaining_requirements(String(c.ailment_id), int(c.step_index))
+		for kind in r.keys():
+			if Items.is_consumable(kind):
+				need[kind] = int(need.get(kind, 0)) + int(r[kind])
+			else:
+				need[kind] = maxi(int(need.get(kind, 0)), int(r[kind]))
+	return need
+
+
+func _occupied_spots() -> Dictionary:
+	var occupied := {}
+	for it in world_items.values():
+		if it.state == WorldItem.State.IN_CONTAINER:
+			occupied["%s:%d" % [it.container_id, it.slot]] = true
+		elif it.anchor >= 0:
+			occupied["anchor:%d" % it.anchor] = true
+	return occupied
+
+
+func _avoid_points() -> Array:
+	var avoid := []
+	for p in players.values():
+		avoid.append(p.global_position)
+	for t in patient_tables:
+		avoid.append(t.position)
+	if patient_tables.is_empty():
+		avoid.append(table_pos())
+	return avoid
+
+
 func _spawn_from_plan(e: Dictionary) -> Node:
+	var it := _spawn_from_plan_inner(e)
+	if it != null:
+		_shift_item_ids[it.item_id] = true  # loop: cleared from the hospital at the next clock-in
+	return it
+
+
+func _spawn_from_plan_inner(e: Dictionary) -> Node:
 	var anchors: Array = level_info.get("loose_anchors", [])
 	var ct_id: String = String(e.get("container_id", ""))
 	if ct_id != "":
@@ -768,9 +1132,9 @@ func supply_count(kind: String) -> int:
 
 ## If breakage ever leaves the shift unwinnable, quietly put more supply somewhere far away.
 func _check_supply() -> void:
-	if case.is_empty():
+	var need := _live_requirements()   # loop: every live case at once, the shelf is shared
+	if need.is_empty():
 		return
-	var need := Procedures.remaining_requirements(case.ailment_id, int(case.step_index))
 	var have := {}
 	var short := false
 	for kind in need.keys():
@@ -779,17 +1143,7 @@ func _check_supply() -> void:
 			short = true
 	if not short:
 		return
-	var occupied := {}
-	for it in world_items.values():
-		if it.state == WorldItem.State.IN_CONTAINER:
-			occupied["%s:%d" % [it.container_id, it.slot]] = true
-		elif it.anchor >= 0:
-			occupied["anchor:%d" % it.anchor] = true
-	var avoid := []
-	for p in players.values():
-		avoid.append(p.global_position)
-	avoid.append(table_pos())
-	var plan: Array = SpawnerScript.shortfall_plan(seed_value + shift * 97 + int(world_time), need, have, level_info, occupied, avoid)
+	var plan: Array = SpawnerScript.shortfall_plan(seed_value + shift * 97 + int(world_time), need, have, level_info, _occupied_spots(), _avoid_points())
 	for e in plan:
 		_spawn_from_plan(e)
 
@@ -803,13 +1157,7 @@ func _check_supply() -> void:
 func spawn_loot() -> void:
 	if not is_host():
 		return
-	var occupied := {}
-	for it in world_items.values():
-		if it.state == WorldItem.State.IN_CONTAINER:
-			occupied["%s:%d" % [it.container_id, it.slot]] = true
-		elif it.anchor >= 0:
-			occupied["anchor:%d" % it.anchor] = true
-	var plan: Array = LootSpawnerScript.plan(seed_value, shift, level_info, occupied)
+	var plan: Array = LootSpawnerScript.plan(seed_value, shift, level_info, _occupied_spots())
 	for e in plan:
 		var it := _spawn_from_plan(e)
 		if it != null:
@@ -891,32 +1239,194 @@ func _surface_below(from: Vector3, fallback: Vector3) -> Vector3:
 # the case on the table
 # =========================================================================
 
-## Build or update the patient on the table and the surgery system to match `case`.
-## Runs on every machine; idempotent.
+## The case lying on a table (any state but incoming), {} when the table is free. Returns the live
+## dictionary (host edits stick).
+func case_on_table(table_index: int) -> Dictionary:
+	if table_index < 0:
+		return {}
+	for c in cases:
+		if int(c.get("table", -1)) == table_index and String(c.get("state", "")) != "incoming":
+			return c
+	return {}
+
+
+func case_by_id(id: int) -> Dictionary:
+	for c in cases:
+		if int(c.get("id", -1)) == id:
+			return c
+	return {}
+
+
+## Host: add a case; returns its id (-1 when refused: not the host, or the table holds a live case).
+## A finished case (stable or dead) still lying on the requested table is removed first.
+## Missing fields default: step 0, no flags, vitals 100, state "on_table" with a table else
+## "incoming".
+func add_case(c: Dictionary) -> int:
+	if not is_host():
+		return -1
+	var table := int(c.get("table", -1))
+	if table >= 0:
+		var there := case_on_table(table)
+		if not there.is_empty():
+			if String(there.state) == "on_table":
+				return -1
+			cases.erase(there)
+	var nc := {}
+	for k in c.keys():
+		nc[k] = c[k]
+	nc["id"] = _next_case_id
+	_next_case_id += 1
+	nc["table"] = table
+	nc["patient_id"] = String(c.get("patient_id", "bob"))
+	nc["ailment_id"] = String(c.get("ailment_id", "gunshot"))
+	nc["step_index"] = int(c.get("step_index", 0))
+	nc["flags"] = (c.get("flags", {}) as Dictionary).duplicate(true)
+	nc["vitals"] = float(c.get("vitals", 100.0))
+	nc["state"] = String(c.get("state", "on_table" if table >= 0 else "incoming"))
+	if c.has("player_id"):
+		nc["player_id"] = int(c.player_id)
+	cases.append(nc)
+	_apply_cases_locally()
+	return int(nc.id)
+
+
+## Host: a case is over. Won: stable (stays on its table until the shift ends). Lost: dead.
+func finish_case(id: int, won: bool) -> void:
+	if not is_host():
+		return
+	var c := case_by_id(id)
+	if c.is_empty() or String(c.state) == "stable" or String(c.state) == "dead":
+		return
+	c.state = "stable" if won else "dead"
+	if not won:
+		c.vitals = 0.0
+	for s in surgeries:
+		if int(s.table_index) == int(c.get("table", -2)):
+			s.end_current()
+	_apply_cases_locally()
+	var pname: String = Procedures.patient(String(c.patient_id)).get("name", "The patient")
+	if String(c.patient_id) == "player":
+		pname = "The patient"
+	var at := table_position(int(c.table)) if int(c.table) >= 0 else table_pos()
+	if won:
+		_sound("step_done", at)
+		Audio.sting("saved")
+		_broadcast("sting", {"cue": "saved"})
+		say("%s is stable.%s" % [pname, loop.after_case_hint()], 5.0)
+	else:
+		_sound("flatline", at)
+		Audio.sting("flatline")
+		_broadcast("sting", {"cue": "flatline"})
+		say("%s flatlined.%s" % [pname, loop.after_case_hint()], 5.0)
+	if dev_mode:
+		_dev_case_clear[id] = world_time + 4.0  # DEV HOOK: the dev room clears the table again
+	loop.on_case_finished(c)
+
+
+## Host: take a case out of the shift entirely.
+func remove_case(id: int) -> void:
+	if not is_host():
+		return
+	var c := case_by_id(id)
+	if c.is_empty():
+		return
+	cases.erase(c)
+	_apply_cases_locally()
+
+
+func _alias_case() -> Dictionary:
+	for c in cases:
+		if String(c.get("patient_id", "")) != "player":
+			return c
+	return {}
+
+
+func _set_alias_case(v: Dictionary) -> void:
+	var cur := _alias_case()
+	if v.is_empty():
+		if not cur.is_empty():
+			cases.erase(cur)
+		return
+	if cur.is_empty():
+		var t: int = int(patient_tables[0].index) if not patient_tables.is_empty() else 0
+		var nc := v.duplicate(true)
+		nc["id"] = _next_case_id
+		_next_case_id += 1
+		nc["table"] = int(v.get("table", t))
+		nc["vitals"] = float(v.get("vitals", 100.0))
+		nc["state"] = String(v.get("state", "on_table"))
+		nc["step_index"] = int(v.get("step_index", 0))
+		nc["flags"] = (v.get("flags", {}) as Dictionary).duplicate(true)
+		cases.append(nc)
+		return
+	for k in v.keys():
+		if k != "id":
+			cur[k] = v[k]
+	if not v.has("state"):
+		cur["state"] = "on_table" if int(cur.get("table", -1)) >= 0 else "incoming"
+
+
+## Build or update the patient bodies on the tables and the surgery systems to match `cases`.
+## Runs on every machine; idempotent. (Old name kept: code all over calls it after editing `case`.)
 func _apply_case_locally() -> void:
-	var key := "" if case.is_empty() else "%s|%s" % [case.patient_id, case.ailment_id]
-	if key != _case_key:
-		_case_key = key
-		_flags_key = ""
-		if patient_body != null and is_instance_valid(patient_body):
-			patient_body.queue_free()
-		patient_body = null
-		if key == "":
-			surgery.clear_case()
-			return
-		var top := _surface_below(table_pos() + Vector3.UP * 3.0, table_pos() + Vector3.UP * 0.95)
-		patient_body = BodyScript.create(case.patient_id)
-		_entities.add_child(patient_body)
-		patient_body.global_position = top
-		patient_body.rotation.y = _table_yaw()
-		if patient_body.has_method("set_ailment"):
-			patient_body.set_ailment(case.ailment_id)
-		surgery.start_case(case.patient_id, case.ailment_id)
-	var fk := str(case.get("flags", {})) + str(case.get("step_index", 0))
-	if fk != _flags_key and patient_body != null:
-		_flags_key = fk
-		if patient_body.has_method("apply_flags"):
-			patient_body.apply_flags(case.get("flags", {}))
+	_apply_cases_locally()
+
+
+func _apply_cases_locally() -> void:
+	var want := {}   # table index -> case
+	for c in cases:
+		var st := String(c.get("state", ""))
+		if int(c.get("table", -1)) >= 0 and st != "incoming" and String(c.get("patient_id", "")) != "player":
+			want[int(c.table)] = c
+	for t in _bodies.keys():
+		if not want.has(t):
+			_free_body(t)
+	for t in want.keys():
+		var c: Dictionary = want[t]
+		var key := "%d|%s|%s" % [int(c.get("id", 0)), c.patient_id, c.ailment_id]
+		var e: Dictionary = _bodies.get(t, {})
+		if String(e.get("key", "")) != key:
+			_free_body(t)
+			var pos := table_position(t)
+			var top := _surface_below(pos + Vector3.UP * 3.0, pos + Vector3.UP * 0.95)
+			var body: Node3D = BodyScript.create(String(c.patient_id))
+			_entities.add_child(body)
+			body.global_position = top
+			body.rotation.y = table_yaw_of(t)
+			if body.has_method("set_ailment"):
+				body.set_ailment(String(c.ailment_id))
+			e = {"key": key, "fk": "", "dead": false, "node": body}
+			_bodies[t] = e
+			var sys := surgery_for_table(t)
+			if sys != null:
+				sys.start_case(String(c.patient_id), String(c.ailment_id))
+		var node = e.get("node")
+		var fk := str(c.get("flags", {})) + str(c.get("step_index", 0))
+		if fk != String(e.get("fk", "")) and node != null and is_instance_valid(node):
+			e["fk"] = fk
+			if node.has_method("apply_flags"):
+				node.apply_flags(c.get("flags", {}))
+		if String(c.state) == "dead" and not bool(e.get("dead", false)) and node != null and is_instance_valid(node):
+			e["dead"] = true
+			if node.has_method("flatline"):
+				node.flatline()
+	var sig := ""
+	for c in cases:
+		sig += "%d:%d:%s:%d:%s|" % [int(c.get("id", 0)), int(c.get("table", -1)), String(c.get("state", "")), int(c.get("step_index", 0)), String(c.get("ailment_id", ""))]
+	if sig != _cases_sig:
+		_cases_sig = sig
+		cases_changed.emit()
+
+
+func _free_body(t: int) -> void:
+	var e: Dictionary = _bodies.get(t, {})
+	var n = e.get("node")
+	if n != null and is_instance_valid(n):
+		n.queue_free()
+	_bodies.erase(t)
+	var sys := surgery_for_table(t)
+	if sys != null:
+		sys.clear_case()
 
 
 ## The operating table's long axis runs along world X unless the level says otherwise.
@@ -925,56 +1435,72 @@ func _table_yaw() -> float:
 
 
 func _clear_case() -> void:
-	case = {}
+	cases.clear()
+	_dev_case_clear.clear()
 	shelf = {}
-	_apply_case_locally()
+	_apply_cases_locally()
 	if shelf_node != null and is_instance_valid(shelf_node):
 		shelf_node.show_stock(shelf)
 
 
-## Host: a surgery mistake. Costs vitals and nothing else.
-func surgery_botch(amount: float, reason: String) -> void:
+## The case a surgery report or call is about: the one on `table_index`, or the first patient
+## case for -1.
+func _case_for(table_index: int) -> Dictionary:
+	return _alias_case() if table_index < 0 else case_on_table(table_index)
+
+
+## Host: a surgery mistake. Costs vitals and nothing else. `table_index` -1 means the first
+## patient case (the old single-table call).
+func surgery_botch(amount: float, reason: String, table_index: int = -1) -> void:
 	if not is_host() or phase != Phase.SHIFT:
 		return
-	vitals -= amount
+	var c := _case_for(table_index)
+	if c.is_empty() or String(c.state) != "on_table":
+		return
+	c.vitals = float(c.vitals) - amount
 	if reason != "" and _botch_say_timer <= 0.0:
 		_botch_say_timer = 2.0
 		say(reason, 1.8)
 	if amount >= 0.5 and _complication_timer <= 0.0:
 		_complication_timer = 1.2
-		_sound("complication", table_pos())
+		_sound("complication", table_position(int(c.table)))
 
 
-## Host: the current step is finished. Uses up its supplies, remembers its result, moves on.
-func surgery_step_done(result: Dictionary) -> void:
-	if not is_host() or phase != Phase.SHIFT or case.is_empty():
+## Host: the current step of a table's case is finished. Uses up its supplies, remembers its
+## result, moves on; the last step makes the patient stable.
+func surgery_step_done(result: Dictionary, table_index: int = -1) -> void:
+	if not is_host() or phase != Phase.SHIFT:
 		return
-	var step := Procedures.step(case.ailment_id, int(case.step_index))
+	var c := _case_for(table_index)
+	if c.is_empty() or String(c.state) != "on_table":
+		return
+	var step := Procedures.step(c.ailment_id, int(c.step_index))
 	if step.is_empty():
 		return
 	var uses := int(step.uses)
 	if uses > 0:
 		shelf[step.item] = maxi(0, shelf_count(step.item) - uses)
-	var flags: Dictionary = case.get("flags", {})
+	var flags: Dictionary = c.get("flags", {})
 	flags.merge(result, true)
-	case.flags = flags
-	case.step_index = int(case.step_index) + 1
-	vitals = minf(100.0, vitals + 8.0)
+	c.flags = flags
+	c.step_index = int(c.step_index) + 1
+	c.vitals = minf(100.0, float(c.vitals) + 8.0)
 	if shelf_node != null:
 		shelf_node.show_stock(shelf)
-	_apply_case_locally()
-	_sound("step_done", table_pos())
-	var next := Procedures.step(case.ailment_id, int(case.step_index))
+	_apply_cases_locally()
+	var next := Procedures.step(c.ailment_id, int(c.step_index))
 	if next.is_empty():
-		_end_shift(true, "%s is stable. Punch out!" % Procedures.patient(case.patient_id).name)
+		finish_case(int(c.id), true)
 	else:
+		_sound("step_done", table_position(int(c.table)))
 		say("Done: %s. Next: %s (%s)." % [step.label, next.label, Items.display_name(next.item)], 4.0)
 
 
-## Client operator -> host. On the host itself it goes straight to the surgery system.
+## Client operator -> host. On the host itself it goes straight to the surgery system. Reports
+## carry "tb", the table index of the surgery system that sent them.
 func send_operator_report(report: Dictionary) -> void:
 	if is_host():
-		surgery.receive_operator_report(Net.my_id(), report)
+		_route_operator_report(Net.my_id(), report)
 	elif Net.active:
 		if report.has("botches") or report.has("finished") or report.has("exit") or report.has("reliable"):
 			_rpc_operator_report_reliable.rpc_id(Net.HOST_ID, report)
@@ -982,16 +1508,24 @@ func send_operator_report(report: Dictionary) -> void:
 			_rpc_operator_report.rpc_id(Net.HOST_ID, report)
 
 
+func _route_operator_report(peer_id: int, report: Dictionary) -> void:
+	var sys: Node = surgery_for_table(int(report.get("tb", -1))) if report.has("tb") else null
+	if sys == null and not surgeries.is_empty():
+		sys = surgeries[0]
+	if sys != null:
+		sys.receive_operator_report(peer_id, report)
+
+
 @rpc("any_peer", "unreliable_ordered", "call_remote")
 func _rpc_operator_report(report: Dictionary) -> void:
 	if is_host():
-		surgery.receive_operator_report(multiplayer.get_remote_sender_id(), report)
+		_route_operator_report(multiplayer.get_remote_sender_id(), report)
 
 
 @rpc("any_peer", "reliable", "call_remote")
 func _rpc_operator_report_reliable(report: Dictionary) -> void:
 	if is_host():
-		surgery.receive_operator_report(multiplayer.get_remote_sender_id(), report)
+		_route_operator_report(multiplayer.get_remote_sender_id(), report)
 
 
 # =========================================================================
@@ -1081,12 +1615,18 @@ func _physics_process(delta: float) -> void:
 
 	if is_host():
 		_simulate(delta)
-	surgery.physics_tick(delta)
-	if patient_body != null and is_instance_valid(patient_body):
-		if patient_body.has_method("set_vitals"):
-			patient_body.set_vitals(vitals)
-		if patient_body.has_method("set_sedation"):
-			patient_body.set_sedation(float(case.get("flags", {}).get("sedation", 0.0)))
+	for s in surgeries:
+		s.physics_tick(delta)
+	for t in _bodies.keys():
+		var body := body_for_table(int(t))
+		if body == null:
+			continue
+		var c := case_on_table(int(t))
+		if body.has_method("set_vitals"):
+			body.set_vitals(float(c.get("vitals", 100.0)))
+		if body.has_method("set_sedation"):
+			body.set_sedation(float(c.get("flags", {}).get("sedation", 0.0)))
+	loop.physics_tick(delta)
 
 	_update_danger()
 	_net_tick(delta)
@@ -1094,9 +1634,12 @@ func _physics_process(delta: float) -> void:
 
 func _simulate(delta: float) -> void:
 	_tick_noise(delta)
-	var op: int = surgery.operator_peer() if surgery.has_method("operator_peer") else 0
 	for p in players.values():
-		p.operating = p.peer_id == op
+		p.operating = false
+	for s in surgeries:
+		var op: int = s.operator_peer()
+		if op != 0 and players.has(op):
+			players[op].operating = true
 	match phase:
 		Phase.LOBBY:
 			_sim_lobby(delta)
@@ -1105,11 +1648,10 @@ func _simulate(delta: float) -> void:
 		Phase.WON, Phase.LOST:
 			end_timer -= delta
 			if end_timer <= 0.0:
-				var won := phase == Phase.WON
-				if dev_mode:
-					dev.on_case_over(won)  # DEV HOOK: stay in the dev room
+				if phase == Phase.WON:
+					_to_next_shift()
 				else:
-					start_lobby(seed_value + 1, shift + 1 if won else shift)
+					_new_run()
 
 
 func _sim_lobby(delta: float) -> void:
@@ -1117,7 +1659,7 @@ func _sim_lobby(delta: float) -> void:
 		punch = minf(1.0, punch + delta / C.PUNCH_SECONDS)
 		if punch >= 1.0:
 			punch = 0.0
-			begin_shift()
+			clock_in()
 	else:
 		punch = maxf(0.0, punch - delta * 1.5)
 
@@ -1125,9 +1667,20 @@ func _sim_lobby(delta: float) -> void:
 func _sim_shift(delta: float) -> void:
 	var living := alive_players()
 
-	# The patient is always dying.
+	# Every patient on a table is always dying.
 	var drain: float = C.VITALS_DRAIN_SECONDS * pow(0.85, shift - 1)
-	vitals -= delta * 100.0 / drain
+	for c in cases.duplicate():
+		if String(c.get("state", "")) != "on_table" or String(c.get("patient_id", "")) == "player":
+			continue
+		c.vitals = float(c.vitals) - delta * 100.0 / drain
+		if float(c.vitals) <= 0.0:
+			c.vitals = 0.0
+			finish_case(int(c.id), false)
+	if dev_mode:
+		for id in _dev_case_clear.keys():
+			if world_time >= float(_dev_case_clear[id]):
+				_dev_case_clear.erase(id)
+				remove_case(int(id))
 
 	_sim_pod(delta, living)
 
@@ -1136,11 +1689,32 @@ func _sim_shift(delta: float) -> void:
 		_supply_timer = SUPPLY_CHECK_SECONDS
 		_check_supply()
 
-	if vitals <= 0.0:
-		vitals = 0.0
-		_end_shift(false, "The patient flatlined.")
-	elif living.is_empty():
-		_end_shift(false, "Everyone is dead. The patient is next.")
+	# loop: the time clock ends the shift once every accepted patient is stable or dead.
+	if not dev_mode:
+		if loop.can_clock_out() and _holding_aim("clock"):
+			punch = minf(1.0, punch + delta / C.PUNCH_SECONDS)
+			if punch >= 1.0:
+				punch = 0.0
+				loop.clock_out(false)
+				return
+		else:
+			punch = maxf(0.0, punch - delta * 1.5)
+
+	if not dev_mode and _team_down():
+		game_over("Everyone is down. The night shift is over.")
+
+
+## loop: nobody on the team is up (alive and not downed). Late joiners waiting to spawn and dev room
+## bots do not count; the dev room never ends.
+func _team_down() -> bool:
+	var any := false
+	for p in players.values():
+		if waiting_peers.has(p.peer_id) or p.is_bot:
+			continue
+		any = true
+		if p.alive and p.get("downed") != true:
+			return false
+	return any
 
 
 func _sim_pod(delta: float, _living: Array) -> void:
@@ -1233,7 +1807,7 @@ func damage_player(p: Node, amount: int, source: String, knock: Vector3 = Vector
 	p.take_hit(amount, knock)
 	_broadcast("hit", {"id": p.peer_id, "hp": p.hp, "knock": knock})
 	Audio.play("hurt", p.global_position)
-	surgery.end(p)
+	end_operations(p)
 	_drop_hands(p, true)
 	if not p.alive:
 		Audio.play("flatline", p.global_position)
@@ -1255,7 +1829,7 @@ func knock_down_player(p: Node, source: String, knock: Vector3 = Vector3.ZERO, s
 	else:
 		p.apply_knock(knock)
 		_broadcast("shoved", {"id": p.peer_id, "knock": knock})
-		surgery.end(p)
+		end_operations(p)
 		_drop_hands(p, true)
 		Audio.play("hurt", p.global_position)
 	p.stun = seconds
@@ -1304,7 +1878,7 @@ func player_shoved(p: Node) -> void:
 		var knock := forward * 11.0 + Vector3.UP * 2.0
 		q.apply_knock(knock)
 		_broadcast("shoved", {"id": q.peer_id, "knock": knock})
-		surgery.end(q)
+		end_operations(q)
 		if q.hands_empty():
 			say("%s shoved %s. Very professional." % [p.player_name, q.player_name], 3.0)
 		else:
@@ -1494,33 +2068,65 @@ static func _merge_fields(old: Dictionary, d: Dictionary) -> Dictionary:
 func _global_fields() -> Dictionary:
 	var g := {
 		"t": snappedf(world_time, 0.5), "ph": phase, "sh": shift, "sd": seed_value,
-		"vit": snappedf(vitals, 0.1), "pu": snappedf(punch, 0.01), "po": snappedf(pod, 0.01),
-		"et": snappedf(end_timer, 0.1), "cs": case.duplicate(true), "sf": shelf.duplicate(),
+		"pu": snappedf(punch, 0.01), "po": snappedf(pod, 0.01),
+		"et": snappedf(end_timer, 0.1), "sf": shelf.duplicate(),
 		"wp": waiting_peers.keys(),
 		"dv": dev.net_state() if dev_mode else {},  # DEV HOOK
 		"mn": money, "gb": gold_bars,  # inventory: team money and the gold pile
 	}
-	var sg: Dictionary = surgery.net_state()
-	for k in sg.keys():
-		if k == "ms" and sg[k] is Dictionary:
-			for mk in sg.ms.keys():
-				g["ms." + str(mk)] = sg.ms[mk]
-		else:
-			g["sg." + str(k)] = sg[k]
+	# loop: the cases, one field per case so a vitals tick resends a float, not every case:
+	# "cs" the ids in order, "c.<id>" the case without vitals, "v.<id>" its vitals.
+	var ids := []
+	for c in cases:
+		var id := int(c.id)
+		ids.append(id)
+		var body: Dictionary = c.duplicate(true)
+		body.erase("vitals")
+		g["c.%d" % id] = body
+		g["v.%d" % id] = snappedf(float(c.get("vitals", 100.0)), 0.1)
+	g["cs"] = ids
+	# One surgery system per patient table: "sg<table>.<field>" and "ms<table>.<minigame field>".
+	for s in surgeries:
+		if int(s.table_index) < 0:
+			continue
+		var sg: Dictionary = s.net_state()
+		var ti := int(s.table_index)
+		for k in sg.keys():
+			if k == "ms" and sg[k] is Dictionary:
+				for mk in sg.ms.keys():
+					g["ms%d.%s" % [ti, str(mk)]] = sg.ms[mk]
+			else:
+				g["sg%d.%s" % [ti, str(k)]] = sg[k]
+	var lp: Dictionary = loop.net_state()
+	for k in lp.keys():
+		g["lp." + str(k)] = lp[k]
 	return g
 
 
-static func _surgery_state_from(g: Dictionary) -> Dictionary:
+static func _surgery_state_from(g: Dictionary, table_index: int) -> Dictionary:
 	var sg := {}
 	var ms := {}
+	var sp := "sg%d." % table_index
+	var mp := "ms%d." % table_index
 	for k in g.keys():
 		var key := String(k)
-		if key.begins_with("sg."):
-			sg[key.substr(3)] = g[k]
-		elif key.begins_with("ms."):
-			ms[key.substr(3)] = g[k]
+		if key.begins_with(sp):
+			sg[key.substr(sp.length())] = g[k]
+		elif key.begins_with(mp):
+			ms[key.substr(mp.length())] = g[k]
 	sg["ms"] = ms
 	return sg
+
+
+static func _cases_from(g: Dictionary) -> Array:
+	var out := []
+	for id in g.get("cs", []):
+		var c: Dictionary = (g.get("c.%d" % int(id), {}) as Dictionary).duplicate(true)
+		if c.is_empty():
+			continue
+		c["vitals"] = float(g.get("v.%d" % int(id), 100.0))
+		out.append(c)
+	return out
 
 
 ## Client: rebuild the full state the host meant from the base we acked plus this delta.
@@ -1578,20 +2184,26 @@ func _apply_state(state: Dictionary, msg: Dictionary, keyframe: bool) -> void:
 		world_time = float(g.t)
 	_set_phase(int(g.ph))
 	shift = int(g.sh)
-	vitals = float(g.vit)
 	punch = float(g.pu)
 	pod = float(g.po)
 	end_timer = float(g.et)
 	waiting_peers.clear()
 	for id in g.get("wp", []):
 		waiting_peers[id] = true
-	case = (g.cs as Dictionary).duplicate(true)
-	_apply_case_locally()
+	cases = _cases_from(g)
+	_apply_cases_locally()
 	if str(shelf) != str(g.sf):
 		shelf = (g.sf as Dictionary).duplicate()
 		if shelf_node != null:
 			shelf_node.show_stock(shelf)
-	surgery.apply_net_state(_surgery_state_from(g))
+	for s in surgeries:
+		if int(s.table_index) >= 0:
+			s.apply_net_state(_surgery_state_from(g, int(s.table_index)))
+	var lp := {}
+	for k in g.keys():
+		if String(k).begins_with("lp."):
+			lp[String(k).substr(3)] = g[k]
+	loop.apply_net_state(lp)
 	# inventory: money and the gold pile (the pile rebuilds itself from the count).
 	var new_money := int(g.get("mn", money))
 	if new_money != money:
@@ -1726,6 +2338,10 @@ func _event(kind: String, data: Dictionary) -> void:
 	match kind:
 		"sound":
 			Audio.play(data.cue, data.get("at"))
+		"sting":
+			Audio.sting(String(data.cue))  # loop: a patient saved or lost
+		"loop":
+			loop.on_event(data)
 		"say":
 			message = data.text
 			message_timer = data.secs

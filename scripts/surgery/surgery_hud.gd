@@ -59,8 +59,8 @@ class _Canvas extends Control:
 		var y := h - ph - 18.0
 		draw_rect(Rect2(x, y, pw, ph), Color(0, 0, 0, 0.62))
 		draw_rect(Rect2(x, y, 4, ph), Color("5ce0d0"))
-		var idx := int(game.case.get("step_index", 0)) + 1
-		var total := Procedures.steps(String(game.case.get("ailment_id", ""))).size()
+		var idx := int(st.get("step_index", 0)) + 1   # loop: this table's case
+		var total := int(st.get("steps", 0))
 		draw_string(font, Vector2(x + 16, y + 22), "STEP %d/%d: %s" % [idx, total, String(st.get("title", "")).to_upper()],
 			HORIZONTAL_ALIGNMENT_LEFT, pw - 32, 15, Color("f0e6c8"))
 		draw_string(font, Vector2(x + pw - 16 - 150, y + 22), "ESC / E: step away", HORIZONTAL_ALIGNMENT_RIGHT, 150, 11, Color("777777"))
@@ -78,7 +78,7 @@ class _Canvas extends Control:
 		draw_rect(Rect2(bx, by, bw, 10), Color("2a2f36"))
 		draw_rect(Rect2(bx, by, bw * pr, 10), Color("5cff8a"))
 		draw_string(font, Vector2(bx, by + 26), "PROGRESS %d%%" % roundi(pr * 100.0), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("aaaaaa"))
-		var v: float = maxf(0.0, float(game.get("vitals")))
+		var v: float = maxf(0.0, float(st.get("vitals", 100.0)))
 		var vcol := Color("5cff8a") if v > 50.0 else (Color("ffd35c") if v > 25.0 else Color("ff2a2a"))
 		draw_string(font, Vector2(bx, by + 26), "VITALS %d%%" % ceili(v), HORIZONTAL_ALIGNMENT_RIGHT, bw, 12, vcol)
 		# Gauges
@@ -144,12 +144,15 @@ class _Canvas extends Control:
 
 	func _draw_spectator(font: Font, w: float, h: float, st: Dictionary, game) -> void:
 		var view = game.viewed_player() if game.has_method("viewed_player") else game.local_player()
-		if view == null or view.global_position.distance_to(game.table_pos()) > SPECTATE_RANGE:
+		var sys = hud.system
+		if view == null or view.global_position.distance_to(sys._table_pos()) > SPECTATE_RANGE:
 			return
 		var text := "%s is operating: %s  %d%%" % [String(st.get("operator_name", "Someone")),
 			String(st.get("step_label", st.get("title", ""))), roundi(clampf(float(st.get("progress", 0.0)), 0.0, 1.0) * 100.0)]
 		var tw := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
-		var y := h - 196.0
+		# loop: one line per table being operated on, stacked.
+		var slot: int = maxi(0, game.surgeries.find(sys)) if "surgeries" in game else 0
+		var y := h - 196.0 - 28.0 * slot
 		draw_rect(Rect2(w * 0.5 - tw * 0.5 - 12, y - 17, tw + 24, 24), Color(0, 0, 0, 0.55))
 		draw_string(font, Vector2(0, y), text, HORIZONTAL_ALIGNMENT_CENTER, w, 13,
 			Color("ff6a6a") if bool(st.get("stirring", false)) else Color("5ce0d0"))

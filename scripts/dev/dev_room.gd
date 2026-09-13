@@ -112,11 +112,11 @@ func _stock_containers() -> void:
 			game._spawn_item(kind, int(batch[batch.size() - 1]), ct.slot_transform(i), WorldItemScript.State.IN_CONTAINER, String(e.id), i)
 
 
-## A patient was saved or lost in the dev room: clear the table, stay in the room.
+## A patient was saved or lost in the dev room: clear the table, stay in the room. (loop: the game
+## now clears a finished case's table itself a few seconds later; this stays for old callers.)
 func on_case_over(_won: bool) -> void:
 	game.case = {}
 	game._apply_case_locally()
-	game.vitals = 100.0
 	game.end_timer = 0.0
 	game._set_phase(game.Phase.SHIFT)
 	for p in game.players.values():
@@ -166,13 +166,12 @@ func _physics_process(delta: float) -> void:
 
 
 func _host_tick(delta: float) -> void:
-	# Vitals: nothing drains while the table is empty; with freeze on the patient waits.
-	if game.phase == game.Phase.SHIFT:
-		if game.case.is_empty():
-			game.vitals = 100.0
-		elif freeze_vitals and game.vitals > 0.0:
-			var drain: float = C.VITALS_DRAIN_SECONDS * pow(0.85, game.shift - 1)
-			game.vitals = minf(100.0, game.vitals + delta * 100.0 / drain)
+	# Vitals: with freeze on every patient on a table waits (loop: every case, not just one).
+	if game.phase == game.Phase.SHIFT and freeze_vitals:
+		var drain: float = C.VITALS_DRAIN_SECONDS * pow(0.85, game.shift - 1)
+		for c in game.cases:
+			if String(c.get("state", "")) == "on_table" and float(c.vitals) > 0.0:
+				c.vitals = minf(100.0, float(c.vitals) + delta * 100.0 / drain)
 	for id in brains.keys():
 		var b = brains[id]
 		b.tick(delta)
@@ -446,12 +445,17 @@ func _apply_request(sender: int, action: String, a: Dictionary) -> void:
 		"patient":
 			set_patient(String(a.get("patient", "bob")), String(a.get("ailment", "gunshot")))
 		"clear_patient":
-			if game.case.is_empty():
-				return
-			game.case = {}
-			game._apply_case_locally()
+			# loop: every patient, on the tables and on the way.
+			for c in game.cases.duplicate():
+				game.remove_case(int(c.id))
 		"vitals":
-			game.vitals = clampf(float(a.get("v", 100.0)), 1.0, 100.0)
+			for c in game.cases:
+				if String(c.get("state", "")) == "on_table":
+					c.vitals = clampf(float(a.get("v", 100.0)), 1.0, 100.0)
+		"extra_patient":
+			game.dev_extra_patient()
+		"skip_grace":
+			game.dev_skip_grace()
 		"stock_shelf":
 			stock_shelf()
 		"clear_shelf":
@@ -569,12 +573,14 @@ func spawn_monster(kind: String, where: String, who: Node = null) -> Node:
 func set_patient(patient_id: String, ailment_id: String) -> void:
 	if not is_host() or Procedures.patient(patient_id).is_empty() or Procedures.ailment(ailment_id).is_empty():
 		return
-	if not game.case.is_empty():
-		game.case = {}
-		game._apply_case_locally()
-	game.case = {"patient_id": patient_id, "ailment_id": ailment_id, "step_index": 0, "flags": {}}
-	game.vitals = 100.0
-	game._apply_case_locally()
+	# loop: the first free patient table; with both taken, the first table's patient makes room.
+	var table: int = game.free_patient_table()
+	if table < 0:
+		table = int(game.patient_tables[0].index) if not game.patient_tables.is_empty() else 0
+		var there: Dictionary = game.case_on_table(table)
+		if not there.is_empty():
+			game.remove_case(int(there.id))
+	game.add_case({"patient_id": patient_id, "ailment_id": ailment_id, "table": table, "state": "on_table"})
 	game._set_phase(game.Phase.SHIFT)
 	game.say("%s is on the table: %s." % [Procedures.patient(patient_id).name, Procedures.ailment(ailment_id).name], 3.0)
 
@@ -633,7 +639,7 @@ func remove_bot(id: int) -> void:
 		return
 	var p = game.players.get(id)
 	if p != null and is_host():
-		game.surgery.end(p)
+		game.end_operations(p)
 		game._drop_hands(p, false)
 	_free_bot(id)
 	bots.erase(id)
