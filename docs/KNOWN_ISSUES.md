@@ -168,6 +168,11 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 
 ## Performance (Radeon 890M, 1600x900, measured 2026-09-12)
 
+- Sweep 2 hospital (2026-09-13, medium, seed 4242, two runs each, nothing else running): OR
+  114-116 fps (1% low 105-110, was 75/67 on the old map), break room 135 (120-129, was 88-93),
+  corridor 104-105 (94-96, **was 123-124 / 115-120**: the new hallways are 80 m sightlines),
+  pharmacy 211-212 (162-165, was 259-277), operating 278-293, neutral area outside 169-170
+  (110-120, 557-568 draw calls). No frame over 25 ms outside the warmup cover (`--hitch`).
 - Medium (default): OR 71-76 fps (1% low 67), lobby 73-76 (59-67), corridor 94-103 (75-90). Low: 95-124.
   Before the perf pass medium was OR 36, lobby 42, corridor 55.
 - High is for dedicated GPUs only: 16-37 fps on the 890M (SSAO, MSAA 2x, full resolution).
