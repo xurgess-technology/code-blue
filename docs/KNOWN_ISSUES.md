@@ -88,9 +88,8 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 
 ## Level and tools
 
-- **The OR supply shelf is about 4.2 m from the table** (the OR template has no wall closer that
-  keeps doors clear). Fine for delivery, but it makes the surgeon walk.
-- **3 of 200 generated maps have no pegboard**; on those the bone saw only spawns loose.
+- **The OR supply shelf is about 4 m from each patient table** (it stands against the north wall
+  between them). Fine for delivery, but it makes the surgeon walk.
 - **The navmesh keeps a player-sized agent about 1.9 m from some containers against walls**
   (seed 4245, `ct_44_22_0`). The game's reach rule still allows the interaction from there, so
   it is fine for players; the test bot now falls back to that rule when it stops getting closer.
@@ -101,6 +100,39 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   behind it. `tools/monster_lab.tscn` (all scenarios pass) remains the real monster check.
 - **Headless runs log "Parameter m is null" from the gauze warmup.** It comes from the dummy
   renderer used by `--headless` and does not happen in a window.
+
+## Hospital (sweep 2 wave 1)
+
+- **Monsters wander into the entrance building and the neutral area.** They only *spawn* on wing
+  hallways, but `Monster.random_nav_point` picks any point of the one navigation region, so a
+  Discharged can stroll into the lobby or the parking lot. `HospitalBuilder.zone_of(info, pos)`
+  tells where a point is; the loop (wave 2) should reject non-wing wander targets, or the builder
+  could split the navigation mesh into regions per zone with their own navigation layers.
+- **Furniture in the open has no collider.** Chairs, IV stands, bins, plants, bed trays, coat
+  racks and the like stand where an agent following the navigation mesh would catch on them, so
+  they are visual only: players walk through them and dropped items fall through them. Blocking
+  furniture (beds, counters, shelves, carts, gurneys, wheelchairs, benches, desks) keeps a
+  collider, clipped to the tiles it blocks and held 0.18 m back from open tiles, so its visual
+  overhangs the collider by up to about 20 cm. Wall corners have a 0.18 m chamfer in the collision
+  only. This was driven by the playtest bot, which cuts path corners by up to 0.7 m; monsters
+  steer the same way.
+- **Supply runs are long.** The map is about 110 x 100 m and deeper wings are far: the god-mode
+  bot needs 140 to 340 s of game time to stock the shelf (vitals drain over 840 s). Real teams
+  split up; keep an eye on it when tuning the drain.
+- **Doorways are open and one tile wide.** No door leaves (still a TODO in DESIGN.md); lintels and
+  signs mark them. Every room of a kind carries the same sign ("WARD", "OFFICE").
+- **Generation retries about 12% of seeds** (a wing with too few room slots for the rooms every
+  wing needs); up to 8 attempts, 30 to 230 ms per map, worst case about 1 s.
+- **Four-wing layouts have two small north wings** (15 and 14 tiles wide) that hold little
+  besides their required rooms.
+- **Outside is a black sky over a 1.9 m fence**, with nothing beyond it. Reads as night; a tree
+  line or distant lights would sell it better.
+- **Some registered hospital models are not placed yet** (`hosp/armchair`, `hosp/washer`,
+  `hosp/bench` — benches are primitives because the model is too short).
+- **Dead fixtures still get a flicker controller** (they spark now and then), and every
+  controller duplicates its panel material, so each fixture panel is its own draw call. There
+  are about 140 to 200 fixtures on a map now.
+- **The generator ignores the size arguments** of `MapGen.generate(seed, w, h)`.
 
 ## Dev room (sweep 2 wave 1)
 
