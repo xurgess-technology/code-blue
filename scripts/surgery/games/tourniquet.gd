@@ -125,11 +125,6 @@ var _windlass: Node3D
 var _rod_pivot: Node3D
 var _twist: MeshInstance3D
 var _clip: Node3D
-var _gauge: Node3D
-var _needle: Node3D
-var _gauge_label: Label3D
-var _gauge_bands: Node3D
-var _tube: MeshInstance3D
 var _puck: Node3D
 var _led_mat: StandardMaterial3D
 var _ring: MeshInstance3D
@@ -736,52 +731,6 @@ func _build() -> void:
 	for s in [-1.0, 1.0]:
 		_mesh(rod, _cyl(0.0064, 0.008, 14), _mat(Color(0.55, 0.04, 0.03), 0.5), _along_x(Vector3(s * 0.042, 0, 0)))
 
-	# Pressure gauge beside the limb, on a line from the strap.
-	_gauge = Node3D.new()
-	_gauge.name = "Gauge"
-	add_child(_gauge)
-	var face := Node3D.new()
-	face.rotation = Vector3(0.75, 0, 0)
-	_gauge.add_child(face)
-	_mesh(face, _cyl(0.034, 0.012, 28), _mat(Color(0.06, 0.06, 0.07), 0.35, 0.5), Transform3D(Basis(), Vector3(0, 0, 0)))
-	var face_mat := _unshaded(Color(0.93, 0.92, 0.86))
-	_mesh(face, _cyl(0.029, 0.002, 28), face_mat, Transform3D(Basis(), Vector3(0, 0.0065, 0)))
-	_gauge_bands = Node3D.new()
-	face.add_child(_gauge_bands)
-	_gauge_bands.position = Vector3(0, 0.0078, 0)
-	var green := _unshaded(Color(0.1, 0.7, 0.25))
-	var red_zone := _unshaded(Color(0.85, 0.1, 0.08))
-	var tick := _unshaded(Color(0.08, 0.08, 0.08))
-	var v := 0.0
-	while v <= P_GAUGE_MAX + 0.1:
-		var big := int(v) % 100 == 0
-		_gauge_mark(tick, v, 0.0245, Vector3(0.0012, 0.0008, 0.006 if big else 0.0035))
-		v += 25.0
-	v = good_min
-	while v <= good_max + 0.1:
-		_gauge_mark(green, v, 0.0195, Vector3(0.0035, 0.0006, 0.005))
-		v += (good_max - good_min) / 6.0
-	v = good_max + 10.0
-	while v <= P_GAUGE_MAX:
-		_gauge_mark(red_zone, v, 0.0195, Vector3(0.0035, 0.0006, 0.005))
-		v += 12.0
-	_needle = Node3D.new()
-	_needle.position = Vector3(0, 0.009, 0)
-	face.add_child(_needle)
-	_mesh(_needle, _box(Vector3(0.0022, 0.0012, 0.025)), _unshaded(Color(0.8, 0.05, 0.05)), Transform3D(Basis(), Vector3(0, 0, -0.009)))
-	_mesh(_needle, _cyl(0.0028, 0.002, 10), _unshaded(Color(0.1, 0.1, 0.1)), Transform3D(Basis(), Vector3(0, 0.001, 0)))
-	_gauge_label = Label3D.new()
-	_gauge_label.pixel_size = 0.0001
-	_gauge_label.font_size = 64
-	_gauge_label.outline_size = 0
-	_gauge_label.modulate = Color(0.1, 0.1, 0.1)
-	_gauge_label.rotation = Vector3(-PI * 0.5, 0, 0)
-	_gauge_label.position = Vector3(0, 0.0085, 0.0175)
-	_gauge_label.shaded = false
-	_gauge_label.double_sided = false
-	face.add_child(_gauge_label)
-	_tube = _mesh(self, _cyl(0.0022, 1.0, 8), _mat(Color(0.05, 0.05, 0.06), 0.4))
-
 	# Distal pulse indicator: a probe on the skin below the strap with a blinking light.
 	_puck = Node3D.new()
 	_puck.name = "PulseProbe"
@@ -958,16 +907,6 @@ func _make_soft_texture(band: bool) -> ImageTexture:
 	return ImageTexture.create_from_image(img)
 
 
-func _gauge_mark(mat: Material, value: float, radius: float, size: Vector3) -> void:
-	var phi := _gauge_angle(value)
-	var basis := Basis(Vector3.UP, -phi)
-	_mesh(_gauge_bands, _box(size), mat, Transform3D(basis, basis * Vector3(0, 0, -radius)))
-
-
-func _gauge_angle(value: float) -> float:
-	return lerpf(-0.75 * PI, 0.75 * PI, clampf(value / P_GAUGE_MAX, 0.0, 1.0))
-
-
 ## A flat strap with thickness following a (z, y) path; STRAP_W wide along X.
 func _ribbon(path: PackedVector2Array, width: float, thick: float) -> ArrayMesh:
 	var st := SurfaceTool.new()
@@ -1099,8 +1038,6 @@ func _update_visuals(delta: float) -> void:
 
 	# The pulse probe appears once the strap is round the limb; there is no pressure dial.
 	var show_crank := stage != Stage.PLACE and _wrap > 0.6
-	_gauge.visible = false
-	_tube.visible = false
 	_puck.visible = show_crank
 	if show_crank:
 		# Pulse probe below the strap, on the near side of the limb.
