@@ -89,22 +89,40 @@ func setup(g: Node) -> void:
 	_cam.far = 60.0
 	_cam.current = false
 	add_child(_cam)
-	# A surgical work lamp riding on the operator's camera: the OR is dark, the site must not be.
-	_lamp = SpotLight3D.new()
-	_lamp.name = "WorkLamp"
-	_lamp.light_color = Color(1.0, 0.97, 0.9)
+	_lamp = make_work_lamp()
 	_lamp.light_energy = 0.0
-	_lamp.spot_range = 2.5
-	_lamp.spot_angle = 32.0
-	_lamp.spot_attenuation = 0.6
-	_lamp.shadow_enabled = false
-	_lamp.light_volumetric_fog_energy = 0.0
 	_lamp.visible = false
 	_cam.add_child(_lamp)
 	hud = HudScript.new()
 	hud.name = "SurgeryHud"
 	add_child(hud)
 	hud.system = self
+
+
+## The surgical work lamp riding on the operator's camera: the OR is dark, the site must not be.
+## ORSCREEN: tuned so close-up skin keeps its colour and the minigames' green / amber / red cues
+## still read (it used to be energy 2.2 with a shallow falloff, which bleached skin nearly white
+## at the 0.4-0.6 m the operating camera sits from the site). tools/minigame_lab.gd --look=or
+## builds the same lamp through this function.
+const LAMP_ENERGY := 0.5
+const LAMP_COLOR := Color(1.0, 0.98, 0.95)
+const LAMP_RANGE := 2.5
+const LAMP_ANGLE := 40.0
+const LAMP_ATTENUATION := 1.0
+
+
+static func make_work_lamp() -> SpotLight3D:
+	var lamp := SpotLight3D.new()
+	lamp.name = "WorkLamp"
+	lamp.light_color = LAMP_COLOR
+	lamp.light_energy = LAMP_ENERGY
+	lamp.spot_range = LAMP_RANGE
+	lamp.spot_angle = LAMP_ANGLE
+	lamp.spot_attenuation = LAMP_ATTENUATION
+	lamp.shadow_enabled = false
+	lamp.light_volumetric_fog_energy = 0.0
+	lamp.light_specular = 0.3
+	return lamp
 
 
 func start_case(_patient_id: String, _ailment_id: String) -> void:
@@ -635,7 +653,7 @@ func _update_camera(delta: float) -> void:
 	_cam.global_transform = head.interpolate_with(target, e)
 	_cam.fov = lerpf(_head_fov, _last_pose_fov, e)
 	_lamp.visible = e > 0.02
-	_lamp.light_energy = 2.2 * e
+	_lamp.light_energy = LAMP_ENERGY * e
 	if _cam_dir < 0 and _cam_blend <= 0.0:
 		_cam_dir = 0
 		_cam.current = false

@@ -2,10 +2,14 @@ extends Node
 ## Boots the real game, poses it, and saves screenshots so the look can be checked
 ## without a human sitting at the keyboard.
 ##
-##   godot --path . tools/gameshot.tscn -- [--seed=N]
+##   godot --path . tools/gameshot.tscn -- [--seed=N] [--tag=1600] [--only=orscreen]
+##
+## --tag suffixes the file names (one run per resolution); --only keeps the shots whose name
+## contains the text (plus the three lobby shots before the OR, which set the scene up).
 
 const OUT_DIR := "res://tools/game_shots"
 const SETTLE_FRAMES := 26
+const ModelScript := preload("res://scripts/orscreen/or_screen_model.gd")
 
 var main: Node3D
 var game: Game
@@ -13,12 +17,18 @@ var bot: Player
 var shots: Array = []
 var _i := 0
 var _seed := 4242
+var _tag := ""
+var _only := ""
 
 
 func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--seed="):
 			_seed = int(a.split("=")[1])
+		elif a.begins_with("--tag="):
+			_tag = "_" + a.split("=")[1]
+		elif a.begins_with("--only="):
+			_only = a.split("=")[1]
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(OUT_DIR))
 
 	main = load("res://scenes/main.tscn").instantiate()
@@ -38,14 +48,26 @@ func _ready() -> void:
 		{"name": "01_clockin_room", "fn": _pose_clockin},
 		{"name": "02_time_clock", "fn": _pose_clock},
 		{"name": "03_corridor", "fn": _pose_corridor},
+		{"name": "11_orscreen_idle", "fn": _pose_screen_idle, "settle": 40},
 		{"name": "04_operating_room", "fn": _pose_or},
+		{"name": "12_orscreen_door", "fn": _pose_screen_door, "settle": 40},
+		{"name": "13_orscreen_close", "fn": _pose_screen_close, "settle": 40},
 		{"name": "05_monster_close", "fn": _pose_monster},
 		{"name": "06_surgery_hud", "fn": _pose_surgery},
+		{"name": "14_orscreen_low_vitals", "fn": _pose_screen_low, "settle": 40},
+		{"name": "18_orscreen_two_cases", "fn": _pose_screen_two_cases, "settle": 40},
+		{"name": "19_orscreen_incoming", "fn": _pose_screen_incoming, "settle": 40},
+		{"name": "20_orscreen_flatline", "fn": _pose_screen_flatline, "settle": 40},
 		{"name": "07_dark_no_light", "fn": _pose_dark},
 		{"name": "08_lectern_guide", "fn": _pose_lectern},
 		{"name": "09_container_open", "fn": _pose_container},
+		{"name": "15_hud_walking", "fn": _pose_hud_walking, "settle": 50},
+		{"name": "16_hud_holding", "fn": _pose_hud_holding, "settle": 30},
+		{"name": "17_orscreen_amputation", "fn": _pose_screen_amputation, "settle": 40},
 		{"name": "10_operating_hud", "fn": _pose_operating, "settle": 140},
 	]
+	if _only != "":
+		shots = shots.filter(func(s): return String(s.name).contains(_only) or String(s.name) < "04")
 	_run()
 
 
@@ -55,7 +77,7 @@ func _run() -> void:
 		for i in int(shot.get("settle", SETTLE_FRAMES)):
 			await get_tree().process_frame
 		var img := get_viewport().get_texture().get_image()
-		var path := "%s/%s.png" % [OUT_DIR, shot.name]
+		var path := "%s/%s%s.png" % [OUT_DIR, shot.name, _tag]
 		img.save_png(ProjectSettings.globalize_path(path))
 		print("[gameshot] wrote ", path, "  ", img.get_width(), "x", img.get_height())
 		_i += 1
@@ -175,8 +197,166 @@ func _pose_container() -> void:
 		return
 
 
+## ORSCREEN: the OR wall monitor and the minimal HUD.
+
+func _ensure_shift() -> void:
+	bot.bot_move = Vector2.ZERO
+	bot.bot_sprint = false
+	if game.phase == Game.Phase.LOBBY:
+		game.begin_shift()
+
+
+func _screen() -> Node:
+	return game.get("or_screen")
+
+
+## Stand `dist` metres out from the monitor along its facing (shortened if a wall is closer),
+## a little to one side, looking at the glass.
+func _look_at_screen(dist: float, side: float) -> void:
+	var s := _screen()
+	if s == null or not s.mounted():
+		print("[gameshot] no OR screen mounted")
+		return
+	var c: Vector3 = s.screen_centre()
+	var n: Vector3 = s.screen_normal()
+	var q := PhysicsRayQueryParameters3D.create(c + n * 0.3, c + n * (dist + 0.6))
+	q.collision_mask = C.L_WORLD
+	var hit := bot.get_world_3d().direct_space_state.intersect_ray(q)
+	var d := dist
+	if not hit.is_empty():
+		d = minf(dist, c.distance_to(hit.position) - 0.7)
+	bot.bot_aim_id = ""
+	bot.set_flashlight(false)
+	var sidev := n.cross(Vector3.UP).normalized()
+	var feet := c + n * d + sidev * side
+	feet.y = game.table_pos().y
+	_look_from(feet, c)
+	print("[gameshot] screen at %s (%s), camera %.1f m out" % [str(c.snappedf(0.1)), s.placement, d])
+
+
+func _pose_screen_idle() -> void:
+	bot.set_flashlight(false)
+	_look_at_screen(4.0, 0.6)
+
+
+func _pose_screen_door() -> void:
+	_ensure_shift()
+	bot.set_flashlight(false)
+	_look_at_screen(9.0, 1.2)
+
+
+func _pose_screen_close() -> void:
+	_ensure_shift()
+	game.shelf["anesthetic"] = 1
+	if game.shelf_node != null:
+		game.shelf_node.show_stock(game.shelf)
+	_look_at_screen(1.9, 0.0)
+
+
+func _pose_screen_low() -> void:
+	_ensure_shift()
+	game.vitals = 18.0
+	_look_at_screen(3.2, 0.5)
+
+
+func _pose_screen_amputation() -> void:
+	_ensure_shift()
+	game.case.ailment_id = "amputation"
+	game.case.step_index = 1
+	game.shelf = {"tourniquet": 1, "gauze": 1}
+	game._apply_case_locally()
+	if game.shelf_node != null:
+		game.shelf_node.show_stock(game.shelf)
+	game.vitals = 64.0
+	_look_at_screen(4.5, -0.8)
+
+
+## Several patients through the `loop` worker's game.cases shape, shown with the screen's test seam
+## until that worker's cases exist on this branch.
+func _fake_cases(cases: Array, shelf: Dictionary, vitals := 100.0) -> void:
+	_ensure_shift()
+	var fake := FakeCases.new()
+	fake.cases = cases
+	fake.shelf = shelf
+	fake.vitals = vitals
+	var s := _screen()
+	if s != null:
+		s.model_override = ModelScript.build(fake)
+	fake.free()
+
+
+func _pose_screen_two_cases() -> void:
+	_fake_cases([
+		{"id": 1, "table": 0, "patient_id": "bob", "ailment_id": "gunshot", "step_index": 1, "vitals": 74.0, "state": "on_table"},
+		{"id": 2, "table": 1, "patient_id": "seal", "ailment_id": "amputation", "step_index": 0, "vitals": 21.0, "state": "on_table"},
+	], {"forceps": 1, "anesthetic": 1, "gauze": 2})
+	_look_at_screen(3.6, 0.4)
+
+
+func _pose_screen_incoming() -> void:
+	_fake_cases([
+		{"id": 1, "table": 0, "patient_id": "bob", "ailment_id": "amputation", "step_index": 2, "vitals": 46.0, "state": "on_table"},
+		{"id": 2, "table": 1, "patient_id": "seal", "ailment_id": "gunshot", "step_index": 0, "vitals": 100.0, "state": "incoming"},
+	], {"bone_saw": 1, "gauze": 1})
+	_look_at_screen(3.6, -0.4)
+
+
+func _pose_screen_flatline() -> void:
+	_fake_cases([
+		{"id": 1, "table": 0, "patient_id": "seal", "ailment_id": "gunshot", "step_index": 1, "vitals": 0.0, "state": "dead"},
+	], {})
+	_look_at_screen(4.0, 0.0)
+
+
+func _pose_screen_real() -> void:
+	var s := _screen()
+	if s != null:
+		s.model_override = {}
+
+
+class FakeCases extends Node:
+	var phase := 2
+	var shift := 1
+	var vitals := 100.0
+	var case := {}
+	var cases: Array = []
+	var shelf := {}
+	var players := {}
+	var surgery = null
+
+	func shelf_count(kind: String) -> int:
+		return int(shelf.get(kind, 0))
+
+
+func _pose_hud_walking() -> void:
+	_pose_screen_real()
+	_pose_corridor()
+	bot.set_flashlight(true)
+	bot.stamina = 0.45
+	bot.bot_move = Vector2(0, -1)
+	bot.bot_sprint = true
+
+
+func _pose_hud_holding() -> void:
+	bot.bot_move = Vector2.ZERO
+	bot.bot_sprint = false
+	_ensure_shift()
+	for i in bot.slots.size():
+		bot.clear_slot(i)
+	bot.take_into("anesthetic", 2)
+	bot.take_into("forceps", 1)
+	bot.take_into("guide", 1)
+	bot.selected = 0
+	bot.hp = maxi(1, bot.max_hp - 1)
+	var sh: Vector3 = game.shelf_node.global_position if game.shelf_node != null else game.table_pos()
+	var fwd: Vector3 = game.shelf_node.global_basis.z.normalized() if game.shelf_node != null else Vector3.BACK
+	_look_from(sh + fwd * 1.6, sh + Vector3(0, 0.9, 0))
+	bot.bot_aim_id = "shelf"
+
+
 ## Actually operating: the surgery camera, the minigame and the surgery HUD together.
 func _pose_operating() -> void:
+	_ensure_shift()
 	_pose_surgery()
 	var tb := game.table_pos()
 	_look_from(tb + Vector3(0.0, 0.0, 1.2), tb + Vector3(0, 1.0, 0))

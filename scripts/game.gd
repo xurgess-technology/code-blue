@@ -85,6 +85,9 @@ const LOOT_CRACK_KEEPS := 0.55
 
 ## Sell bin, shop and gold pile in the world (scripts/economy/economy.gd), child "Economy".
 var economy: Node = null
+## ORSCREEN HOOK: the OR wall monitor (scripts/orscreen/or_screen.gd), child "ORScreen".
+const OrScreenScript := preload("res://scripts/orscreen/or_screen.gd")
+var or_screen: Node = null
 
 
 func _ready() -> void:
@@ -104,6 +107,11 @@ func _ready() -> void:
 	economy.name = "Economy"
 	add_child(economy)
 	economy.setup(self)
+	# ORSCREEN HOOK: the OR wall monitor; it mounts itself on every new level (scripts/orscreen).
+	or_screen = OrScreenScript.new()
+	or_screen.name = "ORScreen"
+	add_child(or_screen)
+	or_screen.setup(self)
 	Net.roster_changed.connect(_on_roster_changed)
 	Net.host_left.connect(func(): end_session("The host left the game."))
 
