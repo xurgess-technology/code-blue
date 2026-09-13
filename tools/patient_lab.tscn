@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://cpatientlab001"]
+
+[ext_resource type="Script" path="res://tools/patient_lab.gd" id="1_plab"]
+
+[node name="PatientLab" type="Node3D"]
+script = ExtResource("1_plab")

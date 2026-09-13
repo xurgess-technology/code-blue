@@ -1,0 +1,346 @@
+extends Node
+## Frame-time probe across the situations most likely to lag, with vsync off so the numbers
+## are the real cost rather than the monitor's refresh rate.
+##
+##   godot --path . tools/perfprobe.tscn -- [--seed=N] [--frames=N] [--shift=N] [--quality=0,1,2]
+##
+## For each scenario and quality preset it prints average fps, the 1% low (99th percentile
+## frame time), the worst frame, script time for physics and process, draw calls, and node count.
+
+const WARMUP := 50
+
+var main: Node3D
+var game: Game
+var bot: Player
+var _seed := 4242
+var _frames := 240
+var _shift := 1
+var _qualities := [1, 0, 2]
+var _rows: Array = []
+var _ab := false
+var _tune := false
+var _hitch := false
+var _spikes: Array = []
+var _phase_label := ""
+var _phase_stats := {}
+
+
+func _ready() -> void:
+	for a in OS.get_cmdline_user_args():
+		var kv := a.trim_prefix("--").split("=", true, 1)
+		var v := kv[1] if kv.size() > 1 else ""
+		match kv[0]:
+			"seed": _seed = int(v)
+			"frames": _frames = int(v)
+			"shift": _shift = int(v)
+			"ab": _ab = true
+			"tune": _tune = true
+			"hitch": _hitch = true
+			"quality":
+				_qualities = []
+				for q in v.split(","):
+					_qualities.append(int(q))
+	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
+	Engine.max_fps = 0
+
+	main = load("res://scenes/main.tscn").instantiate()
+	add_child(main)
+	await get_tree().process_frame
+	game = main.game
+	main.menu.hide_menu()
+	Net.start_solo("Probe")
+	game.start_session(_seed)
+	if _shift > 1:
+		game.start_lobby(_seed, _shift)
+	await get_tree().process_frame
+	bot = game.local_player()
+	bot.bot_active = true
+	bot.bot_invulnerable = true
+	print("[perf] gpu=%s  window=%s  shift=%d" % [RenderingServer.get_video_adapter_name(), str(get_viewport().get_visible_rect().size), _shift])
+	# Let the one-time warmup finish (it runs behind a cover) before measuring anything else.
+	if not _hitch:
+		while game.get_parent().has_node("WarmupCover"):
+			await get_tree().process_frame
+		for i in 30:
+			await get_tree().process_frame
+
+	if _ab:
+		await _run_ab()
+		return
+	if _tune:
+		await _run_tune()
+		return
+	if _hitch:
+		await _run_hitch()
+		return
+	var scenarios := [
+		{"name": "lobby clock-in room", "setup": _lobby},
+		{"name": "corridor, long sightline", "setup": _corridor},
+		{"name": "pharmacy, containers open", "setup": _containers},
+		{"name": "OR, patient + stocked shelf", "setup": _or_view},
+		{"name": "operating: bone saw, bloody", "setup": _operating_saw},
+	]
+	for q in _qualities:
+		main.set_quality(q, false)
+		for s in scenarios:
+			await s.setup.call()
+			await _measure(s.name, q)
+	print("[perf] ============================================================================")
+	print("[perf] %-30s q  avg fps  1%%low fps  worst ms  phys ms  proc ms  draws  nodes" % "scenario")
+	for r in _rows:
+		print("[perf] %-30s %d  %7.0f  %9.0f  %8.1f  %7.2f  %7.2f  %5d  %5d" % [r.name, r.q, r.fps, r.low_fps, r.worst, r.phys, r.proc, r.draws, r.nodes])
+	get_tree().quit(0)
+
+
+func _look(pos: Vector3, at: Vector3) -> void:
+	bot.teleport(pos)
+	var d := at - pos
+	bot.bot_yaw = atan2(-d.x, -d.z)
+	bot.bot_pitch = clampf(atan2(d.y - C.EYE_H, Vector2(d.x, d.z).length()), -1.0, 1.0)
+
+
+func _lobby() -> void:
+	if game.phase != Game.Phase.LOBBY:
+		return
+	_look(game.spawn_points()[0], game.clock_pos())
+
+
+func _ensure_shift() -> void:
+	if game.phase == Game.Phase.LOBBY:
+		game.begin_shift()
+		await get_tree().process_frame
+	# Keep the monsters awake but away from the camera so they cost what they cost in play.
+	for m in game.monsters.values():
+		m.calm = 0.0
+
+
+func _corridor() -> void:
+	await _ensure_shift()
+	var best_len := -1.0
+	var best_from := game.table_pos()
+	var best_dir := Vector3.FORWARD
+	var space := bot.get_world_3d().direct_space_state
+	for spot in game.level_info.get("monster_spawns", []):
+		var eye: Vector3 = spot + Vector3.UP * C.EYE_H
+		for i in 12:
+			var dir := Vector3(cos(TAU * i / 12.0), 0, sin(TAU * i / 12.0))
+			var q := PhysicsRayQueryParameters3D.create(eye, eye + dir * 45.0)
+			q.collision_mask = C.L_WORLD
+			var hit := space.intersect_ray(q)
+			var reach: float = 45.0 if hit.is_empty() else eye.distance_to(hit.position)
+			if reach > best_len:
+				best_len = reach
+				best_from = spot
+				best_dir = dir
+	_look(best_from, best_from + best_dir * 20.0 + Vector3.UP * C.EYE_H)
+
+
+func _containers() -> void:
+	await _ensure_shift()
+	var cts: Array = game.level_info.get("containers", [])
+	var target: Dictionary = {}
+	for e in cts:
+		if String(e.get("room_kind", "")) == "pharmacy":
+			target = e
+			break
+	if target.is_empty() and not cts.is_empty():
+		target = cts[0]
+	if target.is_empty():
+		return
+	var centre: Vector3 = target.get("position", Vector3.ZERO)
+	for e in cts:
+		var n = e.get("node")
+		if n != null and is_instance_valid(n) and (e.get("position", Vector3.ZERO) as Vector3).distance_to(centre) < 8.0:
+			n.set_open(true, false)
+	var node: Node3D = target.get("node")
+	var out := node.global_basis.z.normalized() if node != null else Vector3.BACK
+	_look(centre + out * 3.2, centre + Vector3.UP * 1.0)
+
+
+func _or_view() -> void:
+	await _ensure_shift()
+	for kind in Items.SURGICAL:
+		game.shelf[kind] = 3 if Items.is_consumable(kind) else 1
+	game.shelf_node.show_stock(game.shelf)
+	var t := game.table_pos()
+	_look(t + Vector3(0.8, 0, 3.0), t + Vector3.UP * 1.0)
+
+
+## The heaviest thing surgery does: the saw with a weak tourniquet (blood decals, particles),
+## with the bot actually operating through the real framework and camera.
+func _operating_saw() -> void:
+	await _ensure_shift()
+	game.case = {"patient_id": "seal", "ailment_id": "amputation", "step_index": 2, "flags": {"sedation": 1.0, "tourniquet": 0.3}}
+	game._apply_case_locally()
+	game.shelf["bone_saw"] = 1
+	game.shelf_node.show_stock(game.shelf)
+	_look(game.table_pos() + Vector3(0, 0, 1.6), game.table_pos() + Vector3.UP * 1.0)
+	for i in 5:
+		await get_tree().process_frame
+	game.surgery.bot_skill = 0.4
+	game.surgery.begin(bot)
+	for i in 60:
+		await get_tree().process_frame
+
+
+func _measure(label: String, q: int) -> void:
+	for i in WARMUP:
+		await get_tree().process_frame
+	var times: Array[float] = []
+	var phys := 0.0
+	var proc := 0.0
+	var draws := 0
+	for i in _frames:
+		await get_tree().process_frame
+		times.append(get_process_delta_time() * 1000.0)
+		phys += Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0
+		proc += Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0
+		draws = maxi(draws, int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)))
+		# Sweep the view a little so we do not measure one lucky angle.
+		bot.bot_yaw += sin(i * 0.05) * 0.012
+	var total := 0.0
+	for t in times:
+		total += t
+	var sorted := times.duplicate()
+	sorted.sort()
+	var p99: float = sorted[int(sorted.size() * 0.99) - 1]
+	var avg := total / times.size()
+	var row := {
+		"name": label, "q": q, "fps": 1000.0 / avg, "low_fps": 1000.0 / p99, "worst": sorted[-1],
+		"phys": phys / _frames, "proc": proc / _frames, "draws": draws,
+		"nodes": int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT)),
+	}
+	_rows.append(row)
+	print("[perf] q%d %-30s avg %.0f fps, 1%% low %.0f fps, worst %.1f ms, draws %d" % [q, label, row.fps, row.low_fps, row.worst, draws])
+
+
+## Which part of the frame costs the most in the worst scenes: toggle one thing at a time.
+func _run_ab() -> void:
+	main.set_quality(1, false)
+	var env: Environment = null
+	for n in main.find_children("*", "WorldEnvironment", true, false):
+		env = n.environment
+	var tests := [
+		{"name": "baseline", "on": func(): pass, "off": func(): pass},
+		{"name": "no volumetric fog", "on": func(): env.volumetric_fog_enabled = false, "off": func(): env.volumetric_fog_enabled = true},
+		{"name": "no SSAO/SSIL", "on": func(): env.ssao_enabled = false; env.ssil_enabled = false, "off": func(): env.ssao_enabled = true; env.ssil_enabled = false},
+		{"name": "no glow", "on": func(): env.glow_enabled = false, "off": func(): env.glow_enabled = true},
+		{"name": "flashlight no shadow", "on": func(): bot.flashlight.shadow_enabled = false, "off": func(): bot.flashlight.shadow_enabled = true},
+		{"name": "flashlight off", "on": func(): bot.set_flashlight(false), "off": func(): bot.set_flashlight(true)},
+		{"name": "all omni lights hidden", "on": func(): _omni(false), "off": func(): _omni(true)},
+		{"name": "post layer hidden", "on": func(): main.post.visible = false, "off": func(): main.post.visible = true},
+		{"name": "render scale 0.5", "on": func(): get_viewport().scaling_3d_scale = 0.5, "off": func(): main.set_quality(1, false)},
+	]
+	for scen in [{"name": "OR", "setup": _or_view}, {"name": "lobby", "setup": _lobby}, {"name": "corridor", "setup": _corridor}]:
+		await scen.setup.call()
+		for t in tests:
+			t.on.call()
+			await _measure("%s: %s" % [scen.name, t.name], 1)
+			t.off.call()
+	print("[perf] ============================================================================")
+	for r in _rows:
+		print("[perf] %-40s avg %4.0f fps  1%%low %4.0f  draws %d" % [r.name, r.fps, r.low_fps, r.draws])
+	get_tree().quit(0)
+
+
+func _omni(on: bool) -> void:
+	for l in game.find_children("*", "OmniLight3D", true, false):
+		l.visible = on
+
+
+## Candidate medium presets, measured in the scenes that were slowest.
+func _run_tune() -> void:
+	var env: Environment = null
+	for n in main.find_children("*", "WorldEnvironment", true, false):
+		env = n.environment
+	var vp := get_viewport()
+	var configs := [
+		{"name": "medium", "apply": func(): main.set_quality(1, false)},
+		{"name": "medium, FXAA off", "apply": func(): main.set_quality(1, false); vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_DISABLED},
+		{"name": "medium, SSAO on", "apply": func(): main.set_quality(1, false); env.ssao_enabled = true},
+		{"name": "low", "apply": func(): main.set_quality(0, false)},
+		{"name": "medium (repeat, shows noise)", "apply": func(): main.set_quality(1, false)},
+	]
+	for scen in [{"name": "OR", "setup": _or_view}, {"name": "lobby", "setup": _lobby}, {"name": "corridor", "setup": _corridor}]:
+		await scen.setup.call()
+		for c in configs:
+			c.apply.call()
+			await _measure("%s: %s" % [scen.name, c.name], 1)
+	main.set_quality(1, false)
+	print("[perf] ============================================================================")
+	for r in _rows:
+		print("[perf] %-42s avg %4.0f fps  1%%low %4.0f  worst %5.1f ms" % [r.name, r.fps, r.low_fps, r.worst])
+	get_tree().quit(0)
+
+
+# ---------------------------------------------------------------------------
+# Hitches: first sightings of everything, counting pipeline compiles per frame.
+
+func _compiles() -> int:
+	return int(RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_DRAW)) 		+ int(RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_SPECIALIZATION))
+
+
+func _watch(label: String, frames: int) -> void:
+	_phase_label = label
+	if not _phase_stats.has(label):
+		_phase_stats[label] = {"frames": 0, "worst": 0.0, "spikes": 0, "compiles": 0}
+	var st: Dictionary = _phase_stats[label]
+	var before := _compiles()
+	for i in frames:
+		var c0 := _compiles()
+		await get_tree().process_frame
+		var ms := get_process_delta_time() * 1000.0
+		var dc := _compiles() - c0
+		st.frames += 1
+		st.worst = maxf(st.worst, ms)
+		if ms > 25.0:
+			st.spikes += 1
+			_spikes.append("%-34s frame %3d  %6.1f ms  compiles %d" % [label, i, ms, dc])
+	st.compiles += _compiles() - before
+
+
+func _run_hitch() -> void:
+	# The menu->lobby transition already happened in _ready. The warmup runs behind its
+	# cover during these first frames; spikes there are hidden from the player.
+	await _watch("warmup (behind cover)", 30)
+	await _watch("lobby: look around", 90)
+	bot.bot_yaw += PI
+	await _watch("lobby: turn around", 60)
+	game.begin_shift()
+	await _watch("shift begins", 60)
+	await _corridor()
+	await _watch("corridor", 90)
+	for m in game.monsters.values():
+		var p: Vector3 = m.global_position
+		_look(p + Vector3(2.5, 0, 0.5), p + Vector3.UP * 1.4)
+		await _watch("monster: %s" % m.kind, 60)
+	await _containers()
+	await _watch("containers open", 90)
+	await _or_view()
+	await _watch("OR + shelf", 60)
+	var steps := [["gunshot", 0, {}], ["gunshot", 1, {"sedation": 1.0}], ["gunshot", 2, {"sedation": 1.0, "bullet_removed": true}],
+		["amputation", 1, {"sedation": 1.0}], ["amputation", 2, {"sedation": 1.0, "tourniquet": 0.4}], ["amputation", 3, {"sedation": 1.0, "tourniquet": 0.4, "amputated": true}]]
+	for st in steps:
+		for kind in Items.SURGICAL:
+			game.shelf[kind] = 4
+		game.case = {"patient_id": "bob" if st[0] == "gunshot" else "seal", "ailment_id": st[0], "step_index": st[1], "flags": st[2]}
+		game._apply_case_locally()
+		await _watch("case switch %s/%d" % [st[0], st[1]], 20)
+		game.surgery.bot_skill = 0.3
+		game.surgery.begin(bot)
+		var g: String = Procedures.step(st[0], st[1]).game
+		await _watch("operating: %s" % g, 150)
+		game.surgery.end(bot)
+		await _watch("back from %s" % g, 40)
+	print("[perf] ============================================================================")
+	print("[perf] spikes over 25 ms:")
+	for sp in _spikes:
+		print("[perf]   " + sp)
+	print("[perf] per phase:")
+	var total_spikes := 0
+	for k in _phase_stats.keys():
+		var st2: Dictionary = _phase_stats[k]
+		total_spikes += int(st2.spikes)
+		print("[perf]   %-34s worst %6.1f ms  spikes %2d  pipeline compiles %d" % [k, st2.worst, st2.spikes, st2.compiles])
+	print("[perf] total spikes %d" % total_spikes)
+	get_tree().quit(0)

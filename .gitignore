@@ -1,0 +1,17 @@
+# Godot cache (regenerated on import)
+.godot/
+*.tmp
+*.translation
+
+# Generated screenshots from tools/*.tscn (regenerate with gameshot/perfprobe etc.)
+tools/*_shots/
+
+# Web prototype build output
+prototype-web/node_modules/
+prototype-web/dist/
+prototype-web/release/
+prototype-web/tmp/
+
+# OS
+Thumbs.db
+.DS_Store

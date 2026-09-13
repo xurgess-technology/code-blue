@@ -1,0 +1,55 @@
+{
+  "name": "code-blue",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite --port 5173 --strictPort",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "desktop": "concurrently -k \"vite --port 5173 --strictPort\" \"wait-on tcp:5173 && electron . --dev\"",
+    "desktop:prod": "npm run build && electron .",
+    "relay": "node server/relay.cjs --port 7777",
+    "dist": "npm run build && electron-builder --win"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.5",
+    "electron": "^44.3.0",
+    "electron-builder": "^26.15.3",
+    "typescript": "^5.6.0",
+    "vite": "^6.3.0",
+    "wait-on": "^9.1.0",
+    "three": "^0.186.0",
+    "@types/three": "^0.186.0"
+  },
+  "dependencies": {
+    "ws": "^8.21.3"
+  },
+  "build": {
+    "appId": "com.zachburgess.codeblue",
+    "productName": "Code Blue",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "electron/**",
+      "server/**",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "description": "Co-op first-person hospital horror. Clock in, find the tools, save the patient.",
+  "author": "Zach Burgess"
+}

@@ -1,0 +1,257 @@
+# Assets
+
+Every 3D model and texture shipped in `assets/` and its exact provenance. This
+file is the legal record: if a file is in the repo, it has a row here.
+
+**Licensing rule for this project: CC0 / public domain only.** Every asset below
+is CC0 1.0 Universal — free for commercial use, redistributable inside a
+compiled game, with *no* attribution requirement. Nothing under CC-BY or any
+other licence was taken, even where a good model existed (see
+[Rejected](#rejected-for-licensing) below).
+
+Total on disk: **25 MB** (11 MB models, 14 MB textures), excluding Godot's
+generated `.godot/imported/` cache and the `.import` sidecars.
+
+---
+
+## Sources and their licences
+
+| Source | Licence | Licence page |
+| --- | --- | --- |
+| Kenney (kenney.nl) | CC0 1.0 — each pack ships a `License.txt` stating "Creative Commons Zero, CC0 … personal, educational, and commercial purposes … crediting is not a requirement" | <https://creativecommons.org/publicdomain/zero/1.0/> |
+| Quaternius (quaternius.com) | CC0 1.0 — stated in the "License" row of every pack page linked below | <https://creativecommons.org/publicdomain/zero/1.0/> |
+| Poly Pizza (poly.pizza) | mixed host — **each item below was individually checked** and only CC0 1.0 items were taken | per-model page linked below |
+| ambientCG (ambientcg.com) | CC0 1.0 | <https://docs.ambientcg.com/license/> |
+
+Kenney packs were downloaded as the official zips from kenney.nl; only the
+handful of files listed below were copied into the repo (the rest of each pack
+is not redistributed here).
+
+| Pack | Pack page | Zip actually downloaded |
+| --- | --- | --- |
+| Mini Characters | <https://kenney.nl/assets/mini-characters> | `https://kenney.nl/media/pages/assets/mini-characters/bfc7e272b4-1774770718/kenney_mini-characters.zip` |
+| Graveyard Kit 5.0 | <https://kenney.nl/assets/graveyard-kit> | `https://kenney.nl/media/pages/assets/graveyard-kit/ba8d4b4517-1760691807/kenney_graveyard-kit_5.0.zip` |
+| Furniture Kit | <https://kenney.nl/assets/furniture-kit> | `https://kenney.nl/media/pages/assets/furniture-kit/440e0608a4-1677580847/kenney_furniture-kit.zip` |
+| Space Station Kit | <https://kenney.nl/assets/space-station-kit> | `https://kenney.nl/media/pages/assets/space-station-kit/6475288f2e-1712749919/kenney_space-station-kit.zip` |
+| Mini Market | <https://kenney.nl/assets/mini-market> | `https://kenney.nl/media/pages/assets/mini-market/463f38da51-1729865423/kenney_mini-market.zip` |
+
+Quaternius packs are distributed from the pack page through a Google Drive
+folder; the individual glTF files listed below were taken from the `glTF`
+folder of each pack.
+
+| Pack | Pack page |
+| --- | --- |
+| Ultimate Monsters | <https://quaternius.com/packs/ultimatemonsters.html> |
+| Cute Monsters | <https://quaternius.com/packs/cutemonsters.html> |
+| Ultimate Animated Animals | <https://quaternius.com/packs/ultimateanimatedanimals.html> |
+
+---
+
+## Models
+
+`scale` / `yaw` / `offset` are the fix-ups `Assets.spawn()` applies (see
+[Fix-ups](#fix-ups-applied-to-every-model)). `size` is the measured bounding box
+of the spawned node in metres, W × H × D. Character widths are bind-pose arm
+spans, not body widths.
+
+### Characters — `assets/models/characters/`
+
+| Key | File | Original | Source | Author | Licence | size (m) | Fix-ups |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `char/surgeon` | `surgeon.glb` | `character-male-a.glb` | Kenney Mini Characters | Kenney | CC0 1.0 | 2.06 × **1.80** × 0.91 | scale 2.687, yaw 180, colormap embedded |
+| `char/surgeon_b` | `surgeon_b.glb` | `character-female-a.glb` | Kenney Mini Characters | Kenney | CC0 1.0 | 2.54 × **1.79** × 1.15 | scale 2.308, yaw 180, colormap embedded |
+
+Animated: 32 clips each — `idle`, `walk`, `sprint`, `attack-melee-right/left`,
+`attack-kick-right/left`, `pick-up`, `interact-right/left`, `die`, `crouch`,
+`sit`, `jump`, `fall`, `holding-*`, `wheelchair-*`, `static`.
+
+### Monsters — `assets/models/monsters/`
+
+| Key | File | Original | Source | Author | Licence | size (m) | Fix-ups |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `monster/nurse` | `nurse.glb` | `character-zombie.glb` | Kenney Graveyard Kit 5.0 | Kenney | CC0 1.0 | 1.93 × **1.96** × 0.82 | scale 2.376, yaw 180, y −0.052, colormap embedded |
+| `monster/lurker` | `lurker.gltf` | `Crab.gltf` | Quaternius Cute Monsters | Quaternius | CC0 1.0 | 1.47 × **0.90** × 0.81 | scale 0.573, yaw 180, y +0.017 |
+| `monster/orderly` | `orderly.gltf` | `Big/glTF/Yeti.gltf` | Quaternius Ultimate Monsters | Quaternius | CC0 1.0 | 4.27 × **2.60** × 1.35 | scale 0.919, yaw 180, y +0.010 |
+| `monster/cthulhu` | `cthulhu.gltf` | `Cthulhu.gltf` | Quaternius Cute Monsters | Quaternius | CC0 1.0 | 3.29 × **1.61** × 1.53 | scale 1.026, yaw 180, y +0.058 |
+
+- **Nurse** — the zombie shares the Kenney character rig exactly, so it uses the
+  same animation names as the surgeons. Scaled a touch taller than a player so
+  it reads as wrong at a distance.
+- **Lurker** — *the Lurker is the one role with no good CC0 match.* Nothing CC0
+  is a low six-legged thing with red eyes. The crab is the closest: low, wide,
+  many-legged, it scuttles. Clips: `Idle`, `Walk`, `Bite_Front`, `Bite_InPlace`,
+  `Jump`, `Death`, `HitRecieve`, `Dance`, `Yes`, `No`. It has no run, so
+  `run` is mapped to `Walk`. Swap it the moment a better creature exists.
+- **Orderly** — the yeti is the big lumbering silhouette the design asks for.
+  Clips: `Idle`, `Walk`, `Run`, `Punch`, `Duck`, `Jump`, `Jump_Idle`,
+  `Jump_Land`, `Death`, `HitReact`, `Wave`, `Weapon`, `Yes`, `No`.
+- **Cthulhu** — spare, not wired to a game role. Kept because it is a cheap
+  second big-monster silhouette if the roster grows.
+
+### Patients — `assets/models/patients/`
+
+| Key | File | Original | Source | Author | Licence | size (m) | Fix-ups |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `patient/human` | `patient_human.glb` | `character-male-c.glb` | Kenney Mini Characters | Kenney | CC0 1.0 | 1.75 × **1.81** × 1.05 | scale 2.278, yaw 180, colormap embedded |
+| `patient/ghost` | `patient_ghost.glb` | `character-ghost.glb` | Kenney Graveyard Kit 5.0 | Kenney | CC0 1.0 | 1.84 × **1.55** × 1.14 | scale 2.338, yaw 180, colormap embedded |
+| `patient/wolf` | `patient_wolf.gltf` | `Wolf.gltf` | Quaternius Ultimate Animated Animals | Quaternius | CC0 1.0 | 0.52 × **1.30** × 2.69 | scale 0.485, yaw 180, y +0.005 |
+| `patient/bull` | `bull.gltf` | `Bull.gltf` | Quaternius Ultimate Animated Animals | Quaternius | CC0 1.0 | 1.20 × **2.20** × 3.86 | scale 0.479, yaw 180, y +0.027 |
+
+- **Ghost** is a rigged sheet ghost on the Kenney character skeleton, so it
+  animates with the same clip names as everything else Kenney. It hovers 0.26 m
+  off the floor on purpose — it has no feet. The entry is flagged `floats` so
+  the self-check does not report it as a broken origin.
+- **Wolf** stands in for the werewolf. Clips: `Idle`, `Idle_2`,
+  `Idle_2_HeadLow`, `Walk`, `Gallop`, `Gallop_Jump`, `Jump_ToIdle`, `Attack`,
+  `Eating`, `Death`, `Idle_HitReact1/2`.
+- **Bull** is the elephant's understudy — see the gap below.
+
+### Props — `assets/models/props/`
+
+All static (no AnimationPlayer).
+
+| Key | File | Original | Source | Author | Licence | size (m) | Fix-ups |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `prop/bed` | `bed.glb` | `bedSingle.glb` | Kenney Furniture Kit | Kenney | CC0 1.0 | 1.01 × 0.66 × 1.99 | scale 1.770, yaw 180, x +1.186, z −1.000 |
+| `prop/gurney` | `gurney.glb` | `bed-single.glb` | Kenney Space Station Kit | Kenney | CC0 1.0 | 1.00 × 0.70 × 2.00 | scale 2.0, yaw 180, colormap embedded |
+| `prop/cabinet` | `cabinet.glb` | `kitchenCabinet.glb` | Kenney Furniture Kit | Kenney | CC0 1.0 | 0.86 × 0.90 × 0.90 | scale 2.0, yaw 180, x +0.430, z −0.450 |
+| `prop/wheelchair` | `wheelchair.glb` | `wheelchair.glb` | Kenney Mini Characters | Kenney | CC0 1.0 | 0.95 × 0.94 × 1.11 | scale 1.900, yaw 180, z −0.133, colormap embedded |
+| `prop/vending` | `vending.glb` | `freezers-standing.glb` | Kenney Mini Market | Kenney | CC0 1.0 | 1.70 × 1.53 × 0.85 | scale 1.700, yaw 180, z −0.425, colormap embedded |
+| `prop/bin` | `bin.glb` | `trashcan.glb` | Kenney Furniture Kit | Kenney | CC0 1.0 | 0.34 × 0.70 × 0.38 | scale 1.628, yaw 180 |
+| `prop/locker` | `locker.glb` | "Closet" | Poly Pizza <https://poly.pizza/m/BHEVb1DIuH> | Quaternius | CC0 1.0 | 1.04 × 2.00 × 0.58 | scale 0.671, yaw 180, y +0.007 |
+| `prop/screen` | `screen.glb` | `computerScreen.glb` | Kenney Furniture Kit | Kenney | CC0 1.0 | 0.61 × 0.46 × 0.16 | scale 1.552, yaw 180, x +0.303, z −0.078 |
+| `prop/desk` | `desk.glb` | `desk.glb` | Kenney Furniture Kit | Kenney | CC0 1.0 | 1.45 × 0.76 × 0.77 | scale 1.974, yaw 180, x +0.700, z −0.365 |
+| `prop/chair` | `chair.glb` | `chairDesk.glb` | Kenney Furniture Kit | Kenney | CC0 1.0 | 0.55 × 1.00 × 0.52 | scale 1.640, yaw 180, x +0.271, z −0.254 |
+| `prop/curtain` | `curtain.glb` | "Curtains Double" | Poly Pizza <https://poly.pizza/m/kkeII96j9N> | Quaternius | CC0 1.0 | 1.92 × 2.40 × 0.26 | scale 0.553, yaw 180, x +0.022, y +0.003, z −0.069 |
+| `prop/table_op` | `table_op.glb` | `table.glb` | Kenney Space Station Kit | Kenney | CC0 1.0 | 2.00 × 0.73 × 1.09 | scale 1.820, yaw 180, colormap embedded |
+| `prop/clock` | `clock.glb` | "Alarm Clock" | Poly Pizza <https://poly.pizza/m/y5f363OS9C> | CreativeTrio | CC0 1.0 | 0.20 × 0.30 × 0.10 | scale 1.580, yaw 180 |
+| `prop/pod` | `pod.glb` | `table-display.glb` | Kenney Space Station Kit | Kenney | CC0 1.0 | 1.86 × 0.90 × 1.22 | scale 1.500, yaw 180, y +0.450, colormap embedded |
+
+Honest notes on the stand-ins:
+
+- `prop/gurney` is a sci-fi single bed frame. Metal, low, the right footprint —
+  but it has no wheels and no side rails.
+- `prop/vending` is a double glass-front cooler from the market kit. It reads as
+  a bank of two vending machines rather than one tall machine; a single machine
+  at correct height would have been 2.1 m wide, so it is scaled by footprint.
+- `prop/locker` is a two-door wooden closet, not a dented steel staff locker.
+- `prop/clock` is a desk alarm clock, not a wall clock. Mount it on a shelf.
+- `prop/pod` is a domed display plinth. It reads as the Re-Gen Pod lying down,
+  not as an upright regeneration capsule.
+- `prop/table_op` is a plain sci-fi table at operating-table proportions.
+
+---
+
+## Textures — `assets/textures/`
+
+All from ambientCG, all CC0 1.0, all downloaded as **1K JPG** (not 8K).
+`assets.gd` builds a `StandardMaterial3D` per set at runtime; there are no
+`.tres` material files to keep in sync.
+
+| Key | Folder | ambientCG asset | Page | Maps present | uv1_scale |
+| --- | --- | --- | --- | --- | --- |
+| `mat/floor` | `textures/floor/` | Tiles141 — dirty beige grid floor tile | <https://ambientcg.com/view?id=Tiles141> | color, normalGL, roughness | 2.0 |
+| `mat/wall` | `textures/wall/` | PaintedPlaster017 — white painted plaster | <https://ambientcg.com/view?id=PaintedPlaster017> | color, normalGL, roughness | 2.0 |
+| `mat/wall_tile` | `textures/wall_tile/` | Tiles133D — broken, dirty old white tile | <https://ambientcg.com/view?id=Tiles133D> | color, normalGL, roughness, AO | 2.0 |
+| `mat/ceiling` | `textures/ceiling/` | OfficeCeiling005 — suspended ceiling panel | <https://ambientcg.com/view?id=OfficeCeiling005> | color, normalGL, roughness, metalness, AO | 1.0 |
+| `mat/concrete` | `textures/concrete/` | Concrete034 — light grey smooth concrete | <https://ambientcg.com/view?id=Concrete034> | color, normalGL, roughness | 2.0 |
+| `mat/metal` | `textures/metal/` | MetalPlates001 — brushed scratched steel | <https://ambientcg.com/view?id=MetalPlates001> | color, normalGL, roughness, metalness | 2.0 |
+
+Fix-ups: each zip was unpacked and only the Color / NormalGL / Roughness /
+Metalness / AmbientOcclusion JPGs were kept, renamed to `color.jpg`,
+`normalgl.jpg`, `roughness.jpg`, `metalness.jpg`, `ao.jpg`. The Displacement
+map, the NormalDX variant, and the bundled `.usdc` / `.blend` / `.mtlx` /
+`.tres` files were dropped — they are dead weight in a Godot repo. Where a set
+has no AO or metalness map, ambientCG does not ship one; `assets.gd` simply
+leaves that slot empty.
+
+---
+
+## Keys that do not resolve
+
+The game asks for these; they return `null` and the caller must keep its
+primitive placeholder. `assets/_selfcheck.gd` asserts that they fail
+*gracefully* rather than pretending they do not exist.
+
+| Key | Why | Closest thing we do have |
+| --- | --- | --- |
+| `patient/elephant` | **There is no CC0 elephant.** Poly Pizza has six, every one of them CC-BY 3.0 (Poly by Google and others). Quaternius's animal packs have no elephant. Nothing on Kenney either. | `patient/bull` — a CC0 Quaternius bull, scaled to 2.2 m. Biggest CC0 quadruped found, fully animated. Not an elephant. |
+| `prop/ivstand` | No CC0 IV stand / drip pole exists on any of the vetted sources. Searches for "iv stand", "iv drip", "drip", "infusion", "pole", "stretcher", "gurney", "operating table", "vending machine", "cryo pod" all came back either empty or CC-BY only. | Nothing usable. An IV stand is a cylinder, a pole and a bag — the primitive placeholder is genuinely fine here, or it is a ten-minute Blender job. |
+
+Also worth knowing: there is no CC0 **werewolf** (the wolf stands in) and no
+CC0 **hospital-specific** kit at all. The hospital look here comes from a
+furniture kit plus a space-station kit plus the ambientCG tiles, not from a
+medical pack.
+
+## Rejected for licensing
+
+Found, would have been good, **not used** because they are CC-BY and the rule
+for this project is CC0 only:
+
+- Elephant ×6, Wheelchair ×2, Ambulance ×3, "GRADD Hospital Room", "Dentist
+  chair V2", "Cot", "camp bed" — all CC-BY 3.0 on Poly Pizza.
+- Quaternius "Bestiary Dungeon Monsters Kit" — a paid "Source" kit, its pack
+  page carries no CC0 statement. Not touched.
+
+---
+
+## Fix-ups applied to every model
+
+1. **Facing.** Every source pack here is exported from Blender through the glTF
+   exporter, so the authored front is **+Z** (the glTF convention). Godot's
+   convention is **−Z forward**. Every entry therefore carries `yaw: 180`, which
+   `Assets.spawn()` applies. This was verified directly, not assumed: the Kenney
+   `aid-mask` face accessory occupies z ∈ [+0.02, +0.23]; the Quaternius wolf's
+   highest vertex cluster (the head) sits at z ≈ +2.0; the Poly Pizza locker's
+   door panel is the primitive at z ∈ [+0.002, +0.030]. After `spawn()`, every
+   model faces **−Z** and can be driven with `look_at()` directly.
+2. **Scale.** Packs disagree wildly — Kenney Mini Characters are authored 0.67 m
+   tall, Quaternius animals are 3–5 units. Each entry has a uniform `scale`
+   chosen to hit a sensible real-world size: humans 1.8 m, the Nurse 1.96 m, the
+   Orderly 2.6 m, the Lurker 0.9 m, desks 0.76 m, beds 2.0 m long.
+3. **Origin.** Each entry has `x`/`y`/`z` offsets so the spawned node's origin is
+   at the **base** of the model and its footprint is **centred** on that origin.
+   Kenney furniture in particular is authored with the origin at a corner.
+   Verified by the self-check: every model reports `base-at-0: yes` except the
+   ghost, which floats by design.
+4. **Embedded textures.** Kenney's GLB files reference an external
+   `Textures/colormap.png`. Since models from different Kenney packs share
+   directories here — and their colormaps differ — the PNG was inlined into each
+   GLB as a `data:` URI (the JSON chunk was rewritten, the BIN chunk untouched).
+   Each affected file is marked "colormap embedded" above. This is a packaging
+   change only; no geometry, rigging or UV was altered.
+
+No model was retopologised, re-rigged, re-textured or otherwise modified beyond
+the packaging change in (4). Everything else is done at load time by
+`scripts/assets.gd`, so the files on disk stay byte-comparable to their sources.
+
+---
+
+## How to use them
+
+`scripts/assets.gd` is the autoload singleton `Assets`, the only thing that
+should ever touch these paths.
+
+```gdscript
+# Swap a placeholder primitive for a real model.
+var body := Assets.spawn("monster/orderly")
+if body == null:
+    body = _placeholder_capsule()      # keep whatever you had
+add_child(body)
+
+# Drive its animations without knowing what the pack calls them.
+Assets.play(body, "monster/orderly", "walk")
+
+# Materials.
+$Floor.material_override = Assets.material("mat/floor")
+```
+
+To verify everything after a change:
+
+```
+Godot_v4.7.2-stable_win64_console.exe --headless --path . --import
+Godot_v4.7.2-stable_win64_console.exe --headless --path . --script assets/_selfcheck.gd
+```
+
+The self-check instantiates every key, prints its path, measured bounds and
+animation list, and exits non-zero if anything regressed.

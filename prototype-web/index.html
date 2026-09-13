@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Code Blue</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; height: 100%; }
+  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+  #gl { cursor: crosshair; }
+  #hud { pointer-events: none; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<canvas id="hud"></canvas>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>

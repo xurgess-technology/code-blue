@@ -1,0 +1,9 @@
+* text=auto eol=lf
+*.bat text eol=crlf
+*.wav binary
+*.ogg binary
+*.png binary
+*.jpg binary
+*.glb binary
+*.exr binary
+*.hdr binary
