@@ -251,10 +251,6 @@ const MODELS := {
 		"path": "res://assets/models/hospital/kenney_furniture/kitchenSink.glb", "scale": 1.900, "yaw": 180, "x": 0.408, "y": -0.000, "z": -0.428,
 		"note": "Kenney Furniture Kit kitchenSink: utility / lab / scrub sink. Size 0.82 x 0.93 x 0.86 m.",
 	},
-	"hosp/chair_plain": {
-		"path": "res://assets/models/hospital/kenney_furniture/chair.glb", "scale": 1.900, "yaw": 180, "x": 0.190, "y": -0.000, "z": -0.190,
-		"note": "Kenney Furniture Kit chair. Size 0.38 x 0.89 x 0.38 m.",
-	},
 	"hosp/chair_cushion": {
 		"path": "res://assets/models/hospital/kenney_furniture/chairModernCushion.glb", "scale": 1.900, "yaw": 180, "x": 0.190, "y": 0.000, "z": -0.190,
 		"note": "Kenney Furniture Kit chairModernCushion. Size 0.38 x 0.87 x 0.38 m.",
@@ -387,14 +383,6 @@ const MODELS := {
 		"path": "res://assets/models/hospital/kenney_roads/construction-barrier.glb", "scale": 6.500, "yaw": 180, "x": -0.000, "y": -0.000, "z": -0.000,
 		"note": "Kenney City Kit Roads construction-barrier. Size 0.88 x 0.84 x 1.46 m.",
 	},
-	"hosp/shelf_gondola": {
-		"path": "res://assets/models/hospital/kenney_market/shelf-boxes.glb", "scale": 2.200, "yaw": 180, "x": -0.000, "y": -0.000, "z": -0.000,
-		"note": "Kenney Mini Market shelf-boxes. Size 1.76 x 1.87 x 1.54 m.",
-	},
-	"hosp/shelf_end": {
-		"path": "res://assets/models/hospital/kenney_market/shelf-end.glb", "scale": 2.200, "yaw": 180, "x": -0.000, "y": 0.000, "z": -0.442,
-		"note": "Kenney Mini Market shelf-end. Size 1.76 x 2.31 x 0.88 m.",
-	},
 	"hosp/register": {
 		"path": "res://assets/models/hospital/kenney_market/cash-register.glb", "scale": 1.600, "yaw": 180, "x": 0.040, "y": -0.000, "z": 0.040,
 		"note": "Kenney Mini Market cash-register: cafeteria till. Size 1.36 x 0.95 x 1.36 m.",
@@ -447,10 +435,6 @@ const MODELS := {
 		"path": "res://assets/models/hospital/polyhaven/steel_frame_shelves_02/steel_frame_shelves_02.gltf", "scale": 1.000, "yaw": 180, "x": 0.000, "y": 0.001, "z": -0.000,
 		"note": "Poly Haven steel_frame_shelves_02. Size 0.59 x 2.14 x 0.50 m.",
 	},
-	"hosp/street_lamp": {
-		"path": "res://assets/models/hospital/polyhaven/street_lamp_01/street_lamp_01.gltf", "scale": 1.400, "yaw": 180, "x": -0.000, "y": -0.000, "z": -0.000,
-		"note": "Poly Haven street_lamp_01. Size 0.99 x 5.42 x 0.54 m.",
-	},
 	"hosp/tool_cart": {
 		"path": "res://assets/models/hospital/polyhaven/tool_cart/tool_cart.gltf", "scale": 1.000, "yaw": 180, "x": -0.021, "y": 0.004, "z": -0.008,
 		"note": "Poly Haven tool_cart: instrument cart. Size 1.27 x 0.96 x 0.75 m.",
@@ -498,7 +482,6 @@ const MATERIALS := {
 	"mat/pavement": {"dir": "res://assets/textures/pavement", "uv_scale": 0.5, "note": "Poly Haven concrete_pavement - sidewalk."},
 	"mat/linoleum": {"dir": "res://assets/textures/linoleum", "uv_scale": 0.5, "note": "Poly Haven old_linoleum_flooring_01 - corridor floor."},
 	"mat/tile_floor": {"dir": "res://assets/textures/tile_floor", "uv_scale": 0.6, "note": "Poly Haven worn_tile_floor - restroom, morgue, OR floor."},
-	"mat/grass": {"dir": "res://assets/textures/grass", "uv_scale": 0.2, "note": "Poly Haven sparse_grass - verges past the fence."},
 	# ---- end hospital ----
 	"mat/metal": {
 		"dir": "res://assets/textures/metal", "uv_scale": 2.0, "metallic": 1.0,

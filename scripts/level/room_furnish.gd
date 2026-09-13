@@ -358,7 +358,11 @@ static func _restroom(f: Frame) -> void:
 	var sink_u := f.W - f.half("wall_sink") if start == 0 else f.half("wall_sink")
 	var face := -1 if start == 0 else 1
 	for v in [0.9, 1.9]:
-		f.put("wall_sink", sink_u, v, face, 0)
+		if f.put("wall_sink", sink_u, v, face, 0):
+			if start == 0:
+				f.mount_right("mirror", v)
+			else:
+				f.mount_left("mirror", v)
 	if start == 0:
 		f.mount_right("hand_dryer", 2.9)
 	else:
@@ -370,8 +374,9 @@ static func _office(f: Frame) -> void:
 	var du := f.W * 0.5
 	f.put("office_desk", du, f.D - 1.45, 0, -1)
 	f.put("office_chair", du, f.D - 0.6, 0, -1)
-	f.put("computer", du + 0.25, f.D - 1.35, 0, -1, {"y": 0.75})
 	f.put("visitor_chair", du - 0.35, f.D - 2.45, 0, 1)
+	if not f.put("coat_rack", 0.35, 0.4, 0, 1):
+		f.put("coat_rack", f.W - 0.35, 0.4, 0, 1)
 	if not f.left("filing_cabinet", f.D - 0.6):
 		f.left("filing_cabinet", 1.5)
 	f.left("filing_cabinet", f.D - 1.25)

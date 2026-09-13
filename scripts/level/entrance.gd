@@ -134,9 +134,9 @@ static func build(st: S, ox: int, oy: int, north_wings: int) -> void:
 
 	# ---- operating room (x 14-22, y 4-12) --------------------------------------------------
 	var tables := [
-		{"pos": Vector2(ox + 16.2, oy + 5.9), "kind": "patient"},
-		{"pos": Vector2(ox + 20.8, oy + 5.9), "kind": "patient"},
-		{"pos": Vector2(ox + 18.5, oy + 10.2), "kind": "player"},
+		{"pos": Vector2(ox + 16.2, oy + 5.5), "kind": "patient"},
+		{"pos": Vector2(ox + 20.8, oy + 5.5), "kind": "patient"},
+		{"pos": Vector2(ox + 18.5, oy + 10.5), "kind": "player"},
 	]
 	st.spots["tables"] = []
 	for t in tables:

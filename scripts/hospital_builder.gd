@@ -336,8 +336,9 @@ static func _build_surfaces(gen: Dictionary, geo: GeoChunks) -> void:
 					mat = "wall_tile"
 				var top := FENCE_H if fence else (C.WALL_H + (1.2 if outdoor else 0.0))
 				var split := 0.0 if (outdoor or mat == "wall_tile") else 1.05
-				_wall_face(geo, cx, cy, tx, ty, d, 0.0, split, "wall_low", true)
-				_wall_face(geo, cx, cy, tx, ty, d, split, top, mat, true)
+				_wall_face(geo, cx, cy, tx, ty, d, 0.0, split, "wall_low", false)
+				_wall_face(geo, cx, cy, tx, ty, d, split, top, mat, false)
+				_collision_face(geo, rows, tx, ty, d, maxf(top, C.WALL_H))
 			if fence:
 				var y := FENCE_H
 				geo.quad(cx, cy, "facade", Vector3(x0, y, z0), Vector3(x1, y, z0), Vector3(x1, y, z1), Vector3(x0, y, z1),
@@ -440,6 +441,43 @@ static func _wall_face(geo: GeoChunks, cx: int, cy: int, tx: int, ty: int, d: Ve
 	_vface(geo, cx, cy, mat, C.tile_to_world(tx, ty), Vector3(d.x, 0.0, d.y), y0, y1, collide)
 
 
+## Non-blocking pieces within (agent radius - player radius) of a wall keep their collider.
+## Nothing the factory builds is that flat today, so this is off; kept for thin wall pieces.
+const FLAT_PIECE_COLLIDERS := false
+
+## Furniture colliders stop this far (metres) short of tiles the navigation mesh keeps.
+const FURNITURE_INSET := 0.18
+
+## Collision chamfer at outside wall corners (door jambs, hallway corners, pillars), metres.
+const CORNER_CHAMFER := 0.18
+
+
+## The collision for one wall face: the visual face, cut back at outside corners, with a
+## 45-degree chamfer across each corner. Bodies sliding along a wall into a doorway glance off
+## the chamfer instead of catching on the jamb.
+static func _collision_face(geo: GeoChunks, rows: PackedStringArray, tx: int, ty: int, d: Vector2i, top: float) -> void:
+	var n := Vector3(d.x, 0.0, d.y)
+	var r := n.cross(Vector3.UP)
+	var ri := Vector2i(roundi(r.x), roundi(r.z))
+	var mid := C.tile_to_world(tx, ty) + n * (C.TILE * 0.5)
+	var k0 := mid - r * (C.TILE * 0.5)
+	var k1 := mid + r * (C.TILE * 0.5)
+	var open := func(x: int, y: int) -> bool:
+		return _open_char(_at(rows, x, y))
+	var c := CORNER_CHAMFER
+	var convex0: bool = open.call(tx - ri.x, ty - ri.y) and open.call(tx + d.x - ri.x, ty + d.y - ri.y)
+	var convex1: bool = open.call(tx + ri.x, ty + ri.y) and open.call(tx + d.x + ri.x, ty + d.y + ri.y)
+	var a := k0 + r * c if convex0 else k0
+	var b := k1 - r * c if convex1 else k1
+	var up := Vector3(0.0, top, 0.0)
+	geo.faces.append_array([a, b, b + up, a, b + up, a + up])
+	if convex1:
+		# The corner's other face starts c back along -n; join the two with a slanted face.
+		var p := k1 - r * c
+		var q := k1 - n * c
+		geo.faces.append_array([p, q, q + up, p, q + up, p + up])
+
+
 ## Solid wall, a doorway or an archway: anything a lintel continues.
 static func _wallish(gen: Dictionary, x: int, y: int) -> bool:
 	var c := _at(gen.rows, x, y)
@@ -518,6 +556,8 @@ static func _build_furniture(root: Node3D, gen: Dictionary, info: Dictionary) ->
 			if not b.has(mesh):
 				b[mesh] = []
 			(b[mesh] as Array).append(xf * (part.xform as Transform3D))
+		var support := Rect2()
+		var support_top := -1.0
 		if _solid_piece(gen, kind, p, float(e.yaw)):
 			if not bodies.has(ck):
 				var sb := StaticBody3D.new()
@@ -527,8 +567,46 @@ static func _build_furniture(root: Node3D, gen: Dictionary, info: Dictionary) ->
 				holder.add_child(sb)
 				bodies[ck] = sb
 			var s := Defs.size(kind)
-			var shape_xf := xf * Transform3D(Basis.IDENTITY, Vector3(0, s.y * 0.5, 0))
-			(bodies[ck] as StaticBody3D).add_child(_box_shape(s, shape_xf, "S%d" % count))
+			var fp := Defs.footprint_rect(kind, p, float(e.yaw))
+			var tiles := Defs.blocked_tiles(kind, p, float(e.yaw))
+			if Defs.blocks(kind) and not tiles.is_empty():
+				# Never let the collider reach into a tile the navigation mesh keeps: clip it to
+				# the tiles the piece blocks (an overhang of a few centimetres stays visual only).
+				var cover := Rect2(Vector2(tiles[0]), Vector2.ONE)
+				for tt in tiles:
+					cover = cover.merge(Rect2(Vector2(tt), Vector2.ONE))
+				# ...and keep it FURNITURE_INSET back from tiles that stay open, so an agent cutting a
+				# corner of its navigation path does not catch on the box.
+				var inset := FURNITURE_INSET / C.TILE
+				var rows: PackedStringArray = gen.rows
+				var blk: PackedByteArray = gen.blocked
+				var gw: int = gen.width
+				var open_at := func(x: int, y: int) -> bool:
+					return _open_char(_at(rows, x, y)) and blk[y * gw + x] == 0
+				var x0 := int(cover.position.x)
+				var y0 := int(cover.position.y)
+				var x1 := int(cover.end.x) - 1
+				var y1 := int(cover.end.y) - 1
+				var left := false
+				var right := false
+				var top := false
+				var bottom := false
+				for yy in range(y0, y1 + 1):
+					left = left or open_at.call(x0 - 1, yy)
+					right = right or open_at.call(x1 + 1, yy)
+				for xx in range(x0, x1 + 1):
+					top = top or open_at.call(xx, y0 - 1)
+					bottom = bottom or open_at.call(xx, y1 + 1)
+				cover = Rect2(cover.position + Vector2(inset if left else 0.0, inset if top else 0.0),
+						cover.size - Vector2((inset if left else 0.0) + (inset if right else 0.0), (inset if top else 0.0) + (inset if bottom else 0.0)))
+				var clip := fp.intersection(cover)
+				if clip.size.x > 0.07 and clip.size.y > 0.07:
+					fp = clip
+			var centre := _w(fp.get_center(), s.y * 0.5 + float(e.get("y", 0.0)))
+			var box := Vector3(fp.size.x * C.TILE, s.y, fp.size.y * C.TILE)
+			(bodies[ck] as StaticBody3D).add_child(_box_shape(box, Transform3D(Basis.IDENTITY, centre), "S%d" % count))
+			support = fp
+			support_top = s.y + float(e.get("y", 0.0))
 		var t := Vector2i(int(floor(p.x)), int(floor(p.y)))
 		var pk := place_kind(gen, t.x, t.y)
 		if int(e.room) >= 0:
@@ -536,6 +614,9 @@ static func _build_furniture(root: Node3D, gen: Dictionary, info: Dictionary) ->
 		var wi := _wing_of(gen, t.x, t.y)
 		for a in Defs.anchors(kind):
 			var ap: Vector3 = xf * (a[0] as Vector3)
+			# Only where the collider really is under it, or the item falls through.
+			if not support.grow(-0.04).has_point(Vector2(ap.x, ap.z) / C.TILE) or absf(ap.y - support_top) > 0.06:
+				continue
 			anchors.append({"position": ap, "yaw": float(e.yaw), "surface": String(a[1]), "room_kind": pk,
 					"wing": wi.wing, "depth": wi.depth})
 		count += 1
@@ -563,17 +644,20 @@ static func _build_furniture(root: Node3D, gen: Dictionary, info: Dictionary) ->
 	info["furniture_count"] = count
 
 
-## Does a piece get a collider? Blocking pieces always (the navigation mesh leaves their tiles
-## out). Other colliding pieces only while they stand against a wall, inside the margin the
-## navigation mesh keeps from walls anyway: a chair or a plant in the middle of a room has no
-## collider, so monsters and bots walking the navigation mesh never snag on it.
+## Does a piece get a collider? Blocking pieces do (the navigation mesh leaves their tiles out).
+## Other pieces only when they are flat against a wall, closer to it than the gap a navigation
+## agent's body keeps (agent radius minus player radius): anything that stands further out is
+## where a monster or bot following the mesh edge would catch on it, so chairs, bins, plants and
+## IV stands have no collider. See docs/KNOWN_ISSUES.md.
 static func _solid_piece(gen: Dictionary, kind: String, p: Vector2, yaw: float) -> bool:
 	if not Defs.collides(kind):
 		return false
 	if Defs.blocks(kind):
-		return true
+		return not Defs.blocked_tiles(kind, p, yaw).is_empty()
+	if not FLAT_PIECE_COLLIDERS:
+		return false
 	var r := Defs.footprint_rect(kind, p, yaw)
-	var margin := (NAV_AGENT_RADIUS + 0.08) / C.TILE
+	var margin := (NAV_AGENT_RADIUS - C.PLAYER_RADIUS) / C.TILE
 	var rows: PackedStringArray = gen.rows
 	var solid := func(x: int, y: int) -> bool:
 		return not _open_char(_at(rows, x, y))

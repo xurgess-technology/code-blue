@@ -28,7 +28,7 @@ const ASSET := {
 	"doormat": "hosp/doormat", "scrub_sink": "hosp/sink_cabinet", "ambulance": "hosp/ambulance",
 	"van": "hosp/van", "sedan": "hosp/sedan", "suv": "hosp/suv", "hatchback": "hosp/hatchback",
 	"covered_car": "hosp/covered_car", "street_light": "hosp/street_light", "dumpster": "hosp/dumpster",
-	"cone": "hosp/cone", "barrier": "hosp/barrier",
+	"cone": "hosp/cone", "barrier": "hosp/barrier", "mirror": "hosp/mirror", "coat_rack": "hosp/coat_rack",
 }
 
 ## Models laid on top of a primitive kind: [asset key, position in the piece frame, yaw degrees].
@@ -36,14 +36,17 @@ const EXTRA := {
 	"stall": [["hosp/toilet", Vector3(0.0, 0.0, 0.42), 0.0]],
 	"lab_bench_scope": [["hosp/microscope", Vector3(-0.35, 0.92, 0.0), 0.0]],
 	"kitchen_counter_coffee": [["hosp/coffee_machine", Vector3(-0.35, 0.95, 0.08), 0.0], ["hosp/microwave", Vector3(0.35, 0.95, 0.1), 0.0]],
+	"kitchen_counter": [["hosp/radio", Vector3(0.3, 0.95, 0.15), -12.0]],
+	"lab_island": [["hosp/laptop", Vector3(0.4, 0.92, 0.2), 150.0]],
 	"console_desk": [["prop/screen", Vector3(-0.35, 0.76, 0.12), 0.0], ["prop/screen", Vector3(0.35, 0.76, 0.12), 0.0], ["hosp/keyboard", Vector3(0.0, 0.76, -0.12), 0.0]],
-	"reception_desk": [["prop/screen", Vector3(-0.7, 0.77, 0.15), 180.0], ["hosp/keyboard", Vector3(-0.7, 0.77, -0.05), 180.0]],
+	"reception_desk": [["prop/screen", Vector3(-0.7, 0.77, 0.15), 180.0], ["hosp/keyboard", Vector3(-0.7, 0.77, -0.05), 180.0],
+			["hosp/plant_small", Vector3(1.2, 1.12, -0.33), 0.0]],
 	"shop_table": [["hosp/box_open", Vector3(-0.45, 0.8, 0.0), 10.0], ["hosp/medical_box", Vector3(0.45, 0.8, 0.0), -8.0]],
 	"shop_crates": [["hosp/box_closed", Vector3(-0.2, 0.0, 0.0), 0.0], ["hosp/box_closed", Vector3(0.22, 0.0, 0.05), 14.0], ["hosp/box_closed", Vector3(0.0, 0.62, 0.0), -9.0]],
 	"mop_bucket": [["hosp/bucket", Vector3(0.0, 0.0, 0.0), 0.0]],
 	"magazine_table": [["hosp/books", Vector3(0.25, 0.41, 0.05), 20.0]],
-	"office_desk": [["prop/screen", Vector3(0.35, 0.75, 0.25), 0.0], ["hosp/keyboard", Vector3(0.35, 0.75, 0.0), 0.0]],
-	"nurse_desk_top": [],
+	"office_desk": [["prop/screen", Vector3(0.35, 0.75, 0.25), 0.0], ["hosp/keyboard", Vector3(0.35, 0.75, 0.0), 0.0],
+			["hosp/plant_small", Vector3(-0.75, 0.75, 0.25), 0.0]],
 }
 
 ## Kinds whose model is replaced by primitives even when the asset exists, because the model's

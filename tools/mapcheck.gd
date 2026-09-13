@@ -22,8 +22,6 @@ const HB := preload("res://scripts/hospital_builder.gd")
 
 const DETERMINISM_SEEDS := [1, 7, 42, 137, 200]
 const ASCII_SEED := 7
-## How close the navigation mesh must bring a player to a container or loose item.
-const REACH := 1.9
 
 var failures: PackedStringArray = []
 var first_seed := 1
@@ -236,10 +234,6 @@ func _stats(values: Array) -> String:
 class Runner extends Node:
 	const MG := preload("res://scripts/mapgen.gd")
 	const HB := preload("res://scripts/hospital_builder.gd")
-	## Containers report the point on the wall behind them; their front is about half a metre
-	## closer, so they get a little more.
-	const REACH := 1.9
-	const CONTAINER_REACH := 2.15
 
 	var check: Object
 	var seeds: Array = []
@@ -438,23 +432,67 @@ class Runner extends Node:
 		var examples: Array = []
 		var spots: Array = []
 		for c in info.containers:
-			spots.append([c.id, c.position, CONTAINER_REACH])
+			# Aim at the container's front, half a metre out from the wall, at waist height.
+			var node: Node3D = c.node
+			var front: Vector3 = c.position + node.global_basis.z.normalized() * -0.45 if node.is_inside_tree() else c.position
+			spots.append([c.id, Vector3(front.x, 1.0, front.z)])
 		for i in info.loose_anchors.size():
-			spots.append(["anchor %d (%s, %s)" % [i, info.loose_anchors[i].surface, info.loose_anchors[i].room_kind], info.loose_anchors[i].position, REACH])
+			spots.append(["anchor %d (%s, %s)" % [i, info.loose_anchors[i].surface, info.loose_anchors[i].room_kind], info.loose_anchors[i].position])
+		var los_space := get_tree().root.world_3d.direct_space_state
 		for s in spots:
 			var p: Vector3 = s[1]
-			var q := NavigationServer3D.map_get_closest_point(map, Vector3(p.x, 0.0, p.z))
-			var flat := Vector2(q.x - p.x, q.z - p.z).length()
-			var ok := flat <= float(s[2])
-			if ok:
+			# A standing spot on the navigation mesh, reachable from outside, from which the eye
+			# (1.7 m) is within interaction range of the target with nothing solid in between.
+			var ok := false
+			var best_flat := INF
+			var cands: Array = [NavigationServer3D.map_get_closest_point(map, Vector3(p.x, 0.0, p.z))]
+			for k in 8:
+				for rad in [0.9, 1.5]:
+					var a := TAU * k / 8.0
+					cands.append(NavigationServer3D.map_get_closest_point(map, Vector3(p.x + cos(a) * rad, 0.0, p.z + sin(a) * rad)))
+			for q in cands:
+				var flat := Vector2(q.x - p.x, q.z - p.z).length()
+				best_flat = minf(best_flat, flat)
+				var eye: Vector3 = q + Vector3.UP * C.EYE_H
+				if eye.distance_to(p) > C.INTERACT_RANGE:
+					continue
+				var ray := PhysicsRayQueryParameters3D.create(eye, p)
+				ray.collision_mask = C.L_WORLD
+				var hit := los_space.intersect_ray(ray)
+				if not hit.is_empty() and (hit.position as Vector3).distance_to(p) > 0.5:
+					continue
 				var path := NavigationServer3D.map_get_path(map, start, q, true)
-				ok = path.size() >= 2 and path[path.size() - 1].distance_to(q) < 0.6
+				if path.size() >= 2 and path[path.size() - 1].distance_to(q) < 0.6:
+					ok = true
+					break
 			if not ok:
 				unreachable += 1
 				if examples.size() < 4:
-					examples.append("%s at (%.1f, %.1f), nav %.2f m away" % [s[0], p.x, p.z, flat])
+					examples.append("%s at (%.1f, %.2f, %.1f), nav %.2f m away" % [s[0], p.x, p.y, p.z, best_flat])
 		if unreachable > 0:
 			_fail("%s: %d containers / anchors out of reach, e.g. %s" % [tag, unreachable, "; ".join(examples)])
+		# Things resting on furniture need a collider under them: loose items on counters, trays
+		# and gurneys, and the patient on each OR table.
+		var space := get_tree().root.world_3d.direct_space_state
+		var unsupported: Array = []
+		var rests: Array = []
+		for a in info.loose_anchors:
+			if a.surface != "floor":
+				rests.append(["%s anchor (%s)" % [a.surface, a.room_kind], a.position])
+		for t in info.tables:
+			rests.append(["%s table" % t.kind, t.position + Vector3(0, 0.945, 0)])
+		for rest in rests:
+			var p: Vector3 = rest[1]
+			var q := PhysicsRayQueryParameters3D.create(p + Vector3.UP * 0.4, p + Vector3.DOWN * 0.5)
+			q.collision_mask = C.L_WORLD
+			var hit := space.intersect_ray(q)
+			if hit.is_empty() or absf(hit.position.y - p.y) > 0.12:
+				if unsupported.size() < 4:
+					unsupported.append("%s at (%.1f, %.2f, %.1f) lands at %s" % [rest[0], p.x, p.y, p.z, "nothing" if hit.is_empty() else "%.2f" % hit.position.y])
+				else:
+					unsupported.append("")
+		if not unsupported.is_empty():
+			_fail("%s: %d resting spots have no surface under them, e.g. %s" % [tag, unsupported.size(), "; ".join(unsupported.slice(0, 4))])
 		print("  nav: coverage %.1f%%, longest path from the neutral area %.0f m, %d spots checked, %d out of reach" % [
 				coverage * 100.0, longest, spots.size(), unreachable])
 
