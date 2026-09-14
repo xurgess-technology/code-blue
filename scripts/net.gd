@@ -61,9 +61,16 @@ const LOBBY_TYPE_FRIENDS_ONLY := 1
 const RESULT_OK := 1
 const CHAT_ROOM_ENTER_SUCCESS := 1
 ## ENet peer timeouts (ms): a peer that stops answering is dropped after 5 to 12 seconds
-## instead of ENet's default 30. Long enough to ride out a level build on a slow machine.
+## instead of ENet's default 30 (once settled; see PATIENT_* for the first seconds).
 const TIMEOUT_MIN_MS := 5000
 const TIMEOUT_MAX_MS := 12000
+## While a machine builds a level it does not service the connection for seconds, and ENet's
+## round-trip estimate stays inflated for a while afterwards (a lost reliable packet is then
+## resent many seconds later). Right after connecting and around a new hospital, peers get this
+## much more patience; Game hands them back to the normal timeouts once things settle.
+const PATIENT_TIMEOUT_LIMIT := 64
+const PATIENT_TIMEOUT_MIN_MS := 10000
+const PATIENT_TIMEOUT_MAX_MS := 20000
 
 
 func _ready() -> void:
@@ -419,11 +426,20 @@ func _on_connected() -> void:
 
 
 func _set_timeouts(id: int) -> void:
+	set_patient(id, true)
+
+
+## ENet only: `patient` timeouts (see PATIENT_*) or the normal ones for one peer.
+func set_patient(id: int, patient: bool) -> void:
 	var enet := multiplayer.multiplayer_peer as ENetMultiplayerPeer
 	if enet == null:
 		return
 	var pp := enet.get_peer(id)
-	if pp != null:
+	if pp == null:
+		return
+	if patient:
+		pp.set_timeout(PATIENT_TIMEOUT_LIMIT, PATIENT_TIMEOUT_MIN_MS, PATIENT_TIMEOUT_MAX_MS)
+	else:
 		pp.set_timeout(0, TIMEOUT_MIN_MS, TIMEOUT_MAX_MS)
 
 

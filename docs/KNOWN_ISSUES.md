@@ -86,6 +86,30 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   persona names, and how quickly a vanished Steam peer is noticed. Needs two Steam accounts.
 - **Upstream player state is still 20 Hz full state** (a compact array, about 2.5-3.5 KB/s per
   client with operator reports). Fine for four players; delta it if the player count grows.
+- **Lagged nettests used to die at clock-in (fixed by netfix, sweep 2 integration).** Measured
+  cause: with the hospital a full keyframe was one 22.2 KB unreliable message (3.2 KB in the
+  lobby), about 17 ENet fragments. A client whose ack was unusable (level build, or 5 s of
+  history gone) got that keyframe on *every* tick: 2372 keyframes, 47.9 MB to one client in a
+  failed `deliver`, 1.6 MB/s of datagrams through the relay; with 3% loss, 80 ms of reordering and
+  a newer keyframe every tick, one never completed, so the ack never advanced (stuck at seq 216
+  for 90 s). Replication is now per field with acks and messages of at most 1000 bytes (see
+  CONTRACTS, Networking).
+- **Harsh links degrade through ENet's reliable channel, not snapshots.** At 200 ms, 80 ms jitter,
+  8% loss (4x speed), `deliver` and `full_shift_lag` pass but `surgery` / `two_patients` fail about
+  half the time: a client's level build stalls it for seconds right after joining, ENet's RTT
+  estimate jumps to 1-3 s (variance up to 2 s) and decays slowly, so a reliable RPC lost in that
+  window is retransmitted 8-10 s later (a nettest order arrives after the step it was about) and
+  two losses of one reliable packet exceed `Net.TIMEOUT_MAX_MS` (a disconnect). The same showed
+  once at 120/40/3% under heavy CPU load from other worktrees. Snapshots kept flowing throughout.
+  Building the level without blocking the network poll, or a longer timeout right after joining,
+  would help.
+- **The lag relay reorders more than real links**: each datagram gets an independent uniform
+  jitter, so +-40 ms at 4x game speed reorders several packets per tick. Snapshot messages are
+  unordered and cope (`NET_REORDER_MS` 100 ms before a gap counts as a loss).
+- **A global group or entity waits for its field names to be whole.** After a lost message that
+  added fields, the client keeps the group's last whole copy (`g`) or does not apply that entity
+  (players, monsters, items) until the whole entity arrives again (fast-loss detection plus one
+  resend, typically 100-400 ms).
 - **Monsters are the largest part of a snapshot** (about 2 KB/s per client with two or three
   moving). Sending their position at a lower rate or as smaller deltas would halve the total.
 - **A killed client takes 5 to 12 seconds to be noticed** (ENet timeout, `Net.TIMEOUT_*_MS`).
@@ -193,10 +217,6 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 - **The rim can look flat on big box-shaped loot** (heart monitor, defibrillator) at glancing
   angles in the dark; tune `TINT_SHADER` exponent or the gold `rim` in `item_models.gd`.
 - **Dev room bots cannot sell**: a carry order with loot delivers to a player, not the sell bin.
-- **`full_shift_lag` failed once** (both lagged clients dropped about 10 s into the shift, the host
-  then passed alone) while two headless playtests ran on the same machine; it passed in the
-  full run before and alone after (20 s). Looks like the lag relay starving under CPU load, not
-  inventory, but worth watching.
 - **Money readout is a corner number** until wave 3's minimal HUD (shown near the sell bin, shop
   or pile, while aiming at them, or for 4 s after a change).
 
@@ -234,12 +254,6 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   the wire twice. The integration wave can move it onto a real case and a surgery system from
   `game.surgeries`. On fallback levels clients do not append the player table to
   `level_info.tables`, so the mirror's `table` index only resolves on the host there.
-- **`full_shift_lag` fails** (120 ms, 40 ms jitter, 3% loss): after the hospital merge the lagged
-  clients stop receiving updates early in the shift and the host plays alone until the timeout;
-  the coordinator saw the same with `deliver` on main before the loop landed. Every unlagged
-  scenario passes, `two_patients` included. Clock-in now spawns about 70 loot stacks at once (the
-  same burst `begin_shift` had), which makes one big delta; splitting large deltas across ticks is
-  one thing to try (networking section of `game.gd`). Not investigated further by the loop worker.
 
 ## OR screen and minimal HUD (sweep 2 wave 3)
 
@@ -296,11 +310,6 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 - **Suture kits skip `ItemSpawner.plan`**: `game.spawn_suture_kits()` places three stacks of 1-2 in
   random legal containers (trauma bags, nurse station drawers, drawer units), not spread by wing
   depth, and not topped up by the softlock guard.
-- **Nettest with lag fails before any downed code runs** (also on `main` after the hospital merge):
-  `deliver` and `downed` with `--lag=120 --jitter=40 --loss=0.03` stop receiving snapshots a few
-  seconds into the shift (the host logs 2.3 KB keyframes over the MTU). `late_join` failed twice
-  on this branch when it ran while other headless tests loaded the CPU (the late joiner lost its
-  connection during the lobby rebuild); alone it passes (19 s), as on `main`.
 - **`tools/mapcheck.gd` reports seed 112** (a morgue tray anchor 3.3 m off the navmesh); the same
   on `main` before the pod removal.
 

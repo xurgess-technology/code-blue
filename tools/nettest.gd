@@ -56,6 +56,7 @@ var _done := false
 var _t0 := 0.0
 var _inbox: Array = []
 var _press_at_ms := 0
+var _t_joined := 0.0    # client: wall time the connection came up (0 before)
 
 
 func _ready() -> void:
@@ -89,6 +90,7 @@ func _ready() -> void:
 		game.start_session(seed_value)
 	else:
 		# Exactly what the menu does, so the join-name path is the real one.
+		Net.joined_ok.connect(func(): _t_joined = _wall(), CONNECT_ONE_SHOT)
 		main._start_join(NAMES[index], "127.0.0.1:%d" % port)
 	_run()
 
@@ -1069,6 +1071,9 @@ func _do_until(step: Callable, cond: Callable, seconds: float, what: String) -> 
 			return false
 		if _wall() - start > seconds:
 			_end(false, "timed out after %.0f s waiting for %s" % [seconds, what])
+			return false
+		if role != "host" and not Net.active and scenario != "host_quit" and scenario != "host_kill" and game.phase == Game.Phase.MENU and _t_joined > 0.0:
+			_end(false, "lost the connection to the host while waiting for %s" % what)
 			return false
 		step.call()
 		await get_tree().physics_frame

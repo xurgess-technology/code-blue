@@ -2404,6 +2404,8 @@ const NET_UNKNOWN := "\u0001unknown"
 ## The value that says "this field left the report" (null is an ordinary value).
 const NET_GONE := "\u0001gone"
 const ACK_BITS := 64
+## How long peers keep patient ENet timeouts after a level build (Net.PATIENT_*), wall ms.
+const NET_PATIENCE_MS := 15000
 ## A message is lost once one sent this much later (wall ms) was acknowledged without it.
 const NET_REORDER_MS := 100
 
@@ -2421,6 +2423,7 @@ var net_counters: Dictionary = {}
 var _net_seq: int = 0                 # snapshot ticks sent (kept for _rpc_shift)
 var _net_prev: Dictionary = {}        # last tick's state, to find what changed
 var _repl: Dictionary = {}            # peer id -> per-client replication record (_repl_new)
+var _net_patience: Dictionary = {}    # peer id -> wall msec its patient timeouts end (-1: first ack)
 # client
 var _cl_recs: Dictionary = {}         # sec -> id -> {v: {field: value}, s: {field: seq}}
 var _cl_state: Dictionary = {}        # sec -> id -> fields, only complete entities (g: the fields)
@@ -2440,6 +2443,7 @@ var _cl_g_last: Dictionary = {}       # global group id -> its last complete fie
 func _net_tick(delta: float) -> void:
 	if not Net.active:
 		return
+	_net_patience_tick()
 	if not is_host():
 		_cl_full_acc += delta
 		if _cl_full_acc >= KEYFRAME_SECONDS:
@@ -2485,6 +2489,7 @@ func _send_snapshots() -> void:
 			continue
 		if not _repl.has(id):
 			_repl[id] = _repl_new(state, now)
+			_net_be_patient(id, -1)   # it will stall building the level when this arrives
 		var r: Dictionary = _repl[id]
 		for sec in NET_SECS:
 			(r.dirty[sec] as Dictionary).merge(changed[sec])
@@ -2741,6 +2746,8 @@ func _player_state(ack: Array, s: Array) -> void:
 		var mask := int(ack[1])
 		var now := Time.get_ticks_msec()
 		if latest > int(r.acked_max):
+			if int(r.acked_max) == 0 and int(_net_patience.get(id, 0)) == -1:
+				_net_patience[id] = now + NET_PATIENCE_MS   # it has built the level: settle soon
 			r.acked_max = latest
 			r.last_ack = now
 			if r.pend.has(latest):
@@ -2766,10 +2773,29 @@ func _player_state(ack: Array, s: Array) -> void:
 		p.apply_remote_state(s)
 
 
-## Host: a new hospital needs nothing special any more (the replicas diff to it). Kept as the
-## hook start_lobby calls.
+## Host: a new hospital needs nothing special for replication (the replicas diff to it), but
+## every client is about to stall building it: give them patient timeouts for a while.
 func _net_reset_history() -> void:
-	pass
+	for id in Net.peer_ids():
+		if id != Net.HOST_ID:
+			_net_be_patient(id, Time.get_ticks_msec() + NET_PATIENCE_MS)
+
+
+## Patient ENet timeouts for a peer until `until_msec` (-1: until its first acknowledgement).
+func _net_be_patient(id: int, until_msec: int) -> void:
+	Net.set_patient(id, true)
+	_net_patience[id] = until_msec
+
+
+func _net_patience_tick() -> void:
+	if _net_patience.is_empty():
+		return
+	var now := Time.get_ticks_msec()
+	for id in _net_patience.keys():
+		var until := int(_net_patience[id])
+		if until >= 0 and now >= until:
+			_net_patience.erase(id)
+			Net.set_patient(id, false)
 
 
 # ---------------------------------------------------------------------------
@@ -3091,6 +3117,8 @@ func _rpc_shift(new_seed: int, new_shift: int, new_phase: int, _net_seq_unused: 
 func _net_client_reset() -> void:
 	_cl_full = true
 	_pl_applied.clear()
+	if Net.active:
+		_net_be_patient(Net.HOST_ID, Time.get_ticks_msec() + NET_PATIENCE_MS)
 
 
 ## Client: a new connection starts a new replica (the host's sequence numbers start again).
