@@ -29,6 +29,10 @@ var target := 0.0
 ## Amount per second toward the target.
 var speed := 1.8
 var locked := false
+## Automatic swing doors: which way the pair opens this time (-1 into the tunnel, +1 out of the face).
+var swing := -1
+## Whoever set the door moving (a bot pulling it toward itself is not in its way).
+var opener: Node = null
 var max_out := 90.0
 var max_in := 90.0
 ## Local X of the hinge of each leaf, and the leaf's closed direction (+1 / -1 along X).
@@ -220,10 +224,12 @@ func is_closed() -> bool:
 	return absf(amount) < 0.04
 
 
-## Degrees of the swing for an amount (hinged: signed).
+## Degrees of the swing for an amount (hinged: signed; automatic pairs: toward `swing`).
 func angle_for(a: float) -> float:
 	if is_hinged():
 		return clampf(a * 90.0, -max_in, max_out)
+	if swing > 0:
+		return clampf(a, 0.0, 1.0) * minf(90.0, max_out)
 	return -clampf(a, 0.0, 1.0) * 90.0
 
 
@@ -232,6 +238,11 @@ func limit(side: int) -> float:
 	if not is_hinged():
 		return 1.0
 	return (max_out if side > 0 else max_in) / 90.0
+
+
+## Automatic swing doors: may this pair open out of the face (away from someone in the tunnel)?
+func can_swing_out() -> bool:
+	return (kind == "gate" or kind == "auto") and max_out >= 80.0
 
 
 ## Leaf `i`'s local transform at an amount.
@@ -249,8 +260,6 @@ func leaf_xform(i: int, a: float) -> Transform3D:
 	var th := deg_to_rad(angle_for(a))
 	var d := float(leaf_dir[i])
 	var u := Vector3(d * cos(th), 0.0, sin(th))
-	if not is_hinged():
-		u = Vector3(d * cos(th), 0.0, sin(th))
 	var basis := Basis(u, Vector3.UP, u.cross(Vector3.UP))
 	return Transform3D(basis, Vector3(float(leaf_hinge[i]), 0.0, 0.0))
 
@@ -312,7 +321,7 @@ func _blocked_at(a: float) -> bool:
 	# one pushing the door stands on the other side, pressed against it).
 	var sweep := signf(a) if not closing else signf(amount)
 	if not is_hinged():
-		sweep = -1.0
+		sweep = float(swing)
 	var inv := global_transform.affine_inverse()
 	for i in leaf_bodies.size():
 		var body: AnimatableBody3D = leaf_bodies[i]
@@ -325,6 +334,8 @@ func _blocked_at(a: float) -> bool:
 			var col = hit.get("collider")
 			if col == null:
 				continue
+			if col == opener:
+				continue   # the one opening it (pulling a door toward themselves) steps back from it
 			var lz: float = (inv * (col as Node3D).global_position).z
 			if kind != "sliding" and sweep != 0.0 and lz * sweep < 0.0:
 				continue

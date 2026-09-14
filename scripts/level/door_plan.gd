@@ -207,7 +207,8 @@ static func _fit_swing(st: S, d: Dictionary, occ: Dictionary, index: int, grid: 
 				best_h = h
 		d.hinge = best_h
 		d.max_out = best
-	elif kind == "double":
+	elif kind == "double" or kind == "gate" or kind == "auto":
+		# Automatic pairs swing out of the face too, away from someone coming through the tunnel.
 		d.max_out = _max_angle(st, d, 1, grid, occ, index)
 	for leaf in leaves(d):
 		var a := 0.0

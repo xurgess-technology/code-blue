@@ -168,12 +168,13 @@ func physics_tick(delta: float) -> void:
 				d.set_meta("jam_rolled", false)
 
 
-func _drive(d: Node, target: float, speed: float) -> void:
+func _drive(d: Node, target: float, speed: float, opener: Node = null) -> void:
 	if is_equal_approx(d.target, target) and is_equal_approx(d.speed, speed) and not d.halted:
 		return
 	d.target = target
 	d.speed = speed
 	d.halted = false
+	d.opener = opener
 	_moving[d.door_id] = d
 
 
@@ -239,12 +240,18 @@ func _auto_tick(d: Node, agents: Array, delta: float) -> void:
 		return
 	var inv: Transform3D = d.global_transform.affine_inverse()
 	var sensed := false
+	var nearest_z := INF
 	for a in agents:
 		var lp: Vector3 = inv * (a.pos as Vector3)
 		var reach := CREW_SENSOR_RANGE if a.kind == "crew" else SENSOR_RANGE
 		if absf(lp.z) <= reach and absf(lp.x) <= d.width * 0.5 + SENSOR_SIDE:
 			sensed = true
-			break
+			if absf(lp.z) < absf(nearest_z):
+				nearest_z = lp.z
+	# A closed pair picks its way: away from whoever is nearest, into the tunnel unless they are
+	# coming through it and there is room to swing out.
+	if sensed and d.is_closed() and d.target <= 0.0 and d.kind != "sliding":
+		d.swing = 1 if (nearest_z < 0.0 and d.can_swing_out()) else -1
 	var hold := float(_hold_open.get(d.door_id, 0.0))
 	if hold > 0.0:
 		_hold_open[d.door_id] = hold - delta
@@ -394,9 +401,13 @@ func _push_check(d: Node, a: Dictionary) -> void:
 		return   # players use E
 	if absf(lp.z) > reach or absf(lp.x) > d.width * 0.5 + PUSH_SIDE:
 		return
-	# Heading into the door: facing across its plane toward it.
+	# Heading into the door: facing across its plane toward it. Bots and carriers walking a path
+	# around a corner often face the door at a slant, so for them being right at it is enough.
 	var fwd_z: float = d.normal.dot(a.fwd)
-	if fwd_z * signf(lp.z) > -0.35:
+	var pushing := fwd_z * signf(lp.z) <= -0.2
+	if (kind == "bot" or kind == "carrier") and absf(lp.z) <= 1.3 and absf(lp.x) <= d.width * 0.5:
+		pushing = pushing or fwd_z * signf(lp.z) <= 0.3
+	if not pushing:
 		return
 	var side := swing_side(d, a.pos)
 	var want: float = float(side) * d.limit(side)
@@ -409,7 +420,7 @@ func _push_check(d: Node, a: Dictionary) -> void:
 		"bot", "carrier":
 			if not agents_open_doors:
 				return
-			_drive(d, want, SPEED_OPEN)
+			_drive(d, want, SPEED_OPEN, m)
 			_count("bot")
 			game._sound("doors_creak", d.centre)
 			game.emit_noise(d.centre, NOISE_OPEN, "door")
@@ -550,7 +561,10 @@ func net_fields() -> Dictionary:
 		var d = doors[id]
 		if d == null or not is_instance_valid(d):
 			continue
-		out["d." + String(id)] = int(round(float(d.amount) * 50.0))
+		var q := int(round(float(d.amount) * 50.0))
+		if d.kind == "gate" or d.kind == "auto":
+			q *= -1 if d.swing < 0 else 1   # automatic pairs: the sign is the way they swing
+		out["d." + String(id)] = q
 	return out
 
 
@@ -569,6 +583,12 @@ func apply_net(g: Dictionary) -> void:
 		if d == null or not is_instance_valid(d):
 			continue
 		var a := float(int(g[k])) / 50.0
+		if d.kind == "gate" or d.kind == "auto":
+			if a < 0.0:
+				d.swing = -1
+			elif a > 0.0:
+				d.swing = 1
+			a = absf(a)
 		if not _applied_once.has(id):
 			_applied_once[id] = true
 			d.snap_to(a)
