@@ -182,6 +182,28 @@ limb (site Z), `axis_depth` how far below the site origin the axis runs, `shape`
 exponent (2 round, 6 boxy). Minigames read limb geometry only through `site_section`,
 `infection_start` and `make_severed_limb`, never through `PatientBody.parts`.
 
+**The seal's Blender model (2026-09-14).** `PatientBody.create("seal")` builds the seal from the
+`patient/seal` asset (`assets/models/patients/seal/seal.glb`, made in `art/seal/`) through
+`scripts/patients/seal_model_builder.gd`, and falls back to the lofted `seal_builder.gd` when the
+asset or its shader is missing (`SealModelBuilder.procedural_only = true` forces the fallback, for
+tools). Same frame and API; what differs underneath:
+
+- `site_transform` returns the rest pose (the Idle clip's first frame). The `site_*` anchor nodes sit
+  on the neck, spine and `flipper_fore.L` bones, so every overlay on them (tourniquet, wound,
+  dressings, bleeding decals) follows the clips. Sections come from the mesh: `limb` half_up 0.0335,
+  half_side 0.0659; `limb_cut` 0.0270 / 0.0626 (both also carry `half_down`, the flatter underside);
+  `infection_start` 0.0972 and 0.0216.
+- Motion: no AnimationPlayer runs. The builder samples the Idle, Fidget, Twitch, Stir and Flatline
+  clips every frame and blends them from the body state: Idle's rate follows the breathing rate and
+  its ribs the breathing depth, `stir()` restarts Stir weighted by its strength, fidget and low-vitals
+  twitching blend their clips in, `flatline()` fades into Flatline. `breath_amp` is 0 (the ribs bone
+  breathes); `rig.position`'s jolt offset still applies.
+- `skin_mats` holds the model's two ShaderMaterials (`seal_skin.gdshader`): `pallor`, `grey`,
+  `infect` and `breath` as before, plus `infect_front`, `highlight_injection`, `highlight_gunshot`.
+- The amputation swaps the model's `Seal_Paddle_L` for its `Seal_StumpCap_L`; the fishing line shows
+  for the amputation ailment until the paddle comes off. `make_severed_limb` duplicates the static
+  `Seal_PaddleSevered_L` (paddle, cut face, line) at the paddle's current place.
+
 ## Surgery (surgery worker)
 
 ```gdscript
@@ -920,8 +942,18 @@ game.downed_view           # scripts/downed/downed_view.gd: blood trails, the lo
 SAW_BREAK_CHANCE 0.12  SWING_COOLDOWN 0.8  SAW_REACH 2.0  SEDATE_SECONDS 75.0  JAB_COOLDOWN 1.0  JAB_REACH 1.8
 DRAG_HOLD 1.0  DRAG_SPEED_K 0.55  DRAG_BEHIND 1.15  JAB_KNOCKOUT 8.0  NOISE_HIT 0.9  NOISE_SWING 0.3
 game.combat.is_usable(kind) -> bool          # "bone_saw", "anesthetic"
-game.combat.use(p)                           # host (game.player_used): swing or jab with the selected stack
-game.combat.local_try_use(p) -> bool         # the clicking machine: its own cooldown, starts the animation
+game.combat.use(p)                           # host, the old use_count path: starts a jab / saw wind-up
+game.combat.local_try_use(p) -> bool         # the clicking machine: starts the jab / saw wind-up (own cooldown)
+game.combat.local_shove_begin(p) -> bool / local_shove_release(p)   # the shoving machine: Q or left mouse down / up
+game.combat.action_of(p) -> {} or {k, ph, t, u, charge, c}   # every machine: the wind-up state the hands draw
+game.combat.is_winding(p) -> bool            # winding up or charging: walk speed, no sprint, no slot change, no drop
+game.combat.cancel_windup(p, why)            # host: game.damage_player, player_shoved (the victim), knock_out call it
+game.combat.strike_shove(p, c)               # host: game.player_shoved(p, c) at the shove's strike
+game.combat.monster_shoved(m, c)             # host, from game.player_shoved: a stunned capturable monster's window
+game.combat.stun_pose(m, shaper, lying)      # Monster._update_visual hook: the stun window's pose
+game.combat.jab_prompt(p) -> "" or "[Click] Jab it"   # Player._update_aim: holding anesthetic at a stunned monster
+game.combat.windup                           # scripts/combat/windup.gd (constants and state, below)
+game.combat.stun_window                      # scripts/combat/stun_window.gd
 game.combat.find_target(p, reach, cone_deg) -> {node, kind: "monster"|"player", point, dist} or {}
 game.combat.knock_out(q, seconds)            # host: the teammate jab (hands drop, stun + "stun" event)
 game.combat.is_sedated(m) / can_sedate(m) / sedation_left(m)   # guarded monster API
@@ -932,8 +964,8 @@ game.combat.can_drag(q, m, check_hands := true) / start_drag(q, m) / drop_dragge
 game.combat.dragger_pressed_interact(q, aim_id)   # host, from Player._consume_actions while dragging
 game.combat.strap(q, table_index) -> case id # host
 game.combat.table_index_for(interact_id) / strap_problem(table_index) -> "" or why not
-game.combat.animate_held(p, delta, fp, tp)   # Player._process
-game.combat.last_result / swings_seen / rng / break_chance / anim_freeze / stop_anim(p) / set_sedation_left(m, s)   # tests, tools
+game.combat.animate_held(p, delta, fp, tp)   # kept as a no-op (the hands animate themselves)
+game.combat.last_result / swings_seen / rng / break_chance / anim_freeze / pose_at(p, k, ph, t, c) / stop_anim(p) / set_sedation_left(m, s)   # tests, tools
 ```
 
 - **Saw** (host): a cone of 38 degrees around the aim from the eyes (yaw from `rotation.y`, pitch
@@ -969,17 +1001,100 @@ game.combat.last_result / swings_seen / rng / break_chance / anim_freeze / stop_
   "dissection", monster: true, flags: {sedation: lerp(0.35, 1.0, sedation_left / 75), snapped to
   0.01}})`; then `game.monsters.erase(id)`, `on_monster_removed(m)`, `m.queue_free()` (no death
   effect, no `monster_killed` event), `combat_strap` and "X strapped the Y to the table.".
-- **Network**: `cb_swing {id, k: "saw"|"jab"}` (reliable) animates the use on every other machine;
-  `net_state()` (`g.cb`) is `{}` or `{s: [monster ids]}` (the fallback sedated set only). Drags ride
-  in `Player.report_full` as `dm`.
-- **Animation**: `anim_pose(k, t, rest, third)` gives the held stack's pose in camera space (first
-  person) or body space (others: in front of the head). The jab shows `make_syringe()` (needle along
-  -Z, warmed in `warmup.gd`) and hides the vials. `SWING_TIME` 0.55 s, `JAB_TIME` 0.45 s.
+- **Wind-ups** (hands sweep, `scripts/combat/windup.gd`, every machine): every shove, jab and saw
+  swing goes WINDUP -> STRIKE -> RECOVER. `WINDUP_TIME` jab 0.35 s, saw 0.3 s; the shove charges
+  while held: `SHOVE_MIN` 0.2 s (a tap), full at `SHOVE_FULL` 0.9 s, fires by itself at `SHOVE_MAX`
+  1.5 s; charge `c` = (held - 0.2) / 0.7 clamped. `STRIKE_TIME` shove 0.16 / jab 0.18 / saw 0.22,
+  `RECOVER_TIME` 0.36 / 0.32 / 0.36. The hit resolves on the host **at the strike** (`_swing`,
+  `_jab`, `strike_shove`), so the target is checked then (a monster that got up during a jab's
+  wind-up shrugs it off). Cooldowns (unchanged values) start at the strike, and at a cancel. While
+  winding: walk speed, no sprint, no slot change, no drop. Hit, shoved, knocked out, downed, stunned,
+  carried, carrying, dragging, operating or in Hive Eyes: the host cancels with no strike.
+- **Shove** (`game.player_shoved(p, charge := -1.0)`): charge 0 (a tap) is the old shove (2 s stun);
+  a charged shove stuns a capturable monster `lerp(2.0, 3.5, c)` s with `lerp(1.05, 1.9, c)` m of push
+  (`Monster.shoved(dir, charge)`) and knocks a player back `lerp(11, 16, c)`; noise `0.6 + 0.25 c`.
+  -1 is the instant shove the `Player.shove_count` counter still triggers (tests, old callers).
+  Wind-ups emit noise 0.3 ("windup") and a charging shove 0.3..0.65 ("charge") every 0.4 s.
+- **Network**: the owner starts the wind-up on the input and calls the reliable RPCs
+  `Combat._rpc_windup(k, seq)` / `_rpc_release(seq, held)` (client -> host; a host-local player or bot
+  calls `host_begin` / `host_release` directly). The host refuses (busy, cooling down, wrong item) with
+  `cb_cancel`, else broadcasts `cb_windup {id, k, s}`; at the strike `cb_swing {id, k, s, c}`; a cancel
+  `cb_cancel {id, s, cd}`. The shove's held seconds are capped to `min(claim, host-measured time
+  between the two events + HOST_CHARGE_SLACK 0.3, SHOVE_MAX)`; a held shove the host never hears
+  released fires at `SHOVE_MAX + 0.4`. Others show at least `MIN_SHOWN_WINDUP` (0.15 s) of a wind-up
+  whose strike arrived in the same frame. `cb_stun {m, s}` starts a monster's stun window on every
+  machine. `net_state()` (`g.cb`) is `{}` or `{s: [monster ids]}` (the fallback sedated set only).
+  Drags ride in `Player.report_full` as `dm`. Nothing else crosses the wire (the carry camera is local).
+- **Stun window** (`stun_window.gd`): from the host's shove to `s` seconds later: stagger pushed 1.7x
+  for 0.3 s, then down (RigShaper `daze` 1: knees buckle, slumped, head hanging, arms dangling),
+  `hands_dazed` every 1.25 s within 22 m, and for the last `RISE_WARNING` 0.6 s `rise` 0..1: it
+  jerks upright with `hands_rise`. No HUD; holding anesthetic at a jabbable monster the crosshair
+  prompt reads "[Click] Jab it" (`hud.gd` shows prompts that start with "[" as they are).
+- Wind-up sounds (`tools/gen_audio_hands.mjs`): `hands_windup_01/_02` (quiet at the player for
+  teammates), `hands_charge` (rising, stopped at the strike), `hands_full` (the charge maxed).
 - Sounds (`tools/gen_audio_combat.mjs`): `combat_swing_01/_02`, `combat_jab_swish`,
   `combat_hit_01/_02`, `combat_clang`, `combat_snap`, `combat_jab`, `combat_needle_fail`,
   `combat_drag`, `combat_strap`.
-- Tests: `tools/combattest.tscn` (headless, dev room), `tools/combatshot.tscn` (windowed shots to
-  `tools/combat_shots/`), nettest scenario `combat`.
+- Tests: `tools/combattest.tscn` (headless, dev room; wind-up cases at the end),
+  `tools/combatshot.tscn` (windowed shots to `tools/combat_shots/`), `tools/carrycamtest.tscn`,
+  `tools/gameshot.tscn -- --only=hands`, nettest scenario `combat` (wind-ups seen before strikes,
+  the capped charge).
+
+## Player: hands, poses and the carry camera (hands worker, 2026-09-14)
+
+```gdscript
+ItemModels.grip(kind) -> {pos, fwd, up, style: "palm"|"fist", hands: 1|2, bundle}   # scripts/hands/grips.gd
+Grips.grip_transform(kind) / transform_of(g) -> Transform3D   # the model in socket space
+Grips.shown_count(kind, count)               # a batch shows at most `bundle` copies in a hand
+p.hands                                      # scripts/hands/fp_hands.gd, node "Hands" under the camera (local)
+p.hands.fov_k / pose_l / pose_r / arm_l / arm_r / held_changed(kind, count) / static dress(node)
+HandsFP.HANDS_LAYER (1 << 18)                # hands and held first-person stacks; the flashlight skips it
+p.body_hands                                 # scripts/hands/body_hands.gd: clips, pose overrides, hand sockets
+p.body_hands.hand_r / hand_l                 # BoneAttachment3D on the arm bones
+p.body_hands.set_active(on) / has_rig()
+p.carry_cam                                  # scripts/camera/carry_camera.gd, local player only (else null)
+p.carry_cam.active / blend / offset / arm_length / hides_hands() / aim_segment()
+p.bot_charge                                 # test seam: true holds the shove, false lets go
+Settings "carry_camera": "shoulder" (default) | "first_person"
+```
+
+- **Socket axes** (every hand, first and third person): origin in the palm, -Z the fingers, +Y out
+  of the palm, +X the hand's right. A grip maps the model's `fwd` to -Z and `up` to +Y with `pos` in
+  the palm. "palm" things lie on an open, palm-up hand; "fist" handles (saw, forceps, reflex hammer,
+  thermometer, otoscope) sit in a closed hand, thumb up. `hands: 2` (bulky loot, the guide) sit
+  between both palms. `HeldFirstPerson` (`Head/FX/Camera/HeldFirstPerson`) and `HeldThirdPerson`
+  (`Body/HeldThirdPerson`) keep their paths: each frame they are moved onto the socket, and their
+  child `Held` carries the grip transform (first person: two-handed things fit 0.22 m, big loot
+  0.13 m; third person two-handed things 0.55 m).
+- **First person**: right hand the torch (thumb up), left hand the selected stack; two-handed things
+  take both hands and the torch tucks down at the right. Poses (camera space, `hand_poses.gd`) blend
+  the wind-up / strike / recover of `combat.action_of`; walk bob, sway lagging the mouse, a 0.38 s
+  lower-and-raise when the selected kind changes, lowered while sprinting, pulled back up to 0.17 m
+  when a short ray fan (every 0.05 s) finds a wall within 0.62 m. x/y scale with `fov_k`
+  (`Player.apply_fov`).
+- **The arms seam**: `fp_arms.make_arm(side, colour) -> Node3D` is the only builder: origin at the palm
+  socket, sleeve toward +Z, optional children `Rig/Fingers` (+`Mid`) and `Rig/Thumb` for `set_curl`.
+  The human model's arms replace it there.
+- **Third person, the rig seam**: `rig_map.gd` names the rig's torso, head and arm bones, the arms'
+  rest directions and the hand socket offset on each arm bone (Kenney has no hand bones), and the pose
+  table (arm directions in skeleton space, +Z forward, the body's right -X; torso pitch / yaw;
+  weights): `hold`, `hold_both`, `carry`, `drag`, `saw_windup` / `saw_strike`, `jab_windup` /
+  `jab_strike`, `shove_charge` / `shove_strike`. `body_poser.gd` (a SkeletonModifier3D after the
+  AnimationPlayer) points the arms and leans the torso over the looped idle / walk / sprint clips.
+  A new rig is an entry in `RigMap.RIGS`. A body without a matching rig (the capsule placeholder, a
+  dev dummy) keeps `HeldThirdPerson` at `BodyHands.FIXED_ATTACH`. The local player's body only
+  animates while the carry camera shows it. The jab shows a syringe in the hand (both views).
+- **Carry camera**: while the local player carries a downed player or drags a monster (setting
+  "shoulder"), `Head/FX` eases (0.35 s) to `CARRY_OFFSET` (-1.0, 0.45, 2.0) in the head's frame (over
+  the left shoulder; the body rides the right) or `DRAG_OFFSET` (0.45, 1.0, 3.6) with a 0.45 rad
+  downward look (the body lies behind). Sphere casts (r 0.16) from the head go up, out to the
+  shoulder, then back: a wall beside moves it in over the head, a wall behind pulls it toward the
+  head; shortening is instant, growing back 2.5 m/s, a teleport snaps. The first-person hands and held
+  stack hide (the camera's cull mask drops `HANDS_LAYER`), the local body shows (no shadows) unless the
+  camera is within 0.55 m of the head, the flashlight stays at the head pointed along the camera. The
+  aim ray (`aim_segment`) runs along the camera's line from where it passes the head, reaching
+  `C.INTERACT_RANGE` from the head, so nothing between the camera and the head is aimed at and the
+  host's reach check is unchanged. Local only. Carrying bulky loot does not switch it on.
 
 ## Dissection (dissection worker, sweep 3)
 

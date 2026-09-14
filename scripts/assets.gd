@@ -115,6 +115,16 @@ const MODELS := {
 		"anims": {"idle": "Idle", "walk": "Walk", "run": "Walk", "attack": "Walk", "frozen": "Frozen", "static": "Frozen"},
 		"note": "Night Nurse, made for Code Blue with Blender scripts (art/night_nurse/blender_src). No third-party licence.",
 	},
+	# ---- patients ---------------------------------------------------------
+	# The seal patient (2026-09-14): built in-house from Python in Blender (art/seal/), authored in the
+	# PatientBody frame (nose -X, belly on y 0, its left +Z), so no fix-ups. 16k triangles, 20 bones,
+	# clips sampled by scripts/patients/seal_model_builder.gd. Textures are separate VRAM-compressed PNGs.
+	"patient/seal": {
+		"path": "res://assets/models/patients/seal/seal.glb",
+		"scale": 1.0, "yaw": 0,
+		"anims": {"idle": "Idle", "stir": "Stir", "fidget": "Fidget", "twitch": "Twitch", "dead": "Flatline"},
+		"note": "Harbor seal patient, made for Code Blue with Blender scripts (art/seal/blender_src). No third-party licence.",
+	},
 	"monster/lurker": {
 		"path": "res://assets/models/monsters/lurker.gltf",
 		"scale": 0.573, "yaw": 180, "y": 0.017,

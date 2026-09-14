@@ -140,6 +140,12 @@ static func footprint(kind: String) -> Vector3:
 	return Vector3(0.15, 0.1, 0.15)
 
 
+## HANDS HOOK: where a kind sits in a hand (the palm position plus the model's forward and up):
+## {pos, fwd, up, style "palm"|"fist", hands 1|2, bundle}. The table lives in scripts/hands/grips.gd.
+static func grip(kind: String) -> Dictionary:
+	return (load("res://scripts/hands/grips.gd") as GDScript).grip(kind)
+
+
 # ---------------------------------------------------------------------------
 # models sweep 2: real models from Assets (`item/<kind>`)
 #

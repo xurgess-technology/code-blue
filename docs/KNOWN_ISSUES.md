@@ -465,6 +465,33 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   (`material_get_instance_shader_parameters`, dummy renderer). The run passes; not traced, and not
   checked against main.
 
+## The seal's Blender model (2026-09-14)
+
+- **The stump floats.** After the cut the stub ends in the air: the paddle, not the arm, rests on
+  the table. The stump cap and its dressing hang a few centimetres over the sheet
+  (`tools/patient_shots/seal_dressed_amputation.png`).
+- **The fore flipper root is a tube pushed into the body**, with a crease where it meets the flank,
+  and the flipper is splayed further from the body than a resting seal would hold it (that keeps the
+  tourniquet and the cut clear of the flank).
+- **The infection has less relief in the engine than in Blender.** It bumps through a screen-space
+  derivative of its height map, which is soft at grazing light.
+- **The tourniquet step's own infection tint overlaps the model's** at the front edge (see "The
+  infection still shows in two styles" above): its red-purple decal sits over the baked ulcers for a
+  few centimetres.
+- **The gunshot dressing band is an elliptical cylinder** sized to the flank (half width 0.30 m); it
+  sinks into the belly under the table and stands a few millimetres off the back in places.
+- **Stir while low on vitals** blends Stir over Twitch, so a twitching seal that is jolted loses its
+  tremor for about half a second.
+- **Site frames are the rest pose.** Stirs and the idle look move the neck and flippers under a
+  minigame's plane by up to a few centimetres (the surgery system re-places minigames at
+  `site_transform` every tick, so the sites must not follow the bones); the overlays on the anchors
+  do follow.
+- **Perf** (`perfprobe -- --quality=1,0` and `-- --seal-procedural`, 1280x720, seed 4242, other
+  workers idle): "OR, the seal close up" 120 fps at q1 and 144 at q0 with the model (129 draws), 104
+  and 137 with the procedural seal (159-162 draws); "operating: bone saw" 144 / 163 with the model,
+  156 / 160 procedural. Runs while another worker baked in Blender swung by 2x, so compare numbers
+  only from quiet runs.
+
 ## Dissection (sweep 3)
 
 - **The strapped rig bodies are fitted by measured constants** (`monster_rig_look.gd` `RIG`: scale,
@@ -667,10 +694,10 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 - **The dragged monster can clip into walls.** It is pinned `DRAG_BEHIND` (1.15 m) straight behind
   the dragger with no collision; backing into a corner pushes it through the wall until you turn.
   Putting it down there lands it on the dragger's spot instead (`_point_is_clear`).
-- **No arms on the swing, the jab or the drag.** The held saw / syringe moves on its own in front
-  of the camera (and in front of other players' heads); the dragger's hands do not reach back to
-  the monster's ankles (`tools/combat_shots/07_drag_other.png`). Fine for primitives, wants rigged
-  arms later.
+- **Resolved (hands, 2026-09-14): no arms on the swing, the jab or the drag.** First-person forearms
+  and hands hold every item on its grip, the swing and the jab move the hand, other players hold
+  the stack in the rig's right hand and reach back to drag (see "Hands, wind-ups and the carry
+  camera" below).
 - **The HUD hold bar says "LIFTING..." while you start dragging a monster** (combat reuses
   `Player.carry_hold` so the HUD needed no change). One word in `hud.gd` if it matters.
 - **Prompts over a bright surface are hard to read.** The cream prompt text under the crosshair
@@ -683,3 +710,44 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 - **nettest `combat` under `--lag=120 --jitter=40 --loss=0.03`** passed on the second run; the
   first failed before any combat, in the shared `_wait_shift_as_client` check ("saw crew=false
   subtitles=false" on client 2), the same kind of lag flake as `leave_items` above.
+
+## Hands, wind-ups and the carry camera (hands worker, 2026-09-14)
+
+- **Kenney proportions limit the third-person poses.** The surgeon rig has one bone per arm and no
+  hands, shoulders at 0.77 m and a 0.9 m head, so a held item sits near knee-to-hip height in front
+  and the jab's pull-back (the arm straight back, the torso twisted) is hard to read from the front
+  (`tools/game_shots/26_hands_jab_windup_teammate.png`); the saw's raised arm and the shove's lean
+  read well. The shared Blender human replaces the rig through `scripts/hands/rig_map.gd`.
+- **The carry camera over a Kenney carrier shows a lot of head.** Over the left shoulder the
+  carrier's big dark hair fills the lower right third of the view; the carried body shows at the
+  right edge and the crosshair stays clear (`29_hands_carry_cam_player.png`). Pressed against a
+  corridor wall the camera slides in over the head and the wall fills the left of the view
+  (`29_hands_carry_cam_player_corridor.png`). Worth another look with the human model.
+- **The carry camera's crosshair is beside the head.** The aim ray follows the camera's line, so
+  things are aimed at the way they look, but at 1 m to the side a table right in front of the head
+  needs the crosshair on it, not the head pointed at it (bots that aim by yaw from the head, like
+  `tools/downedtest.gd`, use `bot_aim_id` and are unaffected; `tools/carrycamtest.gd` aims the camera).
+- **nettest `combat` under `--lag=120 --jitter=40 --loss=0.03` is flaky here.** Of seven lagged runs,
+  three on `--port=9970` lost every connection because another session was running
+  `full_shift_lag` on the same port at the same time (use a free `--port`); on `--port=9990` three of
+  four passed the combat checks, the other lost client 2's connection near the end (the known lag
+  flake, with Blender builds holding the CPU at 70-100%). An early run showed the watcher a strike
+  with no wind-up before it (a resent packet delivered both together); `MIN_SHOWN_WINDUP` covers that
+  now. A resend can also stretch the host's measured gap between the wind-up and the release, so an
+  over-long claim is capped to that gap + 0.3 s, not to the real hold (seen: 1.22 s held for a 0.25 s
+  hold). Unlagged, `combat`, `monsters`, `downed` and `dissection` all pass.
+- **Wind-ups make every use feel 0.2-0.35 s slower** by design; the cooldown values are unchanged
+  and start at the strike, so the saw's full cycle is 1.1 s (was 0.8) and the jab's 1.35 s (was 1.0).
+  Tune `WINDUP_TIME` / cooldowns after playtests.
+- **Predicted strikes on a client** play `WINDUP_TIME` after the click; the host's strike lands a lag
+  later (the hit sound and damage follow), which reads as a slightly late impact at 120 ms.
+- **The first-person hands are not lit by the flashlight** (`HANDS_LAYER` is off its cull mask, as
+  the dev gun's first-person layer already was), only by fixtures and the head glow, so in a dark
+  hallway they are dim silhouettes. Deliberate: in the beam they bleached white.
+- **Hands can still clip a wall at extreme angles.** The pull-in uses three rays every 0.05 s; a thin
+  pillar beside the view can slip between them.
+- **A charged shove on a non-capturable monster** (the Night Nurse) behaves like a tap: she retreats.
+- **perfprobe was run before and after on a busy machine** (see the final report); both sets are
+  noisy (other workers' Blender builds). The probe's local player shows the new first-person hands in
+  every scene (about 14 draw calls: palm, sleeve, finger and thumb pieces, the torch); remote bodies
+  add an AnimationPlayer and a SkeletonModifier3D each (no teammates in the probe).

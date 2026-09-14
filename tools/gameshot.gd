@@ -19,6 +19,7 @@ var _i := 0
 var _seed := 4242
 var _tag := ""
 var _only := ""
+var _seal_table := 0
 
 
 func _ready() -> void:
@@ -30,6 +31,8 @@ func _ready() -> void:
 		elif a.begins_with("--only="):
 			_only = a.split("=")[1]
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(OUT_DIR))
+	# Never outlive a broken run (a windowed Godot left behind holds the GPU).
+	get_tree().create_timer(900.0).timeout.connect(func(): get_tree().quit(2))
 
 	main = load("res://scenes/main.tscn").instantiate()
 	add_child(main)
@@ -50,6 +53,8 @@ func _ready() -> void:
 		{"name": "03_corridor", "fn": _pose_corridor},
 		{"name": "11_orscreen_idle", "fn": _pose_screen_idle, "settle": 40},
 		{"name": "04_operating_room", "fn": _pose_or},
+		{"name": "21_seal_on_table", "fn": _pose_seal, "settle": 40},
+		{"name": "22_seal_on_table_close", "fn": _pose_seal_close, "settle": 20},
 		{"name": "12_orscreen_door", "fn": _pose_screen_door, "settle": 40},
 		{"name": "13_orscreen_close", "fn": _pose_screen_close, "settle": 40},
 		{"name": "05_monster_close", "fn": _pose_monster},
@@ -64,10 +69,32 @@ func _ready() -> void:
 		{"name": "15_hud_walking", "fn": _pose_hud_walking, "settle": 50},
 		{"name": "16_hud_holding", "fn": _pose_hud_holding, "settle": 30},
 		{"name": "17_orscreen_amputation", "fn": _pose_screen_amputation, "settle": 40},
-		{"name": "10_operating_hud", "fn": _pose_operating, "settle": 140},
 	]
+	# HANDS HOOK (docs/HANDS_AND_FEEDBACK.md "Done when"): hands, wind-ups, the stun window and the
+	# carry camera. `--only=hands` runs just these (plus the lobby shots that set the scene up).
+	for kind in _hand_kinds():
+		shots.append({"name": "21_hands_fp_%s" % kind, "fn": _pose_hold.bind(kind), "settle": 24})
+	shots.append_array([
+		{"name": "22_hands_teammate_one_hand", "fn": _pose_teammate.bind("bone_saw", ""), "settle": 30},
+		{"name": "22_hands_teammate_vials", "fn": _pose_teammate.bind("anesthetic", ""), "settle": 30},
+		{"name": "23_hands_teammate_bulky", "fn": _pose_teammate.bind("heart_monitor", ""), "settle": 30},
+		{"name": "24_hands_shove_full_fp", "fn": _pose_action_fp.bind("", "shove"), "settle": 20},
+		{"name": "25_hands_shove_full_teammate", "fn": _pose_teammate.bind("", "shove"), "settle": 30},
+		{"name": "26_hands_jab_windup_fp", "fn": _pose_action_fp.bind("anesthetic", "jab"), "settle": 20},
+		{"name": "26_hands_jab_windup_teammate", "fn": _pose_teammate.bind("anesthetic", "jab"), "settle": 30},
+		{"name": "27_hands_saw_windup_fp", "fn": _pose_action_fp.bind("bone_saw", "saw"), "settle": 20},
+		{"name": "27_hands_saw_windup_teammate", "fn": _pose_teammate.bind("bone_saw", "saw"), "settle": 30},
+		{"name": "27_hands_saw_strike_fp", "fn": _pose_action_fp.bind("bone_saw", "saw_strike"), "settle": 20},
+		{"name": "28_hands_stun_window_down", "fn": _pose_stun.bind(false), "settle": 50},
+		{"name": "28_hands_stun_window_rising", "fn": _pose_stun.bind(true), "settle": 30},
+		{"name": "29_hands_carry_cam_player", "fn": _pose_carry.bind("player", false), "settle": 60},
+		{"name": "29_hands_carry_cam_monster", "fn": _pose_carry.bind("monster", false), "settle": 60},
+		{"name": "29_hands_carry_cam_player_corridor", "fn": _pose_carry.bind("player", true), "settle": 60},
+		{"name": "29_hands_carry_cam_monster_corridor", "fn": _pose_carry.bind("monster", true), "settle": 60},
+	])
+	shots.append({"name": "10_operating_hud", "fn": _pose_operating, "settle": 140})
 	if _only != "":
-		shots = shots.filter(func(s): return String(s.name).contains(_only) or String(s.name) < "04")
+		shots = shots.filter(func(s): return _matches(String(s.name)) or String(s.name) < "04")
 	_run()
 
 
@@ -140,6 +167,39 @@ func _pose_or() -> void:
 		game.begin_shift()
 	var t := game.table_pos()
 	_look_from(t + Vector3(0.6, 0, 3.4), t + Vector3(0, 1.0, 0))
+
+
+## A real seal case (the Blender model) on a free patient table, seen from the doorway side.
+func _pose_seal() -> void:
+	_ensure_shift()
+	var ti := -1
+	for c in game.cases:
+		if String(c.get("patient_id", "")) == "seal" and int(c.get("table", -1)) >= 0:
+			ti = int(c.table)
+	if ti < 0:
+		ti = game.free_patient_table()
+		if ti < 0 and not game.patient_tables.is_empty():
+			ti = int(game.patient_tables[game.patient_tables.size() - 1].index)
+			var old: Dictionary = game.case_on_table(ti)
+			if not old.is_empty():
+				game.remove_case(int(old.id))
+		game.add_case({"patient_id": "seal", "ailment_id": "amputation", "table": ti, "flags": {"sedation": 0.3}})
+	_seal_table = ti
+	var t: Vector3 = game.table_position(ti)
+	_look_from(t + Vector3(1.4, 0, 1.9), t + Vector3(0, 0.95, 0))
+
+
+func _pose_seal_close() -> void:
+	var t: Vector3 = game.table_position(_seal_table)
+	var body = game.body_for_table(_seal_table)
+	var at: Vector3 = body.global_position if body != null else t + Vector3(0, 0.9, 0)
+	if body == null:
+		_look_from(t + Vector3(0.8, 0, 1.0), at)
+		return
+	var bx: Vector3 = body.global_transform.basis.x
+	var bz: Vector3 = body.global_transform.basis.z
+	# off its left side, eyes about 0.9 m over the table top
+	_look_from(at - bx * 0.2 + bz * 1.7 + Vector3(0, 0.9 - 1.7, 0), at - bx * 0.25 + Vector3(0, 0.1, 0))
 
 
 func _pose_monster() -> void:
@@ -363,3 +423,209 @@ func _pose_operating() -> void:
 	game.surgery.bot_skill = 0.5
 	bot.bot_aim_id = "table"
 	bot.bot_press += 1
+
+
+# =========================================================================
+# HANDS HOOK: hands, wind-ups, the stun window and the carry camera
+# =========================================================================
+
+const WindupScript := preload("res://scripts/combat/windup.gd")
+var _mate: Player = null
+var _shot_monster: Node = null
+
+
+static func _hand_kinds() -> Array:
+	var out: Array = ["anesthetic", "gauze", "forceps", "tourniquet", "bone_saw", "suture_kit", "guide"]
+	for k in preload("res://scripts/economy/loot_table.gd").kinds():
+		out.append(k)
+	return out
+
+
+## A lit, uncluttered spot in the OR: beside the first patient table, looking across the room.
+func _hands_spot() -> void:
+	_ensure_shift()
+	_reset_hands_scene()
+	bot.set_flashlight(true)
+	var t := game.table_pos()
+	_look_from(t + Vector3(0.6, 0, 3.4), t + Vector3(-0.4, 1.0, 0))
+
+
+func _reset_hands_scene() -> void:
+	if _mate != null and is_instance_valid(_mate):
+		game._release_downed_links(_mate)
+		_mate.revive_full()
+		_mate.refresh_downed_visuals()
+		_mate.teleport(game.table_pos() + Vector3(0, -40, 0))
+	game.combat.anim_freeze = false
+	for p in game.players.values():
+		game.combat.stop_anim(p)
+	if _shot_monster != null and is_instance_valid(_shot_monster):
+		game.kill_monster(_shot_monster)
+	_shot_monster = null
+	if bot.carrying != 0:
+		game.drop_carried(bot)
+	game.combat.drop_dragged(bot)
+	for i in bot.slots.size():
+		bot.clear_slot(i)
+	bot.hp = bot.max_hp
+
+
+func _give(p: Player, kind: String) -> void:
+	for i in p.slots.size():
+		p.clear_slot(i)
+	if kind == "":
+		return
+	var n := 3 if Items.stacks(kind) else 1
+	var i := p.take_into(kind, n, 50 if Items.is_loot(kind) else 0)
+	p.selected = maxi(0, i)
+
+
+func _pose_hold(kind: String) -> void:
+	_hands_spot()
+	_give(bot, kind)
+
+
+## FP at the peak of a wind-up (k "jab" / "saw" / "shove" full charge) or at a strike ("saw_strike").
+func _pose_action_fp(kind: String, k: String) -> void:
+	_hands_spot()
+	_give(bot, kind)
+	# Past the lower-and-raise the new stack starts with.
+	bot.hands._raise = 0.0
+	match k:
+		"shove":
+			game.combat.pose_at(bot, "shove", WindupScript.WINDUP, WindupScript.SHOVE_FULL + 0.05)
+		"saw_strike":
+			game.combat.pose_at(bot, "saw", WindupScript.STRIKE, WindupScript.STRIKE_TIME.saw * 0.45)
+		_:
+			game.combat.pose_at(bot, k, WindupScript.WINDUP, float(WindupScript.WINDUP_TIME[k]))
+
+
+func _teammate() -> Player:
+	if _mate == null or not is_instance_valid(_mate):
+		_mate = game.dev._make_bot_node(-50, "Teammate", "bot")
+		_mate.name_tag.text = "Teammate"
+		_mate.set_flashlight(true)
+	game.combat.stop_anim(_mate)
+	if not _mate.alive or _mate.downed:
+		game._release_downed_links(_mate)
+		_mate.revive_full()
+		_mate.refresh_downed_visuals()
+	return _mate
+
+
+## A teammate 2.4 m in front, three-quarters on, holding `kind`, optionally frozen in action k.
+func _pose_teammate(kind: String, k: String) -> void:
+	_hands_spot()
+	var mate := _teammate()
+	_give(mate, kind)
+	var t := game.table_pos()
+	var eye := t + Vector3(0.6, 0, 3.4)
+	var at := eye + Vector3(-1.1, 0, -2.6)
+	mate.teleport(game._floor_at(at))
+	var d := eye - at
+	mate.bot_yaw = atan2(-d.x, -d.z) + (1.05 if k == "" else 0.7)
+	mate.bot_pitch = 0.0
+	_look_from(eye, at + Vector3(0, 0.8, 0))
+	match k:
+		"shove":
+			game.combat.pose_at(mate, "shove", WindupScript.WINDUP, WindupScript.SHOVE_FULL + 0.05)
+		"jab", "saw":
+			game.combat.pose_at(mate, k, WindupScript.WINDUP, float(WindupScript.WINDUP_TIME[k]))
+
+
+## A Walk-In just shoved (`rising` false: down in the window; true: the closing warning).
+func _pose_stun(rising: bool) -> void:
+	if not rising:
+		_hands_spot()
+		var t := game.table_pos()
+		var eye := t + Vector3(0.6, 0, 3.4)
+		if _mate != null and is_instance_valid(_mate):
+			_mate.teleport(game.table_pos() + Vector3(0, 0, -30))
+		var at := game._floor_at(eye + Vector3(-0.3, 0, -1.6))
+		_shot_monster = game._add_monster("walk_in", at)
+		_shot_monster.rotation.y = -PI * 0.4
+		_shot_monster.brain.stun(Vector3.ZERO, 99.0, 0.0)
+		game.combat.stun_window.host_stunned(_shot_monster, 99.0)
+		_look_from(eye, at + Vector3(0, 0.8, 0))
+		_give(bot, "anesthetic")
+		bot.bot_aim_id = ""
+		return
+	if _shot_monster == null or not is_instance_valid(_shot_monster):
+		return
+	var s: Dictionary = game.combat.stun_window.stuns.get(_shot_monster.monster_id, {})
+	if not s.is_empty():
+		# About a third of the way into the rise when the shot is taken (30 frames from now).
+		s.end = game.world_time + 0.5 + 0.4
+		s.rose = false
+
+
+## The carry camera: carrying a downed teammate or dragging a sedated monster, in the open OR or
+## pressed against a corridor wall (the camera pulls in toward the head).
+func _pose_carry(what: String, corridor: bool) -> void:
+	_reset_hands_scene()
+	_ensure_shift()
+	Settings.set_value("carry_camera", "shoulder")
+	bot.set_flashlight(true)
+	var from: Vector3
+	var dir: Vector3
+	if corridor:
+		var c := _corridor_wall_spot()
+		from = c[0]
+		dir = c[1]
+	else:
+		# Open ground: the neutral area outside the doors, looking at the entrance.
+		var nz: Dictionary = game.level_info.get("neutral", {})
+		var sp: Array = nz.get("spawn_points", [])
+		from = sp[0] if not sp.is_empty() else game.table_pos() + Vector3(0.6, 0, 4.2)
+		var ent: Vector3 = game.level_info.get("entrance", {}).get("position", game.table_pos())
+		dir = Vector3(ent.x - from.x, 0, ent.z - from.z).normalized()
+	_look_from(from, from + dir * 6.0 + Vector3(0, 1.2, 0))
+	bot._pitch = -0.05
+	bot.bot_pitch = -0.05
+	if what == "player":
+		var mate := _teammate()
+		_give(mate, "")
+		mate.teleport(game._floor_at(from + dir * 1.0))
+		game.down_player(mate, "test")
+		game.start_carry(bot, mate)
+	else:
+		_shot_monster = game._add_monster("walk_in", game._floor_at(from - dir * 1.0))
+		_shot_monster.sedate(75.0)
+		game.combat.start_drag(bot, _shot_monster)
+
+
+## A spot in a wing hallway 0.55 m from its left-hand wall, looking along the hallway.
+func _corridor_wall_spot() -> Array:
+	var space := bot.get_world_3d().direct_space_state
+	var best := [game.table_pos() + Vector3(0, 0, 6), Vector3.FORWARD]
+	var best_len := -1.0
+	for spot in game.level_info.get("monster_spawns", []):
+		var eye: Vector3 = spot + Vector3.UP * 1.2
+		for i in 8:
+			var a := TAU * i / 8.0
+			var d := Vector3(cos(a), 0, sin(a))
+			var reach := _ray_len(space, eye, d, 30.0)
+			var left := d.cross(Vector3.UP) * -1.0
+			var wl := _ray_len(space, eye, left, 4.0)
+			var wr := _ray_len(space, eye, -left, 4.0)
+			if reach > best_len and wl + wr < 3.4 and reach > 8.0:
+				best_len = reach
+				# Slide toward the left wall.
+				var shift := (wl - wr) * 0.5 + 0.25   # a little left of the middle
+				best = [game._floor_at(spot + left * shift), d]
+	return best
+
+
+func _ray_len(space: PhysicsDirectSpaceState3D, from: Vector3, dir: Vector3, max_len: float) -> float:
+	var q := PhysicsRayQueryParameters3D.create(from, from + dir * max_len)
+	q.collision_mask = C.L_WORLD
+	var hit := space.intersect_ray(q)
+	return max_len if hit.is_empty() else from.distance_to(hit.position)
+
+
+## --only=a,b: a shot runs when its name contains any of the parts.
+func _matches(shot_name: String) -> bool:
+	for part in _only.split(","):
+		if part != "" and shot_name.contains(part):
+			return true
+	return false

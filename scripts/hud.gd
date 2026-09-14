@@ -147,7 +147,8 @@ func _draw_prompt(w: float, h: float, me) -> void:
 			_text(Vector2(0, y), me.aim_prompt.substr(1), 14, Color("e0a020"), HORIZONTAL_ALIGNMENT_CENTER, w)
 		else:
 			var key := "[E]" if me.aim_hold <= 0.0 or me.aim_prompt.begins_with("Hold E") else "[Hold E]"
-			var text: String = me.aim_prompt if me.aim_prompt.begins_with("Hold E") else "%s %s" % [key, me.aim_prompt]
+			# HANDS HOOK: a prompt that names its own key ("[Click] Jab it") is shown as it is.
+			var text: String = me.aim_prompt if me.aim_prompt.begins_with("Hold E") or me.aim_prompt.begins_with("[") else "%s %s" % [key, me.aim_prompt]
 			_text(Vector2(0, y), text, 16, Color("f0e6c8"), HORIZONTAL_ALIGNMENT_CENTER, w)
 		y += 20.0
 	var guide_here: bool = me.holding("guide")
