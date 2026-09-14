@@ -663,9 +663,9 @@ func _tray_xf(lift_off: float) -> Transform3D:
 
 func _build_tray() -> void:
 	var steel := StandardMaterial3D.new()
-	steel.albedo_color = Color(0.5, 0.52, 0.55)
-	steel.metallic = 0.6
-	steel.roughness = 0.3
+	steel.albedo_color = Color(0.72, 0.74, 0.76)
+	steel.metallic = 0.25
+	steel.roughness = 0.4
 	var root := Node3D.new()
 	root.name = "SpecimenTray"
 	root.transform = _tray_xf(0.0)
@@ -754,17 +754,17 @@ func tick(delta: float) -> void:
 		var mat: StandardMaterial3D = cn.mat
 		if gone:
 			# Two limp stubs.
-			_place_cyl(cn.a, a3, a3.lerp(w3, 0.18) + Vector3(0, -0.006, 0), 0.0016)
-			_place_cyl(cn.b, w3, w3.lerp(a3, 0.18) + Vector3(0, -0.006, 0), 0.0016)
+			_place_cyl(cn.a, a3, a3.lerp(w3, 0.18) + Vector3(0, -0.006, 0), 0.0028)
+			_place_cyl(cn.b, w3, w3.lerp(a3, 0.18) + Vector3(0, -0.006, 0), 0.0028)
 			ring_mi.visible = false
 			mat.emission = Color(0, 0, 0)
 			continue
 		var mid := Vector3(c.g.x, wall_y * 0.5 + brain_top * 0.5, c.g.y)
 		if clamp_i == i:
 			mid = Vector3(_vis_tip.x, tip_y - 0.004, _vis_tip.y)
-		_place_cyl(cn.a, a3, mid, 0.0022 * (1.0 - 0.35 * s01))
-		_place_cyl(cn.b, mid, w3, 0.0022 * (1.0 - 0.35 * s01))
-		var col := Color(0.25, 1.0, 0.4).lerp(Color(1.0, 0.72, 0.1), smoothstep(0.45, 0.9, s01)) if clamp_i == i else Color(0, 0, 0)
+		_place_cyl(cn.a, a3, mid, 0.0036 * (1.0 - 0.35 * s01))
+		_place_cyl(cn.b, mid, w3, 0.0036 * (1.0 - 0.35 * s01))
+		var col := Color(0.25, 1.0, 0.4).lerp(Color(1.0, 0.72, 0.1), smoothstep(0.45, 0.9, s01)) if clamp_i == i else Color(0.3, 0.26, 0.14)
 		if clamp_i == i and yank:
 			col = Color(1.0, 0.1, 0.05)
 		mat.emission = col
@@ -774,7 +774,7 @@ func tick(delta: float) -> void:
 		if ring_mi.visible:
 			ring_mi.position = Vector3(c.g.x, mid.y + 0.004, c.g.y)
 			var on := _vis_tip.distance_to(c.g) < GRAB_R
-			var sc := 0.009 if on else 0.007 + 0.004 * fmod(_cue_t * 0.9 + float(i) * 0.3, 1.0)
+			var sc := 0.014 if on else 0.011 + 0.005 * fmod(_cue_t * 0.9 + float(i) * 0.3, 1.0)
 			ring_mi.scale = Vector3(sc, sc * 0.3, sc)
 			rmat.albedo_color = Color(0.25, 1.0, 0.45, 0.9) if on else Color(1.0, 0.95, 0.8, 0.75 * (1.0 - fmod(_cue_t * 0.9 + float(i) * 0.3, 1.0)))
 

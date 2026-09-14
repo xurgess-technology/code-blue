@@ -216,6 +216,8 @@ func _probe_limb() -> void:
 	# Bob's section reports 7 mm up and 64 mm across; the arm is much rounder than that, and a
 	# sliver would keep the blade and the kerf from sinking in.
 	hu = clampf(maxf(float(sec.half_up), hs * 0.75), 0.01, 0.3)
+	if String(ctx.get("variant", "")) == "skull":
+		hu = clampf(float(sec.half_up), 0.01, 0.3)   # the skull: a shallow cut across a wide head
 
 
 func plane_extent() -> Vector2:
@@ -552,10 +554,10 @@ func _build() -> void:
 	var proj_y := -hu + 0.03
 	_marker = _decal(_texture("marker"), Vector3(0.006, proj_h, hs * 3.0 + 0.04), Vector3(0, proj_y, 0), 1)
 	# The glowing guide along the cut: it flashes green, amber or red with each pass.
-	_guide = _decal(_texture("glow_line"), Vector3(0.09, proj_h, hs * 3.2 + 0.05), Vector3(0, proj_y, 0), 10)
+	_guide = _decal(_texture("glow_line"), Vector3(0.04 if skull else 0.09, proj_h, hs * (2.2 if skull else 3.2) + 0.05), Vector3(0, proj_y, 0), 10)
 	_guide.texture_emission = _guide.texture_albedo
 	# Bright enough to read under the work lamp, not so bright it blooms the limb away.
-	_guide.emission_energy = 1.3
+	_guide.emission_energy = 0.9 if skull else 1.3
 	_guide.modulate = GUIDE_COLORS[Verdict.NONE]
 	_bruise = _decal(_texture("bruise"), Vector3(0.05, proj_h, 0.05), Vector3(0, proj_y, 0), 2)
 	_dust_decal = _decal(_texture("dust"), Vector3(0.08, proj_h, 0.1), Vector3(0, proj_y, 0), 3)
@@ -782,6 +784,9 @@ func _update_visuals(delta: float) -> void:
 	_hop = maxf(0.0, _hop - delta * 5.0)
 	var hop := _hop * _hop * 0.012 * absf(sin(_vt * 60.0))
 	_saw.position = Vector3(_vis_bx - sin(deg_to_rad(8.0)) * (0.05 - sink * 0.5), _vis_lift - sink + hop, _vis_bz)
+	if skull:
+		# dissection: nobody at the skull yet, no saw hanging over the monster's face.
+		_saw.visible = operator or held or depth > 0.0
 	_saw.rotation.y = clampf((_vis_bx - kx) * 3.0, -0.25, 0.25)
 	_smear_mat.albedo_color.a = clampf(0.25 * f + blood * 1.5, 0.0, 0.92)
 	var nd := int(clampf(blood * 9.0, 0.0, 6.0))

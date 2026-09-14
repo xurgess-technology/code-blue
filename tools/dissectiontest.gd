@@ -299,7 +299,7 @@ func _shots() -> void:
 		await _seconds(1.2)
 		await _shot(String(pair[1]))
 		# Close on the head.
-		me.teleport(game._floor_at(tp + Vector3(-1.4, 0, 0.55).rotated(Vector3.UP, yaw)))
+		me.teleport(game._floor_at(tp + Vector3(-0.45, 0, 1.0).rotated(Vector3.UP, yaw)))
 		await _frames(2)
 		_look_at(tp + Vector3(-0.78, 0.95, 0).rotated(Vector3.UP, yaw))
 		await _seconds(0.6)
@@ -323,6 +323,20 @@ func _shots() -> void:
 	_look_at(tp0 + Vector3(-0.78, 0.95, 0).rotated(Vector3.UP, game.table_yaw_of(t0)))
 	await _seconds(1.0)
 	await _shot("04_skull_open")
+	# 07: the OR monitor with both monster panels (brain condition, sedation).
+	if game.or_screen != null and game.or_screen.mounted():
+		var sc: Vector3 = game.or_screen.screen_centre()
+		var nrm: Vector3 = game.or_screen.screen_normal()
+		var feet := sc + nrm * 1.9
+		feet.y = game.table_pos().y
+		me.teleport(feet)
+		me.set_flashlight(false)
+		await _frames(2)
+		_look_at(sc)
+		game.or_screen.refresh_now()
+		await _seconds(1.0)
+		await _shot("07_or_screen")
+		me.set_flashlight(true)
 	# 05/06: the brain forceps: the nerves, then carrying it to the tray.
 	me.teleport(game._floor_at(tp0 + Vector3(0, 0, 1.0).rotated(Vector3.UP, game.table_yaw_of(t0))))
 	await _frames(2)
@@ -334,18 +348,7 @@ func _shots() -> void:
 	await _seconds(0.5)
 	await _shot("06_brain_carry")
 	await _until(func(): return String(game.case_by_id(wid).get("state", "")) != "on_table", 30.0)
-	await _seconds(1.5)
-	# 07: the OR monitor with both monster panels.
-	if game.or_screen != null and game.or_screen.mounted():
-		var sc: Vector3 = game.or_screen.screen_centre()
-		var nrm: Vector3 = game.or_screen.screen_normal()
-		me.teleport(game._floor_at(sc + nrm * 2.6))
-		await _frames(2)
-		_look_at(sc)
-		game.or_screen.refresh_now()
-		await _seconds(1.0)
-		await _shot("07_or_screen")
-	await _seconds(3.0)
+	await _seconds(4.0)
 	print("[dissectiontest] shots done (discharged case %d)" % did)
 
 

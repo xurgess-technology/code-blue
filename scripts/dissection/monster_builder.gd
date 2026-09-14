@@ -26,15 +26,15 @@ const STIR := 0.75
 ## Per kind: body length, head radii, widths, colours.
 const LOOKS := {
 	"walk_in": {
-		"length": 1.74, "head": Vector3(0.112, 0.1, 0.09), "width": 1.0, "thin": 1.0,
-		"skin": Color(0.56, 0.58, 0.46), "scalp": Color(0.16, 0.14, 0.12), "hair": 0.9,
-		"gown": Color(0.46, 0.62, 0.66), "gown_dark": Color(0.3, 0.36, 0.3), "eyeless": false,
+		"length": 1.74, "head": Vector3(0.14, 0.125, 0.112), "width": 1.0, "thin": 1.0,
+		"skin": Color(0.5, 0.55, 0.38), "scalp": Color(0.14, 0.12, 0.1), "hair": 0.9,
+		"gown": Color(0.34, 0.56, 0.6), "gown_dark": Color(0.28, 0.32, 0.2), "eyeless": false,
 		"ear": 1.0, "brain_scale": 1.0,
 	},
 	"discharged": {
-		"length": 1.96, "head": Vector3(0.118, 0.1, 0.088), "width": 0.9, "thin": 0.82,
-		"skin": Color(0.62, 0.6, 0.58), "scalp": Color(0.45, 0.43, 0.42), "hair": 0.0,
-		"gown": Color(0.55, 0.57, 0.52), "gown_dark": Color(0.28, 0.24, 0.2), "eyeless": true,
+		"length": 1.96, "head": Vector3(0.145, 0.12, 0.104), "width": 0.9, "thin": 0.82,
+		"skin": Color(0.58, 0.56, 0.55), "scalp": Color(0.45, 0.43, 0.42), "hair": 0.0,
+		"gown": Color(0.52, 0.5, 0.4), "gown_dark": Color(0.26, 0.2, 0.14), "eyeless": true,
 		"ear": 1.45, "brain_scale": 1.0,
 	},
 }
@@ -81,11 +81,17 @@ static func build(b) -> bool:
 	parts["brain"] = hd.brain
 	parts["cut"] = hd.info
 	parts["brain_radii"] = hd.brain_radii
-	var face := _face(head, hr, lk, seed_v)
+	# The face is laid out for a 0.112 m head and scaled up to this one.
+	var fk := hr.x / 0.112
+	var face_root := Node3D.new()
+	face_root.name = "Face"
+	face_root.scale = Vector3.ONE * fk
+	head.add_child(face_root)
+	var face := _face(face_root, hr / fk, lk, seed_v)
 	parts["jaw"] = face.get("jaw")
 
 	# --- body ---------------------------------------------------------------------------------------
-	var dims := {"L": L, "w": w, "thin": float(lk.thin), "head_c": head_c, "hr": hr}
+	var dims := {"L": L, "w": w, "thin": float(lk.thin), "head_c": head_c, "hr": hr, "tx": head_c.x + hr.x + 0.02}
 	if own_body:
 		_primitive_body(b, rig, lk, dims, seed_v)
 	else:
@@ -184,6 +190,7 @@ static func vc_mat(key: String, rough := 0.85, cull_off := false) -> StandardMat
 	var m := StandardMaterial3D.new()
 	m.resource_name = key
 	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
 	m.roughness = rough
 	if cull_off:
 		m.cull_mode = BaseMaterial3D.CULL_DISABLED
@@ -204,7 +211,7 @@ static func _face(head: Node3D, hr: Vector3, lk: Dictionary, seed_v: int) -> Dic
 	var dark := Kit.mat("mb_hollow", Color(0.09, 0.05, 0.06), 0.9)
 	var eyeless: bool = lk.eyeless
 	var out := {}
-	var eye_x := -0.018
+	var eye_x := -0.006
 	var eye_z := hr.z * 0.4
 	if not eyeless:
 		# Sunken sockets with small milky eyes staring up.
@@ -222,8 +229,6 @@ static func _face(head: Node3D, hr: Vector3, lk: Dictionary, seed_v: int) -> Dic
 			var y := _surface_y(hr, eye_x, eye_z)
 			Kit.add_mesh(head, Kit.box(Vector3(0.004, 0.003, 0.03)), scar, Transform3D(Basis(Vector3(1, 0, 0), sz * 0.25), Vector3(eye_x, y + 0.0005, sz * eye_z)), "Scar")
 	# Brow ridge, nose, mouth.
-	var brow_y := _surface_y(hr, -0.042, 0.0)
-	Kit.add_mesh(head, Kit.sphere(1.0, 14, 6), skin_mat, Transform3D(Basis().scaled(Vector3(0.012, 0.007, hr.z * 0.72)), Vector3(-0.04, brow_y - 0.002, 0)), "Brow")
 	var nose_y := _surface_y(hr, 0.028, 0.0)
 	Kit.add_mesh(head, Kit.sphere(1.0, 10, 6), skin_mat, Transform3D(Basis(Vector3(0, 0, 1), 0.5).scaled(Vector3(0.026, 0.012, 0.014)), Vector3(0.026, nose_y + 0.006, 0)), "Nose")
 	Kit.add_mesh(head, Kit.sphere(0.0035, 6, 4), dark, Transform3D(Basis(), Vector3(0.043, nose_y + 0.004, 0.006)), "Nostril")
@@ -261,6 +266,7 @@ static func _primitive_body(b, rig: Node3D, lk: Dictionary, d: Dictionary, seed_
 	var th: float = d.thin
 	var s := L / 1.74
 	var x0 := -L * 0.5
+	var tx: float = d.tx
 	var skin: Color = lk.skin
 	var gown: Color = lk.gown
 	var stain: Color = lk.gown_dark
@@ -282,7 +288,9 @@ static func _primitive_body(b, rig: Node3D, lk: Dictionary, d: Dictionary, seed_
 	var gown_m := vc_mat("mb_vgown", 0.95)
 
 	# Neck.
-	var neck_x := x0 + 0.215 * s
+	var hc: Vector3 = d.head_c
+	var hrr: Vector3 = d.hr
+	var neck_x := hc.x + hrr.x * 0.75
 	var nk := Kit.loft([
 		[neck_x - 0.03 * s, 0.045 * w, 0.045, 0.075, 0.9],
 		[neck_x + 0.05 * s, 0.05 * w, 0.05, 0.08, 0.9],
@@ -290,16 +298,15 @@ static func _primitive_body(b, rig: Node3D, lk: Dictionary, d: Dictionary, seed_
 	Kit.add_mesh(rig, nk, skin_m, Transform3D(), "NeckMesh")
 
 	# Torso in the gown, down past the hips like a short skirt over the thighs.
-	var tx := x0 + 0.26 * s
 	var torso_rings := [
-		[tx, 0.13 * w, 0.07 * th, 0.085, 0.9],
-		[tx + 0.05 * s, 0.2 * w, 0.1 * th, 0.1, 0.9],
-		[tx + 0.18 * s, 0.215 * w, 0.115 * th, 0.105, 0.9],
-		[tx + 0.34 * s, 0.18 * w, 0.1 * th, 0.095, 0.9],
-		[tx + 0.5 * s, 0.185 * w, 0.095 * th, 0.09, 0.9],
-		[tx + 0.62 * s, 0.2 * w, 0.085 * th, 0.085, 0.9],
-		[tx + 0.8 * s, 0.2 * w, 0.075 * th, 0.075, 0.9],
-		[tx + 0.84 * s, 0.205 * w, 0.07 * th, 0.072, 0.9],
+		[tx, 0.13 * w, 0.07 * th * 0.85, 0.085, 0.9],
+		[tx + 0.05 * s, 0.2 * w, 0.1 * th * 0.85, 0.1, 0.9],
+		[tx + 0.18 * s, 0.215 * w, 0.115 * th * 0.85, 0.105, 0.9],
+		[tx + 0.34 * s, 0.18 * w, 0.1 * th * 0.85, 0.095, 0.9],
+		[tx + 0.5 * s, 0.185 * w, 0.095 * th * 0.85, 0.09, 0.9],
+		[tx + 0.62 * s, 0.2 * w, 0.085 * th * 0.85, 0.085, 0.9],
+		[tx + 0.8 * s, 0.2 * w, 0.075 * th * 0.85, 0.075, 0.9],
+		[tx + 0.84 * s, 0.205 * w, 0.07 * th * 0.85, 0.072, 0.9],
 	]
 	var torso := Node3D.new()
 	torso.name = "Torso"
@@ -374,16 +381,17 @@ static func _straps(rig: Node3D, d: Dictionary) -> void:
 	var w: float = d.w
 	var s := L / 1.74
 	var x0 := -L * 0.5
+	var tx: float = d.tx
 	var th: float = d.thin
 	var root := Node3D.new()
 	root.name = "Straps"
 	rig.add_child(root)
 	# x, half width over the body, height over the body
 	var list := [
-		[x0 + 0.44 * s, 0.3 * w, 0.215 * th + 0.03],   # chest, over the upper arms
-		[x0 + 0.84 * s, 0.3 * w, 0.18 * th + 0.025],     # wrists and hips
-		[x0 + 1.18 * s, 0.2 * w, 0.14 * th + 0.015],     # thighs
-		[x0 + 1.5 * s, 0.17 * w, 0.1 * th + 0.015],      # shins
+		[tx + 0.18 * s, 0.3 * w, 0.215 * th * 0.85 + 0.03],   # chest, over the upper arms
+		[tx + 0.58 * s, 0.3 * w, 0.18 * th * 0.85 + 0.025],     # wrists and hips
+		[tx + 0.92 * s, 0.2 * w, 0.14 * th + 0.015],     # thighs
+		[tx + 1.24 * s, 0.17 * w, 0.1 * th + 0.015],      # shins
 	]
 	var leather := Kit.mat("mb_strap", Color(0.2, 0.13, 0.08), 0.7)
 	leather.cull_mode = BaseMaterial3D.CULL_DISABLED
@@ -392,7 +400,7 @@ static func _straps(rig: Node3D, d: Dictionary) -> void:
 		var x: float = e[0]
 		var hw: float = e[1]
 		var hh: float = e[2]
-		Kit.add_mesh(root, _band(hw, hh, 0.56, 0.065, 0.007), leather, Transform3D(Basis(), Vector3(x, 0, 0)), "Strap")
+		Kit.add_mesh(root, _band(hw, hh, 0.37, 0.065, 0.007), leather, Transform3D(Basis(), Vector3(x, 0, 0)), "Strap")
 		Kit.add_mesh(root, Kit.box(Vector3(0.05, 0.012, 0.045)), metal, Transform3D(Basis(), Vector3(x, hh * 0.72, hw * 0.78)), "Buckle")
 		Kit.add_mesh(root, Kit.box(Vector3(0.03, 0.014, 0.03)), Kit.mat("mb_buckle_in", Color(0.2, 0.13, 0.08), 0.7), Transform3D(Basis(), Vector3(x, hh * 0.72 + 0.002, hw * 0.78)), "BuckleIn")
 

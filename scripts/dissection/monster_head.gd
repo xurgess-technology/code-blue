@@ -9,7 +9,7 @@ extends RefCounted
 ## above the brows, the crown and the top of the back of the head come off as one bowl.
 
 const CUT_DIR := Vector3(-0.70710678, 0.70710678, 0.0)
-const CUT_K := 0.7
+const CUT_K := 0.78
 const SEGS := 30
 const CAP_RINGS := 6
 const REST_RINGS := 14
@@ -25,6 +25,7 @@ static func vmat(key: String, rough := 0.8, spec := 0.35, cull_off := false) -> 
 	var m := StandardMaterial3D.new()
 	m.resource_name = key
 	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true
 	m.roughness = rough
 	m.metallic_specular = spec
 	if cull_off:
@@ -116,7 +117,7 @@ static func build(parent: Node3D, r: Vector3, look: Dictionary, seed_v: int) -> 
 		# Eyeless: smooth dark hollows where the eyes were.
 		if eyeless:
 			for sz in [-1.0, 1.0]:
-				var ep := Vector3(-0.02, r.y * 0.86, sz * r.z * 0.4)
+				var ep := Vector3(-0.006 * r.x / 0.112, r.y * 0.9, sz * r.z * 0.4)
 				var dd := (p - ep).length()
 				c = c.lerp(Color(0.2, 0.17, 0.2), (1.0 - smoothstep(0.008, 0.026, dd)) * 0.55)
 		return c
@@ -303,7 +304,7 @@ static func brain_mesh(radii: Vector3, seed_v: int) -> ArrayMesh:
 			if p.y < -radii.y * 0.45:
 				p.y = -radii.y * 0.45 + (p.y + radii.y * 0.45) * 0.25   # flattened base
 			var groove := clampf((1.0 - ridge) * 1.2 + fis * 1.3, 0.0, 1.0)
-			var col := Color(0.8, 0.62, 0.6).lerp(Color(0.42, 0.2, 0.24), groove)
+			var col := Color(0.9, 0.7, 0.68).lerp(Color(0.5, 0.26, 0.3), groove)
 			col = col.lerp(Color(0.55, 0.12, 0.14), 0.25 * smoothstep(0.55, 0.8, noise3(n * 3.0 + off * 3.0)))
 			st.set_color(col)
 			st.add_vertex(p)
