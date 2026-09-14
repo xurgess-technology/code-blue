@@ -194,6 +194,7 @@ func _ready() -> void:
 	add_child(or_screen)
 	or_screen.setup(self)
 	Net.roster_changed.connect(_on_roster_changed)
+	Net.joined_ok.connect(_net_client_forget)  # net: a new connection starts a new replica
 	Net.host_left.connect(func(): end_session("The host left the game."))
 
 
@@ -847,8 +848,9 @@ func _sync_players() -> void:
 		if is_host() and phase != Phase.LOBBY:
 			_hold_until_next_shift(p)
 			say("%s joined. They clock in at the next shift." % Net.name_for(id), 3.0)
-		elif not is_host() and _recv_states.has(_recv_latest) and _recv_states[_recv_latest].pl.has(id):
-			p.apply_remote_full(_recv_states[_recv_latest].pl[id])
+		elif not is_host() and (_cl_state.get("pl", {}) as Dictionary).has(id):
+			_pl_applied[id] = p.get_instance_id()
+			p.apply_remote_full(_cl_state.pl[id])
 	for id in players.keys():
 		if not ids.has(id) and not players[id].is_bot:  # DEV HOOK: bots are not in the Net roster
 			var gone: Node = players[id]
@@ -857,8 +859,7 @@ func _sync_players() -> void:
 				var dropped := _drop_hands_in_place(gone)
 				end_operations(gone)
 				_release_downed_links(gone)  # downed: whoever they carried lands; their carrier lets go
-				_net_acks.erase(id)
-				_net_keyframe_at.erase(id)
+				_repl.erase(id)   # net: its replication record
 				waiting_peers.erase(id)
 				if phase == Phase.SHIFT:
 					say("%s left the shift.%s" % [gone.player_name, " What they carried is on the floor." if dropped else ""], 3.0)
@@ -2356,17 +2357,32 @@ func _in_shove_cone(from: Node, target: Vector3, forward: Vector3) -> bool:
 #
 # Snapshots (host -> each client, unreliable, SNAPSHOT_HZ):
 #   The host builds one "state" per tick: sections of entity reports keyed by id
-#     g   the global fields (time, phase, vitals, case, shelf, surgery, waiting peers)
-#     pl  players, mo monsters, it world items: id -> report dictionary
-#     ct  open containers: interact_id -> true (absent means closed)
-#   Each client acks the last snapshot it decoded (field "ak" of its player state). The host
-#   keeps the last HISTORY states and sends each client only what differs from the state that
-#   client acked: new or changed entities (only their changed fields) and removed ids. Loss
-#   costs nothing but a slightly larger next delta, because the base is always something the
-#   client provably has. A full keyframe goes out when the client has acked nothing usable
-#   and every KEYFRAME_SECONDS regardless, so any divergence heals.
-#   Wire format: {s: seq, b: base seq (0 = keyframe), g: {fields}, pl/mo/it/ct: {id: fields},
-#                 x: {section: [removed ids]}}; empty parts are omitted.
+#     g   the global fields (time, phase, cases, shelf, surgery, loop...) as a few entities
+#         grouped by which fields come and go together (_global_groups)
+#     pl  players, mo monsters, it world items: id -> report dictionary (without "id")
+#     ct  open containers: interact_id -> {} (absent means closed)
+#   Replication is per field with acknowledgements, so no message ever depends on another one
+#   arriving and no message is ever large:
+#   - For each client the host remembers, per entity field, the value that client has confirmed
+#     (acked) and the value still in flight. A field is sent when the current value differs from
+#     what is in flight, or (nothing in flight) from what was confirmed. A lost or timed-out
+#     message turns its fields "unknown", so they are sent again with their current values.
+#   - Every message carries absolute values and its own sequence number; the client keeps, per
+#     field, the newest sequence it applied and ignores older values. Any subset of messages in
+#     any order converges to the host's state.
+#   - Existence is the field "@": a hash of the entity's field names while it exists, -1 once
+#     removed. A client uses an entity only once its own field names hash the same (it holds
+#     exactly the host's fields). A change of field names sends the whole entity; a field that
+#     left the report is sent as NET_GONE.
+#   - Messages are packed up to NET_MSG_BYTES (well under the ENet MTU and Steam's unreliable
+#     segment size, so nothing is ever fragmented), in priority order g, pl, mo, ct, it. A burst
+#     (clock-in spawns ~70 loot stacks at once, a late joiner needs everything) spreads over as
+#     many ticks as it takes: at most NET_TICK_BYTES per tick and NET_WINDOW_BYTES unacknowledged,
+#     one small message per tick while the window is full, fewer while the client is silent.
+#   Wire format: {s: seq, g/pl/mo/ct/it: {id: {field: value}}}; empty sections are omitted.
+#   Clients ack in _player_state([newest seq, bit mask of the 64 before it], ...).
+#   Every KEYFRAME_SECONDS a client re-applies its whole replica to its nodes (no bandwidth), so
+#   anything local that drifted is put back.
 # Discrete one-off things (sounds, messages, hits, phase changes) stay reliable RPCs.
 #
 # Joining mid-shift: a peer that arrives outside the lobby waits as a spectator (not alive,
@@ -2375,31 +2391,66 @@ func _in_shove_cone(from: Node, target: Vector3, forward: Vector3) -> bool:
 # its operation; the step keeps its progress for whoever operates next.
 
 const KEYFRAME_SECONDS := 10.0
-const HISTORY := 100   # 5 s of snapshots: a client that stalls or lags still has a usable base
-const SECTIONS := ["pl", "mo", "it", "ct"]
+const NET_SECS := ["g", "pl", "mo", "ct", "it"]
+## Largest snapshot message (estimated payload bytes). ENet's MTU is 1392 and Steam's unreliable
+## segment carries about 1200, so a message this size is one datagram on both backends.
+const NET_MSG_BYTES := 1000
+## Per client, per tick: at most this many bytes while catching up on a burst...
+const NET_TICK_BYTES := 4000
+## ...and no new catch-up messages while this many bytes are unacknowledged.
+const NET_WINDOW_BYTES := 16000
+## A field whose last message was lost: never equal to any real value, so it is sent again.
+const NET_UNKNOWN := "\u0001unknown"
+## The value that says "this field left the report" (null is an ordinary value).
+const NET_GONE := "\u0001gone"
+const ACK_BITS := 64
+## How long peers keep patient ENet timeouts after a level build (Net.PATIENT_*), wall ms.
+const NET_PATIENCE_MS := 15000
+## A message is lost once one sent this much later (wall ms) was acknowledged without it.
+const NET_REORDER_MS := 100
 
 ## Peers that joined mid-shift and spectate until the next lobby: peer id -> true. Replicated.
 var waiting_peers: Dictionary = {}
 
-## Test instrumentation: when set, counts the serialized size of every snapshot sent.
+## Test instrumentation: when set, counts the serialized size of every snapshot message sent.
 var net_measure := false
 var net_payload_bytes: int = 0
 var net_section_bytes: Dictionary = {}
+## Counters (always on, cheap): host {msgs, bytes, acked, lost, max_msg}, client {msgs, stale}.
+var net_counters: Dictionary = {}
 
 # host
-var _net_seq: int = 0
-var _net_history: Dictionary = {}     # seq -> state
-var _net_acks: Dictionary = {}        # peer id -> last seq that peer decoded
-var _net_keyframe_at: Dictionary = {} # peer id -> world_time of its last keyframe
+var _net_seq: int = 0                 # snapshot ticks sent (kept for _rpc_shift)
+var _net_prev: Dictionary = {}        # last tick's state, to find what changed
+var _repl: Dictionary = {}            # peer id -> per-client replication record (_repl_new)
+var _net_patience: Dictionary = {}    # peer id -> wall msec its patient timeouts end (-1: first ack)
 # client
-var _recv_states: Dictionary = {}     # seq -> decoded state
-var _recv_latest: int = 0
-var _recv_floor: int = 0              # snapshots at or below this seq predate the current lobby
+var _cl_recs: Dictionary = {}         # sec -> id -> {v: {field: value}, s: {field: seq}}
+var _cl_state: Dictionary = {}        # sec -> id -> fields, only complete entities (g: the fields)
+var _cl_dead: Dictionary = {}         # sec -> id -> [seq, msec] of removals, so late values do not resurrect
+var _cl_changed: Dictionary = {}      # sec -> id -> true since the last apply
+var _cl_removed: Dictionary = {}      # sec -> id -> true since the last apply
+var _cl_latest: int = 0
+var _cl_mask: int = 0
+var _cl_full := true                  # next apply touches every entity (new level, periodic)
+var _cl_full_acc := 0.0
+var _cl_seed_wait := false            # _rpc_shift built a new hospital; ignore older seeds
+var _pl_applied: Dictionary = {}      # peer id -> instance id of the Player node last applied
+var _cl_apply_queued := false
+var _revived_at: Dictionary = {}      # peer id -> [position, wall msec] of the last "revive" event
+var _cl_g_last: Dictionary = {}       # global group id -> its last complete fields (a copy)
 
 
 func _net_tick(delta: float) -> void:
 	if not Net.active:
 		return
+	_net_patience_tick()
+	if not is_host():
+		_cl_full_acc += delta
+		if _cl_full_acc >= KEYFRAME_SECONDS:
+			_cl_full_acc = 0.0
+			_cl_full = true
+			_repl_apply()
 	_snap_accum += delta
 	if _snap_accum < 1.0 / SNAPSHOT_HZ:
 		return
@@ -2409,114 +2460,361 @@ func _net_tick(delta: float) -> void:
 			_send_snapshots()
 	else:
 		var me := local_player()
-		var ack := _recv_latest if _recv_states.has(_recv_latest) else 0
-		_player_state.rpc_id(Net.HOST_ID, ack, me.report_state() if me != null else [])
+		_player_state.rpc_id(Net.HOST_ID, [_cl_latest, _cl_mask], me.report_state() if me != null else [])
 
 
-## Host: build this tick's state and send every client its delta.
+# ---------------------------------------------------------------------------
+# host
+
+## Host: build this tick's state and send every client what it is missing.
 func _send_snapshots() -> void:
 	_net_seq += 1
 	var state := _build_state()
-	_net_history[_net_seq] = state
-	_net_history.erase(_net_seq - HISTORY)
-	var cache := {}   # base seq -> encoded message, shared by clients on the same base
+	var now := Time.get_ticks_msec()
+	# What changed since last tick, once for every client (Dictionary != compares contents).
+	var changed := {}
+	for sec in NET_SECS:
+		var cur: Dictionary = state[sec]
+		var prev: Dictionary = _net_prev.get(sec, {})
+		var ch := {}
+		for id in cur.keys():
+			if not prev.has(id) or _differs(prev[id], cur[id]):
+				ch[id] = true
+		for id in prev.keys():
+			if not cur.has(id):
+				ch[id] = true
+		changed[sec] = ch
+	_net_prev = state
 	for id in Net.peer_ids():
 		if id == Net.HOST_ID:
 			continue
-		var base_seq := int(_net_acks.get(id, 0))
-		if not _net_history.has(base_seq) or world_time - float(_net_keyframe_at.get(id, -INF)) >= KEYFRAME_SECONDS:
-			base_seq = 0
-		if base_seq == 0:
-			_net_keyframe_at[id] = world_time
-		if not cache.has(base_seq):
-			cache[base_seq] = _encode_delta(_net_history.get(base_seq, {}), state, _net_seq, base_seq)
-		var msg: Dictionary = cache[base_seq]
-		if net_measure:
-			net_payload_bytes += var_to_bytes(msg).size()
-			for k in msg.keys():
-				net_section_bytes[k] = int(net_section_bytes.get(k, 0)) + var_to_bytes(msg[k]).size()
-			if base_seq == 0:
-				net_section_bytes["keyframes"] = int(net_section_bytes.get("keyframes", 0)) + var_to_bytes(msg).size()
-				net_section_bytes["keyframe_count"] = int(net_section_bytes.get("keyframe_count", 0)) + 1
-		_snapshot.rpc_id(id, msg)
+		if not _repl.has(id):
+			_repl[id] = _repl_new(state, now)
+			_net_be_patient(id, -1)   # it will stall building the level when this arrives
+		var r: Dictionary = _repl[id]
+		for sec in NET_SECS:
+			(r.dirty[sec] as Dictionary).merge(changed[sec])
+		_repl_expire(r, now)
+		_repl_send(id, r, state, now)
 
 
 func _build_state() -> Dictionary:
 	var pl := {}
 	for p in players.values():
-		pl[p.peer_id] = p.report_full()
+		var d: Dictionary = p.report_full()
+		d.erase("id")   # the key already says it
+		pl[p.peer_id] = d
 	var mo := {}
 	for m in monsters.values():
-		mo[m.monster_id] = m.report()
+		var d: Dictionary = m.report()
+		d.erase("id")
+		mo[m.monster_id] = d
 	var it := {}
 	for i in world_items.values():
-		it[i.item_id] = i.report()
+		var d: Dictionary = i.report()
+		d.erase("id")
+		it[i.item_id] = d
 	var ct := {}
 	for n in get_tree().get_nodes_in_group("container"):
 		if n.has_meta("interact_id") and n.has_method("is_open") and n.is_open():
-			ct[String(n.get_meta("interact_id"))] = true
-	return {"g": _global_fields(), "pl": pl, "mo": mo, "it": it, "ct": ct}
+			ct[String(n.get_meta("interact_id"))] = {}
+	# A deep copy: several net_state()s hand out their live dictionaries (the dev room's bots, a
+	# surgery's minigame state), and the replication records keep these values to compare with
+	# later ticks. A shared dictionary edited in place would look unchanged and never be sent.
+	return {"g": _global_groups(_global_fields().duplicate(true)), "pl": pl, "mo": mo, "ct": ct, "it": it}
 
 
-static func _encode_delta(base: Dictionary, state: Dictionary, seq: int, base_seq: int) -> Dictionary:
-	var msg := {"s": seq, "b": base_seq}
-	var gd := _diff_fields(base.get("g", {}), state.g)
-	if not gd.is_empty():
-		msg["g"] = gd
-	var removed := {}
-	for sec in SECTIONS:
-		var old: Dictionary = base.get(sec, {})
-		var cur: Dictionary = state[sec]
-		var changed := {}
-		for id in cur.keys():
-			var v = cur[id]
-			if not old.has(id):
-				changed[id] = v
-			elif v is Dictionary:
-				var d := _diff_fields(old[id], v)
-				if not d.is_empty():
-					changed[id] = d
-			elif _differs(old[id], v):
-				changed[id] = v
-		if not changed.is_empty():
-			msg[sec] = changed
-		var gone := []
-		for id in old.keys():
-			if not cur.has(id):
-				gone.append(id)
-		if not gone.is_empty():
-			removed[sec] = gone
-	if not removed.is_empty():
-		msg["x"] = removed
-	return msg
+## The global fields as a few entities whose field names change together, so a client missing
+## one new field (a case added, a minigame started) only holds back that group:
+## "" the fixed fields, "cs" the cases, "lp" the loop, "s<table>" a table's surgery.
+static func _global_groups(g: Dictionary) -> Dictionary:
+	var out := {"": {}}
+	for k in g.keys():
+		var key := String(k)
+		var gid := ""
+		if key == "cs" or key.begins_with("c.") or key.begins_with("v."):
+			gid = "cs"
+		elif key.begins_with("lp."):
+			gid = "lp"
+		elif (key.begins_with("sg") or key.begins_with("ms")) and key.contains("."):
+			gid = "s" + key.substr(2, key.find(".") - 2)
+		if not out.has(gid):
+			out[gid] = {}
+		out[gid][k] = g[k]
+	return out
 
 
-## The fields of `cur` that differ from `old`; fields that disappeared are listed under "~".
-static func _diff_fields(old: Dictionary, cur: Dictionary) -> Dictionary:
-	var d := {}
-	for k in cur.keys():
-		if not old.has(k) or _differs(old[k], cur[k]):
-			d[k] = cur[k]
-	var gone := []
-	for k in old.keys():
-		if not cur.has(k):
-			gone.append(k)
-	if not gone.is_empty():
-		d["~"] = gone
-	return d
+func _repl_new(state: Dictionary, now: int) -> Dictionary:
+	var r := {"seq": 0, "ents": {}, "dirty": {}, "pend": {}, "inflight": 0,
+		"srtt": 200.0, "rttvar": 50.0, "last_ack": now, "last_rx": now, "acked_max": 0, "tick": 0}
+	for sec in NET_SECS:
+		r.ents[sec] = {}
+		var d := {}
+		for id in (state[sec] as Dictionary).keys():
+			d[id] = true
+		r.dirty[sec] = d
+	return r
 
+
+## Host: messages to one client whose acknowledgement is overdue count as lost.
+## Measured against when this client's acknowledgements last arrived, not the clock: a host frame
+## that stalls, or acks that sit unprocessed until after this runs, must not count as loss. A client
+## that stopped acknowledging altogether expires nothing (the window throttles it instead); its
+## next ack sorts out what arrived.
+func _repl_expire(r: Dictionary, _now: int) -> void:
+	var rto := clampf(float(r.srtt) + 4.0 * float(r.rttvar) + 50.0, 250.0, 2000.0)
+	var ref := int(r.last_rx)
+	for seq in r.pend.keys():
+		if ref - int(r.pend[seq].t) > rto:
+			_repl_resolve(r, seq, false)
+
+
+## Host: pack one client's missing fields into messages and send them.
+func _repl_send(peer_id: int, r: Dictionary, state: Dictionary, now: int) -> void:
+	r.tick = int(r.tick) + 1
+	var max_msgs := 64
+	if int(r.inflight) >= NET_WINDOW_BYTES:
+		max_msgs = 1
+	if not (r.pend as Dictionary).is_empty() and now - int(r.last_ack) > 1500:
+		max_msgs = 1 if int(r.tick) % 4 == 0 else 0   # silent client (loading, or gone): trickle
+	if max_msgs == 0:
+		return
+	var msgs := []        # [{parts: [[sec, id, fields]], bytes}]
+	var cur := {"parts": [], "bytes": 24}
+	var tick_bytes := 0
+	var full := false
+	for sec in NET_SECS:
+		if full:
+			break
+		var dirty: Dictionary = r.dirty[sec]
+		if dirty.is_empty():
+			continue
+		var ents: Dictionary = r.ents[sec]
+		var cur_sec: Dictionary = state[sec]
+		for eid in dirty.keys():
+			var want := _repl_want(ents, dirty, eid, cur_sec.get(eid))
+			if want.is_empty():
+				continue
+			for chunk in _repl_chunks(want):
+				var b := var_to_bytes([eid, chunk]).size() + 4
+				if (cur.parts as Array).size() > 0 and int(cur.bytes) + b > NET_MSG_BYTES:
+					msgs.append(cur)
+					tick_bytes += int(cur.bytes)
+					cur = {"parts": [], "bytes": 24}
+					if msgs.size() >= max_msgs or tick_bytes >= NET_TICK_BYTES or int(r.inflight) + tick_bytes >= NET_WINDOW_BYTES:
+						full = true
+						break
+				cur.parts.append([sec, eid, chunk])
+				cur.bytes = int(cur.bytes) + b
+			if full:
+				break
+	if not full and (cur.parts as Array).size() > 0:
+		msgs.append(cur)
+	for m in msgs:
+		r.seq = int(r.seq) + 1
+		var seq: int = r.seq
+		var wire := {"s": seq}
+		for part in m.parts:
+			var sec: String = part[0]
+			if not wire.has(sec):
+				wire[sec] = {}
+			var fields: Dictionary = part[2]
+			if (wire[sec] as Dictionary).has(part[1]):
+				(wire[sec][part[1]] as Dictionary).merge(fields, true)
+			else:
+				wire[sec][part[1]] = fields.duplicate()
+			var rec: Dictionary = r.ents[sec][part[1]]
+			for k in fields.keys():
+				rec.f[k] = [fields[k], seq]
+		r.pend[seq] = {"t": now, "n": int(m.bytes), "parts": m.parts}
+		r.inflight = int(r.inflight) + int(m.bytes)
+		net_counters["msgs"] = int(net_counters.get("msgs", 0)) + 1
+		net_counters["bytes"] = int(net_counters.get("bytes", 0)) + int(m.bytes)
+		if net_measure:
+			var size := var_to_bytes(wire).size()
+			net_payload_bytes += size
+			net_counters["max_msg"] = maxi(int(net_counters.get("max_msg", 0)), size)
+			for k in wire.keys():
+				net_section_bytes[k] = int(net_section_bytes.get(k, 0)) + var_to_bytes(wire[k]).size()
+		_snapshot.rpc_id(peer_id, wire)
+
+
+## Host: the fields of one entity this client needs now ({} when none). Also retires records of
+## entities the client provably no longer has, and clears `dirty` once nothing is pending.
+func _repl_want(ents: Dictionary, dirty: Dictionary, eid, cur) -> Dictionary:
+	var rec = ents.get(eid)
+	if rec == null:
+		if cur == null:
+			dirty.erase(eid)
+			return {}
+		rec = {"c": {}, "f": {}}
+		ents[eid] = rec
+	var want := {}
+	if cur == null:
+		# Gone on the host: only existence matters.
+		var need := _repl_needs(rec, "@", -1)
+		if need:
+			want["@"] = -1
+		elif (rec.f as Dictionary).is_empty():
+			ents.erase(eid)
+			dirty.erase(eid)
+		return want
+	var cur_d: Dictionary = cur
+	var sig := _keys_sig(cur_d)
+	# The field names changed (or never arrived): send the whole entity with its new "@", so the
+	# one message that lands makes the client's copy whole, whatever was lost before.
+	var whole := _repl_needs(rec, "@", sig)
+	if whole:
+		want["@"] = sig
+	for k in cur_d.keys():
+		if whole or _repl_needs(rec, k, cur_d[k]):
+			want[k] = cur_d[k]
+	for k in rec.c.keys():
+		if k != "@" and not cur_d.has(k) and _repl_needs(rec, k, NET_GONE):
+			want[k] = NET_GONE
+	for k in rec.f.keys():
+		if k != "@" and not cur_d.has(k) and not want.has(k) and _repl_needs(rec, k, NET_GONE):
+			want[k] = NET_GONE
+	if want.is_empty() and (rec.f as Dictionary).is_empty():
+		dirty.erase(eid)
+	return want
+
+
+## An entity's field names as one number (never -1): a client knows it holds exactly the
+## fields the host has, not just as many.
+static func _keys_sig(d: Dictionary) -> int:
+	var ks := d.keys()
+	ks.erase("@")
+	ks.sort()
+	return hash(ks)
+
+
+static func _repl_needs(rec: Dictionary, k, v) -> bool:
+	var f = rec.f.get(k)
+	if f != null:
+		return _differs(f[0], v)
+	var c = rec.c.get(k)
+	if c == null:
+		# Never sent: absent is what the client already has (existence "@" = -1 included).
+		if k == "@":
+			return int(v) != -1
+		return _differs(v, NET_GONE)
+	return _differs(c[0], v)
+
+
+## Split one entity's fields so every piece fits a message (a single huge field goes alone).
+static func _repl_chunks(want: Dictionary) -> Array:
+	if var_to_bytes(want).size() + 32 <= NET_MSG_BYTES:
+		return [want]
+	var out := []
+	var cur := {}
+	var bytes := 32
+	for k in want.keys():
+		var b := var_to_bytes(k).size() + var_to_bytes(want[k]).size()
+		if not cur.is_empty() and bytes + b > NET_MSG_BYTES:
+			out.append(cur)
+			cur = {}
+			bytes = 32
+		cur[k] = want[k]
+		bytes += b
+	if not cur.is_empty():
+		out.append(cur)
+	return out
+
+
+## Host: a message's fate is known. Delivered fields become confirmed; lost ones unknown.
+func _repl_resolve(r: Dictionary, seq: int, delivered: bool) -> void:
+	var p: Dictionary = r.pend[seq]
+	r.pend.erase(seq)
+	r.inflight = maxi(0, int(r.inflight) - int(p.n))
+	net_counters["acked" if delivered else "lost"] = int(net_counters.get("acked" if delivered else "lost", 0)) + 1
+	for part in p.parts:
+		var sec: String = part[0]
+		var rec = r.ents[sec].get(part[1])
+		if rec == null:
+			continue
+		var fields: Dictionary = part[2]
+		for k in fields.keys():
+			var c = rec.c.get(k)
+			if c == null or int(c[1]) < seq:
+				rec.c[k] = [fields[k] if delivered else NET_UNKNOWN, seq]
+			var f = rec.f.get(k)
+			if f != null and int(f[1]) == seq:
+				rec.f.erase(k)
+		r.dirty[sec][part[1]] = true
+
+
+@rpc("any_peer", "unreliable_ordered", "call_remote")
+func _player_state(ack: Array, s: Array) -> void:
+	if not is_host():
+		return
+	var id := multiplayer.get_remote_sender_id()
+	var r = _repl.get(id)
+	if r != null and ack.size() >= 2:
+		var latest := int(ack[0])
+		var mask := int(ack[1])
+		var now := Time.get_ticks_msec()
+		r.last_rx = now
+		if latest > int(r.acked_max):
+			if int(r.acked_max) == 0 and int(_net_patience.get(id, 0)) == -1:
+				_net_patience[id] = now + NET_PATIENCE_MS   # it has built the level: settle soon
+			r.acked_max = latest
+			r.last_ack = now
+			if r.pend.has(latest):
+				var sample := float(now - int(r.pend[latest].t))
+				r.rttvar = lerpf(float(r.rttvar), absf(sample - float(r.srtt)), 0.25)
+				r.srtt = lerpf(float(r.srtt), sample, 0.125)
+		var newest_acked_t := -1
+		for seq in r.pend.keys():
+			var d: int = latest - int(seq)
+			if d < 0:
+				continue
+			if d == 0 or (d <= ACK_BITS and (mask >> (d - 1)) & 1 == 1):
+				newest_acked_t = maxi(newest_acked_t, int(r.pend[seq].t))
+				_repl_resolve(r, seq, true)
+			elif d > ACK_BITS:
+				_repl_resolve(r, seq, false)
+		# Fast loss: a message sent well after this one arrived and this one did not. The margin
+		# covers reordering by network jitter.
+		if newest_acked_t >= 0:
+			for seq in r.pend.keys():
+				if int(seq) < latest and int(r.pend[seq].t) < newest_acked_t - NET_REORDER_MS:
+					_repl_resolve(r, seq, false)
+	var p = players.get(id)
+	if p != null and not s.is_empty():
+		p.apply_remote_state(s)
+
+
+## Host: a new hospital needs nothing special for replication (the replicas diff to it), but
+## every client is about to stall building it: give them patient timeouts for a while.
+func _net_reset_history() -> void:
+	for id in Net.peer_ids():
+		if id != Net.HOST_ID:
+			_net_be_patient(id, Time.get_ticks_msec() + NET_PATIENCE_MS)
+
+
+## Patient ENet timeouts for a peer until `until_msec` (-1: until its first acknowledgement).
+func _net_be_patient(id: int, until_msec: int) -> void:
+	Net.set_patient(id, true)
+	_net_patience[id] = until_msec
+
+
+func _net_patience_tick() -> void:
+	if _net_patience.is_empty():
+		return
+	var now := Time.get_ticks_msec()
+	for id in _net_patience.keys():
+		var until := int(_net_patience[id])
+		if until >= 0 and now >= until:
+			_net_patience.erase(id)
+			Net.set_patient(id, false)
+
+
+# ---------------------------------------------------------------------------
+# shared helpers
 
 static func _differs(a, b) -> bool:
 	return typeof(a) != typeof(b) or a != b
-
-
-static func _merge_fields(old: Dictionary, d: Dictionary) -> Dictionary:
-	var out := old.duplicate()
-	for k in d.get("~", []):
-		out.erase(k)
-	out.merge(d, true)
-	out.erase("~")
-	return out
 
 
 ## The global fields, flattened one level so a changing tool position does not resend the
@@ -2586,52 +2884,134 @@ static func _cases_from(g: Dictionary) -> Array:
 	return out
 
 
-## Client: rebuild the full state the host meant from the base we acked plus this delta.
-static func _decode_delta(base: Dictionary, msg: Dictionary) -> Dictionary:
-	var g := _merge_fields(base.get("g", {}), msg.get("g", {}))
-	var state := {"g": g}
-	var removed: Dictionary = msg.get("x", {})
-	for sec in SECTIONS:
-		var sec_state: Dictionary = base.get(sec, {}).duplicate()
-		for id in removed.get(sec, []):
-			sec_state.erase(id)
-		var changed: Dictionary = msg.get(sec, {})
-		for id in changed.keys():
-			var v = changed[id]
-			if v is Dictionary and sec_state.get(id) is Dictionary:
-				sec_state[id] = _merge_fields(sec_state[id], v)
-			else:
-				sec_state[id] = v
-		state[sec] = sec_state
-	return state
+# ---------------------------------------------------------------------------
+# client
 
-
-@rpc("authority", "unreliable_ordered", "call_remote")
+@rpc("authority", "unreliable", "call_remote")
 func _snapshot(msg: Dictionary) -> void:
 	var seq := int(msg.get("s", 0))
-	var base_seq := int(msg.get("b", 0))
-	if seq <= _recv_floor or seq <= _recv_latest:
+	if seq <= 0:
 		return
-	var base: Dictionary = {}
-	if base_seq != 0:
-		if not _recv_states.has(base_seq):
-			return   # we no longer have that base; our ack will fall back to a keyframe
-		base = _recv_states[base_seq]
-	var state := _decode_delta(base, msg)
-	var g: Dictionary = state.g
+	net_counters["msgs"] = int(net_counters.get("msgs", 0)) + 1
+	# Acknowledge: newest sequence plus a bit per earlier one.
+	if seq > _cl_latest:
+		var shift_by := seq - _cl_latest
+		if _cl_latest == 0 or shift_by > ACK_BITS:
+			_cl_mask = 0
+		else:
+			_cl_mask = ((_cl_mask << shift_by) if shift_by < ACK_BITS else 0) | (1 << (shift_by - 1))
+		_cl_latest = seq
+	elif seq < _cl_latest:
+		var d := _cl_latest - seq
+		if d <= ACK_BITS:
+			_cl_mask |= 1 << (d - 1)
+	var now := Time.get_ticks_msec()
+	for sec in NET_SECS:
+		if not msg.has(sec):
+			continue
+		var recs: Dictionary = _cl_recs.get(sec, {})
+		_cl_recs[sec] = recs
+		var dead: Dictionary = _cl_dead.get(sec, {})
+		_cl_dead[sec] = dead
+		var entries: Dictionary = msg[sec]
+		for eid in entries.keys():
+			var fields: Dictionary = entries[eid]
+			var rec = recs.get(eid)
+			if rec == null:
+				if dead.has(eid) and int(dead[eid][0]) > seq:
+					net_counters["stale"] = int(net_counters.get("stale", 0)) + 1
+					continue   # a late value for something already removed
+				if int(fields.get("@", 0)) == -1:
+					if not dead.has(eid) or int(dead[eid][0]) < seq:
+						dead[eid] = [seq, now]   # removed before it ever arrived here
+					continue
+				rec = {"v": {}, "s": {}}
+				recs[eid] = rec
+				dead.erase(eid)
+			var vals: Dictionary = rec.v
+			var seqs: Dictionary = rec.s
+			for k in fields.keys():
+				if int(seqs.get(k, 0)) > seq:
+					continue
+				seqs[k] = seq
+				var v = fields[k]
+				if typeof(v) == TYPE_STRING and v == NET_GONE:
+					vals.erase(k)
+				else:
+					vals[k] = v
+			var state_sec: Dictionary = _cl_state.get(sec, {})
+			_cl_state[sec] = state_sec
+			if int(vals.get("@", 0)) == -1:
+				recs.erase(eid)
+				dead[eid] = [int(seqs["@"]), now]
+				state_sec.erase(eid)
+				if sec == "g":
+					_cl_g_last.erase(eid)
+				_cl_mark(_cl_removed, sec, eid)
+				if _cl_changed.has(sec):
+					_cl_changed[sec].erase(eid)
+				continue
+			if vals.has("@") and _keys_sig(vals) == int(vals["@"]):
+				if sec == "g":
+					_cl_g_last[eid] = vals.duplicate()   # used until the group is whole again
+				state_sec[eid] = vals
+				_cl_mark(_cl_changed, sec, eid)
+				if _cl_removed.has(sec):
+					_cl_removed[sec].erase(eid)
+			elif state_sec.has(eid) and sec != "g":
+				state_sec.erase(eid)   # a field is missing again: wait for it
+	# Forget removals old enough that nothing in flight can still mention them.
+	if int(net_counters.get("msgs", 0)) % 200 == 0:
+		for sec in _cl_dead.keys():
+			for eid in _cl_dead[sec].keys():
+				if now - int(_cl_dead[sec][eid][1]) > 10000:
+					_cl_dead[sec].erase(eid)
+	# Several messages can land in one frame (a burst): apply once, at the end of the frame.
+	if not _cl_apply_queued:
+		_cl_apply_queued = true
+		_repl_apply_queued.call_deferred()
+
+
+func _repl_apply_queued() -> void:
+	_cl_apply_queued = false
+	if Net.active and not is_host():
+		_repl_apply()
+
+
+static func _cl_mark(where: Dictionary, sec: String, eid) -> void:
+	if not where.has(sec):
+		where[sec] = {}
+	where[sec][eid] = true
+
+
+## Client: put what the replica holds onto the game: the changed entities, or all of them.
+func _repl_apply() -> void:
+	if not _cl_g_last.has(""):
+		return
+	var g := {}
+	for gid in _cl_g_last.keys():
+		g.merge(_cl_g_last[gid])
 	if not g.has("sd"):
 		return
-	var keyframe := base_seq == 0
-	if int(g.sd) != seed_value or phase == Phase.MENU:
-		if not keyframe:
-			return
-		start_lobby(int(g.sd), int(g.sh))   # clears _recv_states
-	_recv_states[seq] = state
-	for old in _recv_states.keys():
-		if int(old) <= seq - HISTORY:
-			_recv_states.erase(old)
-	_recv_latest = seq
-	_apply_state(state, msg, keyframe)
+	if phase == Phase.MENU:
+		start_lobby(int(g.sd), int(g.sh))   # sets _cl_full
+	elif int(g.sd) != seed_value:
+		if _cl_seed_wait:
+			return   # _rpc_shift already built the newer hospital; this is an older value
+		start_lobby(int(g.sd), int(g.sh))
+	else:
+		_cl_seed_wait = false
+	var full := _cl_full
+	_cl_full = false
+	var state := {"g": g, "pl": _cl_state.get("pl", {}), "mo": _cl_state.get("mo", {}),
+		"it": _cl_state.get("it", {}), "ct": _cl_state.get("ct", {})}
+	var msg := {"x": {}}
+	for sec in ["pl", "mo", "it", "ct"]:
+		msg[sec] = _cl_changed.get(sec, {})
+		msg.x[sec] = (_cl_removed.get(sec, {}) as Dictionary).keys()
+	_cl_changed = {}
+	_cl_removed = {}
+	_apply_state(state, msg, full)
 
 
 func _apply_state(state: Dictionary, msg: Dictionary, keyframe: bool) -> void:
@@ -2671,12 +3051,23 @@ func _apply_state(state: Dictionary, msg: Dictionary, keyframe: bool) -> void:
 		dev.apply_net_state(g.dv)  # DEV HOOK: creates bot players before their entries apply
 
 	var removed: Dictionary = msg.get("x", {})
-	# Players: nodes come from the roster; apply what changed (everything on a keyframe).
-	var pl_ids: Array = state.pl.keys() if keyframe else msg.get("pl", {}).keys()
-	for id in pl_ids:
-		var p = players.get(id)
-		if p != null and state.pl.has(id):
+	# Players: nodes come from the roster (and the dev room's bots); apply what changed, and
+	# everything to a node that has not had this machine's replica yet.
+	var pl_changed: Dictionary = msg.get("pl", {})
+	for id in players.keys():
+		var p = players[id]
+		if not state.pl.has(id) or not is_instance_valid(p):
+			continue
+		if keyframe or pl_changed.has(id) or int(_pl_applied.get(id, 0)) != p.get_instance_id():
+			_pl_applied[id] = p.get_instance_id()
+			var was_pinned: bool = p.on_table or p.carried_by != 0
 			p.apply_remote_full(state.pl[id])
+			# downed: the reliable "revive" event put me beside the table, then an older snapshot
+			# pinned me back onto it; now that the snapshot lets go, stand where the host put me.
+			var rv = _revived_at.get(id)
+			if p.is_local and was_pinned and rv != null and not p.on_table and p.carried_by == 0 \
+					and Time.get_ticks_msec() - int(rv[1]) < 10000:
+				p.teleport(rv[0])
 	# downed: the player table's case, after the players so its patient's colour is known.
 	var pt = g.get("pt", {})
 	player_surgery.apply_net_state(pt if pt is Dictionary else {})
@@ -2703,7 +3094,8 @@ func _apply_state(state: Dictionary, msg: Dictionary, keyframe: bool) -> void:
 func _apply_entities(nodes: Dictionary, entities: Dictionary, changed: Dictionary, removed: Array, keyframe: bool, make: Callable) -> void:
 	for id in removed:
 		if nodes.has(id):
-			nodes[id].queue_free()
+			if is_instance_valid(nodes[id]):
+				nodes[id].queue_free()
 			nodes.erase(id)
 	var ids: Array = entities.keys() if keyframe else changed.keys()
 	for id in ids:
@@ -2719,7 +3111,8 @@ func _apply_entities(nodes: Dictionary, entities: Dictionary, changed: Dictionar
 	if keyframe:
 		for id in nodes.keys():
 			if not entities.has(id):
-				nodes[id].queue_free()
+				if is_instance_valid(nodes[id]):
+					nodes[id].queue_free()
 				nodes.erase(id)
 
 
@@ -2729,38 +3122,38 @@ func _set_container_open(id: String, open: bool) -> void:
 		node.set_open(open, true)
 
 
-## Host: forget what clients have, so the next snapshot to everyone is a keyframe.
-func _net_reset_history() -> void:
-	_net_history.clear()
-	_net_keyframe_at.clear()
-
-
-@rpc("any_peer", "unreliable_ordered", "call_remote")
-func _player_state(ack: int, s: Array) -> void:
-	if not is_host():
-		return
-	var id := multiplayer.get_remote_sender_id()
-	# The newest base this client can decode. Unreliable-ordered, so it never goes backwards,
-	# except to 0 after the client dropped its states for a new lobby.
-	_net_acks[id] = ack
-	var p = players.get(id)
-	if p != null and not s.is_empty():
-		p.apply_remote_state(s)
-
-
 @rpc("authority", "reliable", "call_remote")
-func _rpc_shift(new_seed: int, new_shift: int, new_phase: int, net_seq: int = 0) -> void:
+func _rpc_shift(new_seed: int, new_shift: int, new_phase: int, _net_seq_unused: int = 0) -> void:
 	if new_seed != seed_value:
 		start_lobby(new_seed, new_shift)
-		_recv_floor = maxi(_recv_floor, net_seq)
+		_cl_seed_wait = true
 	shift = new_shift
 	_set_phase(new_phase)
 
 
-## Client side of a new lobby: every decoded state belongs to the old hospital.
+## Client side of a new level: the replica stays (the host keeps diffing against it), but every
+## node is new, so the next apply touches everything.
 func _net_client_reset() -> void:
-	_recv_states.clear()
-	_recv_latest = 0
+	_cl_full = true
+	_pl_applied.clear()
+	if Net.active:
+		_net_be_patient(Net.HOST_ID, Time.get_ticks_msec() + NET_PATIENCE_MS)
+
+
+## Client: a new connection starts a new replica (the host's sequence numbers start again).
+func _net_client_forget() -> void:
+	_cl_recs.clear()
+	_cl_state.clear()
+	_cl_g_last.clear()
+	_cl_dead.clear()
+	_cl_changed.clear()
+	_cl_removed.clear()
+	_cl_latest = 0
+	_cl_mask = 0
+	_cl_full = true
+	_cl_seed_wait = false
+	_pl_applied.clear()
+	net_counters.clear()
 
 
 ## Host: a peer joined outside the lobby. It watches until the next shift.
@@ -2819,6 +3212,7 @@ func _event(kind: String, data: Dictionary) -> void:
 				q.apply_knock(data.knock)
 		"revive":
 			var r = players.get(data.id)
+			_revived_at[data.id] = [data.pos, Time.get_ticks_msec()]  # net: see _apply_state
 			if r != null:
 				r.teleport(data.pos)
 				r.revive(int(data.get("hp", 2)))

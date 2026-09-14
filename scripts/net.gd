@@ -61,9 +61,16 @@ const LOBBY_TYPE_FRIENDS_ONLY := 1
 const RESULT_OK := 1
 const CHAT_ROOM_ENTER_SUCCESS := 1
 ## ENet peer timeouts (ms): a peer that stops answering is dropped after 5 to 12 seconds
-## instead of ENet's default 30. Long enough to ride out a level build on a slow machine.
+## instead of ENet's default 30 (once settled; see PATIENT_* for the first seconds).
 const TIMEOUT_MIN_MS := 5000
 const TIMEOUT_MAX_MS := 12000
+## While a machine builds a level it does not service the connection for seconds, and ENet's
+## round-trip estimate stays inflated for a while afterwards (a lost reliable packet is then
+## resent many seconds later). Right after connecting and around a new hospital, peers get this
+## much more patience; Game hands them back to the normal timeouts once things settle.
+const PATIENT_TIMEOUT_LIMIT := 64
+const PATIENT_TIMEOUT_MIN_MS := 10000
+const PATIENT_TIMEOUT_MAX_MS := 20000
 
 
 func _ready() -> void:
@@ -95,6 +102,39 @@ func _process(_delta: float) -> void:
 	if enet != null and enet.host != null:
 		bytes_sent += enet.host.pop_statistic(ENetConnection.HOST_TOTAL_SENT_DATA)
 		bytes_received += enet.host.pop_statistic(ENetConnection.HOST_TOTAL_RECEIVED_DATA)
+		_sample_link(enet)
+
+
+## Diagnostics for a dropped connection: the last round-trip estimate per peer and the longest
+## frame (a stretch without servicing the connection) of the last 10 to 20 seconds.
+var _link_stats: Dictionary = {}   # peer id -> String
+var _stall_ms := [0, 0]            # longest frame this window, previous window
+var _last_frame_ms := 0
+var _link_sample_ms := 0
+
+
+func _sample_link(enet: ENetMultiplayerPeer) -> void:
+	var now := Time.get_ticks_msec()
+	if _last_frame_ms > 0:
+		_stall_ms[0] = maxi(int(_stall_ms[0]), now - _last_frame_ms)
+	_last_frame_ms = now
+	if now - _link_sample_ms < 1000:
+		return
+	if now / 10000 != _link_sample_ms / 10000:
+		_stall_ms = [0, _stall_ms[0]]
+	_link_sample_ms = now
+	for id in names.keys():
+		if id == multiplayer.get_unique_id():
+			continue
+		var pp := enet.get_peer(id)
+		if pp != null:
+			_link_stats[id] = "rtt %d ms (var %d), loss %.1f%%" % [pp.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME), pp.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME_VARIANCE), pp.get_statistic(ENetPacketPeer.PEER_PACKET_LOSS) / 655.36]
+
+
+func _log_lost(id: int) -> void:
+	if backend != "enet":
+		return
+	print("[net] peer %d disconnected: last %s; longest frame lately %d ms" % [id, _link_stats.get(id, "no stats"), maxi(int(_stall_ms[0]), int(_stall_ms[1]))])
 
 
 func is_host() -> bool:
@@ -406,6 +446,8 @@ func _on_peer_connected(id: int) -> void:
 
 
 func _on_peer_disconnected(id: int) -> void:
+	if multiplayer.is_server():
+		_log_lost(id)
 	names.erase(id)
 	roster_changed.emit()
 	if multiplayer.is_server():
@@ -419,11 +461,20 @@ func _on_connected() -> void:
 
 
 func _set_timeouts(id: int) -> void:
+	set_patient(id, true)
+
+
+## ENet only: `patient` timeouts (see PATIENT_*) or the normal ones for one peer.
+func set_patient(id: int, patient: bool) -> void:
 	var enet := multiplayer.multiplayer_peer as ENetMultiplayerPeer
 	if enet == null:
 		return
 	var pp := enet.get_peer(id)
-	if pp != null:
+	if pp == null:
+		return
+	if patient:
+		pp.set_timeout(PATIENT_TIMEOUT_LIMIT, PATIENT_TIMEOUT_MIN_MS, PATIENT_TIMEOUT_MAX_MS)
+	else:
 		pp.set_timeout(0, TIMEOUT_MIN_MS, TIMEOUT_MAX_MS)
 
 
@@ -433,6 +484,7 @@ func _on_connect_failed() -> void:
 
 
 func _on_server_disconnected() -> void:
+	_log_lost(HOST_ID)
 	reset()
 	host_left.emit()
 
@@ -474,6 +526,7 @@ class LagProxy extends RefCounted:
 	var _client_port := 0
 	var _queue: Array = []   # [release_msec: int, to_host: bool, bytes: PackedByteArray], sorted
 	var _rng := RandomNumberGenerator.new()
+	const RECV_BUFFER := 1 << 22
 
 	func _init(lag: float, jitter: float, loss_rate: float) -> void:
 		lag_ms = lag
@@ -482,9 +535,11 @@ class LagProxy extends RefCounted:
 		_rng.randomize()
 
 	func start(host_ip: String, host_port: int) -> int:
-		if _listen.bind(0, "127.0.0.1") != OK:
+		# A roomy receive buffer: the relay only drains once per frame, and a slow frame must not
+		# drop datagrams on its own on top of the simulated loss.
+		if _listen.bind(0, "127.0.0.1", RECV_BUFFER) != OK:
 			return 0
-		if _up.bind(0) != OK:
+		if _up.bind(0, "*", RECV_BUFFER) != OK:
 			return 0
 		_up.set_dest_address(host_ip, host_port)
 		return _listen.get_local_port()

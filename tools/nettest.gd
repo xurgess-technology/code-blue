@@ -49,6 +49,7 @@ var port := 7790
 var seed_value := 4242
 var timeout_s := 150.0
 var stats := false
+var lagged := false     # the runner simulates lag for the clients of this scenario
 
 var main: Node3D
 var game: Game
@@ -56,6 +57,7 @@ var _done := false
 var _t0 := 0.0
 var _inbox: Array = []
 var _press_at_ms := 0
+var _t_joined := 0.0    # client: wall time the connection came up (0 before)
 
 
 func _ready() -> void:
@@ -71,6 +73,7 @@ func _ready() -> void:
 			"seed": seed_value = int(v)
 			"timeout": timeout_s = float(v)
 			"stats": stats = true
+			"lagged": lagged = true
 	if role == "host":
 		index = 0
 	_t0 = _wall()
@@ -89,6 +92,7 @@ func _ready() -> void:
 		game.start_session(seed_value)
 	else:
 		# Exactly what the menu does, so the join-name path is the real one.
+		Net.joined_ok.connect(func(): _t_joined = _wall(), CONNECT_ONE_SHOT)
 		main._start_join(NAMES[index], "127.0.0.1:%d" % port)
 	_run()
 
@@ -190,7 +194,7 @@ func _sc_surgery():
 		var watch := func():
 			if game.surgery_for_table(int(game.case.table)).operator_id == op_id:
 				seen.op = true
-		if not await _do_until(watch, func(): return int(game.case.step_index) >= 1, 120.0, "the step to finish"):
+		if not await _do_until(watch, func(): return int(game.case.get("step_index", 0)) >= 1, 120.0, "the step to finish"):
 			return
 		if not seen.op:
 			return _end(false, "the host never saw client %d operating" % op_id)
@@ -203,26 +207,28 @@ func _sc_surgery():
 		return
 	if not await _wait_shift_as_client():
 		return
-	if not await _until(func(): return _count_msgs("operate") > 0, 30.0, "operate order"):
+	# Watch from the start: the order can reach the spectator after the operation began.
+	var st := {"states": {}, "ops": {}}
+	var watch := func():
+		var op := int(game.surgery.operator_id)
+		if op != 0 and op != Net.my_id():
+			st.ops[op] = true
+			if game.surgery.mg != null:
+				st.states[str(game.surgery.mg.net_state())] = true
+	if not await _do_until(watch, func(): return _count_msgs("operate") > 0, 30.0, "operate order"):
 		return
 	var op_id: int = _msgs("operate")[0].data.peer
 	if op_id == Net.my_id():
 		if not await _begin_operating():
 			return
-		if not await _until(func(): return int(game.case.step_index) >= 1, 120.0, "my step to be accepted"):
+		if not await _until(func(): return int(game.case.get("step_index", 0)) >= 1, 120.0, "my step to be accepted"):
 			return
 		await _finish_together("operated step 0 to completion")
 	else:
-		var st := {"states": {}, "op": false}
-		var watch := func():
-			if game.surgery.operator_id == op_id:
-				st.op = true
-			if game.surgery.mg != null:
-				st.states[str(game.surgery.mg.net_state())] = true
-		if not await _do_until(watch, func(): return int(game.case.step_index) >= 1, 120.0, "the operator to finish"):
+		if not await _do_until(watch, func(): return int(game.case.get("step_index", 0)) >= 1, 120.0, "the operator to finish"):
 			return
-		if not st.op or st.states.size() < 5:
-			return _end(false, "spectator saw operator=%s and only %d distinct tool states" % [str(st.op), st.states.size()])
+		if not st.ops.has(op_id) or st.states.size() < 5:
+			return _end(false, "spectator saw operator=%s and only %d distinct tool states" % [str(st.ops.has(op_id)), st.states.size()])
 		_send("watched", {"states": st.states.size()})
 		await _finish_together("watched %d distinct tool states and the step completing" % st.states.size())
 
@@ -239,6 +245,7 @@ func _sc_leave_items():
 		if not await _until(func(): return _count_msgs("standing") > 0, 40.0, "the leaver to take position"):
 			return
 		var spot: Vector3 = _msgs("standing")[0].data.pos
+		_send("standing_ok", {})
 		if not await _until(func(): return not game.players.has(leaver), 30.0, "the leaver to disconnect"):
 			return
 		await _frames(90)   # let the dropped stacks settle
@@ -264,7 +271,10 @@ func _sc_leave_items():
 		_me().teleport(spot)
 		await _wall_wait(1.5)
 		_send("standing", {"pos": _me().global_position})
-		await _wall_wait(0.5)
+		# Leaving closes the connection: a reliable message still being retransmitted over a lossy
+		# link would die with it, so wait for the host to confirm it heard us.
+		await _until(func(): return _count_msgs("standing_ok") > 0, 20.0, "the host to hear where I stand")
+		await _wall_wait(0.3)
 		_say("PASS: leaving with %s" % str(_me().slots))
 		_done = true
 		Net.leave()
@@ -292,11 +302,11 @@ func _sc_leave_operating():
 		if not await _until(func(): return not game.players.has(first), 90.0, "client 1 to vanish"):
 			return
 		var saved: Dictionary = game.surgery._mg_state
-		if game.surgery.operator_id != 0 or int(game.case.step_index) != 0 or float(saved.get("p", 0.0)) <= 0.0:
+		if game.surgery.operator_id != 0 or int(game.case.get("step_index", 0)) != 0 or float(saved.get("p", 0.0)) <= 0.0:
 			return _end(false, "after the drop: operator=%d step=%d saved=%s" % [game.surgery.operator_id, game.case.step_index, str(saved)])
 		_say("operator gone; step paused at progress %.2f" % float(saved.p))
 		_send("resume", {"peer": second, "p": float(saved.p)})
-		if not await _until(func(): return int(game.case.step_index) >= 1, 120.0, "client 2 to finish the step"):
+		if not await _until(func(): return int(game.case.get("step_index", 0)) >= 1, 120.0, "client 2 to finish the step"):
 			return
 		await _finish_together("step paused on disconnect and was finished by client 2")
 		return
@@ -325,7 +335,7 @@ func _sc_leave_operating():
 	if game.surgery.mg.progress < saved_p - 0.05:
 		return _end(false, "resumed at %.2f instead of %.2f" % [game.surgery.mg.progress, saved_p])
 	_say("resuming at %.2f (host saved %.2f)" % [game.surgery.mg.progress, saved_p])
-	if not await _until(func(): return int(game.case.step_index) >= 1, 120.0, "my resumed step to finish"):
+	if not await _until(func(): return int(game.case.get("step_index", 0)) >= 1, 120.0, "my resumed step to finish"):
 		return
 	await _finish_together("resumed from %.2f and finished the step" % saved_p)
 
@@ -462,6 +472,11 @@ func _sc_full_shift():
 			_tag(), sent, recv, secs, sent / secs, recv / secs,
 			"sent_per_client_Bps" if role == "host" else "upstream_Bps", per,
 			float(game.net_payload_bytes - int(st.get("payload", 0))) / secs / float(maxi(1, clients)) if role == "host" else 0.0])
+		var during := {}
+		for k in game.net_counters.keys():
+			if k != "max_msg":
+				during[k] = int(game.net_counters[k]) - int(st.get("counters", {}).get(k, 0))
+		print("[stats] %s snapshot messages while the shift ran %s, whole session %s" % [_tag(), str(during), str(game.net_counters)])
 		if role == "host":
 			var parts := []
 			for k in game.net_section_bytes.keys():
@@ -600,16 +615,22 @@ func _sc_two_patients():
 		_stock_shelf()
 		var ops := {_peer_of(1): tables[0], _peer_of(2): tables[1]}
 		_send("operate_tables", {"ops": ops})
-		var seen := {"both": false}
+		var seen := {"both": false, "a": false, "b": false}
 		var watch := func():
 			var a = game.surgery_for_table(tables[0])
 			var b = game.surgery_for_table(tables[1])
+			seen.a = seen.a or a.operator_id == _peer_of(1)
+			seen.b = seen.b or b.operator_id == _peer_of(2)
 			if a.operator_id == _peer_of(1) and b.operator_id == _peer_of(2):
 				seen.both = true
 		if not await _do_until(watch, func(): return int(game.cases[0].step_index) >= 1 and int(game.cases[1].step_index) >= 1, 150.0, "both first steps"):
 			return
 		if not seen.both:
-			return _end(false, "never saw both clients operating at the same time")
+			# Over a lagged link one bot can finish its short step before the other's request
+			# even reaches the host; then each must at least have operated its own table.
+			if not (lagged and seen.a and seen.b):
+				return _end(false, "never saw both clients operating at the same time (a=%s b=%s)" % [str(seen.a), str(seen.b)])
+			_say("the two operations did not overlap (lagged link); both tables were operated")
 		for c in game.cases:
 			if not (c.flags as Dictionary).has("sedation"):
 				return _end(false, "a step finished without its flags: %s" % str(c))
@@ -635,13 +656,15 @@ func _sc_two_patients():
 	var sys = game.surgery_for_table(mine)
 	var other_sys = game.surgery_for_table(other)
 	game.surgery_bot_skill = 1.0
-	if not await _do_until(func(): _press_at(game.table_position(mine), game.table_interact_id(mine)),
-			func(): return sys.is_local_operating(), 40.0, "the host to let me operate on table %d" % mine):
-		return
+	# Watch the other table from the start: over a lagged link its operation can begin (or even
+	# end) before the host has let me operate.
 	var st := {"states": {}}
 	var watch := func():
 		if other_sys.mg != null and other_sys.operator_id != 0 and other_sys.operator_id != Net.my_id():
 			st.states[str(other_sys.mg.net_state())] = true
+	if not await _do_until(func(): watch.call(); _press_at(game.table_position(mine), game.table_interact_id(mine)),
+			func(): return sys.is_local_operating(), 40.0, "the host to let me operate on table %d" % mine):
+		return
 	if not await _do_until(watch, func(): return int(game.case_on_table(mine).get("step_index", 0)) >= 1 and int(game.case_on_table(other).get("step_index", 0)) >= 1, 150.0, "both steps"):
 		return
 	if st.states.size() < 3:
@@ -727,6 +750,11 @@ func _sc_downed():
 			return
 		if not (seen.carried and seen.table and seen.op):
 			return _end(false, "downed client saw carried=%s table=%s minigame=%s" % [str(seen.carried), str(seen.table), str(seen.op)])
+		# The snapshot saying "standing" and the reliable revive event (which puts me beside the
+		# table) travel separately; over a lossy link either can land first.
+		var t_rev := _wall()
+		while (me.hp != Game.REVIVE_HP or me.global_position.y > 0.5) and _wall() - t_rev < 10.0:
+			await _frames(1)
 		if me.hp != Game.REVIVE_HP or me.global_position.y > 0.5:
 			return _end(false, "revived with hp %d at %s" % [me.hp, str(me.global_position)])
 		await _finish_together("went down, crawled, was carried and stitched back up (hp %d)" % me.hp)
@@ -796,14 +824,15 @@ func _shift_bot(st: Dictionary) -> void:
 		st.sent = Net.bytes_sent
 		st.recv = Net.bytes_received
 		st.payload = game.net_payload_bytes
+		st.counters = game.net_counters.duplicate()
 		game.net_section_bytes = {}
 		_say("patient on the table: %s/%s" % [game.case.patient_id, game.case.ailment_id])
-	if int(game.case.step_index) != int(st.last_step):
-		st.last_step = int(game.case.step_index)
+	if int(game.case.get("step_index", 0)) != int(st.last_step):
+		st.last_step = int(game.case.get("step_index", 0))
 		_say("step %d, vitals %.0f, shelf %s, operator %d" % [st.last_step, game.vitals, str(game.shelf), game.surgery.operator_id])
 	if me.operating or game.surgery.is_local_operating():
 		return
-	var need := Procedures.remaining_requirements(game.case.ailment_id, int(game.case.step_index))
+	var need := Procedures.remaining_requirements(game.case.ailment_id, int(game.case.get("step_index", 0)))
 	var short := {}
 	for kind in need.keys():
 		var n: int = int(need[kind]) - game.shelf_count(kind)
@@ -929,7 +958,7 @@ func _begin_operating() -> bool:
 	var ok := await _do_until(func(): _press_at(game.table_pos(), "table"),
 		func(): return game.surgery.is_local_operating(), 40.0, "the host to let me operate")
 	if ok:
-		_say("operating step %d" % int(game.case.step_index))
+		_say("operating step %d" % int(game.case.get("step_index", 0)))
 	return ok
 
 
@@ -1059,6 +1088,9 @@ func _do_until(step: Callable, cond: Callable, seconds: float, what: String) -> 
 			return false
 		if _wall() - start > seconds:
 			_end(false, "timed out after %.0f s waiting for %s" % [seconds, what])
+			return false
+		if role != "host" and not Net.active and scenario != "host_quit" and scenario != "host_kill" and game.phase == Game.Phase.MENU and _t_joined > 0.0:
+			_end(false, "lost the connection to the host while waiting for %s" % what)
 			return false
 		step.call()
 		await get_tree().physics_frame
