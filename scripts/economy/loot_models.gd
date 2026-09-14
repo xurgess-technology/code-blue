@@ -34,6 +34,58 @@ static func build(root: Node3D, kind: String, count: int) -> void:
 		_: _add(root, _box(Vector3(0.15, 0.1, 0.15), _m("magenta", Color.MAGENTA)), Vector3(0, 0.05, 0))
 
 
+## models sweep 2: what ItemModels merges into a kind's real model besides the model itself.
+##   copies:   [[asset key, Transform3D]] more models (the tubes in the sample rack)
+##   parts:    [[Mesh, surface, Transform3D, Material]] small primitive details (the blood in the
+##             tubes, the green trace on the heart monitor's glass)
+##   recolour: {material resource_name or "*": Color} albedo tint on the model's own materials
+## Positions are in the model's fitted frame: base on the floor, footprint centred.
+static func asset_extras(kind: String) -> Dictionary:
+	match kind:
+		"sample_rack":
+			var copies := []
+			var parts := []
+			var blood := _m("blood", Color(0.45, 0.02, 0.03), 0.25)
+			var tube := CylinderMesh.new()
+			tube.top_radius = 0.0075
+			tube.bottom_radius = 0.0075
+			tube.height = 0.045
+			tube.radial_segments = 8
+			tube.rings = 1
+			var cap := CylinderMesh.new()
+			cap.top_radius = 0.0105
+			cap.bottom_radius = 0.0105
+			cap.height = 0.012
+			cap.radial_segments = 8
+			cap.rings = 1
+			for i in 6:
+				var x := -0.0775 + i * 0.031
+				copies.append(["item/sample_tube", Transform3D(Basis(), Vector3(x, 0.006, 0.0))])
+				parts.append([tube, 0, Transform3D(Basis(), Vector3(x, 0.03, 0.0)), blood])
+				var cm := _m("cap_%d" % (i % 3), [Color(0.7, 0.1, 0.1), Color(0.2, 0.4, 0.8), Color(0.3, 0.6, 0.25)][i % 3], 0.5)
+				parts.append([cap, 0, Transform3D(Basis(), Vector3(x, 0.086, 0.0)), cm])
+			return {"copies": copies, "parts": parts}
+		"heart_monitor":
+			var trace := _screen("ecg", Color(0.3, 1.0, 0.45))
+			var parts := []
+			var pts := [Vector2(-0.09, 0.0), Vector2(-0.04, 0.0), Vector2(-0.025, 0.035), Vector2(-0.01, -0.03), Vector2(0.005, 0.0), Vector2(0.07, 0.0)]
+			for i in pts.size() - 1:
+				var a: Vector2 = pts[i]
+				var b: Vector2 = pts[i + 1]
+				var seg := BoxMesh.new()
+				seg.size = Vector3((b - a).length(), 0.004, 0.002)
+				var xf := Transform3D(Basis(Vector3.BACK, (b - a).angle()), Vector3(HEART_SCREEN.x + (a.x + b.x) * 0.5, HEART_SCREEN.y + (a.y + b.y) * 0.5, HEART_SCREEN.z))
+				parts.append([seg, 0, xf, trace])
+			return {"parts": parts}
+		"patient_records":
+			return {"recolour": {"*": Color(0.86, 0.72, 0.46)}}
+	return {}
+
+
+## Where the heart monitor's trace sits on the television_02 model's glass (fitted frame).
+const HEART_SCREEN := Vector3(-0.03, 0.22, 0.175)
+
+
 ## Rough footprint (x, height, z) so the pickup box and shelves can size themselves.
 static func footprint(kind: String) -> Vector3:
 	match kind:
@@ -225,6 +277,17 @@ static func _pill_bottles(root: Node3D, n: int) -> void:
 
 
 static func _xray_film(root: Node3D) -> void:
+	# models sweep 2: a real chest radiograph (CC0, `mat/xray_film`) on the film when it exists.
+	var real := _xray_material()
+	if real != null:
+		_add(root, _box(Vector3(0.24, 0.002, 0.275), _m("xray_sleeve", Color(0.05, 0.07, 0.09), 0.3)), Vector3(0, 0.001, 0))
+		var mi := MeshInstance3D.new()
+		var pm := PlaneMesh.new()
+		pm.size = Vector2(0.224, 0.256)
+		mi.mesh = pm
+		mi.material_override = real
+		_add(root, mi, Vector3(0, 0.0025, 0))
+		return
 	var film := _m("xray_film", Color(0.08, 0.12, 0.18), 0.25, 0.0, Color(0.15, 0.25, 0.35), 0.3)
 	var bone := _m("xray_bone", Color(0.5, 0.6, 0.66), 0.3, 0.0, Color(0.45, 0.6, 0.7), 0.7)
 	_add(root, _box(Vector3(0.28, 0.003, 0.23), film), Vector3(0, 0.0015, 0))
@@ -233,6 +296,29 @@ static func _xray_film(root: Node3D) -> void:
 	for i in 5:
 		for s in [-1.0, 1.0]:
 			_add(root, _box(Vector3(0.09, 0.001, 0.008), bone), Vector3(s * 0.05, 0.0035, -0.07 + i * 0.035), Vector3(0, s * (14.0 + i * 3.0), 0))
+
+
+## The radiograph as a faintly backlit film, or null when the texture is missing.
+static func _xray_material() -> StandardMaterial3D:
+	if _mats.has("xray_real"):
+		return _mats["xray_real"]
+	var loop := Engine.get_main_loop()
+	var assets = (loop as SceneTree).root.get_node_or_null("Assets") if loop is SceneTree else null
+	var m: StandardMaterial3D = null
+	if assets != null and assets.has("mat/xray_film"):
+		var src = assets.material("mat/xray_film")
+		if src is StandardMaterial3D:
+			m = StandardMaterial3D.new()
+			m.resource_name = "loot_xray_real"
+			m.albedo_texture = src.albedo_texture
+			m.albedo_color = Color(0.72, 0.82, 0.9)
+			m.roughness = 0.25
+			m.emission_enabled = true
+			m.emission_texture = src.albedo_texture
+			m.emission = Color(0.45, 0.6, 0.75)
+			m.emission_energy_multiplier = 0.35
+	_mats["xray_real"] = m
+	return m
 
 
 static func _records(root: Node3D) -> void:

@@ -1,8 +1,9 @@
 class_name ItemModels
 extends RefCounted
-## Visuals for item stacks, built from primitives so nothing waits on downloads.
-## A registered asset under `item/<kind>` always wins. Origin sits at the base of the stack,
-## there is no collision, and a stack of N looks like N things.
+## Visuals for item stacks. A registered asset under `item/<kind>` always wins (models sweep 2:
+## merged into one shared mesh per kind, see asset_mesh()); everything else is built from
+## primitives. Origin sits at the base of the stack, there is no collision, and a stack of N
+## looks like N things.
 
 
 const LootModels := preload("res://scripts/economy/loot_models.gd")
@@ -36,11 +37,9 @@ static var _tint_mats := {}
 
 
 static func make(kind: String, count: int = 1) -> Node3D:
-	var assets = Engine.get_main_loop().root.get_node_or_null("Assets") if Engine.get_main_loop() else null
-	if assets != null and assets.has("item/" + kind):
-		var real: Node3D = assets.spawn("item/" + kind)
-		if real != null:
-			return real
+	var mesh := asset_mesh(kind)
+	if mesh != null:
+		return _from_template(kind, mesh, count)
 	var root := Node3D.new()
 	root.name = "Model_%s" % kind
 	match kind:
@@ -123,6 +122,11 @@ static func apply_tint(node: Node, kind: String, soft := false) -> void:
 
 ## Rough footprint so containers and shelves can space stacks out.
 static func footprint(kind: String) -> Vector3:
+	# models sweep 2: a real model's measured size (stacks keep the table's footprint for the pile).
+	if not ItemsDB.def(kind).get("stack", false):
+		var mesh := asset_mesh(kind)
+		if mesh != null:
+			return (asset_transform(kind) * mesh.get_aabb()).size
 	match kind:
 		"anesthetic": return Vector3(0.14, 0.09, 0.08)
 		"gauze": return Vector3(0.22, 0.1, 0.12)
@@ -137,6 +141,295 @@ static func footprint(kind: String) -> Vector3:
 
 
 # ---------------------------------------------------------------------------
+# models sweep 2: real models from Assets (`item/<kind>`)
+#
+# The first time a kind is asked for, its model (plus the extra parts LootModels.asset_extras()
+# adds: tubes in the rack, the trace on the monitor) is flattened into ONE ArrayMesh with one
+# surface per material, the Assets fixup baked in, decimated to a triangle budget and given fresh
+# LODs. Every stack of that kind then shares the mesh: one MeshInstance3D, one draw per material,
+# one rim overlay. Kinds without a model (or a missing file) keep their primitive.
+
+## Triangle budget per model after decimation (small loot / bulky loot / surgical supplies).
+const TRI_BUDGET_SMALL := 2600
+const TRI_BUDGET_BULKY := 6000
+
+## Tools only (perfprobe --models): build every item from primitives, as before the models sweep.
+static var primitives_only := false
+static var _asset_meshes := {}   # kind -> ArrayMesh, or null when the kind has no usable model
+static var _asset_xforms := {}   # kind -> Transform3D the shared mesh is drawn with
+
+
+static func _assets() -> Node:
+	var loop := Engine.get_main_loop()
+	return (loop as SceneTree).root.get_node_or_null("Assets") if loop is SceneTree else null
+
+
+## The shared mesh for a kind's real model, or null (no model registered or the file is missing).
+static func asset_mesh(kind: String) -> ArrayMesh:
+	if primitives_only:
+		return null
+	if _asset_meshes.has(kind):
+		return _asset_meshes[kind]
+	var mesh: ArrayMesh = null
+	var assets := _assets()
+	if assets != null and assets.has("item/" + kind):
+		var parts := _model_parts(assets, "item/" + kind, Transform3D())
+		var extras: Dictionary = LootModels.asset_extras(kind) if LootTable.has(kind) else {}
+		for c in extras.get("copies", []):
+			if assets.has(String(c[0])):
+				parts.append_array(_model_parts(assets, String(c[0]), c[1]))
+		for p in extras.get("parts", []):
+			parts.append(p)
+		var recolour: Dictionary = extras.get("recolour", {})
+		if not recolour.is_empty():
+			for p in parts:
+				p[3] = _recoloured(p[3], recolour)
+		var budget := TRI_BUDGET_BULKY if ItemsDB.is_bulky(kind) else TRI_BUDGET_SMALL
+		# Fast path: one imported mesh already under budget (the heavy models are baked that way,
+		# see ASSETS.md) is used as it is, keeping its import LODs; only the fixup moves it.
+		var single := extras.is_empty() and not parts.is_empty() and parts[0][0] is ArrayMesh and _tris(parts) <= budget
+		for p in parts:
+			single = single and p[0] == parts[0][0] and p[2] == parts[0][2] and p[3] == (p[0] as Mesh).surface_get_material(int(p[1]))
+		if single:
+			mesh = parts[0][0]
+			_asset_xforms[kind] = parts[0][2]
+		else:
+			mesh = merge_parts(parts, budget)
+			if mesh != null:
+				mesh.resource_name = "item_" + kind
+	_asset_meshes[kind] = mesh
+	return mesh
+
+
+## The transform the shared mesh of a kind is drawn with (identity for merged meshes).
+static func asset_transform(kind: String) -> Transform3D:
+	return _asset_xforms.get(kind, Transform3D())
+
+
+static func _tris(parts: Array) -> int:
+	var n := 0
+	for p in parts:
+		if p[0] is ArrayMesh:
+			n += (p[0] as ArrayMesh).surface_get_array_index_len(int(p[1])) / 3
+	return n
+
+
+## [Mesh, surface, Transform3D, Material] for every surface of a model key, in the frame of its
+## Assets fixup then `xf`.
+static func _model_parts(assets: Node, key: String, xf: Transform3D) -> Array:
+	var out: Array = []
+	var scene: PackedScene = assets.model(key)
+	if scene == null:
+		return out
+	var fix: Transform3D = xf * assets.fixup(key)
+	var hide: Array = assets.info(key).get("hide", [])
+	var inst := scene.instantiate()
+	for n in inst.find_children("*", "MeshInstance3D", true, false):
+		var mi := n as MeshInstance3D
+		if mi.mesh == null or hide.has(String(mi.name)):
+			continue
+		var t := Transform3D()
+		var p: Node = mi
+		while p != null and p != inst:
+			if p is Node3D:
+				t = (p as Node3D).transform * t
+			p = p.get_parent()
+		for s in mi.mesh.get_surface_count():
+			var mat: Material = mi.material_override
+			if mat == null:
+				mat = mi.get_surface_override_material(s)
+			if mat == null:
+				mat = mi.mesh.surface_get_material(s)
+			out.append([mi.mesh, s, fix * t, mat])
+	inst.free()
+	return out
+
+
+static var _recolour_cache := {}
+
+
+static func _recoloured(mat: Material, recolour: Dictionary) -> Material:
+	if not (mat is BaseMaterial3D):
+		return mat
+	var col = recolour.get(String(mat.resource_name), recolour.get("*", null))
+	if col == null:
+		return mat
+	var key := "%d|%s" % [mat.get_instance_id(), str(col)]
+	if not _recolour_cache.has(key):
+		var m := (mat as BaseMaterial3D).duplicate() as BaseMaterial3D
+		m.albedo_color = col
+		_recolour_cache[key] = m
+	return _recolour_cache[key]
+
+
+## Merge [Mesh, surface, xf, material] parts into one ArrayMesh, one surface per material,
+## decimated to `budget` triangles in total, with LODs. Null when there is nothing to merge.
+static func merge_parts(parts: Array, budget: int) -> ArrayMesh:
+	var groups := {}    # material instance id -> {mat, arrays list}
+	var order: Array = []
+	var total := 0
+	for p in parts:
+		var mesh: Mesh = p[0]
+		var s: int = p[1]
+		if mesh is ArrayMesh and (mesh as ArrayMesh).surface_get_primitive_type(s) != Mesh.PRIMITIVE_TRIANGLES:
+			continue
+		var mat: Material = p[3]
+		var gid := mat.get_instance_id() if mat != null else 0
+		if not groups.has(gid):
+			groups[gid] = {"mat": mat, "list": []}
+			order.append(gid)
+		var arr := mesh.surface_get_arrays(s)
+		groups[gid].list.append([arr, p[2]])
+		var idx = arr[Mesh.ARRAY_INDEX]
+		total += (idx.size() if idx != null else (arr[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()) / 3
+	if order.is_empty():
+		return null
+	var keep := clampf(float(budget) / maxf(1.0, float(total)), 0.0, 1.0)
+	var im := ImporterMesh.new()
+	for gid in order:
+		var arrays := _combine(groups[gid].list)
+		var tris := (arrays[Mesh.ARRAY_INDEX] as PackedInt32Array).size() / 3
+		if keep < 0.95 and tris > 200:
+			arrays[Mesh.ARRAY_INDEX] = _decimated(arrays, int(tris * keep))
+		if (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size() > (arrays[Mesh.ARRAY_INDEX] as PackedInt32Array).size() * 0.6:
+			arrays = _compact(arrays)
+		im.add_surface(Mesh.PRIMITIVE_TRIANGLES, arrays, [], {}, groups[gid].mat)
+	im.generate_lods(25.0, 60.0, [])
+	return im.get_mesh()
+
+
+## One surface's worth of arrays from several [arrays, xf], transformed, with tangents when the
+## parts had UVs and normals.
+static func _combine(list: Array) -> Array:
+	var verts := PackedVector3Array()
+	var norms := PackedVector3Array()
+	var uvs := PackedVector2Array()
+	var cols := PackedColorArray()
+	var idx := PackedInt32Array()
+	var has_uv := true
+	var has_col := false
+	for e in list:
+		var a: Array = e[0]
+		if a[Mesh.ARRAY_TEX_UV] == null:
+			has_uv = false
+		if a[Mesh.ARRAY_COLOR] != null:
+			has_col = true
+	for e in list:
+		var a: Array = e[0]
+		var xf: Transform3D = e[1]
+		var nb := xf.basis.inverse().transposed()
+		var base := verts.size()
+		var v: PackedVector3Array = a[Mesh.ARRAY_VERTEX]
+		var n = a[Mesh.ARRAY_NORMAL]
+		for i in v.size():
+			verts.append(xf * v[i])
+			norms.append((nb * (n[i] if n != null else Vector3.UP)).normalized())
+		if has_uv:
+			uvs.append_array(a[Mesh.ARRAY_TEX_UV])
+		if has_col:
+			if a[Mesh.ARRAY_COLOR] != null:
+				cols.append_array(a[Mesh.ARRAY_COLOR])
+			else:
+				for i in v.size():
+					cols.append(Color.WHITE)
+		var ia = a[Mesh.ARRAY_INDEX]
+		if ia != null:
+			for i in (ia as PackedInt32Array):
+				idx.append(base + i)
+		else:
+			for i in v.size():
+				idx.append(base + i)
+	var out := []
+	out.resize(Mesh.ARRAY_MAX)
+	out[Mesh.ARRAY_VERTEX] = verts
+	out[Mesh.ARRAY_NORMAL] = norms
+	out[Mesh.ARRAY_INDEX] = idx
+	if has_uv:
+		out[Mesh.ARRAY_TEX_UV] = uvs
+	if has_col:
+		out[Mesh.ARRAY_COLOR] = cols
+	if has_uv:
+		var st := SurfaceTool.new()
+		st.create_from_arrays(out)
+		st.generate_tangents()
+		out = st.commit_to_arrays()
+	return out
+
+
+## Drop the vertices a decimated index list no longer uses.
+static func _compact(arrays: Array) -> Array:
+	var idx: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+	var count := (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
+	var remap := PackedInt32Array()
+	remap.resize(count)
+	remap.fill(-1)
+	var order := PackedInt32Array()
+	for i in idx.size():
+		var v := idx[i]
+		if remap[v] < 0:
+			remap[v] = order.size()
+			order.append(v)
+		idx[i] = remap[v]
+	var out := arrays.duplicate()
+	out[Mesh.ARRAY_INDEX] = idx
+	for slot in [Mesh.ARRAY_VERTEX, Mesh.ARRAY_NORMAL, Mesh.ARRAY_TEX_UV, Mesh.ARRAY_COLOR]:
+		var src = arrays[slot]
+		if src == null:
+			continue
+		var dst = src.duplicate()
+		dst.resize(order.size())
+		for j in order.size():
+			dst[j] = src[order[j]]
+		out[slot] = dst
+	var tan = arrays[Mesh.ARRAY_TANGENT]
+	if tan != null:
+		var t := PackedFloat32Array()
+		t.resize(order.size() * 4)
+		for j in order.size():
+			for c in 4:
+				t[j * 4 + c] = tan[order[j] * 4 + c]
+		out[Mesh.ARRAY_TANGENT] = t
+	return out
+
+
+## The meshoptimizer LOD level closest to (and not under) `target` triangles, as base indices.
+static func _decimated(arrays: Array, target: int) -> PackedInt32Array:
+	var im := ImporterMesh.new()
+	im.add_surface(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	im.generate_lods(25.0, 60.0, [])
+	var best: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+	var best_err := absf(float(best.size() / 3 - target))
+	for l in im.get_surface_lod_count(0):
+		var li := im.get_surface_lod_indices(0, l)
+		var tris := li.size() / 3
+		if tris < target * 0.6:
+			continue
+		var err := absf(float(tris - target))
+		if err < best_err:
+			best = li
+			best_err = err
+	return best
+
+
+## A stack of a real model: one shared mesh per copy, laid out like the primitive stacks.
+static func _from_template(kind: String, mesh: ArrayMesh, count: int) -> Node3D:
+	var root := Node3D.new()
+	root.name = "Model_%s" % kind
+	var n := 1
+	if ItemsDB.def(kind).get("stack", false) or ItemsDB.is_consumable(kind):
+		n = clampi(count, 1, 6)
+	var xf := asset_transform(kind)
+	var size := (xf * mesh.get_aabb()).size
+	for i in n:
+		var mi := MeshInstance3D.new()
+		mi.mesh = mesh
+		var x := (i % 3 - (mini(n, 3) - 1) * 0.5) * size.x * 1.25
+		var z := 0.0 if i < 3 else size.z * 1.2
+		var spin := Basis(Vector3.UP, i * 0.72) if n > 1 else Basis()
+		mi.transform = Transform3D(spin, Vector3(x, 0.0, z)) * xf
+		root.add_child(mi)
+	return root
+
 
 static func _mat(col: Color, rough := 0.6, metal := 0.0) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()

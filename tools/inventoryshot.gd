@@ -30,6 +30,8 @@ func _ready() -> void:
 
 
 func _run() -> void:
+	if _only == "" or _only == "models":
+		await _model_shots()
 	if _only == "" or _only == "game":
 		await _game_shots()
 	if _only == "" or _only == "dev":
@@ -233,6 +235,111 @@ func _outdoor_piles() -> void:
 		pile.queue_free()
 		await _frames(2)
 	root.queue_free()
+
+
+# =========================================================================
+# MODELS HOOK (models sweep 2): every loot kind's real model, in a row in a lit room and in a dark
+# wing (flashlight on and off), each one held in first person, and the gold rim up close.
+
+func _model_shots() -> void:
+	await _start(_seed)
+	game.begin_shift()
+	await _frames(20)
+	var kinds: Array = preload("res://scripts/economy/loot_table.gd").kinds()
+	print("[inventoryshot] models: %s" % str(kinds.map(func(k): return "%s=%s" % [k, "model" if ItemModels.asset_mesh(k) != null else "primitive"])))
+	# Lit: the clock-in room, looking along clear floor.
+	var lit := game.clock_pos()
+	var placed := await _model_rows(kinds, lit)
+	bot.set_flashlight(false)
+	await _frames(30)
+	await _shot("20_models_lit_row")
+	for g in range(0, kinds.size(), 4):
+		_model_close(placed, g, g + 4)
+		await _frames(20)
+		await _shot("21_models_lit_close_%d" % (g / 4))
+	_free_items(placed)
+	# Dark wing.
+	var dark := _dark_spot()
+	placed = await _model_rows(kinds, dark)
+	for light in [true, false]:
+		bot.set_flashlight(light)
+		await _frames(30)
+		await _shot("23_models_dark_row_%s" % ("flashlight" if light else "unlit"))
+	bot.set_flashlight(true)
+	for g in range(0, kinds.size(), 4):
+		_model_close(placed, g, g + 4)
+		await _frames(20)
+		await _shot("24_models_dark_close_%d" % (g / 4))
+	_free_items(placed)
+	# Held in first person, in the dark wing with the flashlight on.
+	for k in kinds:
+		_clear()
+		bot.selected = 0
+		bot.take_into(k, 3 if Items.stacks(k) else 1, 100)
+		await _frames(8)
+		await _shot("26_held_%s" % k)
+	_clear()
+
+
+var _row_from := Vector3.ZERO
+var _row_dir := Vector3.FORWARD
+
+
+## Two rows of loot on clear floor in front of a spot; the camera stands back to see them all.
+func _model_rows(kinds: Array, near: Vector3) -> Array:
+	var space := get_viewport().world_3d.direct_space_state
+	var best_dir := Vector3(1, 0, 0)
+	var best := -1.0
+	for i in 16:
+		var d := Vector3(cos(TAU * i / 16.0), 0, sin(TAU * i / 16.0))
+		var q := PhysicsRayQueryParameters3D.create(near + Vector3.UP * 0.4, near + Vector3.UP * 0.4 + d * 5.0)
+		q.collision_mask = C.L_WORLD
+		var hit := space.intersect_ray(q)
+		var reach: float = 5.0 if hit.is_empty() else (near + Vector3.UP * 0.4).distance_to(hit.position)
+		if reach > best:
+			best = reach
+			best_dir = d
+	_row_from = near
+	_row_dir = best_dir
+	var side := best_dir.cross(Vector3.UP)
+	var out := []
+	var half := int(ceil(kinds.size() / 2.0))
+	for i in kinds.size():
+		var row := 0 if i < half else 1
+		var col := i if row == 0 else i - half
+		var at: Vector3 = near + best_dir * (2.2 + row * 0.75) + side * ((col - (half - 1) * 0.5) * 0.36)
+		# Groups of four (one close-up each) sit in 2 x 2 squares 0.5 m apart; the groups make a
+		# 3 x 2 grid 1.2 m apart in front of the camera.
+		var g := i / 4
+		at = near + best_dir * (1.5 + (g / 3) * 1.5 + (i % 4) / 2 * 0.65) + side * ((g % 3 - 1) * 1.5 + (i % 2) * 0.65 - 0.33)
+		var xf := Transform3D(Basis(Vector3.UP, 0.5), game._floor_at(at) + Vector3.UP * 0.005)
+		var it = game._spawn_item(kinds[i], 3 if Items.stacks(kinds[i]) else 1, xf, WorldItem.State.LOOSE)
+		it.value = 100
+		it.place(xf, WorldItem.State.LOOSE)
+		out.append(it)
+	_look_from(near + best_dir * 0.2, near + best_dir * 2.6)
+	bot.bot_pitch = -0.5
+	await _frames(2)
+	return out
+
+
+## Stand close to items [a, b) of the rows.
+func _model_close(items: Array, a: int, b: int) -> void:
+	var c := Vector3.ZERO
+	var n := 0
+	for i in range(a, mini(b, items.size())):
+		c += (items[i] as Node3D).global_position
+		n += 1
+	c /= maxf(1, n)
+	_look_from(c - _row_dir * 1.1, c)
+	bot.bot_pitch = -0.95
+
+
+func _free_items(items: Array) -> void:
+	for it in items:
+		if is_instance_valid(it):
+			game.world_items.erase(it.item_id)
+			it.queue_free()
 
 
 # =========================================================================

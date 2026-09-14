@@ -625,6 +625,38 @@ loop.pay_for(case, shift) -> int   # stable 200 (+25/shift), extra stable 300 (+
   devtest's loop hooks, nettest `deliver`, `surgery`, `late_join`, `full_shift_lag`, `economy`
   (loot kept through a shift) and `two_patients`.
 
+## Models (loot and paramedic models, sweep 2 integration)
+
+`scripts/assets.gd` entries may now carry `pitch` / `roll` (degrees, applied before `yaw`),
+`size` (longest side in metres) or `height` (metres) — either makes `spawn()` measure the model
+once and put its base on the floor, centred — plus `hide` (mesh node names to skip) and `albedo`
+(a replacement colour texture). New helpers: `Assets.fixup(key) -> Transform3D` (what `spawn()`
+applies) and `Assets.measure(key, xf) -> AABB`. Keys: `item/<loot kind>` for 15 kinds,
+`item/sample_tube`, `crew/paramedic_a`, `crew/paramedic_b`, `mat/xray_film`. Assets starts
+threaded loads of every `item/*` and `crew/*` file in `_ready`.
+
+`scripts/item_models.gd`:
+
+```gdscript
+ItemModels.asset_mesh(kind) -> ArrayMesh      # the kind's shared real-model mesh, or null (primitive)
+ItemModels.asset_transform(kind) -> Transform3D   # what that mesh is drawn with (identity when merged)
+ItemModels.merge_parts(parts, tri_budget) -> ArrayMesh  # [[Mesh, surface, Transform3D, Material]]:
+                                              # one surface per material, decimated, compacted, LODs
+ItemModels.primitives_only                    # static, tools only: build everything from primitives
+```
+
+`make()` / `make_tinted()` / `footprint()` keep their contracts; `footprint()` of a non-stacking
+kind with a model is the model's measured size. A model stack is one `MeshInstance3D` per copy
+sharing the mesh (the rim goes on it). `LootModels.asset_extras(kind) -> {copies, parts, recolour}`
+adds details to a kind's merged model (economy visuals).
+
+`scripts/loop/crew.gd`: the medics are `crew/paramedic_*` models animated by an `AnimationTree`
+(idle/walk blend by speed, the back medic's arms from "holding-both"), with the capsule figures as
+the fallback; the crew has an `AnimatableBody3D` "Blocker" on `C.L_WORLD` (mask 0) that anything
+building a look-alike crew must remove (the warmup does). `CrewScript.shapes_only` (static, tools
+only) forces the capsule medics. The fallback levels' desk phone (`phone.gd` `create(false)`) uses
+the `desk_phone` loot model when it exists.
+
 ## OR screen and minimal HUD (orscreen worker, sweep 2 wave 3)
 
 The OR wall monitor (`scripts/orscreen/`) is derived locally on every machine from state that is

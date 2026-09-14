@@ -63,10 +63,21 @@ func _run() -> void:
 	# 4. The paramedics with the gurney, seen from in front.
 	await _until(func(): return not game.loop.crews.is_empty(), 20.0)
 	await _wait(4.0)
-	await _pose_crew(5.0, 0.0)
+	await _pose_crew(6.5, 0.4)
 	await _shot("04_paramedics_gurney", 0.4)
-	await _pose_crew(2.8, 2.6)
+	await _pose_crew(3.2, 3.6)
 	await _shot("05_paramedics_side", 0.4)
+	# MODELS HOOK: close behind the pushing paramedic, then at the table during the hand-over.
+	await _pose_crew(-4.6, 0.9)
+	await _shot("05b_paramedics_behind", 0.3)
+	await _until(func(): return not game.loop.crews.is_empty() and String(game.loop.crews.values()[0].ph) == "hand", 120.0)
+	await _wait(0.2)
+	if not game.loop.crews.is_empty():
+		var cr: Dictionary = game.loop.crews.values()[0]
+		var tp: Vector3 = game.table_position(int(cr.tb))
+		var from: Vector3 = cr.p + (cr.p - tp).normalized() * 3.4 + Basis(Vector3.UP, float(cr.y)) * Vector3(0, 0, -1.6)
+		_look_from(game._floor_at(from), (cr.p + tp) * 0.5 + Vector3.UP * 0.8)
+		await _shot("05c_paramedics_at_table", 0.6)
 
 	# 5. Two patients on the two tables.
 	await _until(func(): return String(game.case.get("state", "")) == "on_table", 120.0)
