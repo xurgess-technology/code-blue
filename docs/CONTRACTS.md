@@ -204,6 +204,29 @@ tools). Same frame and API; what differs underneath:
   for the amputation ailment until the paddle comes off. `make_severed_limb` duplicates the static
   `Seal_PaddleSevered_L` (paddle, cut face, line) at the paddle's current place.
 
+**Bob's Blender model (2026-09-14).** `PatientBody.create("bob")` builds Bob from `patient/human_bob`
+(`assets/models/characters/human/bob.glb`, made in `art/human/`) through
+`scripts/patients/bob_model_builder.gd`, falling back to the reshaped Kenney rig in `bob_builder.gd`
+when the asset or its shaders are missing (`BobModelBuilder.kenney_only = true` forces it). Same
+frame and API; underneath:
+
+- The model lies in its `Lying` clip (frame 0 for `site_transform`), turned so the head is at -X and
+  his right arm on +Z, centred along X. The builder samples `Lying` by hand every frame at the body's
+  breathing rate; stirs, fidgets, twitches and flatline turn the arm, leg, hand and head bones on top.
+  `breath_amp` is 0.
+- Sites come from the GLB's `Site_*` nodes (bones `forearm.L`, `hips`, `upperarm.R`, `forearm.R`),
+  levelled so +Y is straight up; anchors ride those bones. The gunshot is moved from the flank
+  (0.62 rad round) to 0.25 rad round the belly so the skin under the forceps patch is nearly level.
+  Sections: `limb` half_up 0.0489 / half_side 0.049, `limb_cut` 0.0411 / 0.0384, `shape` 2.2;
+  `infection_start` 0.172 and 0.0295.
+- The gunshot ailment hides `Human_GownPanel` (a real opening in the gown, not a patch over it).
+  Amputation hides `Human_Forearm_R`; the upper arm's own stump cap shows. `make_severed_limb` bakes
+  `Human_Forearm_R` from the current pose (`bake_mesh_from_current_skeleton_pose`), cut cap included.
+- `skin_mats` is the model's skin ShaderMaterial (`human_skin.gdshader`): `pallor`, `grey`, `infect`
+  (graded by UV2.x, metres along the right arm, from 0.384 to 0.434), plus `gash`, `wound`,
+  `vein_glow`. Overlays (tourniquet, stump dressing from `SealModelBuilder.make_stump_dressing`,
+  wound, pad and belly band, drips) are fitted to the model.
+
 ## Surgery (surgery worker)
 
 ```gdscript
@@ -797,7 +820,10 @@ kind with a model is the model's measured size. A model stack is one `MeshInstan
 sharing the mesh (the rim goes on it). `LootModels.asset_extras(kind) -> {copies, parts, recolour}`
 adds details to a kind's merged model (economy visuals).
 
-`scripts/loop/crew.gd`: the medics are `crew/paramedic_*` models animated by an `AnimationTree`
+`scripts/loop/crew.gd` (HUMAN HOOK, 2026-09-14): the medics are the Blender paramedics
+`crew/human_paramedic_a` (front, `Walk` at speed / 1.40, `Idle` when stopped) and `crew/human_paramedic_b`
+(back, 1.49 m behind the centre with both hands on the handle, `Push` at speed / 1.25, frozen when
+stopped); before that the medics were `crew/paramedic_*` models (still the fallback) animated by an `AnimationTree`
 (idle/walk blend by speed, the back medic's arms from "holding-both"), with the capsule figures as
 the fallback; the crew has an `AnimatableBody3D` "Blocker" on `C.L_WORLD` (mask 0) that anything
 building a look-alike crew must remove (the warmup does). `CrewScript.shapes_only` (static, tools
@@ -903,6 +929,13 @@ game.downed_view           # scripts/downed/downed_view.gd: blood trails, the lo
   2.7-3.4 m from the OR table; a table model (`scripts/downed/player_table.gd`) is built only when
   nothing is under the spot. Aim proxy `player_table` (prompt "Place X on the table", or the stitches
   operation's prompt).
+- **Human model (2026-09-14, HUMAN HOOK)**: `player_body.gd` builds the player's surgeon variation
+  (`HumanModel.surgeon_for(player_id)`, scrubs tinted by the colour) lying in its `Lying` clip, with
+  `Human_TopLower` hidden and `Human_TopRolled` shown; `gash` is the model's `Site_gash` (on `spine`),
+  levelled; `site_section("gash").half_len` 0.096 x height / 1.78. New `set_gash_open(f)` (1 fresh .. 0
+  closed) drives the `GashOpen` blend shape of `Human_GashSkin` and the skin shader's `gash`; the
+  stitches step calls it with `open_fraction()` every frame, `stitched` closes it. The primitive body
+  is the fallback (`PlayerBody.primitive_only` forces it).
 - Stitches: `Procedures.AILMENTS.stitches`, one step `{id: "stitch", item: "suture_kit", uses: 1,
   game: "stitches", site: "gash"}`, needing a kit on the shared shelf. The case
   `{patient_id: "player", player_id, ailment_id: "stitches", step_index, flags}` and the operation's
@@ -1078,6 +1111,18 @@ Settings "carry_camera": "shoulder" (default) | "first_person"
   A new rig is an entry in `RigMap.RIGS`. A body without a matching rig (the capsule placeholder, a
   dev dummy) keeps `HeldThirdPerson` at `BodyHands.FIXED_ATTACH`. The local player's body only
   animates while the carry camera shows it. The jab shows a syringe in the hand (both views).
+- **The human rig (2026-09-14, HUMAN HOOK)**: `RigMap.HUMAN` (picked first by `detect()`) is the Blender
+  surgeon: `generic: true`, `bones` torso `chest`, arms `upperarm.*`, plus `fore` (forearms), `hand_bone`
+  (`hand.*`, where `HandR`/`HandL` and the grip sockets go, palm 0.055 m along the bone) and
+  `torso_chain` (spine, chest, upperchest share the lean). `RigMap.pose_of(rig, name)` reads a rig's own
+  `poses` over `POSES` (the human's `carry`, `hold`, `hold_both`). With `generic`, `body_poser.gd` turns
+  bones in skeleton space: the forearm points along the pose direction, the upper arm hangs 0.65 lower
+  unless the arm is raised. `body_hands.gd` plays `Idle`, `Jog` (moving; the players' 3.4 m/s), `Sprint`,
+  `Walk` at 1.45x (carrying, dragging, winding up), `Crawl` (downed; frozen when not moving), `Carried`,
+  `Lying` (on the table), and the one-shots `PickUp` (an interact aimed at `it_*`) / `Interact` when an
+  interact comes in standing still. `body_hands.lies_by_clip()` tells `Player._update_down_pose` not to
+  tip the body; carried, the body sits at `Player.HUMAN_CARRIED_OFFSET` (-0.40, 0.235, 0.03) so the
+  Carried clip's belly lands on the carrier's right shoulder. The first-person arms stay `fp_arms`.
 - **Carry camera**: while the local player carries a downed player or drags a monster (setting
   "shoulder"), `Head/FX` eases (0.35 s) to `CARRY_OFFSET` (-1.0, 0.45, 2.0) in the head's frame (over
   the left shoulder; the body rides the right) or `DRAG_OFFSET` (0.45, 1.0, 3.6) with a 0.45 rad
@@ -1089,6 +1134,30 @@ Settings "carry_camera": "shoulder" (default) | "first_person"
   aim ray (`aim_segment`) runs along the camera's line from where it passes the head, reaching
   `C.INTERACT_RANGE` from the head, so nothing between the camera and the head is aimed at and the
   host's reach check is unchanged. Local only. Carrying bulky loot does not switch it on.
+
+## The human models (2026-09-14, art/human)
+
+`scripts/human/human_model.gd` (static): the Blender humans for players, Bob, the downed player and the
+paramedics. Every user keeps its Kenney or primitive path when the asset is missing.
+
+```gdscript
+HumanModel.available(variant) -> bool      # surgeon_a|b|c, bob, paramedic_a|b; false when HumanModel.disabled
+HumanModel.surgeon_for(peer_id) -> String  # SURGEONS[(peer_id - 1) mod 3]
+HumanModel.spawn(variant, tint := BAKED_TINT, own_skin := false) -> Node3D   # Assets root (faces -Z), shader materials, TopRolled hidden
+HumanModel.set_tint(root, colour) / cloth_of(root) / skin_of(root)
+HumanModel.piece(root, name) / show_piece(root, name, on) / skeleton(root) / anim_player(root)
+HumanModel.loop_clips(root)                # all clips loop except Interact / PickUp (library shared per variation)
+HumanModel.sample_clip(skel, anim, t) / bone_global(skel, bone) / chain_to(node, ancestor) / turn_bone(skel, bone, q)
+```
+
+- Assets keys (made in-house): `char/human_surgeon_a|b|c`, `patient/human_bob`, `crew/human_paramedic_a|b`
+  (`assets/models/characters/human/<variant>.glb`, scale 1, yaw 180). The Discharged keeps the Kenney
+  `patient/human` rig; the Walk-In and the Discharged get their own models later.
+- Materials: `shaders/human_cloth.gdshader` (`tint` recolours the scrubs by luminance from mask R,
+  `baked_tint` #3d8f80; mask G reflective strips) and `shaders/human_skin.gdshader` (`pallor`, `grey`,
+  `infect` / `infect_from` / `infect_full` on UV2, `gash`, `wound`, `vein_glow`). Players share one skin
+  material per variation; patients get their own.
+- Pieces, sites, clips and speeds: `art/human/README.md`.
 
 ## Dissection (dissection worker, sweep 3)
 

@@ -92,6 +92,15 @@ func _ready() -> void:
 		{"name": "29_hands_carry_cam_player_corridor", "fn": _pose_carry.bind("player", true), "settle": 60},
 		{"name": "29_hands_carry_cam_monster_corridor", "fn": _pose_carry.bind("monster", true), "settle": 60},
 	])
+	# HUMAN HOOK (art/human): the Blender humans in the game. `--only=human`.
+	shots.append_array([
+		{"name": "30_human_teammates_walk_sprint", "fn": _pose_human_gait, "settle": 22},
+		{"name": "31_human_teammate_carrying", "fn": _pose_human_carry, "settle": 40},
+		{"name": "32_human_teammate_crawling", "fn": _pose_human_crawl, "settle": 40},
+		{"name": "34_human_paramedics_gurney", "fn": _pose_human_crew, "settle": 60},
+	])
+	for st in HUMAN_BOB_STATES:
+		shots.append({"name": "33_human_bob_%s" % st[0], "fn": _pose_human_bob.bind(st[1], st[2]), "settle": 40})
 	shots.append({"name": "10_operating_hud", "fn": _pose_operating, "settle": 140})
 	if _only != "":
 		shots = shots.filter(func(s): return _matches(String(s.name)) or String(s.name) < "04")
@@ -629,3 +638,148 @@ func _matches(shot_name: String) -> bool:
 		if part != "" and shot_name.contains(part):
 			return true
 	return false
+
+
+# =========================================================================
+# HUMAN HOOK: the Blender humans (players, Bob, paramedics)
+# =========================================================================
+
+const HUMAN_BOB_STATES := [
+	["gunshot_open", "gunshot", {"sedation": 1.0}],
+	["gunshot_bullet_out", "gunshot", {"sedation": 1.0, "bullet_removed": true}],
+	["gunshot_dressed", "gunshot", {"sedation": 1.0, "bullet_removed": true, "dressed": true}],
+	["amputation_infected", "amputation", {"sedation": 1.0}],
+	["amputation_tourniquet", "amputation", {"sedation": 1.0, "tourniquet": 0.9}],
+	["amputation_sawn", "amputation", {"sedation": 1.0, "tourniquet": 0.9, "amputated": true}],
+	["amputation_dressed", "amputation", {"sedation": 1.0, "tourniquet": 0.9, "amputated": true, "dressed": true}],
+]
+var _mate2: Player = null
+
+
+func _second_mate() -> Player:
+	if _mate2 == null or not is_instance_valid(_mate2):
+		_mate2 = game.dev._make_bot_node(-51, "Teammate2", "bot")
+		_mate2.name_tag.text = "Teammate 2"
+		_mate2.set_flashlight(true)
+	if not _mate2.alive or _mate2.downed:
+		game._release_downed_links(_mate2)
+		_mate2.revive_full()
+		_mate2.refresh_downed_visuals()
+	return _mate2
+
+
+## Open ground outside the entrance: [from, dir].
+func _open_ground() -> Array:
+	var nz: Dictionary = game.level_info.get("neutral", {})
+	var sp: Array = nz.get("spawn_points", [])
+	var from: Vector3 = sp[0] if not sp.is_empty() else game.table_pos() + Vector3(0.6, 0, 4.2)
+	var ent: Vector3 = game.level_info.get("entrance", {}).get("position", game.table_pos())
+	return [from, Vector3(ent.x - from.x, 0, ent.z - from.z).normalized()]
+
+
+func _pose_human_gait() -> void:
+	_reset_hands_scene()
+	_ensure_shift()
+	var og := _open_ground()
+	var from: Vector3 = og[0]
+	var dir: Vector3 = og[1]
+	var side := dir.cross(Vector3.UP)
+	var a := _teammate()
+	var b := _second_mate()
+	_give(a, "bone_saw")
+	_give(b, "")
+	a.teleport(game._floor_at(from + dir * 6.0 - side * 0.8))
+	b.teleport(game._floor_at(from + dir * 8.5 + side * 0.9))
+	for m in [a, b]:
+		m.bot_yaw = atan2(dir.x, dir.z)
+		m.bot_move = Vector2(0, -1)
+	b.bot_sprint = true
+	bot.set_flashlight(true)
+	_look_from(from, from + dir * 5.0 + Vector3(0, 1.0, 0))
+
+
+func _pose_human_carry() -> void:
+	for m in [_mate, _mate2]:
+		if m != null and is_instance_valid(m):
+			m.bot_move = Vector2.ZERO
+			m.bot_sprint = false
+	_reset_hands_scene()
+	var og := _open_ground()
+	var from: Vector3 = og[0]
+	var dir: Vector3 = og[1]
+	var side := dir.cross(Vector3.UP)
+	var carrier := _second_mate()
+	var carried := _teammate()
+	_give(carrier, "")
+	_give(carried, "")
+	carrier.teleport(game._floor_at(from + dir * 3.2 + side * 0.4))
+	carried.teleport(game._floor_at(from + dir * 3.6 + side * 0.4))
+	game.down_player(carried, "test")
+	game.start_carry(carrier, carried)
+	carrier.bot_yaw = atan2(side.x, side.z) + 0.5
+	carrier.bot_move = Vector2(0, -0.6)
+	bot.set_flashlight(true)
+	_look_from(from, from + dir * 3.2 + Vector3(0, 1.1, 0))
+
+
+func _pose_human_crawl() -> void:
+	if _mate2 != null and is_instance_valid(_mate2):
+		_mate2.bot_move = Vector2.ZERO
+	_reset_hands_scene()
+	var og := _open_ground()
+	var from: Vector3 = og[0]
+	var dir: Vector3 = og[1]
+	var m := _teammate()
+	_give(m, "")
+	m.teleport(game._floor_at(from + dir * 2.6))
+	game.down_player(m, "test")
+	m.bot_yaw = atan2(dir.x, dir.z) + 0.6
+	m.bot_move = Vector2(0, -1)
+	bot.set_flashlight(true)
+	_look_from(from, from + dir * 2.6 + Vector3(0, 0.3, 0))
+
+
+func _pose_human_bob(ailment: String, flags: Dictionary) -> void:
+	if _mate != null and is_instance_valid(_mate):
+		_mate.bot_move = Vector2.ZERO
+	_reset_hands_scene()
+	_ensure_shift()
+	var ti := int(game.patient_tables[0].index) if not game.patient_tables.is_empty() else 0
+	var old: Dictionary = game.case_on_table(ti)
+	if old.is_empty() or String(old.get("patient_id", "")) != "bob" or String(old.get("ailment_id", "")) != ailment:
+		if not old.is_empty():
+			game.remove_case(int(old.id))
+		game.add_case({"patient_id": "bob", "ailment_id": ailment, "table": ti, "flags": flags.duplicate()})
+	else:
+		old.flags = flags.duplicate()
+		var bd = game.body_for_table(ti)
+		if bd != null:
+			bd.apply_flags(flags)
+	var body = game.body_for_table(ti)
+	var t: Vector3 = game.table_position(ti)
+	if body == null:
+		_look_from(t + Vector3(1.2, 0, 1.2), t + Vector3(0, 0.9, 0))
+		return
+	var site := "gunshot" if ailment == "gunshot" else "limb_cut"
+	var at: Vector3 = body.site_transform(site).origin
+	var bz: Vector3 = body.global_transform.basis.z
+	var bx: Vector3 = body.global_transform.basis.x
+	_look_from(at + bz * 1.15 - bx * 0.35 + Vector3(0, -0.55, 0), at)
+	bot.set_flashlight(false)
+
+
+func _pose_human_crew() -> void:
+	_reset_hands_scene()
+	var og := _open_ground()
+	var from: Vector3 = og[0]
+	var dir: Vector3 = og[1]
+	var side := dir.cross(Vector3.UP)
+	var crew: Node3D = (load("res://scripts/loop/crew.gd") as GDScript).create("bob", "amputation")
+	game.level.add_child(crew)
+	var yaw := atan2(-side.x, -side.z)
+	var start := game._floor_at(from + dir * 3.8 - side * 3.0)
+	crew.snap(start, yaw)
+	# roll it along at the crew's 1.25 m/s so the stride matches
+	var tw := create_tween()
+	tw.tween_method(func(v: float): crew.set_target(start + side * v, yaw, "in"), 0.0, 3.0, 2.4)
+	_look_from(from, from + dir * 3.8 + Vector3(0, 0.9, 0))

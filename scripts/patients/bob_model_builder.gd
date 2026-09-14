@@ -213,7 +213,7 @@ static func make_severed_limb(b, parent: Node) -> Node3D:
 	var src: MeshInstance3D = b.parts.get("limb_node")
 	if src == null or parent == null or not src.is_inside_tree():
 		return null
-	var mesh := src.bake_mesh_from_current_skeleton_pose()
+	var mesh := _bake_skinned(src, b.parts["human"].skel)
 	if mesh == null:
 		return null
 	var mi := MeshInstance3D.new()
@@ -229,3 +229,58 @@ static func make_severed_limb(b, parent: Node) -> Node3D:
 	if mi.is_inside_tree():
 		mi.global_transform = src.global_transform
 	return mi
+
+
+## CPU skinning of a skinned MeshInstance3D with the skeleton's current pose, in the mesh
+## instance's own space (bake_mesh_from_current_skeleton_pose needs a registered skin, which a hidden
+## or not-yet-drawn instance may not have).
+static func _bake_skinned(src: MeshInstance3D, skel: Skeleton3D) -> ArrayMesh:
+	var skin := src.skin
+	var am := src.mesh as ArrayMesh
+	if skin == null or am == null or skel == null:
+		return null
+	var mi_to_skel := HM.chain_to(src, skel).affine_inverse()
+	var mats: Array[Transform3D] = []
+	for i in skin.get_bind_count():
+		var bone := skin.get_bind_bone(i)
+		if bone < 0:
+			bone = skel.find_bone(String(skin.get_bind_name(i)))
+		var g := HM.bone_global(skel, bone) if bone >= 0 else Transform3D()
+		mats.append(mi_to_skel * g * skin.get_bind_pose(i))
+	var out := ArrayMesh.new()
+	for si in am.get_surface_count():
+		var arr := am.surface_get_arrays(si)
+		var verts: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+		var norms: PackedVector3Array = arr[Mesh.ARRAY_NORMAL]
+		var bones: PackedInt32Array = arr[Mesh.ARRAY_BONES]
+		var weights: PackedFloat32Array = arr[Mesh.ARRAY_WEIGHTS]
+		var tans = arr[Mesh.ARRAY_TANGENT]
+		var nb := bones.size() / maxi(1, verts.size())
+		for v in verts.size():
+			var p := Vector3.ZERO
+			var n := Vector3.ZERO
+			var tg := Vector3.ZERO
+			for k in nb:
+				var w := weights[v * nb + k]
+				if w <= 0.0:
+					continue
+				var m: Transform3D = mats[bones[v * nb + k]]
+				p += (m * verts[v]) * w
+				n += (m.basis * norms[v]) * w
+				if tans != null:
+					tg += (m.basis * Vector3(tans[v * 4], tans[v * 4 + 1], tans[v * 4 + 2])) * w
+			verts[v] = p
+			norms[v] = n.normalized()
+			if tans != null:
+				tg = tg.normalized()
+				tans[v * 4] = tg.x
+				tans[v * 4 + 1] = tg.y
+				tans[v * 4 + 2] = tg.z
+		arr[Mesh.ARRAY_VERTEX] = verts
+		arr[Mesh.ARRAY_NORMAL] = norms
+		arr[Mesh.ARRAY_BONES] = null
+		arr[Mesh.ARRAY_WEIGHTS] = null
+		if tans != null:
+			arr[Mesh.ARRAY_TANGENT] = tans
+		out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+	return out
