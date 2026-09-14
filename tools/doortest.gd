@@ -148,6 +148,19 @@ func _hinged_by_player() -> void:
 	_stand(front + d.normal * 3.0)
 	await _seconds(1.2)
 	_check(absf(d.amount) > 0.85, "once they step away it carries on (%.2f)" % d.amount)
+	# A dropped item in the way stops a closing door; kicked away, the door shuts.
+	var side := 1.0 if d.amount > 0.0 else -1.0
+	var lying: Vector3 = d.global_position + d.normal * side * 0.45 + d.along * 0.05 + Vector3.UP * 0.3
+	var it: Node = game._spawn_item("gauze", 2, Transform3D(Basis(), lying), WorldItem.State.LOOSE)
+	await _seconds(0.8)
+	game.doors._drive(d, 0.0, 1.6)
+	await _seconds(1.5)
+	_check(absf(d.amount) > 0.1, "a dropped item in its way stops the door closing (%.2f, item at %s)" % [d.amount, str(it.global_position.snappedf(0.1))])
+	it.global_position = d.global_position + d.normal * side * 3.0 + Vector3.UP * 0.3
+	await _seconds(1.5)
+	_check(d.is_closed(), "with the item moved the door closes (%.2f)" % d.amount)
+	game.world_items.erase(it.item_id)
+	it.queue_free()
 	game.doors.set_all(false)
 	await _seconds(1.5)
 

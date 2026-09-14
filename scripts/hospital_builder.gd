@@ -92,6 +92,10 @@ static func build(gen: Dictionary, info: Dictionary) -> Node3D:
 	for step in commit_steps(wings, wings_root):
 		step.call()
 	finish_info(gen, info, base, wings)
+	# The base part is kept (the wing loader merges its lists with every new set of wings); its
+	# mesh data is not needed any more.
+	for key in ["geo", "faces", "furn", "colliders", "signs", "lights", "containers", "doors", "occluder"]:
+		base[key] = {} if (base[key] is Dictionary) else []
 	var nav := NavigationRegion3D.new()
 	nav.name = "Nav"
 	nav.navigation_mesh = bake_nav(gen)

@@ -158,8 +158,8 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 - **Supply runs are long.** The map is about 110 x 100 m and deeper wings are far: the god-mode
   bot needs 140 to 340 s of game time to stock the shelf (vitals drain over 840 s). Real teams
   split up; keep an eye on it when tuning the drain.
-- **Doorways are open and one tile wide.** No door leaves (still a TODO in DESIGN.md); lintels and
-  signs mark them. Every room of a kind carries the same sign ("WARD", "OFFICE").
+- **Every room of a kind carries the same sign** ("WARD", "OFFICE"). Doors: see "Doors and the
+  per-shift wings" below.
 - **Generation retries about 12% of seeds** (a wing with too few room slots for the rooms every
   wing needs); up to 8 attempts, 30 to 230 ms per map, worst case about 1 s.
 - **Four-wing layouts have two small north wings** (15 and 14 tiles wide) that hold little
@@ -241,9 +241,9 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   answering machine), and clocking out is the only way to end a shift besides game over.
 - **A dead patient's penalty clamps money at $0** (`add_money` without the `debt:` prefix), so a
   broke team loses nothing for a death.
-- **The next shift keeps the hospital and its layout** but not what was dropped there: untouched
-  spawner items are removed at clock-in, and every container closes. Items players dropped stay.
-  The guide stays wherever it was left.
+- **The next shift rebuilds the wings** (doors sweep): anything dropped in a wing is gone with it,
+  including items players left there on purpose; only the entrance building and the neutral area
+  keep what lies in them. The guide goes back to its lectern if it was left in a wing.
 - **The fallback second table** (levels without `level_info.tables`, e.g. the dev room) is placed
   by a fixed list of offsets and a tile or distance check; in the dev room it stands 0.35 m from
   the pen barrier. The navigation mesh does not know about it.
@@ -517,6 +517,41 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   print it too).
 - **Warmup builds four more bodies and four more minigames** (both monsters, closed and opened, the
   skull saw and the brain forceps). `tools/perfprobe.tscn` was not run for this change.
+
+## Doors and the per-shift wings (doors worker, 2026-09-14)
+
+- **Ceiling fixtures still light through closed doors** (they cast no shadows, as they already lit
+  through walls). The flashlight (a shadow caster) and every sight ray stop at a door.
+- **The main entrance's glass blocks sight rays** like a solid door (its panels are on
+  `C.L_WORLD`): nothing sees through it. Monsters never wander into the entrance building anyway.
+- **A leaf folded open past 90% stops colliding** so bodies cutting a doorway corner do not catch on
+  its end; a player hugging the jamb can clip a few centimetres into the open leaf.
+- **About 3% of room doors cannot swing out past 80 degrees** (furniture next to the doorway on the
+  hallway side's far end or a bin by the door inside): they always fold into their tunnel, toward
+  someone coming from the room, and the one who pushed is not in their way (the leaf shoves a bot
+  back a little). `DoorPlan.check` guarantees every door still opens wide enough to pass.
+- **Doors respond on the host**: a client sees an automatic door start to open 100-200 ms after it
+  walks into the sensor (3.4 m, which covers a sprint) and a hinged door after its E reaches the
+  host. Nothing is predicted locally.
+- **Agents open hinged doors by facing them within about 3 m** (bots and carriers within 1.3 m at a
+  slant). A monster sliding along a closed door at a steep angle bumps it before it opens; the
+  Night Nurse's door check samples three points at the doorway, not the whole leaf.
+- **Players and bots inside a wing when it is rebuilt are teleported** to the entrance hall in front
+  of that wing's gate. The normal rebuild starts when the paycheck screen ends, so a player who
+  stayed in a wing sees the jump. Items left in a wing (on purpose or not) are gone with it.
+- **The wing count (three or four) is fixed per run**: the entrance building's north doorways
+  depend on it.
+- **The dev panel's door tools in a hospital run** need a visit to the dev room first in that process
+  (`DevRoom.tools_unlocked`); a friend's client that never entered the dev room has no panel.
+- **Headless frame-time checks are noisy on a busy machine** (other workers' Blender and Godot runs):
+  the same rebuild measured 8 ms and 59 ms for its longest frame of work in two runs (container
+  creation and `doors.register` spiking to 30-40 ms under contention). `doortest -- --frames`
+  (windowed) is the real check.
+- **`DoorPlan.check` re-samples with the plan's own geometry** (10 degree steps, 0.12 tile points
+  along each leaf, obstacles grown by half the leaf's thickness): it proves the plan kept its rules,
+  not that a finer sweep would never graze something.
+- **Quitting while the wings rebuild** waits for the thread and frees the detached old wings
+  (`WingLoader._exit_tree`); before that a host quitting right after a clock-out crashed on exit.
 
 ## Testing tips
 

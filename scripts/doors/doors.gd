@@ -280,9 +280,7 @@ func _auto_tick(d: Node, agents: Array, delta: float) -> void:
 		if d.target < 1.0:
 			if d.is_closed():
 				_count("auto")
-				game._sound("doors_hiss" if d.kind == "sliding" else "doors_heavy", d.centre)
-				if d.kind != "sliding":
-					game.emit_noise(d.centre, NOISE_GATE, "door")
+				_fx(d, "doors_hiss" if d.kind == "sliding" else "doors_heavy", 0.0 if d.kind == "sliding" else NOISE_GATE, "door")
 			_drive(d, 1.0, open_speed)
 		if d.kind == "gate" and d.amount > 0.18 and d.amount < JAM_AMOUNT - 0.05 and _jam_roll(d):
 			d.jam_t = _rng.randf_range(JAM_SECONDS.x, JAM_SECONDS.y)
@@ -295,8 +293,21 @@ func _auto_tick(d: Node, agents: Array, delta: float) -> void:
 		d.sensor_t -= delta
 		if d.sensor_t <= 0.0 and d.target > 0.0:
 			if d.amount > 0.6:
-				game._sound("doors_hiss" if d.kind == "sliding" else "doors_heavy", d.centre)
+				_fx(d, "doors_hiss" if d.kind == "sliding" else "doors_heavy", 0.0, "door")
 			_drive(d, 0.0, close_speed)
+
+
+## One door's sound (an event every machine plays) and the noise monsters hear, at most every
+## FX_GAP seconds per door: a door that keeps being pushed while something holds it must not flood
+## the reliable channel with sound events.
+const FX_GAP := 0.45
+func _fx(d: Node, cue: String, loudness: float, kind: String) -> void:
+	if _t - float(d.get_meta("fx_t", -10.0)) < FX_GAP:
+		return
+	d.set_meta("fx_t", _t)
+	game._sound(cue, d.centre)
+	if loudness > 0.0:
+		game.emit_noise(d.centre, loudness, kind)
 
 
 ## Deep wings' gates sometimes stick: once per opening, when the roll says so.
@@ -422,27 +433,23 @@ func _push_check(d: Node, a: Dictionary) -> void:
 				return
 			_drive(d, want, SPEED_OPEN, m)
 			_count("bot")
-			game._sound("doors_creak", d.centre)
-			game.emit_noise(d.centre, NOISE_OPEN, "door")
+			_fx(d, "doors_creak", NOISE_OPEN, "door")
 		"walk_in":
 			if m == null or not _monster_wants_through(m):
 				return
 			_drive(d, want, SPEED_WALK_IN)
 			_count("walk_in")
-			game._sound("doors_creak", d.centre)
-			game.emit_noise(d.centre, NOISE_CREAK, "door")
+			_fx(d, "doors_creak", NOISE_CREAK, "door")
 		"discharged":
 			if m == null or not _monster_wants_through(m):
 				return
 			if int(m.mode) == M.Mode.RUSH:
 				_drive(d, want, SPEED_BURST)
 				_count("discharged_burst")
-				game._sound("doors_slam", d.centre)
-				game.emit_noise(d.centre, NOISE_SLAM, "door_slam")
+				_fx(d, "doors_slam", NOISE_SLAM, "door_slam")
 			else:
 				_drive(d, want, SPEED_CLOSE)
-				game._sound("doors_creak", d.centre)
-				game.emit_noise(d.centre, NOISE_CREAK, "door")
+				_fx(d, "doors_creak", NOISE_CREAK, "door")
 			_count("discharged")
 		"night_nurse":
 			if m == null or bool(m.observed) or not _monster_wants_through(m):

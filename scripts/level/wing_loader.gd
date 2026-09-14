@@ -79,7 +79,8 @@ func on_level_built(info: Dictionary) -> void:
 	wings_ready = true
 	busy = false
 	_wings_root = info.get("wings_root")
-	_notify_built(info)
+	if _wings_root != null:
+		_notify_built(info)   # a hospital's wings (not the dev room or the fallback ward)
 
 
 ## Stop a rebuild in progress (a new level replaces everything anyway).
@@ -95,6 +96,12 @@ func cancel() -> void:
 			n.free()
 	_teardown = []
 	busy = false
+
+
+## Quitting in the middle of a rebuild: wait for the thread and free the old wings still detached
+## (nodes out of the tree are nobody else's to free; left alone they outlive the renderer).
+func _exit_tree() -> void:
+	cancel()
 
 
 func has_wings() -> bool:
