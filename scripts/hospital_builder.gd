@@ -79,7 +79,7 @@ static var _mat_cache := {}
 static func build(gen: Dictionary, info: Dictionary) -> Node3D:
 	if not gen.has("furniture"):
 		return Legacy.build(gen, info)
-	warm_parts()
+	warm_parts(gen)
 	var root := Node3D.new()
 	root.name = "Hospital"
 	var base := prepare(gen, PART_BASE)
@@ -119,7 +119,12 @@ static func part_of(gen: Dictionary, x: int, y: int) -> int:
 
 ## Build every furniture kind's shared meshes once, on the main thread, so `prepare()` only reads
 ## the cache (a worker thread must never load an asset or create a mesh).
-static func warm_parts() -> void:
+static func warm_parts(gen: Dictionary = {}) -> void:
+	if gen.has("furniture"):
+		# Just the kinds this map uses (a cold start builds every model it draws anyway).
+		for e in gen.furniture:
+			Factory.parts("canopy_post" if e.get("canopy_post", false) else String(e.kind))
+		return
 	for kind in Defs.P.keys():
 		Factory.parts(kind)
 	Factory.parts("canopy_post")

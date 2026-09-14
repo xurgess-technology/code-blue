@@ -25,6 +25,7 @@ const OrScreenScript := preload("res://scripts/orscreen/or_screen.gd")  # ORSCRE
 const BrainsScript := preload("res://scripts/brains/brains.gd")  # SWEEP 3 HOOK (brains)
 const DoorScript := preload("res://scripts/doors/door.gd")  # DOORS HOOK
 const DoorModels := preload("res://scripts/doors/door_models.gd")  # DOORS HOOK
+const HospitalBuilderScript := preload("res://scripts/hospital_builder.gd")  # DOORS HOOK
 
 
 ## Run once. Safe to call again; later calls return immediately.
@@ -149,8 +150,12 @@ static func run(game: Node) -> void:
 	shelf.add_child(ph)
 	ph.set_ringing(true)
 
-	# DOORS HOOK: one door of every kind (the laminate, steel and glass leaves, the frames, the gate's
+	# DOORS HOOK: every furniture kind's shared meshes (the first level only built the kinds it uses;
+	# the wing loader's thread needs them all), then one door of every kind (the laminate, steel and glass leaves, the frames, the gate's
 	# lamp in each state), as look-alikes: no collision, not interactable.
+	var wp0 := Time.get_ticks_msec()
+	HospitalBuilderScript.warm_parts()
+	var warm_parts_ms := Time.get_ticks_msec() - wp0
 	var dx := -1.5
 	for kind in ["hinged", "double", "gate", "auto", "sliding"]:
 		var w := 4.0 if kind == "sliding" else (2.0 if kind != "hinged" else 1.0)
@@ -221,7 +226,7 @@ static func run(game: Node) -> void:
 	root.process_mode = Node.PROCESS_MODE_DISABLED
 	AudioServer.set_bus_mute(master, was_muted)
 	cover.queue_free()
-	print("[warmup] built and drew everything once in %d ms" % (Time.get_ticks_msec() - started))
+	print("[warmup] built and drew everything once in %d ms (furniture kinds %d ms)" % [Time.get_ticks_msec() - started, warm_parts_ms])
 
 
 static func _make_cover() -> CanvasLayer:

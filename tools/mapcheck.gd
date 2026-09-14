@@ -400,12 +400,12 @@ class Runner extends Node:
 			_fail("%s: navigation mesh has no polygons" % tag)
 		# DOORS: a door node in every doorway, standing in its doorway, closed, blocking it.
 		var by_tile := {}
-		for n in info.get("door_nodes", []):
-			for t in n.data.tiles:
-				by_tile[t] = n
-			var tile := C.world_to_tile(n.transform.origin - n.transform.basis.z * 0.2)
-			if not (n.data.tiles as Array).has(tile):
-				_fail("%s: door %s stands outside its doorway (%s)" % [tag, n.door_id, str(tile)])
+		for dn in info.get("door_nodes", []):
+			for t in dn.data.tiles:
+				by_tile[t] = dn
+			var tile := C.world_to_tile(dn.transform.origin - dn.transform.basis.z * 0.2)
+			if not (dn.data.tiles as Array).has(tile):
+				_fail("%s: door %s stands outside its doorway (%s)" % [tag, dn.door_id, str(tile)])
 		var rows2: PackedStringArray = info.rows
 		var bare := 0
 		for y in rows2.size():
@@ -415,8 +415,8 @@ class Runner extends Node:
 		if bare > 0:
 			_fail("%s: %d doorway tiles without a door node" % [tag, bare])
 		var gates := 0
-		for n in info.get("door_nodes", []):
-			if n.kind == "gate":
+		for dn in info.get("door_nodes", []):
+			if dn.kind == "gate":
 				gates += 1
 		if gates != (info.get("wings", []) as Array).size():
 			_fail("%s: %d wing gates for %d wings" % [tag, gates, (info.get("wings", []) as Array).size()])

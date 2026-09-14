@@ -120,6 +120,8 @@ func regenerate(gn: int) -> void:
 		generation = gn
 		return
 	cancel()
+	# The thread only reads the furniture mesh cache: every kind must be built before it starts.
+	HB.warm_parts()
 	generation = gn
 	wings_ready = false
 	busy = true
