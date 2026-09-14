@@ -195,6 +195,10 @@ static func bake(parent: Node3D, keep: Array = []) -> void:
 	var by_mat := {}
 	var order: Array = []
 	var victims: Array = []
+	# DOORS HOOK (wing rebuilds): reading a primitive mesh's arrays waits on the render thread (10-30 ms
+	# per container in a window), so the merged mesh is cached by what went into it and a container
+	# built the same way again (every rebuild of the wings) reuses it.
+	var key := PackedStringArray()
 	for child in parent.get_children():
 		if not (child is MeshInstance3D) or keep.has(child):
 			continue
@@ -202,20 +206,30 @@ static func bake(parent: Node3D, keep: Array = []) -> void:
 		if mi.mesh == null or mi.mesh.get_surface_count() != 1:
 			continue
 		var mat: Material = mi.material_override if mi.material_override != null else mi.mesh.surface_get_material(0)
-		if not by_mat.has(mat):
-			var st := SurfaceTool.new()
-			st.begin(Mesh.PRIMITIVE_TRIANGLES)
-			by_mat[mat] = st
-			order.append(mat)
-		(by_mat[mat] as SurfaceTool).append_from(mi.mesh, 0, mi.transform)
 		victims.append(mi)
+		key.append("%s|%s|%d" % [_mesh_key(mi.mesh), str(mi.transform), mat.get_instance_id() if mat != null else 0])
 	if victims.size() < 2:
 		return
-	var mesh := ArrayMesh.new()
-	for mat in order:
-		var st: SurfaceTool = by_mat[mat]
-		st.commit(mesh)
-		mesh.surface_set_material(mesh.get_surface_count() - 1, mat)
+	var ck := "|".join(key)
+	var mesh: ArrayMesh = _bake_cache.get(ck) if not ck.contains("?") else null
+	if mesh == null:
+		for mi: MeshInstance3D in victims:
+			var mat: Material = mi.material_override if mi.material_override != null else mi.mesh.surface_get_material(0)
+			if not by_mat.has(mat):
+				var st := SurfaceTool.new()
+				st.begin(Mesh.PRIMITIVE_TRIANGLES)
+				by_mat[mat] = st
+				order.append(mat)
+			(by_mat[mat] as SurfaceTool).append_from(mi.mesh, 0, mi.transform)
+		mesh = ArrayMesh.new()
+		for mat in order:
+			var st: SurfaceTool = by_mat[mat]
+			st.commit(mesh)
+			mesh.surface_set_material(mesh.get_surface_count() - 1, mat)
+		if not ck.contains("?"):
+			if _bake_cache.size() >= 512:
+				_bake_cache.clear()
+			_bake_cache[ck] = mesh
 	for v in victims:
 		parent.remove_child(v)
 		v.free()
@@ -223,6 +237,36 @@ static func bake(parent: Node3D, keep: Array = []) -> void:
 	merged.name = "Baked"
 	merged.mesh = mesh
 	parent.add_child(merged)
+
+
+static var _bake_cache := {}
+
+
+## The shape of a primitive mesh as text ("?" when it cannot be told apart from another by its
+## properties, which keeps it out of the cache).
+static func _mesh_key(m: Mesh) -> String:
+	if m is BoxMesh:
+		return "box%s" % str((m as BoxMesh).size)
+	if m is CylinderMesh:
+		var c := m as CylinderMesh
+		return "cyl%s,%s,%s,%d,%d" % [c.top_radius, c.bottom_radius, c.height, c.radial_segments, c.rings]
+	if m is SphereMesh:
+		var s := m as SphereMesh
+		return "sph%s,%s,%d,%d,%s" % [s.radius, s.height, s.radial_segments, s.rings, str(s.is_hemisphere)]
+	if m is CapsuleMesh:
+		var p := m as CapsuleMesh
+		return "cap%s,%s,%d,%d" % [p.radius, p.height, p.radial_segments, p.rings]
+	if m is PrismMesh:
+		var r := m as PrismMesh
+		return "pri%s,%s" % [str(r.size), r.left_to_right]
+	if m is TorusMesh:
+		var o := m as TorusMesh
+		return "tor%s,%s,%d,%d" % [o.inner_radius, o.outer_radius, o.rings, o.ring_segments]
+	if m is QuadMesh:
+		return "quad%s" % str((m as QuadMesh).size)
+	if m is PlaneMesh:
+		return "plane%s" % str((m as PlaneMesh).size)
+	return "?%d" % m.get_instance_id()
 
 
 ## A StaticBody3D with one box shape. layer is C.L_WORLD or C.L_INTERACT.

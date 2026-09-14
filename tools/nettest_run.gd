@@ -54,6 +54,8 @@ const SCENARIOS := [
 	{"name": "dissection", "scenario": "dissection", "clients": 2, "timeout": 300},
 	# POCKETS: a client, a carried client and an item through a seam into the Factory.
 	{"name": "pockets", "scenario": "pockets", "clients": 2, "timeout": 300, "extra": ["--pocket=factory"]},
+	# DOORS: gates locked and unlocking, E on a door, a late joiner, the next shift's wings.
+	{"name": "doors", "scenario": "doors", "clients": 2, "timeout": 400, "start_after": {2: "[marker] doors_open"}},
 ]
 ## Not part of the default run: bandwidth measurements (4 players, no lag, --stats). `bandwidth`
 ## is Bob's gunshot (seed 4242, the case the pre-delta numbers were taken on); `bandwidth_amp`

@@ -13,6 +13,7 @@ var game: Node = null
 var main: Node = null
 
 var _root: PanelContainer
+var _doors_root: PanelContainer = null   # DOORS HOOK: the door tools alone, in a hospital run
 var _open := false
 var _refresh_t := 0.0
 var _c := {}              # control name -> Control
@@ -36,7 +37,11 @@ func is_open() -> bool:
 
 func toggle(on = null) -> void:
 	_open = (not _open) if on == null else bool(on)
-	_root.visible = _open
+	# DOORS HOOK: in a hospital run (after a dev room visit) only the door tools show.
+	var room: bool = game != null and game.dev_mode
+	_root.visible = _open and room
+	if _doors_root != null:
+		_doors_root.visible = _open and not room
 	if _open:
 		_bots_sig = ""
 		_refresh()
@@ -45,7 +50,7 @@ func toggle(on = null) -> void:
 
 
 func _in_room() -> bool:
-	return game != null and game.dev_mode and game.phase != game.Phase.MENU
+	return game != null and (game.dev_mode or DevRoomScript.tools_unlocked) and game.phase != game.Phase.MENU
 
 
 func _input(event: InputEvent) -> void:
@@ -287,7 +292,41 @@ func _build() -> void:
 	_bots_box.add_theme_constant_override("separation", 4)
 	col.add_child(_bots_box)
 
+	# ---- DOORS HOOK: every door, and the wings behind the gates
+	_section(col, "Doors")
+	_door_buttons(col)
+
 	_label(col, "F1 or Esc closes this panel.", 11, DIM)
+
+	# The door tools on their own, for a hospital run after a visit to the dev room.
+	_doors_root = PanelContainer.new()
+	_doors_root.name = "DevDoorsPanel"
+	_doors_root.offset_left = 10
+	_doors_root.offset_top = 10
+	_doors_root.offset_right = 10 + PANEL_W
+	_doors_root.offset_bottom = 170
+	_doors_root.add_theme_stylebox_override("panel", sb)
+	add_child(_doors_root)
+	var dcol := VBoxContainer.new()
+	dcol.add_theme_constant_override("separation", 6)
+	_doors_root.add_child(dcol)
+	var dt := Label.new()
+	dt.text = "DEV: DOORS"
+	dt.add_theme_font_size_override("font_size", 20)
+	dt.add_theme_color_override("font_color", ACCENT)
+	dcol.add_child(dt)
+	_door_buttons(dcol)
+	_label(dcol, "F1 or Esc closes this panel.", 11, DIM)
+	_doors_root.visible = false
+
+
+func _door_buttons(parent: Control) -> void:
+	var d1 := _row(parent)
+	_button(d1, "Open all doors", func(): _req("doors_all", {"open": true}))
+	_button(d1, "Close all doors", func(): _req("doors_all", {"open": false}))
+	var d2 := _row(parent)
+	_button(d2, "Regenerate wings now", func(): _req("regen_wings"))
+	_c["doors_label%d" % _c.size()] = _label(parent, "Hinged doors swing away from you on E. The wings only exist in a hospital run.", 11, DIM)
 
 
 func _section(parent: Control, text: String) -> void:

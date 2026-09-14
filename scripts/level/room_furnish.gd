@@ -20,11 +20,12 @@ const KINDS := {
 	"restroom": {"w": [3, 5], "d": [3, 4], "weight": 3.5, "open": 0, "label": "RESTROOM"},
 	"office": {"w": [3, 4], "d": [3, 4], "weight": 7.0, "open": 0, "label": "OFFICE"},
 	"lab": {"w": [4, 7], "d": [4, 5], "weight": 1.5, "open": 0, "label": "LABORATORY"},
-	"radiology": {"w": [4, 6], "d": [4, 6], "weight": 1.0, "open": 0, "label": "RADIOLOGY"},
-	"morgue": {"w": [4, 7], "d": [4, 5], "weight": 0.6, "open": 0, "label": "MORGUE"},
+	"radiology": {"w": [4, 6], "d": [4, 6], "weight": 1.0, "open": 0, "double": true, "label": "RADIOLOGY"},
+	"morgue": {"w": [4, 7], "d": [4, 5], "weight": 0.6, "open": 0, "double": true, "label": "MORGUE"},
 	"janitor_closet": {"w": [3, 3], "d": [3, 3], "weight": 3.0, "open": 0, "label": "JANITOR"},
-	"cafeteria": {"w": [7, 11], "d": [5, 6], "weight": 0.3, "open": 4, "label": "CAFETERIA"},
+	"cafeteria": {"w": [7, 11], "d": [5, 6], "weight": 0.3, "open": 0, "double": true, "label": "CAFETERIA"},
 }
+## `double`: the wide rooms get a two-tile doorway with double doors instead of one door.
 
 ## Most of a kind on one map, and in one wing.
 const MAP_CAP := {"pharmacy": 3, "lab": 2, "radiology": 2, "morgue": 2, "cafeteria": 1, "waiting_room": 2}
@@ -96,12 +97,15 @@ class Frame extends RefCounted:
 		side = r.side
 		W = w if side == "S" or side == "N" else h
 		D = h if side == "S" or side == "N" else w
-		var door: Vector2i = r.door
+		door_u = u_of(r.door)
+
+	## The u cell of a doorway tile in the door wall.
+	func u_of(door: Vector2i) -> int:
 		match side:
-			"S": door_u = door.x - x
-			"N": door_u = x + w - 1 - door.x
-			"W": door_u = door.y - y
-			"E": door_u = y + h - 1 - door.y
+			"S": return door.x - x
+			"N": return x + w - 1 - door.x
+			"W": return door.y - y
+		return y + h - 1 - door.y
 
 	## Local (u, v) in tiles to tile space.
 	func g(u: float, v: float) -> Vector2:
@@ -212,10 +216,15 @@ class Frame extends RefCounted:
 static func furnish(st: S, room: int, rng: Rng) -> void:
 	var f := Frame.new(st, room, rng)
 	var kind: String = st.rooms[room].kind
-	# The doorway and one step inside it stay clear.
+	# The doorway and one step inside it stay clear (both halves of a double doorway).
 	f.keep_cell(f.door_u, 0)
 	if f.D > 3 and kind != "pharmacy":
 		f.keep_cell(f.door_u, 1)
+	if st.rooms[room].has("door2"):
+		var u2 := f.u_of(st.rooms[room].door2)
+		f.keep_cell(u2, 0)
+		if f.D > 3:
+			f.keep_cell(u2, 1)
 	match kind:
 		"patient_room": _patient_room(f)
 		"supply_closet": _supply_closet(f)

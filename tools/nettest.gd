@@ -43,6 +43,10 @@ extends Node
 ##   pockets          (--pocket=factory) client 1 walks through a seam into the pocket holding gauze
 ##                    (the host sees it arrive and stay, client 2 sees it jump, never slide across the
 ##                    world); client 2 goes down, client 1 walks out, lifts it and carries it in
+##   doors            client 1 finds the wing gates locked in the lobby, sees them unlock at
+##                    clock-in, opens and closes a hinged door with E; client 2 joins mid-shift and
+##                    sees the doors as they are and the same wings; at the next shift both clients
+##                    rebuild the new wings (same layout as the host) and see the gates unlock
 ##
 ## Shifts start the way the loop does (sweep 2): the host clocks in, skips the grace period,
 ## answers the phone, and the paramedics wheel the patient onto a table.
@@ -145,6 +149,7 @@ func _run() -> void:
 		"monsters": await _sc_monsters()   # SWEEP 3 HOOK (monsters)
 		"dissection": await _sc_dissection()
 		"pockets": await _sc_pockets()   # POCKETS
+		"doors": await _sc_doors()   # DOORS HOOK
 		_: _end(false, "unknown scenario " + scenario)
 
 
@@ -1596,6 +1601,128 @@ func _shift_bot(st: Dictionary) -> void:
 # =========================================================================
 # bot actions
 # =========================================================================
+
+## DOORS HOOK: doors and the per-shift wings across the wire.
+func _sc_doors():
+	if role == "host":
+		if not await _until(func(): return Net.names.size() >= 2 and game.players.size() >= 2, 60.0, "client 1"):
+			return
+		if not game.doors.gates_locked:
+			return _end(false, "the gates are not locked in the lobby")
+		if not await _until(func(): return _count_msgs("saw_locked") > 0, 60.0, "client 1 to see the gates locked"):
+			return
+		game.clock_in()
+		if not await _until(func(): return _count_msgs("saw_unlocked") > 0, 60.0, "client 1 to see the gates unlock"):
+			return
+		var door_id := _net_door()
+		if not await _until(func(): return _count_msgs("pressed_open") > 0, 60.0, "client 1 to press E on the door"):
+			return
+		if not await _until(func(): return absf(game.doors.amount_of(door_id)) > 0.85, 20.0, "the door to open on the host"):
+			return
+		if not await _until(func(): return _count_msgs("pressed_close") > 0 and game.doors.doors[door_id].is_closed(), 40.0, "client 1 to close it again"):
+			return
+		if not await _until(func(): return _count_msgs("saw_closed") > 0, 40.0, "client 1 to see it closed"):
+			return
+		# Leave one door open for the late joiner to find that way.
+		var d = game.doors.doors[door_id]
+		game.doors._drive(d, -1.0, 5.0)
+		if not await _until(func(): return absf(game.doors.amount_of(door_id)) > 0.95, 10.0, "the door open for the late joiner"):
+			return
+		print("[marker] doors_open")
+		if not await _until(func(): return _count_msgs("late_ok") > 0, 120.0, "the late joiner to check the doors"):
+			return
+		game._end_shift(true, "Test: shift over.")
+		if not await _until(func(): return game.phase == Game.Phase.LOBBY and game.shift == 2, 60.0, "the next lobby"):
+			return
+		if not await _until(func(): return game.wing_loader.wings_ready, 60.0, "the host's new wings"):
+			return
+		_send("wings", {"gen": int(game.wing_loader.generation), "rows": hash(game.level_info.rows)})
+		if not await _until(func(): return _count_msgs("rebuilt") >= 2, 120.0, "both clients to rebuild the wings"):
+			return
+		game.clock_in()
+		await _finish_together("clients saw locked gates, the unlock, E on a door, a late joiner saw the doors and wings, and both rebuilt the next shift's wings")
+		return
+	# Clients.
+	if not await _until(func(): return game.phase != Game.Phase.MENU and _me() != null and not game.level_info.is_empty() and not game.doors.doors.is_empty(), 90.0, "the world"):
+		return
+	var me := _me()
+	me.bot_active = true
+	var door_id := _net_door()
+	if index == 1:
+		var g := _net_gate()
+		if not await _until(func(): return g.locked and g.lamp_state == "locked" and g.is_closed(), 30.0, "a locked gate"):
+			return
+		# Walk up to it and press E: nothing opens.
+		me.teleport(g.global_position + g.normal * 1.6)
+		var to: Vector3 = g.centre - me.global_position
+		me.bot_yaw = atan2(-to.x, -to.z)
+		me.bot_aim_id = g.door_id
+		await _wall_wait(0.5)
+		if not me.aim_prompt.begins_with("!Locked"):
+			return _end(false, "the locked gate's prompt is '%s'" % me.aim_prompt)
+		me.bot_press += 1
+		await _wall_wait(1.0)
+		if not g.is_closed():
+			return _end(false, "a locked gate opened on the client")
+		_send("saw_locked", {})
+		if not await _until(func(): return not g.locked and g.lamp_state == "open" and g.amount > 0.5, 60.0, "the gates to unlock and open"):
+			return
+		_send("saw_unlocked", {})
+		var d = game.doors.doors[door_id]
+		me.bot_aim_id = door_id
+		me.teleport(d.global_position + d.normal * 1.3)
+		await _wall_wait(0.3)
+		if me.aim_prompt != "Open door":
+			return _end(false, "the door's prompt on the client is '%s'" % me.aim_prompt)
+		me.bot_press += 1
+		_send("pressed_open", {})
+		if not await _until(func(): return absf(d.amount) > 0.85, 20.0, "the door to swing open on the client"):
+			return
+		await _wall_wait(0.5)
+		me.bot_press += 1
+		_send("pressed_close", {})
+		if not await _until(func(): return d.is_closed(), 20.0, "the door to close on the client"):
+			return
+		_send("saw_closed", {})
+		if not await _until(func(): return _count_msgs("wings") > 0, 200.0, "the host's next wings"):
+			return
+	else:
+		# The late joiner: the host left the door open; the wings match the host's.
+		if not await _until(func(): return absf(game.doors.amount_of(door_id)) > 0.9, 30.0, "the open door as the host left it"):
+			return
+		if not await _until(func(): return not _net_gate().locked, 20.0, "the gates unlocked, as on the host"):
+			return
+		_send("late_ok", {})
+		if not await _until(func(): return _count_msgs("wings") > 0, 200.0, "the host's next wings"):
+			return
+	var w: Dictionary = _msgs("wings")[0].data
+	if not await _until(func(): return game.wing_loader.wings_ready and int(game.wing_loader.generation) == int(w.gen), 90.0, "the next wings to build here"):
+		return
+	if hash(game.level_info.rows) != int(w.rows):
+		return _end(false, "the rebuilt wings differ from the host's")
+	_send("rebuilt", {})
+	if not await _until(func(): return game.phase == Game.Phase.SHIFT and not _net_gate().locked, 60.0, "the gates to unlock on the new wings"):
+		return
+	await _finish_together("rebuilt generation %d like the host and saw the gates unlock" % int(w.gen))
+
+
+## The same hinged wing door on every machine: the first by id with floor on both sides.
+func _net_door() -> String:
+	var ids: Array = []
+	for d in game.doors.doors.values():
+		if d.kind == "hinged" and not bool(d.data.get("base", false)) and d.max_out >= 80.0:
+			ids.append(String(d.door_id))
+	ids.sort()
+	return ids[0] if not ids.is_empty() else ""
+
+
+func _net_gate() -> Node:
+	var best: Node = null
+	for d in game.doors.doors.values():
+		if d.kind == "gate" and (best == null or String(d.door_id) < String(best.door_id)):
+			best = d
+	return best
+
 
 func _me() -> Player:
 	return game.local_player() as Player

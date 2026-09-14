@@ -44,6 +44,14 @@ const LootTableScript := preload("res://scripts/economy/loot_table.gd")
 ## Every nav obstacle as [centre, size] on the floor; filled while building.
 static var _obstacles: Array = []
 
+## DOORS HOOK: the pen's partitions (west face x, doorway z range) and their doors.
+const DoorScript := preload("res://scripts/doors/door.gd")
+const DoorPlan := preload("res://scripts/level/door_plan.gd")
+const PARTITIONS := [
+	{"id": "dr_dev_hinged", "kind": "hinged", "x": 7.5, "gap": Vector2(3.0, 4.5)},
+	{"id": "dr_dev_double", "kind": "double", "x": 15.0, "gap": Vector2(1.5, 4.5)},
+]
+
 
 static func build(info: Dictionary) -> Node3D:
 	_obstacles = []
@@ -105,6 +113,41 @@ static func build(info: Dictionary) -> Node3D:
 	gate.position = Vector3((GATE_X.x + GATE_X.y) * 0.5, 0, bz)
 	root.add_child(gate)
 	info["dev_gate"] = gate
+
+	# ---- DOORS HOOK: two partitions split the pen into three bays, a hinged door in one and double
+	# doors in the other, so monsters can be watched using doors (scripts/doors/doors.gd). Walls a tile
+	# thick like the hospital's, so each door has its tunnel to fold into.
+	var part_mat := _surface("mat/wall", Color(0.62, 0.64, 0.60), 0.85)
+	var door_nodes: Array = []
+	for pd in PARTITIONS:
+		var x0: float = pd.x
+		var gap: Vector2 = pd.gap
+		for seg in [[0.0, gap.x], [gap.y, PEN_Z]]:
+			var len: float = seg[1] - seg[0]
+			if len <= 0.01:
+				continue
+			var c := Vector3(x0 + C.TILE * 0.5, H * 0.5, (seg[0] + seg[1]) * 0.5)
+			var size := Vector3(C.TILE, H, len)
+			root.add_child(_box_mesh(size, c, part_mat))
+			_shape(body, size, c)
+			_obstacles.append([Vector3(c.x, 0, c.z), Vector3(size.x, 0, size.z)])
+		# The lintel above the doorway.
+		var lc := Vector3(x0 + C.TILE * 0.5, (2.25 + H) * 0.5, (gap.x + gap.y) * 0.5)
+		root.add_child(_box_mesh(Vector3(C.TILE, H - 2.25, gap.y - gap.x), lc, part_mat))
+		var tiles: Array = []
+		var tz := int(round(gap.x / C.TILE))
+		var tx := int(round(x0 / C.TILE))
+		var width := int(round((gap.y - gap.x) / C.TILE))
+		for k in width:
+			tiles.append(Vector2i(tx, tz + k))
+		# Doors face +X (east): the plane just inside the east face of the partition.
+		var d := {"id": String(pd.id), "kind": String(pd.kind), "tiles": tiles, "n": Vector2i(1, 0), "s": Vector2i(0, 1),
+			"plane": Vector2(tx + 1.0 - DoorPlan.PLANE_INSET, (gap.x + gap.y) * 0.5 / C.TILE), "width": float(width),
+			"hinge": -1, "max_in": 90.0, "max_out": 90.0, "room": -1, "zone": 0, "wing": "dev", "depth": 0, "base": true}
+		var node: Node3D = DoorScript.create(d)
+		root.add_child(node)
+		door_nodes.append(node)
+	info["door_nodes"] = door_nodes
 
 	# ---- OR table, shelf, lectern -------------------------------------------------
 	root.add_child(_operating_table(TABLE))
@@ -250,7 +293,9 @@ static func build(info: Dictionary) -> Node3D:
 		tool_spawns.append(Vector3(13.5 + (i % 4) * 1.6, 0.0, 13.5 + (i / 4) * 1.4))
 	info["player_spawns"] = player_spawns
 	info["tool_spawns"] = tool_spawns
-	info["monster_spawns"] = [Vector3(4.0, 0, 3.2), Vector3(12.0, 0, 2.6), Vector3(20.0, 0, 3.4), Vector3(8.0, 0, 5.0), Vector3(16.0, 0, 5.0)]
+	# DOORS HOOK: all in the pen's middle bay (between the partitions at x 7.5-9 and 15-16.5), in
+	# plain view of the lab; the side bays are through the doors.
+	info["monster_spawns"] = [Vector3(10.2, 0, 3.2), Vector3(12.0, 0, 2.6), Vector3(13.8, 0, 3.4), Vector3(10.6, 0, 5.0), Vector3(13.4, 0, 5.0)]
 	info["dummy_spots"] = [Vector3(15.5, 0, 10.2), Vector3(17.0, 0, 10.2), Vector3(18.5, 0, 10.2), Vector3(20.0, 0, 10.2), Vector3(15.5, 0, 11.8), Vector3(17.0, 0, 11.8), Vector3(18.5, 0, 11.8), Vector3(20.0, 0, 11.8)]
 	# No time clock here: park its aim spot under the floor where nobody can aim.
 	info["clock"] = Vector3(1.0, -40.0, 1.0)

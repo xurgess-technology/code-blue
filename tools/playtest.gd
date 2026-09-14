@@ -43,9 +43,12 @@ var _stuck_timer := 0.0
 var _last_pos := Vector3.ZERO
 var _blacklist := {}
 var _heartbeat := 30.0
+var _beat_pos := Vector3.INF   # DOORS: where the bot was at the last heartbeat
 var _target_item := -1
 var _stare_t := 0.0
 var _shove_ready := 0.0
+var _dodge_until := 0.0
+var _dodge_side := 1.0
 var take_extra := false
 var skip_grace := false
 var _was_phase := -1
@@ -283,7 +286,17 @@ func _go_use(id: String, pos: Vector3, hold: bool) -> void:
 		_heartbeat = 30.0
 		_say("t=%.0f heading for %s at %s, bot at %s, hands %s, aim '%s'" % [elapsed, id, str(pos.snappedf(0.1)),
 			str(bot.global_position.snappedf(0.1)), str(bot.slots.map(func(s): return s.kind)), bot.aim_id])
-	var flat :=Vector3(pos.x, bot.global_position.y, pos.z)
+		# DOORS: when the bot has not moved since the last heartbeat, say what is around it.
+		if bot.global_position.distance_to(_beat_pos) < 0.3 and game.get("doors") != null:
+			for d in game.doors.near(bot.global_position):
+				if (d.global_position as Vector3).distance_to(bot.global_position) < 4.0:
+					_say("    near %s %s amount %.2f target %.2f halted %s" % [d.kind, d.door_id, d.amount, d.target, str(d.halted)])
+			for m in game.monsters.values():
+				if m.global_position.distance_to(bot.global_position) < 6.0:
+					_say("    monster %s mode %d at %.1f m" % [m.kind, m.mode, m.global_position.distance_to(bot.global_position)])
+			_say("    path %s next %s stuck %.1f" % [str(_path.size()), str(_path[0].snappedf(0.1) if _path.size() > 0 else Vector3.ZERO), _stuck_timer])
+		_beat_pos = bot.global_position
+	var flat := Vector3(pos.x, bot.global_position.y, pos.z)
 	var d := bot.global_position.distance_to(flat)
 	bot.bot_aim_id = id
 	# The navmesh can keep the bot just beyond REACH of something against a wall; once it has
@@ -352,6 +365,18 @@ func _walk_to(target: Vector3) -> void:
 	bot.bot_yaw = atan2(-to_next.x, -to_next.z)
 	bot.bot_move = Vector2(0, -1)
 	bot.bot_sprint = false
+	# A monster pressed against the bot (a Night Nurse it keeps looking at, in god mode she never
+	# lands a hit and never leaves) can pin it for the rest of the shift: back off and sidestep.
+	if _stuck_timer > 3.0 and elapsed >= _dodge_until:
+		for m in game.monsters.values():
+			var off: Vector3 = m.global_position - bot.global_position
+			off.y = 0.0
+			if off.length() < 1.2:
+				_dodge_until = elapsed + 1.2
+				_dodge_side = -_dodge_side
+				break
+	if elapsed < _dodge_until:
+		bot.bot_move = Vector2(_dodge_side, 0.7)
 
 
 func _flee_if_hunted() -> bool:
@@ -369,6 +394,11 @@ func _shove_close_walk_in() -> bool:
 		var to: Vector3 = m.global_position - bot.global_position
 		to.y = 0.0
 		if to.length() > 2.2:
+			continue
+		# DOORS: one on the other side of a shut door (or a wall) is not within reach.
+		var los := PhysicsRayQueryParameters3D.create(bot.head.global_position, m.global_position + Vector3.UP * 1.2)
+		los.collision_mask = C.L_WORLD
+		if not bot.get_world_3d().direct_space_state.intersect_ray(los).is_empty():
 			continue
 		bot.bot_yaw = atan2(-to.x, -to.z)
 		bot.bot_move = Vector2.ZERO

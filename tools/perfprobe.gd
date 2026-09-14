@@ -25,6 +25,7 @@ var _orscreen := false
 var _models := false
 var _brains := false   # SWEEP 3 HOOK (brains)
 var _pockets := false  # POCKETS: --pockets, the Factory and the Restaurant against the corridor baseline
+var _doors := false    # DOORS HOOK
 var _hands := false    # HANDS HOOK
 var _spikes: Array = []
 var _phase_label := ""
@@ -46,7 +47,10 @@ func _ready() -> void:
 			"models": _models = true
 			"brains": _brains = true
 			"pockets": _pockets = true   # POCKETS
+			"doors": _doors = true
 			"hands": _hands = true
+			# SEAL HOOK: build the procedural seal instead of the Blender model (A/B the patient's cost).
+			"seal-procedural": (load("res://scripts/patients/seal_model_builder.gd") as GDScript).set("procedural_only", true)
 			"quality":
 				_qualities = []
 				for q in v.split(","):
@@ -98,12 +102,15 @@ func _ready() -> void:
 		return
 	if _pockets:
 		await _run_pockets()   # POCKETS
+	if _doors:
+		await _run_doors()
 		return
 	var scenarios := [
 		{"name": "lobby clock-in room", "setup": _lobby},
 		{"name": "corridor, long sightline", "setup": _corridor},
 		{"name": "pharmacy, containers open", "setup": _containers},
 		{"name": "OR, patient + stocked shelf", "setup": _or_view},
+		{"name": "OR, the seal close up", "setup": _or_seal},  # SEAL HOOK
 		{"name": "operating: bone saw, bloody", "setup": _operating_saw},
 		# INVENTORY HOOK: the same view of the gold pile empty and with 500 bars.
 		{"name": "gold pile, 0 bars", "setup": func(): await _pile_view(0)},
@@ -194,6 +201,16 @@ func _or_view() -> void:
 	game.shelf_node.show_stock(game.shelf)
 	var t := game.table_pos()
 	_look(t + Vector3(0.8, 0, 3.0), t + Vector3.UP * 1.0)
+
+
+## SEAL HOOK: the seal (Blender model unless --seal-procedural) on the table, idle and breathing, from
+## a player standing beside it.
+func _or_seal() -> void:
+	await _ensure_shift()
+	game.case = {"patient_id": "seal", "ailment_id": "amputation", "step_index": 0, "flags": {"sedation": 0.3}}
+	game._apply_case_locally()
+	var t := game.table_pos()
+	_look(t + Vector3(0.9, 0, 1.6), t + Vector3.UP * 0.95)
 
 
 ## INVENTORY HOOK: look at the gold pile (and the sell bin and shop behind it) with `n` bars.
@@ -384,6 +401,69 @@ func _run_orscreen() -> void:
 ## containers open and the long corridor, each with nothing, Echo at level 3 (30 m, as many outlines
 ## as it allows, held on for the whole measurement) and Hive Eyes through a Walk-In standing there;
 ## plus five brains on the floor in view. Twice, so the noise shows.
+## DOORS HOOK (`-- --doors`): a hallway of doors, the longest corridor and the OR, each with every
+## door shut, every door open (the automatic ones held open), and shut without the doors' occluders.
+func _run_doors() -> void:
+	main.set_quality(1, false)
+	var ds: Node = game.doors
+	var hide_doors := func(hidden: bool) -> void:
+		for d in ds.doors.values():
+			d.visible = not hidden
+			if d.occluder != null:
+				d.occluder.visible = not hidden and d.is_closed()
+	var set_doors := func(open: bool, occluders: bool) -> void:
+		ds.set_all(open)
+		for d in ds.doors.values():
+			if d.is_automatic():
+				ds._hold_open[d.door_id] = 9999.0 if open else 0.0
+				if not open:
+					ds._drive(d, 0.0, 5.0)
+		for i in 90:
+			await get_tree().process_frame
+		for d in ds.doors.values():
+			if d.occluder != null:
+				d.occluder.visible = occluders and d.is_closed()
+	for pass_i in 2:
+		for scen in [{"name": "hallway of doors", "setup": _doors_hallway}, {"name": "corridor", "setup": _corridor}, {"name": "OR", "setup": _or_view}]:
+			await scen.setup.call()
+			# As before the doors: every door open and hidden (no leaves drawn, no occluders).
+			await set_doors.call(true, false)
+			hide_doors.call(true)
+			await _measure("%s: no doors (as before) %d" % [scen.name, pass_i + 1], 1)
+			hide_doors.call(false)
+			await set_doors.call(false, true)
+			await _measure("%s: doors shut %d" % [scen.name, pass_i + 1], 1)
+			await set_doors.call(false, false)
+			await _measure("%s: shut, no door occluders %d" % [scen.name, pass_i + 1], 1)
+			await set_doors.call(true, true)
+			await _measure("%s: doors open %d" % [scen.name, pass_i + 1], 1)
+			await set_doors.call(false, true)
+	print("[perf] ============================================================================")
+	for r in _rows:
+		print("[perf] %-44s avg %4.0f fps  1%%low %4.0f  worst %5.1f ms  draws %d" % [r.name, r.fps, r.low_fps, r.worst, r.draws])
+	get_tree().quit(0)
+
+
+## Looking along a wing hallway past the most doors in one wall.
+func _doors_hallway() -> void:
+	await _ensure_shift()
+	var best_n := -1
+	for d in game.doors.doors.values():
+		if not d.is_hinged() or bool(d.data.get("base", false)):
+			continue
+		var n := 0
+		for e in game.doors.doors.values():
+			if e == d or not e.is_hinged():
+				continue
+			var rel: Vector3 = e.global_position - d.global_position
+			if absf(rel.dot(d.normal)) < 0.2 and absf(rel.dot(d.along)) < 16.0 and e.normal.dot(d.normal) > 0.9:
+				n += 1
+		var from: Vector3 = d.global_position + d.normal * 2.0 - d.along * 2.5
+		if n > best_n and game._point_is_clear(from):
+			best_n = n
+			_look(from, d.global_position + d.normal * 0.2 + d.along * 7.0 + Vector3.UP * 1.2)
+
+
 func _run_brains() -> void:
 	main.set_quality(1, false)
 	var b: Node = game.brains

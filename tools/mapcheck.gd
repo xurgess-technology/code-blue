@@ -8,8 +8,12 @@ extends SceneTree
 ## rooms each needs, every special room on the map, the break room landmarks, the neutral area
 ## spots and spawns, monster spawns only on wing hallways and never in the entrance building or
 ## the neutral area, doors, container placement rules, required furniture per room kind, and
-## every open tile and room reachable from the neutral area). Re-generates a few seeds to prove
-## determinism and prints one map.
+## every open tile and room reachable from the neutral area). Doors (DoorPlan.check, through
+## validate): a door in every doorway, every leaf's whole swing clear of walls, furniture,
+## containers and every other door, and every room reachable through doors that open wide enough.
+## Wings per shift: the same run seed with another shift's wing seed keeps the entrance building
+## and the neutral area identical tile for tile and changes the wings. Re-generates a few seeds to
+## prove determinism and prints one map.
 ##
 ## Builds, for a few seeds: every level_info key the game and the sweep 2 contract promise,
 ## monster spawns outside `entrance_rect` / `neutral_rect`, navigation coverage of the open
@@ -387,6 +391,35 @@ func _check_determinism() -> void:
 			fail("wings at depth %d have more working fixtures (%.0f%%) than shallower ones" % [d, share * 100.0])
 		prev = share
 	print("determinism: re-generated %d seeds, identical output" % DETERMINISM_SEEDS.size())
+	# DOORS: later shifts of a run rebuild the wings only.
+	for seed in DETERMINISM_SEEDS:
+		var s1: Dictionary = MG.generate(seed)
+		for shift in [2, 3]:
+			var sn: Dictionary = MG.generate(seed, MG.wing_seed_for(seed, shift))
+			var problems := MG.validate(sn)
+			for p in problems:
+				fail("seed %d shift %d: %s" % [seed, shift, p])
+			var er: Rect2i = s1.entrance_rect
+			var nr: Rect2i = s1.neutral_rect
+			var same := true
+			var wings_differ := 0
+			for y in (s1.rows as PackedStringArray).size():
+				var a: String = s1.rows[y]
+				var b: String = sn.rows[y]
+				for x in a.length():
+					var t := Vector2i(x, y)
+					if er.has_point(t) or nr.grow(1).has_point(t):
+						if a[x] != b[x]:
+							same = false
+					elif a[x] != b[x]:
+						wings_differ += 1
+			if not same:
+				fail("seed %d shift %d: the entrance building or neutral area changed" % [seed, shift])
+			if str(s1.spots) != str(sn.spots) or er != (sn.entrance_rect as Rect2i):
+				fail("seed %d shift %d: a landmark moved" % [seed, shift])
+			if wings_differ < 100:
+				fail("seed %d shift %d: the wings barely changed (%d tiles)" % [seed, shift, wings_differ])
+	print("wings per shift: %d seeds x 2 later shifts, entrance identical, wings regenerated" % DETERMINISM_SEEDS.size())
 	print("working fixtures by wing depth: %s" % ", ".join(lit))
 
 
@@ -564,6 +597,28 @@ class Runner extends Node:
 			_fail("%s: OR shelf spot is far from the table" % tag)
 		if (info.nav_region as NavigationRegion3D).navigation_mesh.get_polygon_count() <= 0:
 			_fail("%s: navigation mesh has no polygons" % tag)
+		# DOORS: a door node in every doorway, standing in its doorway, closed, blocking it.
+		var by_tile := {}
+		for dn in info.get("door_nodes", []):
+			for t in dn.data.tiles:
+				by_tile[t] = dn
+			var tile := C.world_to_tile(dn.transform.origin - dn.transform.basis.z * 0.2)
+			if not (dn.data.tiles as Array).has(tile):
+				_fail("%s: door %s stands outside its doorway (%s)" % [tag, dn.door_id, str(tile)])
+		var rows2: PackedStringArray = info.rows
+		var bare := 0
+		for y in rows2.size():
+			for x in rows2[y].length():
+				if rows2[y][x] == "+" and not by_tile.has(Vector2i(x, y)):
+					bare += 1
+		if bare > 0:
+			_fail("%s: %d doorway tiles without a door node" % [tag, bare])
+		var gates := 0
+		for dn in info.get("door_nodes", []):
+			if dn.kind == "gate":
+				gates += 1
+		if gates != (info.get("wings", []) as Array).size():
+			_fail("%s: %d wing gates for %d wings" % [tag, gates, (info.get("wings", []) as Array).size()])
 
 	func _physics_process(_delta: float) -> void:
 		if level == null:

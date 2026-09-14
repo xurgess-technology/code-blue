@@ -33,7 +33,7 @@ You and your best friends clock into the ER with one goal: save a life. The prob
 2. One patient with one ailment arrives. Vitals drain the whole shift.
 3. Search the hospital for the supplies the procedure needs and put them on the OR supply shelf.
 4. Operate step by step. Each step is its own minigame.
-5. Stabilise the patient to punch out. The next shift is a new hospital, harder, with more monsters.
+5. Stabilise the patient to punch out. The next shift is harder, with more monsters, and its wings are new: while the team is out in the parking lot the gates stay locked and the wings behind them are rebuilt; the entrance building never changes during a run.
 6. Lose if the patient flatlines or everyone is dead.
 
 Run length 10 to 20 minutes. Difficulty rises with the shift number: tighter minigame tolerances, faster vitals drain, more monsters.
@@ -94,10 +94,12 @@ A battered reference binder on a lectern in the clock-in room. It is a physical 
 
 ## The hospital
 
-- Procedurally generated from a shared seed every shift. The OR is always in the middle with its anterooms and the clock-in room attached.
+- One floor: the entrance building (break room with the time clock and phone, the OR, lobby) and three or four procedurally generated wings behind it, with the neutral area (ambulance bay, parking lot, the shop van, the dumpster) outside the main doors.
+- **Loading gates.** The entrance building and the neutral area stay the same for the whole run. The wings are regenerated for every shift from that shift's seed: from clock-out until clock-in the wing gates are shut and locked (red lamps, a dead-bolt clunk), the wings behind them are torn down and a new layout with fresh supplies, loot and monsters is built, and the gates unlock and swing open when the next shift starts. Anyone still inside a wing at the end of a shift is walked out to the entrance hall; what was left lying in a wing is gone. The build never hitches: the layout and the meshes are worked out on a background thread and put into the world a few pieces a frame; clocking in waits for it (the lamps blink amber).
+- **Doors.** Sliding glass doors at the main entrance; heavy automatic double doors with small windows at each wing gate and the OR, which open for anyone close (players, paramedics with the gurney, someone dragging a monster or carrying a player, and monsters); a deep wing's gate now and then stutters and sticks half open for a few seconds. Every other room has hinged doors (double doors on the cafeteria, radiology and the morgue): E opens or closes them, they swing away from you and stay where you leave them. Opening a door makes a small noise, a slam a big one; closed doors block sight and the flashlight and muffle sound. The Walk-In pushes doors open slowly, the Discharged bursts through when it is chasing, the Night Nurse opens them silently while nobody is looking, so a door you shut can be open later. No locked doors yet.
 - Room kinds include wards, storage, offices, pharmacy, maintenance and nurse stations; containers are placed by room kind.
 - Dim and half-dead lighting: most ceiling fixtures flicker or are out; your flashlight does the rest.
-- **TODO**: doors that open and close, power and fuse boxes, hiding spots, multiple floors.
+- **TODO**: power and fuse boxes, hiding spots, multiple floors, locked doors and keys.
 
 ## Monsters
 

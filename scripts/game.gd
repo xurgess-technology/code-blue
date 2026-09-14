@@ -171,6 +171,14 @@ var brains: Node = null       # brain spoilage, the blender, per-player upgrades
 const PocketSpacesScript := preload("res://scripts/level/pockets/pocket_spaces.gd")
 var pockets: Node = null
 
+# DOORS HOOK: every door of the level, and the wings behind the loading gates rebuilt each shift.
+const DoorsScript := preload("res://scripts/doors/doors.gd")
+const WingLoaderScript := preload("res://scripts/level/wing_loader.gd")
+var doors: Node = null         # scripts/doors/doors.gd, child "Doors"
+var wing_loader: Node = null   # scripts/level/wing_loader.gd, child "WingLoader"
+## Host: someone clocked in while the wings were still being rebuilt; clock-in happens when ready.
+var clock_in_pending := false
+
 
 func _ready() -> void:
 	_entities = Node3D.new()
@@ -223,6 +231,15 @@ func _ready() -> void:
 	pockets.name = "Pockets"
 	add_child(pockets)
 	pockets.setup(self)
+	# DOORS HOOK: same path on every machine.
+	doors = DoorsScript.new()
+	doors.name = "Doors"
+	add_child(doors)
+	doors.setup(self)
+	wing_loader = WingLoaderScript.new()
+	wing_loader.name = "WingLoader"
+	add_child(wing_loader)
+	wing_loader.setup(self)
 	Net.roster_changed.connect(_on_roster_changed)
 	Net.joined_ok.connect(_net_client_forget)  # net: a new connection starts a new replica
 	Net.host_left.connect(func(): end_session("The host left the game."))
@@ -294,6 +311,7 @@ func start_lobby(new_seed: int, new_shift: int) -> void:
 	loop.reset()
 	_clear_items()
 	_clear_monsters()
+	clock_in_pending = false   # DOORS HOOK
 	_build_level(new_seed)
 	punch = 0.0
 	end_timer = 0.0
@@ -327,6 +345,14 @@ func start_lobby(new_seed: int, new_shift: int) -> void:
 func clock_in() -> void:
 	if not is_host() or phase != Phase.LOBBY:
 		return
+	# DOORS HOOK: the wings behind the gates are still being rebuilt: clock in once they are ready
+	# (the gates' lamps blink amber meanwhile).
+	if not wing_loader.wings_ready:
+		if not clock_in_pending:
+			clock_in_pending = true
+			say("Clocked in. The wing doors are unlocking...", 3.0)
+		return
+	clock_in_pending = false
 	_populate_shift_world()
 	_set_phase(Phase.SHIFT)
 	loop.on_clock_in()
@@ -341,6 +367,8 @@ func clock_in() -> void:
 func begin_shift() -> void:
 	if not is_host():
 		return
+	wing_loader.finish_now()   # DOORS HOOK: tools cannot wait for the wings
+	clock_in_pending = false
 	if phase == Phase.LOBBY:
 		_populate_shift_world()
 		_set_phase(Phase.SHIFT)
@@ -446,6 +474,10 @@ func _to_next_shift() -> void:
 			_respawn_at_start(p)   # the dead, the downed (downed worker) and late joiners
 	waiting_peers.clear()
 	_set_phase(Phase.LOBBY)
+	# DOORS HOOK: the wings behind the locked gates are rebuilt for this shift (anyone still inside is
+	# walked out to the entrance hall first). Clock-in waits until they are ready.
+	clock_in_pending = false
+	wing_loader.regenerate(maxi(shift, int(wing_loader.generation) + 1))
 	say(loop.lobby_message(), 6.0)
 	if Net.active:
 		_rpc_shift.rpc(seed_value, shift, phase, _net_seq)
@@ -519,12 +551,11 @@ func _build_level(for_seed: int) -> void:
 	elif ResourceLoader.exists(mapgen_path) and ResourceLoader.exists(builder_path):
 		var MapGenScript: GDScript = load(mapgen_path)
 		var BuilderScript: GDScript = load(builder_path)
-		gen = MapGenScript.generate(for_seed)
+		# DOORS HOOK: the run's entrance building with this shift's wings (a joining client: the host's).
+		var wing_gen: int = wing_loader.generation_for_build(shift)
+		gen = MapGenScript.generate(for_seed, MapGenScript.wing_seed_for(for_seed, wing_gen))
 		level = BuilderScript.build(gen, level_info)
-		# POCKETS HOOK: the rolled pocket space, built far away with its stub copies and seams.
-		# (With doors: build and tear down with each shift's wings.)
-		if level != null:
-			pockets.build(gen, level_info, level)
+		level_info["wing_gen"] = wing_gen
 	# A level missing its landmarks is worse than no level; fall back rather than ship a broken shift.
 	if not dev_mode and (level == null or not _level_info_usable()):
 		if level != null:
@@ -538,6 +569,10 @@ func _build_level(for_seed: int) -> void:
 	_attach_light_flicker(level)
 	_add_occluders()
 	_add_landmarks()
+	# DOORS HOOK: the level's doors (the hospital's, the dev room's) and the wings' generation.
+	doors.clear()
+	doors.register(level_info.get("door_nodes", []))
+	wing_loader.on_level_built(level_info)
 
 
 func _level_info_usable() -> bool:
@@ -571,7 +606,7 @@ func _attach_light_flicker(root: Node) -> void:
 ## without it the renderer draws the entire hospital from inside one corridor.
 func _add_occluders() -> void:
 	var rows: PackedStringArray = level_info.get("rows", PackedStringArray())
-	if rows.is_empty():
+	if rows.is_empty() or level_info.get("occluders_built", false):   # DOORS HOOK: the hospital builds its own per part
 		return
 	var h := rows.size()
 	var w: int = rows[0].length()
@@ -1787,6 +1822,7 @@ func _physics_process(delta: float) -> void:
 	combat.physics_tick(delta)
 	dissection.physics_tick(delta)
 	brains.physics_tick(delta)
+	doors.physics_tick(delta)   # DOORS HOOK: every machine; the host decides, clients animate
 
 	_update_danger()
 	_net_tick(delta)
@@ -1820,6 +1856,9 @@ func _simulate(delta: float) -> void:
 
 
 func _sim_lobby(delta: float) -> void:
+	if clock_in_pending and wing_loader.wings_ready:
+		clock_in()   # DOORS HOOK: the wings finished while the team waited at the clock
+		return
 	if _holding_aim("clock"):
 		punch = minf(1.0, punch + delta / C.PUNCH_SECONDS)
 		if punch >= 1.0:
@@ -2637,6 +2676,8 @@ static func _global_groups(g: Dictionary) -> Dictionary:
 			gid = "cs"
 		elif key.begins_with("lp."):
 			gid = "lp"
+		elif key.begins_with("d."):
+			gid = "dr"   # DOORS HOOK: the door set changes with the wings
 		elif (key.begins_with("sg") or key.begins_with("ms")) and key.contains("."):
 			gid = "s" + key.substr(2, key.find(".") - 2)
 		if not out.has(gid):
@@ -2958,6 +2999,10 @@ func _global_fields() -> Dictionary:
 	var lp: Dictionary = loop.net_state()
 	for k in lp.keys():
 		g["lp." + str(k)] = lp[k]
+	# DOORS HOOK: every door's amount ("d.<id>", in fiftieths, group "dr"), the gates' lock ("dl"),
+	# and which wings the level has ("wg").
+	g.merge(doors.net_fields())
+	g["wg"] = wing_loader.generation
 	return g
 
 
@@ -3097,10 +3142,12 @@ func _repl_apply() -> void:
 	if not g.has("sd"):
 		return
 	if phase == Phase.MENU:
+		wing_loader.next_generation = int(g.get("wg", -1))   # DOORS HOOK: build the host's wings
 		start_lobby(int(g.sd), int(g.sh))   # sets _cl_full
 	elif int(g.sd) != seed_value:
 		if _cl_seed_wait:
 			return   # _rpc_shift already built the newer hospital; this is an older value
+		wing_loader.next_generation = int(g.get("wg", -1))   # DOORS HOOK
 		start_lobby(int(g.sd), int(g.sh))
 	else:
 		_cl_seed_wait = false
@@ -3156,6 +3203,10 @@ func _apply_state(state: Dictionary, msg: Dictionary, keyframe: bool) -> void:
 	brains.apply_net_state(g.get("br", {}))
 	if dev_mode and not (g.get("dv", {}) as Dictionary).is_empty():
 		dev.apply_net_state(g.dv)  # DEV HOOK: creates bot players before their entries apply
+	# DOORS HOOK: the host rebuilt the wings (a new shift): follow; then the doors' amounts.
+	if g.has("wg") and int(g.wg) != wing_loader.generation and not dev_mode:
+		wing_loader.regenerate(int(g.wg))
+	doors.apply_net(g)
 
 	var removed: Dictionary = msg.get("x", {})
 	# Players: nodes come from the roster (and the dev room's bots); apply what changed, and
@@ -3345,6 +3396,13 @@ func _event(kind: String, data: Dictionary) -> void:
 				dissection.on_event(kind, data)
 			elif kind.begins_with("br_"):
 				brains.on_event(kind, data)
+			elif kind == "dr_evict":
+				# DOORS HOOK: the host walked me out of a wing that is about to be rebuilt.
+				var me := local_player()
+				if me != null:
+					me.teleport(data.pos)
+			elif kind.begins_with("dr_"):
+				doors.on_event(kind, data)
 			else:
 				dev.on_event(kind, data)  # DEV HOOK: monster_killed and other dev room events
 

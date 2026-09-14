@@ -130,6 +130,7 @@ func build_level(info: Dictionary) -> Node3D:
 ## The level exists and everyone is in it (game.start_lobby's dev branch).
 func on_enter() -> void:
 	reset_state()
+	tools_unlocked = true   # DOORS HOOK: the panel's door tools now also open in a hospital run
 	game._set_phase(game.Phase.SHIFT)
 	game.vitals = 100.0
 	if is_host():
@@ -461,7 +462,7 @@ func _update_gun_visual(p: Node, delta: float) -> void:
 
 ## Ask for a change. The host applies it at once; a client sends it to the host.
 func request(action: String, args: Dictionary = {}) -> void:
-	if game == null or not game.dev_mode:
+	if game == null or not (game.dev_mode or (tools_unlocked and DOOR_ACTIONS.has(action))):
 		return
 	if is_host():
 		_apply_request(Net.my_id(), action, args)
@@ -471,12 +472,35 @@ func request(action: String, args: Dictionary = {}) -> void:
 
 @rpc("any_peer", "reliable", "call_remote")
 func _rpc_request(action: String, args: Dictionary) -> void:
-	if is_host() and game.dev_mode:
+	if is_host() and (game.dev_mode or (tools_unlocked and DOOR_ACTIONS.has(action))):
 		_apply_request(multiplayer.get_remote_sender_id(), action, args)
+
+
+## DOORS HOOK: once this machine has been in the dev room, its panel (F1) also opens in a hospital
+## run with only the door tools; these are the requests it may send there.
+static var tools_unlocked := false
+const DOOR_ACTIONS := ["doors_all", "regen_wings"]
+
+
+func _door_request(action: String, a: Dictionary) -> void:
+	match action:
+		"doors_all":
+			game.doors.set_all(bool(a.get("open", true)))
+			game.say("Every door %s." % ("open" if bool(a.get("open", true)) else "shut"), 2.0)
+		"regen_wings":
+			if not game.wing_loader.has_wings():
+				game.say("No wings in here. After a visit to the dev room, F1 in a hospital run regenerates the real ones.", 5.0)
+				return
+			game.wing_loader.regenerate(int(game.wing_loader.generation) + 1)
+			game.say("Regenerating the wings behind the gates...", 3.0)
 
 
 func _apply_request(sender: int, action: String, a: Dictionary) -> void:
 	var who = game.players.get(sender)
+	if DOOR_ACTIONS.has(action):
+		_door_request(action, a)   # DOORS HOOK
+		state_changed.emit()
+		return
 	match action:
 		"god":
 			_set_flag(god, sender, bool(a.get("on", not god.has(sender))))
