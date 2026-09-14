@@ -1329,6 +1329,9 @@ func _run_perf() -> void:
 		bot.bot_move = Vector2.ZERO
 		bot.flashlight_on = true
 
+	if OS.get_cmdline_user_args().has("--nurses"):
+		await _perf_nurses(g, bot, first, best_dir, look, frames)
+		return
 	for pass_i in 2:
 		# A: no Walk-Ins at all (what the game had before).
 		g._spawn_monsters()
@@ -1359,9 +1362,44 @@ func _run_perf() -> void:
 	get_tree().quit(0)
 
 
+## `-- --perf --nurses`: the same view with no monsters, then 1 and 4 Night Nurses 3-6 m in front of
+## the camera, walking in place (posed like a client, so they animate and never reach the camera).
+func _perf_nurses(g: Node, bot: Node, first: Vector3, best_dir: Vector3, look: Callable, frames: int) -> void:
+	for pass_i in 2:
+		for count in [0, 1, 4]:
+			g._clear_monsters()
+			await get_tree().process_frame
+			var list: Array = []
+			for i in count:
+				var side := best_dir.cross(Vector3.UP) * (0.7 if i % 2 == 0 else -0.7)
+				var p: Vector3 = first + best_dir * (3.0 + i * 1.0) + side * (0.0 if count == 1 else 1.0)
+				var m: Node = g._add_monster("night_nurse", p)
+				m.set_physics_process(false)
+				list.append(m)
+			look.call()
+			_perf_tick = func():
+				for m in list:
+					if is_instance_valid(m):
+						var to: Vector3 = bot.global_position - m.global_position
+						m.apply_remote({"pos": m.global_position, "y": atan2(-to.x, -to.z), "md": Modes.Mode.WANDER, "mv": true, "sp": 1.6, "ob": false})
+						m._update_visual(get_process_delta_time())
+			await _perf_measure("%d Night Nurse%s in view #%d" % [count, "" if count == 1 else "s", pass_i + 1], frames, bot)
+			_perf_tick = Callable()
+	print("[perf] ============================================================================")
+	print("[perf] %-40s avg fps  1%%low  worst ms  phys ms  proc ms  draws" % "scenario")
+	for r in _perf_rows:
+		print("[perf] %-40s %7.0f  %5.0f  %8.1f  %7.2f  %7.2f  %5d" % [r.name, r.fps, r.low, r.worst, r.phys, r.proc, r.draws])
+	get_tree().quit(0)
+
+
+var _perf_tick := Callable()
+
+
 func _perf_measure(label: String, frames: int, bot: Node) -> void:
 	for i in 60:
 		await get_tree().process_frame
+		if _perf_tick.is_valid():
+			_perf_tick.call()
 	var times: Array[float] = []
 	var phys := 0.0
 	var proc := 0.0
@@ -1369,6 +1407,8 @@ func _perf_measure(label: String, frames: int, bot: Node) -> void:
 	var cam_pos: Vector3 = bot.global_position
 	for i in frames:
 		await get_tree().process_frame
+		if _perf_tick.is_valid():
+			_perf_tick.call()
 		if bot.global_position.distance_to(cam_pos) > 0.3:
 			bot.teleport(cam_pos)
 		times.append(get_process_delta_time() * 1000.0)
