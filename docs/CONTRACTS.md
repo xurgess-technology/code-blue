@@ -292,6 +292,93 @@ Noise the game already emits on the host: footsteps (walk 0.25, sprint 0.8), con
 pickups 0.15, drops 0.4, breaking glass 0.9, shoves 0.6, surgery monitors 0.6 while someone
 operates.
 
+### Monsters, sweep 3 (monsters worker): the Walk-In, fighting and capturing
+
+Kinds: `Monster.WALK_IN` `"walk_in"`, `DISCHARGED`, `NIGHT_NURSE` (`Monster.KINDS`).
+
+```gdscript
+static func roster(shift, player_count) -> Array[String]  # Discharged/Nurse first (MAX_MONSTERS 5), then Walk-Ins
+static func walk_in_count(shift, player_count) -> int     # 3 + shift + (players - 1), cap MAX_WALK_INS 8
+static func walk_in_spots(level_info, count, rng, space = null) -> Array[Vector3]   # game._spawn_monsters uses it
+static func is_capturable(kind) -> bool                    # walk_in, discharged
+static func max_hp_for(kind) -> int                        # walk_in 2, discharged 4, night_nurse 0
+static func display_name(kind) -> String                   # "Walk-In", "Discharged", "Night Nurse"
+static func make_lying(kind) -> Node3D                     # = monster_model.gd make_lying (below)
+enum State { WANDER, CHASE, STUNNED, SEDATED }             # modes.gd mirrors both enums; append only
+enum Mode { IDLE, WANDER, LISTEN, RUSH, SEARCH, STALK, STUNNED, RETREAT, SEDATED }
+var hp: int; var max_hp: int
+var sedation_left: float      # host only
+var dragged_by: int = 0       # set by combat; replicated
+var hit_count: int            # bumps (mod 64) on every take_hit; replicated
+func can_be_hurt() -> bool                                  # false for the Night Nurse
+func take_hit(dir: Vector3, amount: int, source: String) -> String   # host: "stagger" | "killed" | "immune"
+func can_sedate() -> bool                                   # capturable, not sedated, mode STUNNED now
+func sedate(seconds: float) -> bool                         # host; false for the Nurse / already sedated
+func is_sedated() -> bool                                   # every machine (clients read report "sd")
+func wake() -> void                                         # host
+func eye_transform() -> Transform3D                         # every machine: eyes on the animated head, -Z forward
+```
+
+- **take_hit**: hp -= amount; hp 0 returns `"killed"` and does nothing else (the caller calls
+  `game.kill_monster(m)`). Otherwise a 0.7 s stagger (mode STUNNED, pushed 0.45 m along `dir`),
+  after which it goes for whoever hit it (the nearest player within 3.5 m, else the side the blow
+  came from): the Walk-In walks at them, the Discharged rushes the spot. A sedated monster takes
+  the damage and stays down (`"stagger"`). The Night Nurse returns `"immune"` and nothing changes.
+  Any stagger opens `can_sedate()` for its duration, like a shove (2 s).
+- **sedate(seconds)**: mode and state SEDATED, the brain stops, it never hits anyone, it does not
+  hear or see. On the host it first turns to the facing closest to its current one that leaves
+  room to lie down (rays half its height each way), so a body never lies inside a wall. When
+  `sedation_left` reaches 0 it calls `wake()`. Players never collide with monsters (their mask is
+  the world only), so a sedated monster is not solid to them. Its collision capsule (layer
+  `C.L_MONSTER`) lies down with it on every machine: along local Z, centred on the origin.
+- **wake()**: stands up over 1.2 s (mode STUNNED), then hunts the nearest player (Walk-In: walks
+  to where they are; Discharged: rushes them). If `dragged_by` is set it calls
+  `game.combat.drop_dragged(dragger)` when combat has it, clears `dragged_by`, and hits the dragger
+  (`game.monster_hit_player`) when they are within 3 m. Combat should not hit them a second time.
+- **dragged_by != 0**: the brain does not think (host); every machine sets the monster's position
+  to `game.combat.monster_pin(m).origin` and its yaw to the pin's -Z each physics frame when
+  combat has `monster_pin` (otherwise clients keep interpolating the snapshot). The pin's tilt is
+  ignored. The lying body is centred on the monster's origin along its local Z axis, head toward
+  local **+Z** (behind its former facing), face up, about 0.13 m off the floor: a pin whose -Z
+  points away from the dragger drags it head first.
+- **The lying pose** plays on every machine from mode SEDATED (report `sd`): the model tips over
+  backwards and settles in about 0.6 s; it gets up in about 0.9 s when `sd` clears.
+- **Report** (`Monster.report`) adds `sd` (bool), `db` (peer id), `hc` (hit counter). `hp` and
+  `sedation_left` stay on the host. Clients flinch and play `monsters_flesh_hit` when `hc` changes.
+- **make_lying(kind)** (`scripts/monsters/monster_model.gd`, static): a still copy lying on its back
+  along X, head toward -X, face up (+Y), origin at the middle of its back (the PatientBody
+  convention). Lengths: Walk-In about 1.7 m, Discharged about 2.1 m. No IV pole. Rig-less
+  fallback: primitives. Its node named `Head` follows the head bone. It keeps an AnimationPlayer
+  frozen on the idle pose; do not free the skeleton.
+- **The Walk-In**: sight only (110 degree cone, 12 m, rays to the player's head then chest, walls
+  block, light does not matter; 5 Hz, staggered; the ray count is in `brain.rays`). Wanders 0.8 m/s
+  within 7 m of where it spawned, chases at 1.8 m/s straight at whoever it sees, keeps walking to
+  the last sighting for up to 2.5 s after losing them, looks around about 3 s, gives up. Ignores
+  every noise; `alert_to(pos)` sends it to look at `pos`. Hits for 1 on contact, then backs off
+  and stays calm 4 s. Shove: 2 s stun. Height about 1.75 m, collision radius 0.36.
+- **The Discharged**: about 2.1 m (collision capsule 2.1 m, radius 0.36), eyeless, ears on the
+  large side of normal; `MonsterModel.set_ears(listen, yaw, delta)` swivels them toward `listen_yaw`
+  and flares them while listening (every machine, from the report's mode and `ly`).
+- **Placement** (`walk_in_spots`, host): hallway tiles (`.`/`M`, outside every room rect grown by a
+  tile, not in a doorway's mouth) of each wing (`zone_of` == the wing id), at least 5 m from the
+  entrance building and within 12 m of the wing's shallowest such tile; blocked tiles rejected
+  with a sphere query when a physics space is given. Groups of 2-3 (4 when there are more
+  Walk-Ins than wings can take), one group per wing while wings last, each within 3.5 m of a
+  random shallow centre. Levels without `wings`/`zones`/`entrance_rect` (dev room, lab) group
+  them around `monster_spawns`.
+- **Shapes.bake(root, key)**: every part added through `MonsterModel.add_part` is merged into one
+  mesh per material, cached per kind and part for the session (a Walk-In went from about 90 draw
+  calls to about 6). Parts that move on their own must carry meta `no_bake` (the ears).
+- Sounds (`tools/gen_audio_monsters.mjs`): `monsters_walkin_groan` (occasional, and when it first
+  sees someone), `monsters_walkin_shuffle` (per step), `monsters_flesh_hit` (any struck monster),
+  `monsters_walkin_death` (played by the dev room's `monster_died_fx` for a Walk-In),
+  `monsters_sedated_breath` (every 3-4 s near a sedated monster).
+- Tests: `tools/monster_lab.tscn` (headless scenarios 1-10: hearing, darkness, the Nurse, contact,
+  roster, client mirrors, the Walk-In, hits/sedation/waking, dragging/lying copies, placement over
+  generated hospitals), `-- --shots` (windowed close-ups into `tools/monster_shots/`), `-- --perf`
+  (Walk-In frame cost, windowed), `-- --real` (a bot in a generated hospital), and the nettest
+  scenario `monsters`.
+
 ## Medical guide (guide worker)
 
 ```gdscript

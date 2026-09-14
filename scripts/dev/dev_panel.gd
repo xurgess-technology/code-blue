@@ -178,9 +178,9 @@ func _build() -> void:
 	s1.add_child(count)
 	_button(s1, "Spawn item", func(): _req("spawn_item", {"kind": item_names[items.selected], "count": int(count.value)}))
 	var s2 := _row(col)
-	var monsters := _option(s2, ["The Discharged", "The Night Nurse"])
+	var monsters := _option(s2, ["The Walk-In", "The Discharged", "The Night Nurse"])  # SWEEP 3 HOOK (monsters): the Walk-In
 	monsters.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var kinds := ["discharged", "night_nurse"]
+	var kinds := ["walk_in", "discharged", "night_nurse"]
 	_button(s2, "In the pen", func(): _req("spawn_monster", {"kind": kinds[monsters.selected], "where": "pen"}))
 	_button(s2, "In front", func(): _req("spawn_monster", {"kind": kinds[monsters.selected], "where": "front"}))
 	var s3 := _row(col)

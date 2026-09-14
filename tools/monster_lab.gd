@@ -1,10 +1,11 @@
 extends Node3D
 ## Monster lab: a lit test corridor with doorways and fixtures, stand-in players, and the
-## two monsters, driven by scripted scenarios that print PASS/FAIL.
+## three monsters, driven by scripted scenarios that print PASS/FAIL.
 ##
 ##   godot --headless --fixed-fps 60 --path . tools/monster_lab.tscn            # scenarios
 ##   godot --path . tools/monster_lab.tscn -- --shots                             # screenshots
 ##   godot --path . tools/monster_lab.tscn -- --shots --only=nurse_door           # one shot
+##   godot --path . --resolution 1600x900 tools/monster_lab.tscn -- --perf              # Walk-In frame cost
 ##   options: --dist=<m> overrides the camera distance, --nopost drops the post layer
 ##
 ## Exit code 0 only when every scenario passed.
@@ -25,6 +26,7 @@ class LabGame extends Node3D:
 	var noises: Array = []
 	var hits: Array = []
 	var said: Array = []
+	var combat: Node = null   # a LabCombat while a drag scenario runs
 
 	func _ready() -> void:
 		add_to_group("game")
@@ -60,6 +62,21 @@ class LabGame extends Node3D:
 		said.append(text)
 
 
+## Stand-in for game.combat: the drag pin and drop_dragged.
+class LabCombat extends Node:
+	var pin := Transform3D.IDENTITY
+	var dropped: Array = []
+
+	func monster_pin(_m: Node) -> Transform3D:
+		return pin
+
+	func drop_dragged(p: Node) -> void:
+		dropped.append(p)
+		for m in p.get_tree().get_nodes_in_group("monster"):
+			if int(m.dragged_by) == int(p.peer_id):
+				m.dragged_by = 0
+
+
 var game: LabGame
 var level: Node3D
 var p1: Node   # the watcher / victim
@@ -73,6 +90,9 @@ var dist_override := 0.0
 func _ready() -> void:
 	if OS.get_cmdline_user_args().has("--real"):
 		await _run_real()
+		return
+	if OS.get_cmdline_user_args().has("--perf"):
+		await _run_perf()
 		return
 	for a in OS.get_cmdline_user_args():
 		if a == "--shots":
@@ -218,6 +238,10 @@ func _run_scenarios() -> void:
 	await _scenario_contact()
 	_scenario_roster()
 	await _scenario_client()
+	await _scenario_walk_in()
+	await _scenario_combat()
+	await _scenario_drag_and_lying()
+	_scenario_placement()
 	var failed := results.filter(func(r): return not r.ok).size()
 	print("[monster_lab] ------------------------------------------")
 	print("[monster_lab] %d checks, %d failed" % [results.size(), failed])
@@ -475,13 +499,20 @@ func _scenario_roster() -> void:
 			var r: Array[String] = MonsterScript.roster(shift, pc)
 			var dd := r.count("discharged")
 			var nn := r.count("night_nurse")
-			line += "  %dp D%d N%d" % [pc, dd, nn]
-			if r.size() > 5 or dd < 1 or (shift == 1 and nn != 0) or (shift >= 2 and nn < 1):
+			var ww := r.count("walk_in")
+			line += "  %dp D%d N%d W%d" % [pc, dd, nn, ww]
+			if dd + nn > MonsterScript.MAX_MONSTERS or dd < 1 or (shift == 1 and nn != 0) or (shift >= 2 and nn < 1):
+				ok = false
+			if ww < 2 or ww > MonsterScript.MAX_WALK_INS or ww != MonsterScript.walk_in_count(shift, pc):
+				ok = false
+			if (shift > 1 or pc > 1) and ww < MonsterScript.roster(maxi(1, shift - 1), maxi(1, pc - 1)).count("walk_in"):
 				ok = false
 		print("[monster_lab]", line)
 	var s1: Array[String] = MonsterScript.roster(1, 1)
-	check("shift 1 solo is exactly one Discharged", s1.size() == 1 and s1[0] == "discharged", str(s1))
-	check("roster rules hold for shifts 1-6, 1-4 players (cap 5, nurse from shift 2)", ok)
+	check("shift 1 solo is one Discharged and Walk-Ins", s1.count("discharged") == 1 and s1.count("night_nurse") == 0 and s1.count("walk_in") == 4, str(s1))
+	check("roster rules hold for shifts 1-6, 1-4 players (cap 5 + Walk-In cap 8, nurse from shift 2, Walk-Ins grow)", ok)
+	check("the Walk-In cap is reached late (shift 6, 4 players: %d)" % MonsterScript.roster(6, 4).count("walk_in"), MonsterScript.roster(6, 4).count("walk_in") == MonsterScript.MAX_WALK_INS)
+	check("capturable: walk_in, discharged; not the Night Nurse", MonsterScript.is_capturable("walk_in") and MonsterScript.is_capturable("discharged") and not MonsterScript.is_capturable("night_nurse"))
 
 
 ## A client copy fed only report() must animate the same state.
@@ -518,6 +549,350 @@ func _scenario_client() -> void:
 	await clear_monsters()
 
 
+func _scenario_walk_in() -> void:
+	print("[monster_lab] --- 7. the Walk-In sees ---")
+	set_all_lights(false)
+	# Facing east (+X) down the dark corridor, a player 8 m ahead, flashlight off.
+	place_player(cor(18.0), cor(0.0) + Vector3.UP * 1.5, false)
+	p1.invuln = 99.0
+	var w: Node = spawn("walk_in", cor(10.0), -PI * 0.5)
+	await wait(0.5)
+	check("it sees a player 8 m ahead in the dark and comes (mode RUSH, state CHASE)", w.mode == Modes.Mode.RUSH and w.state == Modes.State.CHASE, "mode=%d" % w.mode)
+	var eyes: Transform3D = w.eye_transform()
+	var look_dir: Vector3 = -eyes.basis.z
+	check("eye_transform: at eye height (%.2f m), looking the way it walks (%.2f, %.2f, %.2f)" % [eyes.origin.y, look_dir.x, look_dir.y, look_dir.z],
+		eyes.origin.y > 1.3 and eyes.origin.y < 1.8 and look_dir.x > 0.6 and absf(eyes.origin.x - w.global_position.x) < 0.5)
+	var top := 0.0
+	for i in 90:
+		await get_tree().physics_frame
+		top = maxf(top, w.speed)
+	check("it lumbers at about 1.8 m/s (peak %.2f)" % top, top > 1.6 and top < 2.0)
+
+	# Behind it: not seen.
+	await clear_monsters()
+	place_player(cor(4.0), cor(30.0) + Vector3.UP * 1.5, false)
+	w = spawn("walk_in", cor(10.0), -PI * 0.5)
+	w.brain.home = cor(10.0)
+	w.brain.timer = 30.0   # stands still
+	var chased := false
+	for i in 120:
+		await get_tree().physics_frame
+		if w.mode == Modes.Mode.RUSH:
+			chased = true
+	check("a player 6 m behind it is not seen", not chased, "mode=%d" % w.mode)
+	# Deaf: a breaking-glass noise right behind it, and sprint footsteps.
+	for i in 3:
+		game.emit_noise(w.global_position + Vector3(-2.0, 0, 0), 0.9, "glass")
+		game.emit_noise(p1.global_position, 0.8, "footstep")
+		await wait(0.4)
+	check("it ignores noise completely (glass 2 m behind it, sprinting)", w.mode != Modes.Mode.RUSH and w.mode != Modes.Mode.LISTEN and w.mode != Modes.Mode.SEARCH, "mode=%d" % w.mode)
+	# Beyond range: 14 m ahead.
+	await clear_monsters()
+	place_player(cor(24.0), cor(0.0) + Vector3.UP * 1.5, false)
+	w = spawn("walk_in", cor(10.0), -PI * 0.5)
+	w.brain.home = cor(10.0)
+	w.brain.timer = 30.0
+	await wait(1.0)
+	check("a player 14 m ahead (range 12) is not seen", w.mode != Modes.Mode.RUSH, "mode=%d" % w.mode)
+
+	# Loses interest behind a wall.
+	await clear_monsters()
+	place_player(cor(17.0), cor(0.0) + Vector3.UP * 1.5, false)
+	w = spawn("walk_in", cor(10.0), -PI * 0.5)
+	await wait(1.0)
+	var chasing: bool = w.mode == Modes.Mode.RUSH
+	# The player ducks into the top room (doorway at tile 16,4) and stands behind its wall.
+	p1.teleport(C.tile_to_world(19, 2))
+	await wait(0.25)   # one sight tick for the old sighting to clear
+	var t0: float = game.world_time
+	var saw_again := false
+	var searched := false
+	var entered_room := false
+	var gave_up := -1.0
+	while game.world_time - t0 < 10.0:
+		await get_tree().physics_frame
+		if w.brain.seeing:
+			saw_again = true
+		if w.mode == Modes.Mode.SEARCH:
+			searched = true
+		if w.global_position.z < 4.0 * C.TILE:
+			entered_room = true
+		if gave_up < 0.0 and (w.mode == Modes.Mode.WANDER or w.mode == Modes.Mode.IDLE):
+			gave_up = game.world_time - t0
+	check("it was chasing before the player ducked away", chasing)
+	check("behind the wall it never sees them again", not saw_again)
+	check("it goes to where it last saw them and looks around", searched)
+	check("it gives up within about 6 s (%.1f s)" % gave_up, gave_up > 2.0 and gave_up < 7.5, "mode=%d" % w.mode)
+	check("it does not follow into the room", not entered_room)
+
+	# Contact: hits for 1, backs off.
+	await clear_monsters()
+	place_player(cor(13.0), cor(0.0) + Vector3.UP * 1.5, false)
+	p1.invuln = 0.0
+	w = spawn("walk_in", cor(10.0), -PI * 0.5)
+	for i in 5 * 60:
+		await get_tree().physics_frame
+		if not game.hits.is_empty():
+			break
+	check("it walks into a player standing still and hits for 1", game.hits.size() == 1 and game.hits[0].damage == 1 and game.hits[0].kind == "walk_in", "hits=%s" % [game.hits])
+	check("after the hit it backs off and is calm", w.mode == Modes.Mode.RETREAT and w.calm > 0.0, "mode=%d" % w.mode)
+	p1.invuln = 99.0
+
+	# Shove: 2 s stun; the capture window.
+	await wait(2.0)
+	w.shoved(Vector3.RIGHT)
+	var st: Vector3 = w.global_position
+	await wait(1.8)
+	check("a shove stuns the Walk-In for ~2 s (can_sedate %s)" % w.can_sedate(), w.mode == Modes.Mode.STUNNED and w.global_position.distance_to(st) < 0.05 and w.can_sedate())
+	await wait(0.4)
+	check("then it recovers (can_sedate false again)", w.mode != Modes.Mode.STUNNED and not w.can_sedate(), "mode=%d" % w.mode)
+
+	# Cost of building one (the parts are baked once per session, then reused).
+	var tb := Time.get_ticks_usec()
+	var built: Node = MonsterScript.new_monster(990, "walk_in", cor(40.0))
+	var build_ms := float(Time.get_ticks_usec() - tb) / 1000.0
+	built.free()
+	var others := ""
+	for k in ["discharged", "night_nurse"]:
+		var tk := Time.get_ticks_usec()
+		var o: Node = MonsterScript.new_monster(991, k, cor(40.0))
+		others += " %s %.1f ms" % [k, float(Time.get_ticks_usec() - tk) / 1000.0]
+		o.free()
+	check("building another Walk-In takes %.1f ms (parts baked once and cached;%s)" % [build_ms, others], build_ms < 15.0)
+
+	# Cost: several Walk-Ins in sight of the player, rays per second.
+	await clear_monsters()
+	place_player(cor(20.0), cor(0.0) + Vector3.UP * 1.5, false)
+	var crowd: Array = []
+	for i in 6:
+		var c: Node = spawn("walk_in", cor(8.0 + i * 1.5, -0.8 + (i % 2) * 1.6), -PI * 0.5)
+		crowd.append(c)
+	await wait(0.3)
+	for c in crowd:
+		c.brain.rays = 0
+	await wait(3.0)
+	var total := 0
+	for c in crowd:
+		total += int(c.brain.rays)
+	check("6 Walk-Ins cast %.1f rays/s each (sight at 5 Hz, <= 12)" % (total / 3.0 / 6.0), total / 3.0 / 6.0 <= 12.0)
+	var t_us := Time.get_ticks_usec()
+	for i in 200:
+		crowd[0].brain._look()
+	var cost := float(Time.get_ticks_usec() - t_us) / 200.0
+	check("one sight check costs %.0f us" % cost, cost < 500.0)
+	await clear_monsters()
+
+
+func _scenario_combat() -> void:
+	print("[monster_lab] --- 8. hits, sedation, waking ---")
+	set_all_lights(false)
+	place_player(cor(40.0), cor(0.0) + Vector3.UP * 1.5, false)
+	p1.invuln = 99.0
+	var w: Node = spawn("walk_in", cor(10.0), -PI * 0.5)
+	var d: Node = spawn("discharged", cor(20.0), -PI * 0.5)
+	var n: Node = spawn("night_nurse", cor(30.0), -PI * 0.5)
+	await wait(0.2)
+	check("hp: walk_in 2, discharged 4, night_nurse 0", w.hp == 2 and w.max_hp == 2 and d.hp == 4 and d.max_hp == 4 and n.hp == 0 and n.max_hp == 0)
+	check("can_be_hurt: not the Night Nurse", w.can_be_hurt() and d.can_be_hurt() and not n.can_be_hurt())
+	var before: Vector3 = w.global_position
+	var r1: String = w.take_hit(Vector3.RIGHT, 1, "saw:lab")
+	await get_tree().physics_frame
+	check("a first saw hit staggers the Walk-In (%s, knocked %.2f m, hp %d)" % [r1, w.global_position.distance_to(before), w.hp], r1 == "stagger" and w.mode == Modes.Mode.STUNNED and w.hp == 1 and w.global_position.distance_to(before) > 0.2)
+	check("the hit bumps hit_count for every machine (%d)" % w.hit_count, w.hit_count == 1 and int(w.report().hc) == 1)
+	await wait(1.0)
+	check("after the stagger it goes after the hitter (mode RUSH)", w.mode == Modes.Mode.RUSH, "mode=%d" % w.mode)
+	check("a second hit kills it", w.take_hit(Vector3.RIGHT, 1, "saw:lab") == "killed" and w.hp == 0)
+	var results_d: Array = []
+	for i in 4:
+		results_d.append(d.take_hit(Vector3.RIGHT, 1, "saw:lab"))
+	check("the Discharged takes 3 staggers, the 4th hit kills (%s)" % str(results_d), results_d == ["stagger", "stagger", "stagger", "killed"])
+	var rn: String = n.take_hit(Vector3.RIGHT, 5, "saw:lab")
+	check("the Night Nurse is immune (%s), hp unchanged" % rn, rn == "immune" and n.hp == 0 and n.hit_count == 0)
+	n.shoved(Vector3.RIGHT)
+	check("the Night Nurse can never be sedated", not n.can_sedate() and not n.sedate(10.0) and not n.is_sedated())
+	await clear_monsters()
+
+	# Sedation.
+	place_player(cor(13.0), cor(0.0) + Vector3.UP * 1.5, false)
+	p1.invuln = 0.0
+	w = spawn("walk_in", cor(12.0), -PI * 0.5)
+	await wait(0.1)
+	check("not stunned: can_sedate is false", not w.can_sedate())
+	w.shoved(Vector3.LEFT)
+	check("shoved: can_sedate is true", w.can_sedate())
+	check("sedate(3) works", w.sedate(3.0) and w.is_sedated() and w.mode == Modes.Mode.SEDATED and w.state == Modes.State.SEDATED)
+	check("a second sedate while sedated is refused", not w.sedate(3.0))
+	check("report says sd", w.report().sd == true)
+	var at: Vector3 = w.global_position
+	var hits_before := game.hits.size()
+	await wait(1.5)
+	check("sedated next to a player: it lies still (%.3f m) and never hits" % w.global_position.distance_to(at), w.global_position.distance_to(at) < 0.01 and game.hits.size() == hits_before)
+	check("sedation_left counts down (%.2f)" % w.sedation_left, w.sedation_left > 1.3 and w.sedation_left < 1.6)
+	check("lying pose: the model is tipped onto its back (rot %.2f)" % w.model.rotation.x, w.model.rotation.x > 1.45 and w.model.shaper.lying > 0.95)
+	var r_sed: String = w.take_hit(Vector3.RIGHT, 1, "saw:lab")
+	check("hit while sedated: %s, still sedated" % r_sed, r_sed == "stagger" and w.is_sedated())
+	w.hp = w.max_hp
+	await wait(1.7)
+	check("it wakes when sedation runs out: staggering up (mode STUNNED)", not w.is_sedated() and w.mode == Modes.Mode.STUNNED, "mode=%d" % w.mode)
+	await wait(1.3)
+	check("then it hunts the nearest player", w.mode == Modes.Mode.RUSH or w.mode == Modes.Mode.RETREAT or game.hits.size() > hits_before, "mode=%d" % w.mode)
+	await wait(1.0)
+	check("and stands up again (rot %.2f)" % w.model.rotation.x, w.model.rotation.x < 0.2)
+	p1.invuln = 99.0
+
+	# wake() by hand, and the Discharged.
+	await clear_monsters()
+	place_player(cor(30.0), cor(0.0) + Vector3.UP * 1.5, false)
+	d = spawn("discharged", cor(10.0), -PI * 0.5)
+	await wait(0.1)
+	d.shoved(Vector3.LEFT)
+	check("the Discharged: shove then sedate", d.can_sedate() and d.sedate(60.0) and d.is_sedated())
+	game.emit_noise(d.global_position + Vector3(2, 0, 0), 1.0, "glass")
+	await wait(0.5)
+	check("sedated, it does not hear breaking glass", d.is_sedated() and d.mode == Modes.Mode.SEDATED)
+	d.wake()
+	await wait(1.4)
+	check("wake(): up and rushing toward the player (mode %d)" % d.mode, d.mode == Modes.Mode.RUSH and d.brain.target.distance_to(p1.global_position) < 1.0)
+	await clear_monsters()
+
+
+func _scenario_drag_and_lying() -> void:
+	print("[monster_lab] --- 9. dragging, clients, lying copies ---")
+	set_all_lights(false)
+	place_player(cor(14.0), cor(0.0) + Vector3.UP * 1.5, false)
+	p1.invuln = 99.0
+	var lc := LabCombat.new()
+	game.add_child(lc)
+	game.combat = lc
+	var w: Node = spawn("walk_in", cor(10.0), -PI * 0.5)
+	await wait(0.1)
+	w.shoved(Vector3.LEFT)
+	w.sedate(30.0)
+	w.dragged_by = 1
+	lc.pin = Transform3D(Basis(Vector3.UP, 0.7), cor(12.0, 0.5))
+	await wait(0.2)
+	check("dragged: it sits at combat.monster_pin (%.3f m off)" % w.global_position.distance_to(lc.pin.origin), w.global_position.distance_to(lc.pin.origin) < 0.01 and absf(angle_difference(w.rotation.y, 0.7)) < 0.01)
+	check("report carries db", int(w.report().db) == 1)
+	# A client copy follows the pin too, and lies down from sd.
+	var client_game := LabGame.new()
+	client_game.host = false
+	client_game.players = game.players
+	client_game.level_info = game.level_info
+	client_game.combat = lc
+	var cw: Node = MonsterScript.new_monster(997, "walk_in", cor(30.0))
+	add_child(cw)
+	cw.game = client_game
+	cw.apply_remote(w.report())
+	lc.pin = Transform3D(Basis(), cor(13.0, -0.5))
+	await wait(1.5)
+	check("client: dragged monster placed at the pin", cw.global_position.distance_to(lc.pin.origin) < 0.01)
+	check("client: lying pose from sd (rot %.2f), is_sedated() true" % cw.model.rotation.x, cw.model.rotation.x > 1.45 and cw.is_sedated())
+	var rep: Dictionary = w.report()
+	rep.sd = false
+	rep.md = Modes.Mode.WANDER
+	rep.db = 0
+	cw.apply_remote(rep)
+	await wait(1.5)
+	check("client: gets up when sd clears (rot %.2f)" % cw.model.rotation.x, cw.model.rotation.x < 0.2 and not cw.is_sedated())
+	cw.queue_free()
+	client_game.queue_free()
+	# Waking while dragged: dropped through combat.drop_dragged, and it lashes out at the dragger.
+	p1.invuln = 0.0
+	p1.teleport(cor(13.2))
+	lc.pin = Transform3D(Basis(), cor(12.6))
+	await wait(0.1)
+	var hits_before := game.hits.size()
+	w.wake()
+	check("wake while dragged: combat.drop_dragged(dragger) is called and dragged_by clears", lc.dropped.size() == 1 and lc.dropped[0] == p1 and w.dragged_by == 0)
+	check("and it hits the dragger", game.hits.size() == hits_before + 1)
+	game.combat = null
+	lc.queue_free()
+	await clear_monsters()
+	p1.invuln = 99.0
+
+	# make_lying: a still copy along X, head toward -X, origin at the middle of the back.
+	for k in ["walk_in", "discharged"]:
+		var copy: Node3D = MonsterScript.make_lying(k)
+		copy.position = cor(20.0) + Vector3.UP * 1.0
+		add_child(copy)
+		await wait(0.2)
+		var box := AABB()
+		var first := true
+		for mi in copy.find_children("*", "MeshInstance3D", true, false):
+			if not (mi as MeshInstance3D).is_visible_in_tree() or (mi as MeshInstance3D).skin != null or mi.get_parent() is Skeleton3D and String(mi.name).ends_with("-mesh"):
+				continue   # skinned rig meshes report their rest-pose box (A-pose arms)
+			var b: AABB = (mi as MeshInstance3D).global_transform * (mi as MeshInstance3D).get_aabb()
+			box = b if first else box.merge(b)
+			first = false
+		var head: Node3D = copy.find_child("Head", true, false)
+		var hx: float = head.global_position.x - copy.global_position.x if head != null else 0.0
+		var centre: Vector3 = box.get_center() - copy.global_position
+		check("make_lying(%s): long along X (%.2f x %.2f x %.2f), head toward -X (%.2f), centred (%.2f, %.2f)" % [k, box.size.x, box.size.y, box.size.z, hx, centre.x, centre.y],
+			box.size.x > box.size.y * 2.5 and box.size.x > box.size.z * 2.0 and hx < -0.5 and absf(centre.x) < 0.25 and absf(centre.y) < 0.2)
+		copy.queue_free()
+	await get_tree().physics_frame
+
+
+## Walk-In placement in generated hospitals (no physics space: the tile rules only).
+func _scenario_placement() -> void:
+	print("[monster_lab] --- 10. Walk-In placement ---")
+	var MG = load("res://scripts/mapgen.gd")
+	var ok_zone := true
+	var ok_room := true
+	var ok_shallow := true
+	var ok_groups := true
+	var ok_count := true
+	var detail := ""
+	var t_ms := 0
+	for seed in [11, 202, 4242, 777, 90210, 5]:
+		var gen: Dictionary = MG.generate(seed)
+		var info := {}
+		var lvl: Node3D = HB.build(gen, info)
+		for count in [4, 8]:
+			var rng := RandomNumberGenerator.new()
+			rng.seed = seed
+			var t0 := Time.get_ticks_msec()
+			var spots: Array[Vector3] = MonsterScript.walk_in_spots(info, count, rng)
+			t_ms = maxi(t_ms, Time.get_ticks_msec() - t0)
+			if spots.size() != count:
+				ok_count = false
+			var per_wing := {}
+			for p in spots:
+				var z: String = HB.zone_of(info, p)
+				var is_wing := false
+				for wd in info.wings:
+					if String(wd.id) == z:
+						is_wing = true
+				if not is_wing or (info.entrance_rect as Rect2).has_point(Vector2(p.x, p.z)):
+					ok_zone = false
+					detail = "seed %d spot %s zone %s" % [seed, p, z]
+				for r in info.rooms:
+					if (r.rect as Rect2).grow(0.1).has_point(Vector2(p.x, p.z)):
+						ok_room = false
+						detail = "seed %d spot %s in room %s" % [seed, p, r.kind]
+				per_wing[z] = per_wing.get(z, []) + [p]
+			var cands: Dictionary = MonsterScript._walk_in_candidates(info, null)
+			for z in per_wing:
+				var dmin: float = cands[z][0].d
+				for p in per_wing[z]:
+					var dd: float = MonsterScript._rect_dist(info.entrance_rect, Vector2(p.x, p.z))
+					if dd > dmin + MonsterScript.SHALLOW_BAND + MonsterScript.GROUP_RADIUS + 1.0:
+						ok_shallow = false
+						detail = "seed %d wing %s: %.1f m deep, shallowest %.1f" % [seed, z, dd, dmin]
+				if (per_wing[z] as Array).size() > 4 or (per_wing[z] as Array).size() < 2:
+					ok_groups = false
+					detail = "seed %d wing %s has %d" % [seed, z, (per_wing[z] as Array).size()]
+			if count == 8 and per_wing.size() < mini(4, info.wings.size()) - 1:
+				ok_groups = false
+				detail = "seed %d: 8 Walk-Ins in only %d of %d wings" % [seed, per_wing.size(), info.wings.size()]
+			print("[monster_lab]   seed %d, %d Walk-Ins: %s" % [seed, count, str(per_wing.keys().map(func(k): return "%s x%d" % [k, per_wing[k].size()]))])
+		lvl.free()
+	check("Walk-In spots: the requested count", ok_count)
+	check("Walk-In spots: all in wings, never the entrance or neutral area", ok_zone, detail)
+	check("Walk-In spots: hallways, not rooms", ok_room, detail)
+	check("Walk-In spots: the shallow part of each wing", ok_shallow, detail)
+	check("Walk-In spots: groups of 2-4 spread over the wings (worst %d ms)" % t_ms, ok_groups, detail)
+
 # =========================================================================
 # screenshots
 # =========================================================================
@@ -533,9 +908,20 @@ func _run_shots() -> void:
 		["nurse_4m", _shot_nurse.bind(4.0)],
 		["nurse_1_5m", _shot_nurse.bind(1.5)],
 		["nurse_door", _shot_nurse_door],
+		["walk_in_4m", _shot_walk_in.bind(4.0, false)],
+		["walk_in_1_5m", _shot_walk_in.bind(1.5, false)],
+		["walk_in_face", _shot_head.bind("walk_in", false, 0.75, 0.45)],
+		["walk_in_sees_you", _shot_walk_in_rush],
+		["walk_in_group", _shot_walk_in_group],
+		["discharged_head", _shot_head.bind("discharged", false, 0.8, 0.2)],
+		["discharged_side", _shot_head.bind("discharged", false, 0.7, 1.35)],
+		["discharged_ears_listen", _shot_head.bind("discharged", true, 0.8, 0.5)],
+		["discharged_height", _shot_height],
+		["sedated", _shot_sedated],
+		["lying_copies", _shot_lying],
 	]
 	for s in list:
-		if only != "" and s[0] != only:
+		if only != "" and not only.split(",").has(s[0]):
 			continue
 		await clear_monsters()
 		set_all_lights(false)
@@ -599,6 +985,125 @@ func _shot_nurse_door() -> void:
 	await wait(0.3)
 
 
+func _shot_walk_in(dist: float, _unused: bool) -> void:
+	if dist_override > 0.0:
+		dist = dist_override
+	var pos := cor(20.0, -0.2)
+	var w: Node = spawn("walk_in", pos, -PI * 0.5)
+	var yaw := -PI * 0.5 + 0.25
+	_pose(w, pos, yaw, Modes.Mode.WANDER, true, 0.8)
+	var look_h := 1.0 if dist > 2.0 else (1.3 if dist > 1.0 else 1.45)
+	place_player(pos + Vector3(dist, 0, 0.3), pos + Vector3.UP * look_h, true)
+	for i in 40:
+		await get_tree().physics_frame
+		w.apply_remote({"pos": pos, "y": yaw, "md": Modes.Mode.WANDER, "mv": true, "sp": 0.8})
+	w.model.anim.speed_scale = 0.0
+
+
+func _shot_walk_in_rush() -> void:
+	# It has seen the camera and comes: head up, 2 m away, a fixture behind it.
+	var pos := cor(21.0, -0.2)
+	var w: Node = spawn("walk_in", pos, -PI * 0.5)
+	set_light(1, true)
+	for f in 90:
+		await get_tree().physics_frame
+		w.apply_remote({"pos": pos, "y": -PI * 0.5 + 0.15, "md": Modes.Mode.RUSH, "mv": true, "sp": 1.8})
+	w.model.anim.speed_scale = 0.0
+	place_player(pos + Vector3(2.0, 0, 0.25), pos + Vector3.UP * 1.45, true)
+
+
+func _shot_walk_in_group() -> void:
+	var yaws := [-PI * 0.5 + 0.4, -PI * 0.5 - 0.2, -PI * 0.5 + 0.1]
+	var spots := [cor(18.0, -0.7), cor(16.5, 0.6), cor(14.5, -0.2)]
+	var ws: Array = []
+	for i in 3:
+		ws.append(spawn("walk_in", spots[i], yaws[i]))
+	set_light(1, true)
+	place_player(cor(25.0, 0.2), cor(16.0) + Vector3.UP * 1.1, true)
+	for f in 50:
+		await get_tree().physics_frame
+		for i in 3:
+			ws[i].apply_remote({"pos": spots[i], "y": yaws[i], "md": Modes.Mode.RUSH if i == 0 else Modes.Mode.WANDER, "mv": true, "sp": 1.8 if i == 0 else 0.8})
+
+
+## A head close-up: the camera `dist` metres from the face, `view` radians around from straight
+## in front (positive: toward the monster's left), eye level with the head. `listen`: the
+## Discharged listens to a sound on its left.
+func _shot_head(kind: String, listen: bool, dist: float, view: float) -> void:
+	var pos := cor(21.0, -0.3)
+	var m: Node = spawn(kind, pos, -PI * 0.5)
+	var yaw := -PI * 0.5
+	var ly := 0.9 if listen else 0.0
+	var md: int = Modes.Mode.LISTEN if listen else Modes.Mode.IDLE
+	_pose(m, pos, yaw, md, false, 0.0, {"ly": ly})
+	set_light(1, true)
+	for i in 60:
+		await get_tree().physics_frame
+		m.apply_remote({"pos": pos, "y": yaw, "md": md, "mv": false, "sp": 0.0, "ly": ly})
+	m.model.anim.speed_scale = 0.0
+	var head: Node3D = m.model.find_child("Head", true, false)
+	var hp: Vector3 = head.global_position + head.global_transform.basis.y.normalized() * 0.11
+	var fwd := Vector3(-sin(yaw), 0.0, -cos(yaw))
+	var dir := fwd.rotated(Vector3.UP, view)
+	var eye := hp + dir * dist + Vector3.UP * 0.05
+	place_player(Vector3(eye.x, 0.0, eye.z), hp, true)
+	p1.teleport(Vector3(eye.x, eye.y - C.EYE_H, eye.z))
+	var dvec: Vector3 = hp - eye
+	var cam_yaw := atan2(-dvec.x, -dvec.z)
+	p1.rotation.y = cam_yaw
+	p1._target_yaw = cam_yaw
+	p1._pitch = atan2(dvec.y, Vector2(dvec.x, dvec.z).length())
+	p1.head.rotation.x = p1._pitch
+	await wait(0.2)
+
+
+func _shot_height() -> void:
+	# Left to right: the Discharged, a surgeon, a Walk-In, side by side across the corridor.
+	var d: Node = spawn("discharged", cor(21.0, -1.0), -PI * 0.5)
+	_pose(d, cor(21.0, -1.0), -PI * 0.5, Modes.Mode.IDLE, false, 0.0)
+	var surgeon: Node = PlayerScript.new_player(2, "Surgeon", false)
+	game.add_child(surgeon)
+	surgeon.teleport(cor(21.0, 0.05))
+	surgeon.rotation.y = -PI * 0.5
+	surgeon._target_yaw = -PI * 0.5
+	surgeon.add_to_group("monster")   # cleared with the monsters after the shot
+	var w: Node = spawn("walk_in", cor(21.0, 1.0), -PI * 0.5)
+	_pose(w, cor(21.0, 1.0), -PI * 0.5, Modes.Mode.IDLE, false, 0.0)
+	set_light(1, true)
+	place_player(cor(27.5, 0.0), cor(21.0, 0.0) + Vector3.UP * 1.1, true)
+	await wait(1.0)
+	var head: Node3D = d.model.find_child("Head", true, false)
+	print("[monster_lab] Discharged head bone at %.2f m (top of skull about %.2f)" % [head.global_position.y, head.global_position.y + 0.25])
+	var wh: Node3D = w.model.find_child("Head", true, false)
+	print("[monster_lab] Walk-In head bone at %.2f m (top of skull about %.2f)" % [wh.global_position.y, wh.global_position.y + 0.22])
+
+
+func _shot_sedated() -> void:
+	var pos := cor(21.0, -0.5)
+	var w: Node = spawn("walk_in", pos, PI * 0.5 + 0.3)
+	var d: Node = spawn("discharged", cor(18.0, 0.6), -PI * 0.5 - 0.2)
+	for f in 120:
+		await get_tree().physics_frame
+		w.apply_remote({"pos": pos, "y": PI * 0.5 + 0.3, "md": Modes.Mode.SEDATED, "sd": true, "mv": false, "sp": 0.0})
+		d.apply_remote({"pos": cor(18.0, 0.6), "y": -PI * 0.5 - 0.2, "md": Modes.Mode.SEDATED, "sd": true, "mv": false, "sp": 0.0})
+	set_light(1, true)
+	place_player(cor(24.5, 0.8), cor(19.8, 0.0) + Vector3.UP * 0.1, true)
+
+
+func _shot_lying() -> void:
+	var a: Node3D = MonsterScript.make_lying("walk_in")
+	a.position = cor(21.0, -0.7) + Vector3.UP * 0.9
+	add_child(a)
+	a.add_to_group("monster")
+	var b: Node3D = MonsterScript.make_lying("discharged")
+	b.position = cor(21.0, 0.7) + Vector3.UP * 0.9
+	add_child(b)
+	b.add_to_group("monster")
+	set_light(1, true)
+	place_player(cor(21.3, 1.4) + Vector3(0, 0.9, 0), cor(21.0, 0.0) + Vector3.UP * 0.9, true)
+	await wait(0.4)
+
+
 # =========================================================================
 # the real game: boot main.tscn, walk a bot around a generated hospital, log the monsters
 #   godot --headless --fixed-fps 60 --path . tools/monster_lab.tscn -- --real [--seed=4242]
@@ -636,7 +1141,7 @@ func _run_real() -> void:
 		roster.append("%d:%s" % [m.monster_id, m.kind])
 	print("[real] seed=%d shift=%d monsters=%s (roster() says %s)" % [seed, shift, roster, MonsterScript.roster(shift, 1)])
 
-	var names := {0: "IDLE", 1: "WANDER", 2: "LISTEN", 3: "RUSH", 4: "SEARCH", 5: "STALK", 6: "STUNNED", 7: "RETREAT"}
+	var names := {0: "IDLE", 1: "WANDER", 2: "LISTEN", 3: "RUSH", 4: "SEARCH", 5: "STALK", 6: "STUNNED", 7: "RETREAT", 8: "SEDATED"}
 	var last_mode := {}
 	var last_pos := {}
 	var watched_move := {}
@@ -755,3 +1260,124 @@ func _run_real() -> void:
 		usec += Time.get_ticks_usec() - t0
 	print("[real] monster tick: %.3f ms per physics frame for %d monsters" % [usec / 300.0 / 1000.0, g.monsters.size()])
 	get_tree().quit(0)
+
+
+# =========================================================================
+# frame time with Walk-Ins (windowed, vsync off)
+#   godot --path . --resolution 1600x900 tools/monster_lab.tscn -- --perf [--seed=4242] [--frames=300]
+# Same session, same view, alternating: no Walk-Ins, the shift's roster, 8 Walk-Ins in view.
+# =========================================================================
+
+var _perf_rows: Array = []
+
+func _run_perf() -> void:
+	var seed := 4242
+	var frames := 300
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--seed="):
+			seed = int(a.split("=")[1])
+		elif a.begins_with("--frames="):
+			frames = int(a.split("=")[1])
+	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
+	Engine.max_fps = 0
+	var main: Node = load("res://scenes/main.tscn").instantiate()
+	add_child(main)
+	await get_tree().process_frame
+	var g: Node = main.game
+	main.menu.hide_menu()
+	Net.start_solo("Probe")
+	g.start_session(seed)
+	await get_tree().process_frame
+	while g.get_parent().has_node("WarmupCover"):
+		await get_tree().process_frame
+	main.set_quality(1, false)
+	g.begin_shift()
+	for i in 30:
+		await get_tree().process_frame
+	var bot: Node = g.local_player()
+	bot.bot_active = true
+	bot.bot_invulnerable = true
+	print("[perf] gpu=%s window=%s monsters=%s" % [RenderingServer.get_video_adapter_name(), str(get_viewport().get_visible_rect().size), str(g.monsters.values().map(func(m): return m.kind))])
+
+	# The view: from 9 m down the most open line from the first Walk-In, looking back at it.
+	var first: Vector3 = Vector3.ZERO
+	for m in g.monsters.values():
+		if m.kind == "walk_in":
+			first = m.global_position
+			break
+	var space: PhysicsDirectSpaceState3D = bot.get_world_3d().direct_space_state
+	var best_dir := Vector3.FORWARD
+	var best_len := -1.0
+	for i in 16:
+		var dir := Vector3(cos(TAU * i / 16.0), 0, sin(TAU * i / 16.0))
+		var q := PhysicsRayQueryParameters3D.create(first + Vector3.UP * 1.5, first + Vector3.UP * 1.5 + dir * 12.0)
+		q.collision_mask = C.L_WORLD
+		var hit := space.intersect_ray(q)
+		var reach: float = 12.0 if hit.is_empty() else first.distance_to(hit.position)
+		if reach > best_len:
+			best_len = reach
+			best_dir = dir
+	var cam := first + best_dir * minf(9.0, best_len - 0.8)
+	var look := func():
+		bot.teleport(cam)
+		var d: Vector3 = first - cam
+		bot.bot_yaw = atan2(-d.x, -d.z)
+		bot.bot_pitch = -0.08
+		bot.bot_move = Vector2.ZERO
+		bot.flashlight_on = true
+
+	for pass_i in 2:
+		# A: no Walk-Ins at all (what the game had before).
+		g._spawn_monsters()
+		for m in g.monsters.values().duplicate():
+			if m.kind == "walk_in":
+				g.monsters.erase(m.monster_id)
+				m.queue_free()
+		look.call()
+		await _perf_measure("no Walk-Ins (%d monsters) #%d" % [g.monsters.size(), pass_i + 1], frames, bot)
+		# B: the shift's roster.
+		g._spawn_monsters()
+		look.call()
+		await _perf_measure("shift 1 roster (%d monsters) #%d" % [g.monsters.size(), pass_i + 1], frames, bot)
+		# C: 8 Walk-Ins right in view, chasing the camera.
+		for m in g.monsters.values().duplicate():
+			if m.kind == "walk_in":
+				g.monsters.erase(m.monster_id)
+				m.queue_free()
+		for i in 8:
+			var p: Vector3 = first + best_dir * (1.0 + i * 0.7) + best_dir.cross(Vector3.UP) * (0.6 if i % 2 == 0 else -0.6)
+			g._add_monster("walk_in", p)
+		look.call()
+		await _perf_measure("8 Walk-Ins in view (%d monsters) #%d" % [g.monsters.size(), pass_i + 1], frames, bot)
+	print("[perf] ============================================================================")
+	print("[perf] %-40s avg fps  1%%low  worst ms  phys ms  proc ms  draws" % "scenario")
+	for r in _perf_rows:
+		print("[perf] %-40s %7.0f  %5.0f  %8.1f  %7.2f  %7.2f  %5d" % [r.name, r.fps, r.low, r.worst, r.phys, r.proc, r.draws])
+	get_tree().quit(0)
+
+
+func _perf_measure(label: String, frames: int, bot: Node) -> void:
+	for i in 60:
+		await get_tree().process_frame
+	var times: Array[float] = []
+	var phys := 0.0
+	var proc := 0.0
+	var draws := 0
+	var cam_pos: Vector3 = bot.global_position
+	for i in frames:
+		await get_tree().process_frame
+		if bot.global_position.distance_to(cam_pos) > 0.3:
+			bot.teleport(cam_pos)
+		times.append(get_process_delta_time() * 1000.0)
+		phys += Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0
+		proc += Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0
+		draws = maxi(draws, int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)))
+	var total := 0.0
+	for t in times:
+		total += t
+	var sorted := times.duplicate()
+	sorted.sort()
+	var row := {"name": label, "fps": 1000.0 * times.size() / total, "low": 1000.0 / sorted[int(sorted.size() * 0.99) - 1],
+		"worst": sorted[-1], "phys": phys / frames, "proc": proc / frames, "draws": draws}
+	_perf_rows.append(row)
+	print("[perf] %-40s avg %.0f fps, 1%% low %.0f, phys %.2f ms, draws %d" % [label, row.fps, row.low, row.phys, draws])

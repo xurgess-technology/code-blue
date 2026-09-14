@@ -27,7 +27,7 @@ const GUN_FP_POS := Vector3(0.24, -0.23, -0.46)
 ## Render layer 18 for the first-person gun (layer 20 is the minigames').
 const GUN_FP_LAYER := 1 << 17
 const ORDERS := ["follow", "stay", "carry", "operate"]
-const MONSTER_KINDS := ["discharged", "night_nurse"]
+const MONSTER_KINDS := ["walk_in", "discharged", "night_nurse"]  # SWEEP 3 HOOK (monsters): the Walk-In
 const BOT_NAMES := ["Dr. Botsworth", "Nurse Unit", "Intern 404", "Dr. Clank", "Orderly-9", "Dr. Servo", "Scrub Bot", "Dr. Byte"]
 
 const LevelScript := preload("res://scripts/dev/dev_level.gd")
@@ -36,6 +36,7 @@ const GunFx := preload("res://scripts/dev/dev_gun.gd")
 const PlayerScript := preload("res://scripts/player.gd")
 const WorldItemScript := preload("res://scripts/world_item.gd")
 const LootTable := preload("res://scripts/economy/loot_table.gd")
+const MonsterScript3 := preload("res://scripts/monster.gd")  # SWEEP 3 HOOK (monsters): display names
 
 var game: Node = null
 
@@ -590,7 +591,7 @@ func spawn_monster(kind: String, where: String, who: Node = null) -> Node:
 		var spots: Array = game.level_info.get("monster_spawns", [Vector3(12, 0, 3)])
 		pos = spots[game.monsters.size() % spots.size()]
 	var m = game._add_monster(kind, pos)
-	game.say("A %s crawls out." % ("Discharged" if kind == "discharged" else "Night Nurse"), 2.0)
+	game.say("A %s crawls out." % MonsterScript3.display_name(kind), 2.0)  # SWEEP 3 HOOK (monsters)
 	return m
 
 
@@ -820,4 +821,6 @@ func on_event(kind: String, data: Dictionary) -> void:
 
 func monster_died_fx(data: Dictionary) -> void:
 	GunFx.monster_corpse(game.get_node("Entities"), String(data.get("kind", "discharged")), data.get("pos", Vector3.ZERO), float(data.get("y", 0.0)))
-	Audio.play("monsters_shriek", data.get("pos", Vector3.ZERO) + Vector3.UP * 1.5, -4.0, 0.15)
+	# SWEEP 3 HOOK (monsters): the Walk-In dies with its own groan.
+	var death_cue := "monsters_walkin_death" if String(data.get("kind", "")) == "walk_in" else "monsters_shriek"
+	Audio.play(death_cue, data.get("pos", Vector3.ZERO) + Vector3.UP * 1.5, -4.0, 0.15)

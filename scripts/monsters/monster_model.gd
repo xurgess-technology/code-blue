@@ -6,6 +6,7 @@ const Shaper := preload("res://scripts/monsters/rig_shaper.gd")
 const Shapes := preload("res://scripts/monsters/shapes.gd")
 const DischargedLook := preload("res://scripts/monsters/discharged_look.gd")
 const NurseLook := preload("res://scripts/monsters/night_nurse_look.gd")
+const WalkInLook := preload("res://scripts/monsters/walk_in_look.gd")
 
 const RIG_KEY := "patient/human"
 const LOOPING := ["idle", "walk", "sprint"]
@@ -16,6 +17,13 @@ var skeleton: Skeleton3D = null
 var anim: AnimationPlayer = null
 var shaper: Shaper = null
 var iv: Node3D = null            ## the Discharged's IV pole, top-level
+## Movable ears: [{node: Node3D pivot on the head, side: +1 left / -1 right, rest: outward radians}]
+var ears: Array = []
+var _ear_listen := 0.0
+var _ear_yaw := 0.0
+var _ear_twitch := 0.0
+var _ear_twitch_t := 0.0
+var _parts := 0
 var _logical := ""
 var _fallback: Node3D = null
 
@@ -42,9 +50,53 @@ func setup(monster_kind: String) -> void:
 	match kind:
 		"night_nurse":
 			NurseLook.build(self)
+		"walk_in":
+			WalkInLook.build(self)
 		_:
 			DischargedLook.build(self)
 	play("idle")
+
+
+## Ears that turn toward a sound and flare while listening (the Discharged). Every machine,
+## every frame. `listen` 0..1, `yaw` the head turn toward the sound (positive: its left).
+func set_ears(listen: float, yaw: float, delta: float) -> void:
+	if ears.is_empty():
+		return
+	_ear_listen = move_toward(_ear_listen, listen, delta * 4.0)
+	_ear_yaw = lerpf(_ear_yaw, clampf(yaw, -1.2, 1.2) if listen > 0.05 else 0.0, clampf(delta * 5.0, 0.0, 1.0))
+	_ear_twitch_t -= delta
+	if _ear_twitch_t <= 0.0:
+		_ear_twitch_t = randf_range(1.5, 4.0)
+		_ear_twitch = randf_range(-0.25, 0.25)
+	for e in ears:
+		var pivot: Node3D = e.node
+		var sx: float = e.side
+		var twitch := _ear_twitch * (1.0 - _ear_listen) * (1.0 if sx > 0.0 else 0.6)
+		pivot.rotation = Vector3(
+			-0.12 - 0.22 * _ear_listen,
+			-sx * (e.rest + 0.55 * _ear_listen) + _ear_yaw * 0.55 * _ear_listen + twitch * 0.3,
+			sx * (0.05 + 0.12 * _ear_listen))
+
+
+## A still copy lying on its back along X, head toward -X, face up, origin at the middle of its
+## back (the PatientBody convention). Primitives only where the rig is missing. For dissection.
+static func make_lying(monster_kind: String) -> Node3D:
+	var root := Node3D.new()
+	root.name = "LyingMonster"
+	var m = load("res://scripts/monsters/monster_model.gd").new()
+	root.add_child(m)
+	m.setup(monster_kind)
+	if m.iv != null:
+		m.iv.queue_free()
+		m.iv = null
+	if m.shaper != null:
+		m.shaper.lying = 1.0
+	m.play("idle", 0.0, 0.0)
+	# The model's up (+Y, feet to head) becomes -X, its front (-Z) becomes +Y.
+	var tall := 2.1 if monster_kind == "discharged" else (2.3 if monster_kind == "night_nurse" else 1.75)
+	var back := 0.12 if monster_kind == "walk_in" else 0.09
+	m.transform = Transform3D(Basis(Vector3(0, 0, 1), Vector3(-1, 0, 0), Vector3(0, -1, 0)), Vector3(tall * 0.5, back, 0.0))
+	return root
 
 
 ## The Kenney clips are authored one-shot. A per-model copy of the library gets loops,
@@ -95,6 +147,9 @@ func attack_length() -> float:
 
 func add_part(node: Node3D, bone: String, offset := Transform3D.IDENTITY, tip := 0.0) -> void:
 	if shaper != null:
+		# One draw call per material per part instead of one per primitive (a Walk-In was ~90).
+		_parts += 1
+		Shapes.bake(node, "%s|%d" % [kind, _parts])
 		shaper.attach(node, bone, offset, tip)
 
 
@@ -113,8 +168,8 @@ func _build_fallback() -> void:
 	anim = null
 	_fallback = Node3D.new()
 	add_child(_fallback)
-	var tall := 2.25 if kind == "night_nurse" else 1.8
-	var col := Color("dcd8cc") if kind == "night_nurse" else Color("9aa39c")
+	var tall := 2.25 if kind == "night_nurse" else (1.7 if kind == "walk_in" else 2.1)
+	var col := Color("dcd8cc") if kind == "night_nurse" else (Color("8fa3b5") if kind == "walk_in" else Color("9aa39c"))
 	var body := Shapes.cylinder(0.16, tall * 0.62, Shapes.flat(col, 0.9), Vector3(0, tall * 0.45, 0), 0.12)
 	_fallback.add_child(body)
 	_fallback.add_child(Shapes.ellipsoid(Vector3(0.1, 0.13, 0.11), Shapes.flat(Color("b8b3a6")), Vector3(0, tall - 0.13, 0)))
