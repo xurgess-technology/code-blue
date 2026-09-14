@@ -44,6 +44,8 @@ const SCENARIOS := [
 	{"name": "full_shift_lag", "scenario": "full_shift", "clients": 2, "timeout": 900, "lag": true, "extra": ["--seed=4247"]},
 	# loop (sweep 2): two patients on two tables, two clients operating at once.
 	{"name": "two_patients", "scenario": "two_patients", "clients": 2, "timeout": 300},
+	# dissection (sweep 3): a client operates on a strapped monster while another re-doses it.
+	{"name": "dissection", "scenario": "dissection", "clients": 2, "timeout": 300},
 ]
 ## Not part of the default run: bandwidth measurements (4 players, no lag, --stats). `bandwidth`
 ## is Bob's gunshot (seed 4242, the case the pre-delta numbers were taken on); `bandwidth_amp`

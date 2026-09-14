@@ -33,7 +33,7 @@ const GRIP_R := 0.03            # and this close to the brain's centre can take 
 const JAW_CLOSE_RATE := 5.0
 const JAW_OPEN_RATE := 7.0
 const JAW_ON := 0.6
-const SNAP := 0.03              # stretch (m) at which a nerve pops free
+const SNAP := 0.04              # stretch (m) at which a nerve pops free
 const V_YANK := 0.24            # m/s of stretching above which the nerve tears the brain
 const SLIP := 0.03              # tips this far off the nerve's line lose it
 const TEAR_COST := 2.0
@@ -114,6 +114,7 @@ var _b_cord := 0
 var _b_wait := 0.0
 var _b_cursor := Vector2(0.05, 0.12)
 var _b_dropped := false
+var _b_scrape_t := 0.0
 var _b_rng := RandomNumberGenerator.new()
 
 
@@ -197,8 +198,7 @@ func handle_cursor(p: Vector2, buttons: int, delta: float) -> void:
 	_jolt_t = maxf(0.0, _jolt_t - delta)
 	var primary := (buttons & 1) != 0
 	# The hand drags the tips: capped speed, a little lag.
-	var want := tip + (p - tip).limit_length(TIP_SPEED * delta)
-	tip = tip.lerp(want, 1.0 - exp(-delta / TIP_TAU))
+	tip += ((p - tip) * (1.0 - exp(-delta / TIP_TAU))).limit_length(TIP_SPEED * delta)
 
 	match stage:
 		Stage.CORDS:
@@ -270,10 +270,10 @@ func _tick_cords(primary: bool, delta: float) -> void:
 	stretch = maxf(0.0, along)
 	var v := (stretch - _last_stretch) / delta
 	_last_stretch = stretch
-	stretch_v = lerpf(stretch_v, v, 1.0 - exp(-delta / 0.06))
+	stretch_v = lerpf(stretch_v, v, 1.0 - exp(-delta / 0.025))
 	if _jolt_t > 0.0:
 		stretch_v = minf(stretch_v, V_YANK * 0.8)
-	if stretch > SNAP * 0.35 and stretch_v > V_YANK:
+	if stretch > SNAP * 0.2 and stretch_v > V_YANK:
 		tears += 1
 		_free_cord()
 		owner_mg.botch(TEAR_COST, "Yanked a nerve and tore the brain")
@@ -519,7 +519,9 @@ func bot_input(t: float, skill: float) -> Dictionary:
 			buttons = 1
 			# A sloppy hand drifts toward the tray before the brain is clear of the bone, notices the
 			# scrape and centres it again for a moment.
-			if scrape > 0.0:
+			_b_scrape_t = _b_scrape_t + dt if scrape > 0.0 else 0.0
+			if _b_scrape_t > 0.7:
+				_b_scrape_t = 0.0
 				_b_wait = 0.6
 			_b_wait -= dt
 			var drift := Vector2(tray.x, tray.z).normalized() * 0.02 * sloppy if _b_wait <= 0.0 else Vector2.ZERO
