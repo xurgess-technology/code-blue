@@ -108,6 +108,31 @@ static func release(gens: Array) -> void:
 				s.kind = ""
 
 
+## On a map with a pocket: rooms missing the furniture their kind requires (MapGen retries the
+## attempt, as for a room that found no slot). Empty without a pocket, so nothing else changes.
+static func unfurnished(st: S) -> Array:
+	var out: Array = []
+	if not st.spots.has("pocket"):
+		return out
+	var Rooms := preload("res://scripts/level/room_furnish.gd")
+	var pieces := {}
+	for e in st.furniture:
+		if int(e.room) >= 0:
+			if not pieces.has(int(e.room)):
+				pieces[int(e.room)] = {}
+			pieces[int(e.room)][e.kind] = true
+	for r in st.rooms:
+		var have: Dictionary = pieces.get(int(r.id), {})
+		for req in Rooms.REQUIRED.get(r.kind, []):
+			var ok := false
+			for o in (req if req is Array else [req]):
+				ok = ok or have.has(o)
+			if not ok:
+				out.append("%s: %s unfurnished (pocket)" % [r.wing, r.kind])
+				break
+	return out
+
+
 ## The plan of a generated map, or {}.
 static func of(gen: Dictionary) -> Dictionary:
 	return gen.get("spots", {}).get("pocket", {})

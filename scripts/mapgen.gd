@@ -154,6 +154,8 @@ static func _attempt(seed: int, attempt: int) -> Dictionary:
 		g.place_rooms()
 	for g in gens:
 		g.finish()
+	# POCKETS HOOK: with fewer slots a room can land somewhere it cannot be furnished; retry then.
+	missing.append_array(PocketPlan.unfurnished(st))
 
 	_place_markers(st, rng)
 	_light_modes(st, sub)
