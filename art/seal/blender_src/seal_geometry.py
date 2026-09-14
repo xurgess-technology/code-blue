@@ -336,14 +336,15 @@ def theta_from_top(th):
 
 
 # ---------------------------------------------------------------- head landmarks (left side, mirrored by |z|)
-EYE_R = 0.0232
+EYE_R = 0.0262
+EK = EYE_R / 0.0232        # socket and lid sizes follow the globe
 
 
 def _eye_frame():
     x, th = -0.772, 0.93
     p = base_point(x, th)
     n = base_normal(x, th)
-    centre = p - n * 0.0115
+    centre = p - n * 0.0135
     gaze = (n + Vector((-0.85, 0.05, 0.0))).normalized()
     return centre, gaze
 
@@ -366,12 +367,12 @@ def head_features(p):
     de = (q - EYE_C).length
     rel = q - EYE_C
     upper = smooth01((rel.y + 0.004) / 0.012)
-    d -= 0.016 * smooth01(1.0 - de / 0.0235)
-    lid_r = 0.0245 + 0.002 * upper
+    d -= 0.016 * EK * smooth01(1.0 - de / (0.0235 * EK))
+    lid_r = (0.0245 + 0.002 * upper) * EK
     lid = math.exp(-((de - lid_r) / 0.0055) ** 2)
     d += lid * (0.0032 + 0.0038 * upper)
     a['lid'] = lid
-    a['eyerim'] = math.exp(-((de - 0.0235) / 0.0042) ** 2)
+    a['eyerim'] = math.exp(-((de - 0.0235 * EK) / 0.0042) ** 2)
     # soft brow pad, inner end raised (a worried look), and the cheek under the eye
     brow_c = EYE_C + Vector((-0.004, 0.024, -0.010))
     d += 0.0045 * gauss(q, brow_c, (0.020, 0.010, 0.016))

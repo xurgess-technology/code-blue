@@ -188,8 +188,6 @@ func _spawn_seal() -> void:
 	detail_mat.set_shader_parameter("albedo_tex", _tex("Seal_Detail_albedo"))
 	detail_mat.set_shader_parameter("normal_tex", _tex("Seal_Detail_normal"))
 	detail_mat.set_shader_parameter("rough_tex", _tex("Seal_Detail_roughness"))
-	if OS.get_environment("SEAL_NOGLINT") != "":
-		detail_mat.set_shader_parameter("eye_glint", 0.0)
 	coat_mats = [coat]
 	for mi in seal.find_children("*", "MeshInstance3D", true, false):
 		var m := mi as MeshInstance3D

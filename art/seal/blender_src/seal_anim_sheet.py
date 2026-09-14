@@ -12,7 +12,7 @@ HERE = os.path.dirname(os.path.abspath(bpy.data.filepath))
 OUT = os.path.join(os.path.dirname(HERE), 'renders')
 ARGS = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
 ONLY = next((a.split('=', 1)[1].split(',') for a in ARGS if a.startswith('--only=')), ['idle', 'stir', 'fidget', 'twitch', 'flatline'])
-CW, CH = [int(v) for v in next((a.split('=', 1)[1] for a in ARGS if a.startswith('--cell=')), '480x300').split('x')]
+CW, CH = [int(v) for v in next((a.split('=', 1)[1] for a in ARGS if a.startswith('--cell=')), '560x340').split('x')]
 
 scn = bpy.context.scene
 rig = bpy.data.objects['Seal_Rig']
@@ -81,15 +81,15 @@ def sheet(name, action, frames, cam_loc, lens, target=(-0.12, 0.0, 0.14)):
 
 
 # Blender axes: the seal's nose is -X, its left side -Y, up +Z. The camera sits off its left shoulder.
-THREE_Q = (0.9, -1.9, 1.05)
-SIDE = (-0.12, -2.4, 0.35)
+THREE_Q = (0.75, -1.55, 0.85)
+SIDE = (-0.12, -2.0, 0.32)
 if 'idle' in ONLY:
-    sheet('anim_idle', 'Idle', [0, 20, 40, 60, 80, 100], THREE_Q, 42)
+    sheet('anim_idle', 'Idle', [0, 30, 60, 90], THREE_Q, 42)
 if 'stir' in ONLY:
-    sheet('anim_stir', 'Stir', [0, 3, 6, 10, 16, 24, 36], SIDE, 38)
+    sheet('anim_stir', 'Stir', [0, 4, 8, 16, 26], SIDE, 38)
 if 'fidget' in ONLY:
-    sheet('anim_fidget', 'Fidget', [0, 15, 30, 45, 60, 75], THREE_Q, 42)
+    sheet('anim_fidget', 'Fidget', [0, 22, 38, 60], THREE_Q, 42)
 if 'twitch' in ONLY:
-    sheet('anim_twitch', 'Twitch', [0, 9, 20, 32, 48, 55], THREE_Q, 42)
+    sheet('anim_twitch', 'Twitch', [0, 9, 32, 48], THREE_Q, 42)
 if 'flatline' in ONLY:
-    sheet('anim_flatline', 'Flatline', [0], THREE_Q, 42)
+    sheet('anim_flatline', 'Flatline', [0, 5], THREE_Q, 42)
