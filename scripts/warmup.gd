@@ -96,8 +96,8 @@ static func run(game: Node) -> void:
 	ptable.scale = Vector3.ONE * 0.5
 
 	# Monsters: the visual model only, so nothing starts thinking or moving
-	var mx := -0.5
-	for kind in ["discharged", "night_nurse"]:
+	var mx := -1.0
+	for kind in ["discharged", "night_nurse", "walk_in"]:  # SWEEP 3 HOOK (monsters): the Walk-In
 		var model: Node3D = MonsterModel.new()
 		shelf.add_child(model)
 		model.setup(kind)

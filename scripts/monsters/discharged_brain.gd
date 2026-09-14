@@ -40,6 +40,7 @@ var heard_time := -1e9         ## newest noise time already considered
 var retreat_from := Vector3.ZERO
 var _stuck_check := 0.0
 var _stuck_from := Vector3.ZERO
+var _after_stun = null         ## Vector3: where to rush when the stun ends
 ## Last noise it reacted to, for tests and debugging.
 var last_heard: Dictionary = {}
 
@@ -65,7 +66,15 @@ func think(delta: float) -> void:
 			m.state = M.State.STUNNED
 			m.stop()
 			if timer <= 0.0:
-				_start_wander()
+				if _after_stun is Vector3:
+					target = _after_stun
+					_after_stun = null
+					m.mode = M.Mode.RUSH
+					m.state = M.State.CHASE
+					timer = RUSH_GIVE_UP
+					m._repath = 0.0
+				else:
+					_start_wander()
 			return
 		M.Mode.RETREAT:
 			m.state = M.State.STUNNED
@@ -195,12 +204,32 @@ func alert_to(pos: Vector3) -> void:
 
 
 func shoved(dir: Vector3) -> void:
+	stun(dir, SHOVE_STUN, 1.1)
+
+
+## Knocked off balance for `seconds`, pushed `push` metres along dir. `then_hunt` (Vector3):
+## when it recovers it rushes straight there (it knows where the blow came from).
+func stun(dir: Vector3, seconds: float, push := 0.6, then_hunt = null) -> void:
 	dir.y = 0.0
-	m.move_and_collide(dir.normalized() * 1.1)
+	if dir.length() > 0.01 and push > 0.0:
+		m.move_and_collide(dir.normalized() * push)
+	var was_stunned: bool = m.mode == M.Mode.STUNNED
 	m.mode = M.Mode.STUNNED
 	m.state = M.State.STUNNED
 	m.lunge_t = 0.0
-	timer = SHOVE_STUN
+	timer = maxf(timer, seconds) if was_stunned else seconds
+	if then_hunt is Vector3:
+		_after_stun = then_hunt
+
+
+func sedated() -> void:
+	wander_goal = null
+	_after_stun = null
+	m.listen_yaw = 0.0
+
+
+func woke(hunt_pos) -> void:
+	stun(Vector3.ZERO, 1.2, 0.0, hunt_pos)
 
 
 func recoil_after_hit() -> void:

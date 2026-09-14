@@ -15,6 +15,11 @@
 //   monsters_squeak      the Night Nurse's shoe squeaks, one per footfall
 //   monsters_lullaby     a faint, slightly wrong humming the Nurse breathes when unobserved
 //   monsters_grab        the hit / grab when a monster connects
+//   monsters_walkin_groan    sweep 3: the Walk-In's occasional groan, louder when it sees you
+//   monsters_walkin_shuffle  sweep 3: a dragged bare foot, one per Walk-In step
+//   monsters_flesh_hit       sweep 3: a monster struck by the saw
+//   monsters_walkin_death    sweep 3: the Walk-In killed
+//   monsters_sedated_breath  sweep 3: a sedated monster's slow snoring breath
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -273,6 +278,137 @@ function grab(v) {
   return fadeEdges(room(out, 0.22));
 }
 
+// ---------------------------------------------------------------- sweep 3: the Walk-In, hits, sedation
+
+/** A voiced vowel through a slack jaw: a sawtooth-ish glottal source into two formants. */
+function voice(out, at, len, f0From, f0To, formants, gain, r, rough = 0.3) {
+  const f1 = biquad('bandpass', 3.5), f2 = biquad('bandpass', 4.5), f3 = biquad('bandpass', 6);
+  let ph = 0;
+  const o = Math.floor(at * SR);
+  for (let i = 0; i < len * SR && o + i < out.length; i++) {
+    const t = i / SR, u = t / len;
+    const f0 = (f0From + (f0To - f0From) * u) * (1 + 0.025 * Math.sin(TAU * 4.3 * t) + rough * 0.04 * (r() - 0.5));
+    ph += f0 / SR; ph -= Math.floor(ph);
+    // Vocal fry: every few cycles the pulse skips.
+    const fry = 1 - rough * 0.6 * Math.max(0, Math.sin(TAU * f0 * 0.25 * t));
+    const src = (2 * ph - 1) * fry + (r() * 2 - 1) * rough * 0.35;
+    const e = Math.min(1, t / 0.08) * Math.pow(Math.max(0, 1 - u), 0.6);
+    const [a, b, c] = formants;
+    out[o + i] += (f1(src, a) * 1.0 + f2(src, b) * 0.55 + f3(src, c) * 0.2) * e * gain;
+  }
+}
+
+/** The Walk-In's groan: low, wet, falling, half a word. Not loud. */
+function walkinGroan(v) {
+  const r = rngFor('walkin_groan' + v);
+  const len = r.range(1.1, 1.7);
+  const out = buf(len + 0.5);
+  const base = r.range(78, 98);
+  voice(out, 0.0, len, base * 1.15, base * 0.82, [r.range(420, 560), r.range(850, 1050), 2500], 1.0, r, 0.55);
+  // A second, shorter swell partway through, like it tries again.
+  voice(out, len * r.range(0.35, 0.5), len * 0.45, base * 1.05, base * 0.9, [r.range(380, 460), r.range(760, 900), 2300], 0.6, r, 0.7);
+  // Wet throat noise underneath.
+  const bp = biquad('bandpass', 1.5);
+  for (let i = 0; i < len * SR; i++) {
+    const t = i / SR, u = t / len;
+    out[i] += bp(r() * 2 - 1, 700 + 300 * Math.sin(TAU * 2 * t)) * Math.sin(Math.PI * u) * 0.12;
+  }
+  return fadeEdges(room(out, 0.3, 1.1), 10, 150);
+}
+
+/** One heavy bare foot dragged across lino, then set down. */
+function walkinShuffle(v) {
+  const r = rngFor('walkin_shuffle' + v);
+  const drag = r.range(0.22, 0.36);
+  const out = buf(drag + 0.3);
+  const bp = biquad('bandpass', 1.1), lp = biquad('lowpass', 0.7);
+  for (let i = 0; i < drag * SR; i++) {
+    const t = i / SR, u = t / drag;
+    const grain = r() < 0.08 ? (r() * 2 - 1) * 2.5 : r() * 2 - 1;  // skin catching and letting go
+    const e = Math.sin(Math.PI * Math.min(1, u * 1.2)) * (0.6 + 0.4 * Math.sin(TAU * r.range(9, 15) * t));
+    out[i] += bp(grain, 900 + 900 * u) * e * 0.5;
+  }
+  // The foot lands: a dull thud.
+  let ph = 0;
+  const o = Math.floor(drag * 0.85 * SR);
+  for (let i = 0; i < 0.18 * SR && o + i < out.length; i++) {
+    const t = i / SR;
+    ph += (70 * Math.exp(-t * 20) + 45) / SR;
+    out[o + i] += lp(Math.sin(TAU * ph) + (r() * 2 - 1) * 0.3, 500) * env(t, 0.004, 0.05) * 0.9;
+  }
+  return fadeEdges(room(out, 0.18, 0.8));
+}
+
+/** A blade into a body: the chop, a meaty slap, a short spatter. Any monster that is struck. */
+function fleshHit(v) {
+  const r = rngFor('flesh_hit' + v);
+  const out = buf(0.55);
+  const lp = biquad('lowpass', 0.8), hp = biquad('highpass', 0.7), wet = biquad('bandpass', 2.5);
+  let ph = 0;
+  for (let i = 0; i < 0.25 * SR; i++) {
+    const t = i / SR;
+    ph += (120 * Math.exp(-t * 25) + 55) / SR;
+    out[i] += Math.sin(TAU * ph) * env(t, 0.002, 0.06) * 0.9;             // body thump
+    out[i] += lp(r() * 2 - 1, 2400) * env(t, 0.001, 0.02) * 0.9;          // slap
+    out[i] += hp(r() * 2 - 1, 3000) * env(t, 0.0005, 0.008) * 0.5;       // edge
+  }
+  const n = 6 + Math.floor(r() * 6);
+  for (let k = 0; k < n; k++) {
+    const at = r.range(0.03, 0.3), f = r.range(500, 1600);
+    const c = buf(0.05);
+    for (let i = 0; i < c.length; i++) { const t = i / SR; c[i] = wet(r() * 2 - 1, f) * Math.exp(-t / 0.012) * r.range(0.3, 0.8); }
+    add(out, c, at);
+  }
+  return fadeEdges(room(out, 0.2, 0.9));
+}
+
+/** The Walk-In goes down: a long collapsing exhale that breaks into a rattle. */
+function walkinDeath(v) {
+  const r = rngFor('walkin_death' + v);
+  const len = r.range(1.4, 1.8);
+  const out = buf(len + 0.7);
+  const base = r.range(95, 115);
+  voice(out, 0.0, len * 0.6, base * 1.3, base * 0.7, [r.range(500, 620), r.range(950, 1150), 2600], 1.0, r, 0.5);
+  // The rattle: slow irregular clicks of air through fluid.
+  let t = len * 0.45;
+  while (t < len) {
+    const c = buf(0.06), f = r.range(250, 600);
+    for (let i = 0; i < c.length; i++) { const tt = i / SR; c[i] = Math.sin(TAU * f * tt) * Math.exp(-tt / 0.015) * 0.5 + (r() - 0.5) * Math.exp(-tt / 0.01) * 0.4; }
+    add(out, c, t, 1 - (t - len * 0.45) / (len * 0.55));
+    t += r.range(0.04, 0.11) * (1 + (t / len));
+  }
+  // And the body hitting the floor.
+  let ph = 0;
+  const o = Math.floor(len * 0.35 * SR);
+  for (let i = 0; i < 0.35 * SR && o + i < out.length; i++) {
+    const tt = i / SR;
+    ph += (60 * Math.exp(-tt * 12) + 38) / SR;
+    out[o + i] += Math.sin(TAU * ph) * env(tt, 0.004, 0.12) * 0.8;
+  }
+  return fadeEdges(room(out, 0.3, 1.2), 5, 250);
+}
+
+/** Out cold: one slow, deep, slightly snoring breath (in and out). */
+function sedatedBreath(v) {
+  const r = rngFor('sedated_breath' + v);
+  const inLen = r.range(1.1, 1.4), outLen = r.range(1.4, 1.8);
+  const out = buf(inLen + outLen + 0.4);
+  const bp = biquad('bandpass', 1.8), lp = biquad('lowpass', 0.7);
+  let ph = 0;
+  for (let i = 0; i < (inLen + outLen) * SR; i++) {
+    const t = i / SR;
+    const inhale = t < inLen;
+    const u = inhale ? t / inLen : (t - inLen) / outLen;
+    const e = Math.sin(Math.PI * u) ** (inhale ? 1.2 : 0.8) * (inhale ? 0.7 : 1.0);
+    const n = r() * 2 - 1;
+    out[i] += bp(n, inhale ? 900 + 500 * u : 1300 - 700 * u) * e * 0.8;
+    // A soft palate flutter on the in-breath: the snore.
+    ph += r.range(28, 34) / SR;
+    if (inhale) out[i] += lp(Math.sin(TAU * ph) * (0.5 + 0.5 * Math.sign(Math.sin(TAU * ph))) * (r() * 0.5 + 0.5), 350) * e * 0.35;
+  }
+  return fadeEdges(room(out, 0.25), 30, 200);
+}
+
 // ---------------------------------------------------------------- main
 
 const CUES = [
@@ -282,6 +418,12 @@ const CUES = [
   ['monsters_squeak', 5, squeak, -10],
   ['monsters_lullaby', 2, lullaby, -12],
   ['monsters_grab', 2, grab, -4],
+  // sweep 3
+  ['monsters_walkin_groan', 3, walkinGroan, -7],
+  ['monsters_walkin_shuffle', 4, walkinShuffle, -12],
+  ['monsters_flesh_hit', 3, fleshHit, -3],
+  ['monsters_walkin_death', 2, walkinDeath, -5],
+  ['monsters_sedated_breath', 2, sedatedBreath, -14],
 ];
 
 function writeWav(file, a) {

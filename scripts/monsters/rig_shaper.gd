@@ -42,6 +42,7 @@ var listen_yaw := 0.0      ## radians, positive turns the face toward the body's
 var lunge := 0.0           ## 0..1 reach
 var stagger := 0.0         ## 0..1 knocked back
 var twitch := Vector3.ZERO ## small extra head rotation (radians)
+var lying := 0.0           ## 0..1 flattened out (the model itself is tipped over by the Monster)
 
 var _bones := {}
 var _attachments: Array = []
@@ -120,6 +121,8 @@ func _process_modification_with_delta(_delta: float) -> void:
 		sk.set_bone_pose_position(root, Vector3(p.x, p.y * cfg.bob + lift, p.z))
 
 	var thick: float = cfg.leg_thick
+	var limp: float = float(cfg.get("limp", 0.0))
+	var step_phase := 0.0
 	for side in [["leg-left", 1.0], ["leg-right", -1.0]]:
 		var li: int = _bones.get(side[0], -1)
 		if li < 0:
@@ -128,6 +131,11 @@ func _process_modification_with_delta(_delta: float) -> void:
 		sk.set_bone_pose_position(li, Vector3(side[1] * cfg.hip_half / S, lp.y, lp.z))
 		var le := Basis(sk.get_bone_pose_rotation(li)).get_euler()
 		var swing: float = le.x * cfg.stride
+		if side[1] > 0.0:
+			step_phase = le.x
+		else:
+			swing *= 1.0 - limp * 0.65   # the bad leg barely leaves the floor
+		swing = lerpf(swing, (0.04 if side[1] > 0.0 else -0.03), lying)
 		sk.set_bone_pose_rotation(li, Quaternion(Vector3.RIGHT, swing))
 		sk.set_bone_pose_scale(li, Vector3(thick, leg_k, thick))
 
@@ -136,7 +144,11 @@ func _process_modification_with_delta(_delta: float) -> void:
 		return
 	var te := Basis(sk.get_bone_pose_rotation(ti)).get_euler()
 	var pitch: float = cfg.hunch + te.x * cfg.torso_sway + lunge * 0.45 - stagger * 0.5 - listen * cfg.hunch * 0.35
-	var torso_q := Quaternion.from_euler(Vector3(pitch, te.y * cfg.torso_sway, stagger * 0.15))
+	pitch = lerpf(pitch, -0.04, lying)
+	# A limp rolls the body over the good leg every step; `lean` tips it to one side for good.
+	var body_roll: float = stagger * 0.15 + float(cfg.get("lean", 0.0)) + limp * 0.16 * clampf(step_phase * 2.0, -1.0, 1.0)
+	body_roll *= 1.0 - lying
+	var torso_q := Quaternion.from_euler(Vector3(pitch, te.y * cfg.torso_sway * (1.0 - lying), body_roll))
 	sk.set_bone_pose_rotation(ti, torso_q)
 	sk.set_bone_pose_scale(ti, Vector3(u, u, u))
 
@@ -155,6 +167,8 @@ func _process_modification_with_delta(_delta: float) -> void:
 		var spread: float = deg_to_rad(float(o.get("spread", 6.0))) + (absf(ae.z) - PI * 0.25) * float(o.get("idle", cfg.arm_idle))
 		back = lerpf(back, deg_to_rad(-80.0), lunge * float(o.get("lunge", 1.0)))
 		spread = lerpf(spread, deg_to_rad(14.0), lunge * float(o.get("lunge", 1.0)))
+		back = lerpf(back, deg_to_rad(6.0), lying)
+		spread = lerpf(spread, deg_to_rad(11.0), lying)
 		var twist: float = deg_to_rad(float(o.get("twist", 0.0)))
 		var hang := Quaternion(Vector3.BACK, -sgn * (PI * 0.5 - spread))
 		var q := Quaternion(Vector3.RIGHT, back) * Quaternion(Vector3.UP, twist * sgn) * hang
@@ -170,7 +184,9 @@ func _process_modification_with_delta(_delta: float) -> void:
 		var he := Basis(sk.get_bone_pose_rotation(hi)).get_euler()
 		var roll: float = cfg.head_roll + listen * signf(listen_yaw if absf(listen_yaw) > 0.05 else 1.0) * 0.6
 		var hp: float = cfg.head_pitch - pitch * 0.8 + he.x * cfg.head_sway - lunge * 0.2 + listen * 0.15
-		var hq := Quaternion(Vector3.UP, listen_yaw * listen + he.y * cfg.head_sway + twitch.y) \
+		hp = lerpf(hp, -0.15, lying)
+		roll = lerpf(roll, 0.35 * signf(cfg.head_roll + 0.001), lying)   # out cold, the head lolls to one side
+		var hq := Quaternion(Vector3.UP, listen_yaw * listen + he.y * cfg.head_sway * (1.0 - lying) + twitch.y) \
 			* Quaternion(Vector3.RIGHT, hp + twitch.x) * Quaternion(Vector3.BACK, roll + twitch.z)
 		sk.set_bone_pose_rotation(hi, hq)
 		sk.set_bone_pose_scale(hi, Vector3(inv, inv, inv))
