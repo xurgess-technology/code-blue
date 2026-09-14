@@ -2372,7 +2372,8 @@ func _in_shove_cone(from: Node, target: Vector3, forward: Vector3) -> bool:
 #     any order converges to the host's state.
 #   - Existence is the field "@": a hash of the entity's field names while it exists, -1 once
 #     removed. A client uses an entity only once its own field names hash the same (it holds
-#     exactly the host's fields); a field whose value is null was removed from the report.
+#     exactly the host's fields). A change of field names sends the whole entity; a field that
+#     left the report is sent as NET_GONE.
 #   - Messages are packed up to NET_MSG_BYTES (well under the ENet MTU and Steam's unreliable
 #     segment size, so nothing is ever fragmented), in priority order g, pl, mo, ct, it. A burst
 #     (clock-in spawns ~70 loot stacks at once, a late joiner needs everything) spreads over as
@@ -2399,7 +2400,9 @@ const NET_TICK_BYTES := 4000
 ## ...and no new catch-up messages while this many bytes are unacknowledged.
 const NET_WINDOW_BYTES := 16000
 ## A field whose last message was lost: never equal to any real value, so it is sent again.
-const NET_UNKNOWN := "unknown"
+const NET_UNKNOWN := "\u0001unknown"
+## The value that says "this field left the report" (null is an ordinary value).
+const NET_GONE := "\u0001gone"
 const ACK_BITS := 64
 ## A message is lost once one sent this much later (wall ms) was acknowledged without it.
 const NET_REORDER_MS := 100
@@ -2644,17 +2647,20 @@ func _repl_want(ents: Dictionary, dirty: Dictionary, eid, cur) -> Dictionary:
 		return want
 	var cur_d: Dictionary = cur
 	var sig := _keys_sig(cur_d)
-	if _repl_needs(rec, "@", sig):
+	# The field names changed (or never arrived): send the whole entity with its new "@", so the
+	# one message that lands makes the client's copy whole, whatever was lost before.
+	var whole := _repl_needs(rec, "@", sig)
+	if whole:
 		want["@"] = sig
 	for k in cur_d.keys():
-		if _repl_needs(rec, k, cur_d[k]):
+		if whole or _repl_needs(rec, k, cur_d[k]):
 			want[k] = cur_d[k]
 	for k in rec.c.keys():
-		if k != "@" and not cur_d.has(k) and _repl_needs(rec, k, null):
-			want[k] = null
+		if k != "@" and not cur_d.has(k) and _repl_needs(rec, k, NET_GONE):
+			want[k] = NET_GONE
 	for k in rec.f.keys():
-		if k != "@" and not cur_d.has(k) and not want.has(k) and _repl_needs(rec, k, null):
-			want[k] = null
+		if k != "@" and not cur_d.has(k) and not want.has(k) and _repl_needs(rec, k, NET_GONE):
+			want[k] = NET_GONE
 	if want.is_empty() and (rec.f as Dictionary).is_empty():
 		dirty.erase(eid)
 	return want
@@ -2676,7 +2682,9 @@ static func _repl_needs(rec: Dictionary, k, v) -> bool:
 	var c = rec.c.get(k)
 	if c == null:
 		# Never sent: absent is what the client already has (existence "@" = -1 included).
-		return typeof(v) != TYPE_NIL and not (k == "@" and int(v) == -1)
+		if k == "@":
+			return int(v) != -1
+		return _differs(v, NET_GONE)
 	return _differs(c[0], v)
 
 
@@ -2889,7 +2897,7 @@ func _snapshot(msg: Dictionary) -> void:
 					continue
 				seqs[k] = seq
 				var v = fields[k]
-				if typeof(v) == TYPE_NIL:
+				if typeof(v) == TYPE_STRING and v == NET_GONE:
 					vals.erase(k)
 				else:
 					vals[k] = v

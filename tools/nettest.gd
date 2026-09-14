@@ -190,7 +190,7 @@ func _sc_surgery():
 		var watch := func():
 			if game.surgery_for_table(int(game.case.table)).operator_id == op_id:
 				seen.op = true
-		if not await _do_until(watch, func(): return int(game.case.step_index) >= 1, 120.0, "the step to finish"):
+		if not await _do_until(watch, func(): return int(game.case.get("step_index", 0)) >= 1, 120.0, "the step to finish"):
 			return
 		if not seen.op:
 			return _end(false, "the host never saw client %d operating" % op_id)
@@ -209,7 +209,7 @@ func _sc_surgery():
 	if op_id == Net.my_id():
 		if not await _begin_operating():
 			return
-		if not await _until(func(): return int(game.case.step_index) >= 1, 120.0, "my step to be accepted"):
+		if not await _until(func(): return int(game.case.get("step_index", 0)) >= 1, 120.0, "my step to be accepted"):
 			return
 		await _finish_together("operated step 0 to completion")
 	else:
@@ -219,7 +219,7 @@ func _sc_surgery():
 				st.op = true
 			if game.surgery.mg != null:
 				st.states[str(game.surgery.mg.net_state())] = true
-		if not await _do_until(watch, func(): return int(game.case.step_index) >= 1, 120.0, "the operator to finish"):
+		if not await _do_until(watch, func(): return int(game.case.get("step_index", 0)) >= 1, 120.0, "the operator to finish"):
 			return
 		if not st.op or st.states.size() < 5:
 			return _end(false, "spectator saw operator=%s and only %d distinct tool states" % [str(st.op), st.states.size()])
@@ -296,11 +296,11 @@ func _sc_leave_operating():
 		if not await _until(func(): return not game.players.has(first), 90.0, "client 1 to vanish"):
 			return
 		var saved: Dictionary = game.surgery._mg_state
-		if game.surgery.operator_id != 0 or int(game.case.step_index) != 0 or float(saved.get("p", 0.0)) <= 0.0:
+		if game.surgery.operator_id != 0 or int(game.case.get("step_index", 0)) != 0 or float(saved.get("p", 0.0)) <= 0.0:
 			return _end(false, "after the drop: operator=%d step=%d saved=%s" % [game.surgery.operator_id, game.case.step_index, str(saved)])
 		_say("operator gone; step paused at progress %.2f" % float(saved.p))
 		_send("resume", {"peer": second, "p": float(saved.p)})
-		if not await _until(func(): return int(game.case.step_index) >= 1, 120.0, "client 2 to finish the step"):
+		if not await _until(func(): return int(game.case.get("step_index", 0)) >= 1, 120.0, "client 2 to finish the step"):
 			return
 		await _finish_together("step paused on disconnect and was finished by client 2")
 		return
@@ -329,7 +329,7 @@ func _sc_leave_operating():
 	if game.surgery.mg.progress < saved_p - 0.05:
 		return _end(false, "resumed at %.2f instead of %.2f" % [game.surgery.mg.progress, saved_p])
 	_say("resuming at %.2f (host saved %.2f)" % [game.surgery.mg.progress, saved_p])
-	if not await _until(func(): return int(game.case.step_index) >= 1, 120.0, "my resumed step to finish"):
+	if not await _until(func(): return int(game.case.get("step_index", 0)) >= 1, 120.0, "my resumed step to finish"):
 		return
 	await _finish_together("resumed from %.2f and finished the step" % saved_p)
 
@@ -808,12 +808,12 @@ func _shift_bot(st: Dictionary) -> void:
 		st.payload = game.net_payload_bytes
 		game.net_section_bytes = {}
 		_say("patient on the table: %s/%s" % [game.case.patient_id, game.case.ailment_id])
-	if int(game.case.step_index) != int(st.last_step):
-		st.last_step = int(game.case.step_index)
+	if int(game.case.get("step_index", 0)) != int(st.last_step):
+		st.last_step = int(game.case.get("step_index", 0))
 		_say("step %d, vitals %.0f, shelf %s, operator %d" % [st.last_step, game.vitals, str(game.shelf), game.surgery.operator_id])
 	if me.operating or game.surgery.is_local_operating():
 		return
-	var need := Procedures.remaining_requirements(game.case.ailment_id, int(game.case.step_index))
+	var need := Procedures.remaining_requirements(game.case.ailment_id, int(game.case.get("step_index", 0)))
 	var short := {}
 	for kind in need.keys():
 		var n: int = int(need[kind]) - game.shelf_count(kind)
@@ -939,7 +939,7 @@ func _begin_operating() -> bool:
 	var ok := await _do_until(func(): _press_at(game.table_pos(), "table"),
 		func(): return game.surgery.is_local_operating(), 40.0, "the host to let me operate")
 	if ok:
-		_say("operating step %d" % int(game.case.step_index))
+		_say("operating step %d" % int(game.case.get("step_index", 0)))
 	return ok
 
 

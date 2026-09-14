@@ -788,8 +788,11 @@ Replication (networking section of `scripts/game.gd`):
     absolute values; the client keeps the newest sequence per field, so any subset in any order
     converges. There are no keyframes and no message depends on another.
   - Existence is field `@` (a hash of the entity's field names, -1 once removed); the client
-    uses an entity only when it holds exactly those fields. A `null` value means the field left the report,
-    so **reports must not use null as a real value**.
+    uses an entity only when it holds exactly those fields. When the field names change the host
+    sends the whole entity; a field that left the report travels as `Game.NET_GONE` (null is an
+    ordinary value). `g` is split into groups whose names change together (`""` fixed fields,
+    `cs` cases, `lp` loop, `s<table>` surgery), each its own entity; a client keeps using a
+    group's last whole copy while a newer one is incomplete.
   - **No message exceeds `Game.NET_MSG_BYTES` (1000, estimated payload)**: one datagram on ENet
     (MTU 1392) and one segment on Steam (SteamNetworkingSockets MTU about 1200; its 512 KB
     `MAX_STEAM_PACKET_SIZE` is only the reliable/segmented limit, and an unreliable message split
