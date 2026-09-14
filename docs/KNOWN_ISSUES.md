@@ -424,3 +424,18 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   completes all 60 runs.
 - **Test bot**: it dithered forever between two equally near items, and stalled at containers the
   navmesh kept it 1.9 m from. Both fixed in `tools/playtest.gd`.
+
+## Found in the sweep 2 integration check (2026-09-13)
+
+- **`leave_items` is flaky under simulated lag.** With `--lag=120 --jitter=40 --loss=0.03` it
+  failed 2 of 3 runs: the second client lost its connection while waiting to see the leaver's
+  dropped items. Unlagged it passes, as do the other 11 lagged scenarios.
+- **The playtest bot can fail to reach both bone saws on some maps** (seed 802, Bob amputation:
+  it skipped `it_77` and `it_81` as unreachable and the patient died waiting). `mapcheck` reports
+  every container and resting spot in reach, so this looks like bot navigation, but check the
+  spots in the dev room or a windowed run before trusting that.
+- **No threaded model preload.** `Assets._ready` used to request the loot and crew models on
+  loader threads; meshes built there raced the main thread's mesh building and crashed Godot
+  (signal 11) in about half of the headless runs. Removed; models load on first use.
+- **Running several Godot processes on one project directory at the same moment** (not separate
+  worktrees) has also produced start-up segfaults; run headless tests one at a time per checkout.
