@@ -166,14 +166,14 @@ static func _port_fits(g: Dictionary, s: Dictionary, o: Vector2i, eu: Vector2i, 
 				return false
 	# The opening looks onto interior floor with room to either side; the rest of the front wall row
 	# is backed by interior floor or wall, never by another opening.
-	for u in range(Stub.CORRIDOR - 3 + w - Stub.CORRIDOR, w + 2):
+	for u in range(w - Stub.CORRIDOR - 1, w + 2):
 		var q: Vector2i = o + eu * u - ev * 2
-		if not is_open(g, q.x, q.y) or g.reserved[idx(g, q.x, q.y)] == 1:
+		if not is_open(g, q.x, q.y) or g.reserved[idx(g, q.x, q.y)] == 1 or g.nav[idx(g, q.x, q.y)] == 1:
 			return false
 	for k in range(2, 5):
 		for u in range(w - Stub.CORRIDOR - 1, w + 1):
 			var q: Vector2i = o + eu * u - ev * (k + 1)
-			if not is_open(g, q.x, q.y):
+			if not is_open(g, q.x, q.y) or g.nav[idx(g, q.x, q.y)] == 1:
 				return false
 	return true
 

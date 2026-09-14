@@ -37,6 +37,8 @@ var pocket: Dictionary = {}
 var seams: Array = []
 ## Crossings this machine performed (tests): [{what, id, seam, to_pocket, time}]
 var crossings: Array = []
+## Tools (screenshots of both copies): false stops moving anything across seams.
+var crossing_enabled := true
 var _ghosts := {}
 
 
@@ -168,6 +170,7 @@ static func _make_seam(s: Dictionary, port: Dictionary, origin: Vector2i) -> Dic
 
 
 func teardown() -> void:
+	_blend_environment(0.0)
 	for g in _ghosts.values():
 		if is_instance_valid(g):
 			g.queue_free()
@@ -261,7 +264,7 @@ func mirror_noise(pos: Vector3, loudness: float) -> Array:
 # =========================================================================
 
 func _physics_process(_delta: float) -> void:
-	if seams.is_empty() or game == null:
+	if seams.is_empty() or game == null or not crossing_enabled:
 		return
 	var host: bool = game.is_host()
 	for p in game.players.values():
@@ -345,6 +348,67 @@ func _note(what: String, id: int, s: Dictionary, to_pocket: bool) -> void:
 			"time": float(game.world_time) if game != null else 0.0})
 	if crossings.size() > 64:
 		crossings.pop_front()
+
+
+# =========================================================================
+# the space's own air: fog tuned per pocket, blended in away from the entrances
+# =========================================================================
+
+## Environment values each pocket blends toward, deeper than a few metres inside it.
+const AIR := {
+	"factory": {"fog_depth_begin": 14.0, "fog_depth_end": 78.0, "fog_density": 0.5, "volumetric_fog_density": 0.03,
+			"ambient_light_energy": 0.13, "ambient_light_color": Color(0.26, 0.55, 0.44)},
+	"restaurant": {"fog_depth_begin": 16.0, "fog_depth_end": 60.0, "fog_density": 0.35, "volumetric_fog_density": 0.016,
+			"ambient_light_energy": 0.3, "ambient_light_color": Color(0.62, 0.46, 0.34)},
+}
+var _air_base := {}
+var _air_env: Environment = null
+var _air_k := 0.0
+
+
+func _process(_delta: float) -> void:
+	if pocket.is_empty():
+		return
+	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
+	if cam == null:
+		return
+	_blend_environment(air_factor(cam.global_position))
+
+
+## 0 in the hospital, in an entrance stub and near its opening; 1 well inside the space.
+func air_factor(p: Vector3) -> float:
+	if pocket.is_empty() or not in_pocket(p):
+		return 0.0
+	var nearest := INF
+	for s in seams:
+		var l := Stub.to_local(s.xp, p)
+		if l.x > -1.5 and l.x < float(s.w) + 1.5 and l.z > -1.2 and l.z < float(s.d) + 1.0:
+			return 0.0
+		nearest = minf(nearest, Vector2(p.x - s.opening.x, p.z - s.opening.z).length())
+	return smoothstep(3.0, 14.0, nearest)
+
+
+func _blend_environment(k: float) -> void:
+	if k <= 0.0 and _air_k <= 0.0:
+		return
+	if _air_env == null or not is_instance_valid(_air_env):
+		var we := get_tree().root.find_child("LookEnvironment", true, false) as WorldEnvironment if is_inside_tree() else null
+		if we == null or we.environment == null:
+			return
+		_air_env = we.environment
+	if _air_k <= 0.0:
+		_air_base = {}
+		for key in AIR.factory.keys():
+			_air_base[key] = _air_env.get(key)
+	_air_k = k
+	var target: Dictionary = AIR.get(String(pocket.get("kind", "")), {})
+	for key in _air_base.keys():
+		var base = _air_base[key]
+		var want = target.get(key, base)
+		if base is Color:
+			_air_env.set(key, (base as Color).lerp(want, k))
+		else:
+			_air_env.set(key, lerpf(float(base), float(want), k))
 
 
 # =========================================================================

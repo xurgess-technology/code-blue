@@ -55,41 +55,7 @@ static func layout(stubs: Array, seed: int) -> Dictionary:
 		Common.set_open(g, t.x, t.y, kitchen)
 	Common.set_open(g, doors.men.x, doors.men.y, restroom)
 	Common.set_open(g, doors.women.x, doors.women.y, restroom)
-	# The bar and the front door keep their walls; entrances go elsewhere.
-	Common.reserve(g, BAR.grow(1))
-	Common.reserve(g, Rect2i(FRONT_DOOR.x - 3, FRONT_DOOR.y, 8, 5))
-	Common.reserve(g, Rect2i(doors.kitchen[0].x - 2, DINING.end.y - 3, 6, 4))
-	Common.reserve(g, Rect2i(doors.corridor.x - 1, DINING.end.y - 3, 4, 4))
-	var walls := [
-		{"from": Vector2i(M, M + 3), "dir": Vector2i(0, 1), "len": 12, "ev": Vector2i(-1, 0)},
-		{"from": Vector2i(M + 3, M), "dir": Vector2i(1, 0), "len": W - 4, "ev": Vector2i(0, -1)},
-		{"from": Vector2i(INTERIOR.end.x, M + 3), "dir": Vector2i(0, 1), "len": 12, "ev": Vector2i(1, 0)},
-		{"from": Vector2i(KITCHEN.position.x + 2, INTERIOR.end.y), "dir": Vector2i(1, 0), "len": KITCHEN.size.x - 4, "ev": Vector2i(0, 1)},
-	]
-	var ports := Common.place_ports(g, stubs, walls, rng)
-
-	# Tables for four in a grid down the middle, booths along the walls where no entrance opens.
-	var tables: Array = []
-	for ty in range(DINING.position.y + 4, DINING.end.y - 3, 4):
-		for tx in range(DINING.position.x + 5, BAR.position.x - 2, 4):
-			var t := Vector2i(tx, ty)
-			if _free(g, Rect2i(t, Vector2i.ONE).grow(1)):
-				tables.append({"tile": t, "yaw": 0.0 if rng.randf() < 0.8 else PI * 0.25})
-				_block(g, Rect2i(t, Vector2i.ONE))
-	var booths: Array = []
-	# West wall: benches along y, the table against the wall.
-	for y in range(DINING.position.y + 1, DINING.end.y - 2, 3):
-		var r := Rect2i(DINING.position.x, y, 1, 2)
-		if _free(g, r.grow(1).intersection(Rect2i(DINING.position.x, DINING.position.y, DINING.size.x, DINING.size.y))):
-			booths.append({"rect": r, "wall": Vector2i(-1, 0)})
-			_block(g, r)
-	# South wall (the back of the dining room).
-	for x in range(DINING.position.x + 4, BAR.position.x - 1, 3):
-		var r := Rect2i(x, DINING.end.y - 1, 2, 1)
-		if _free(g, r.grow(1).intersection(DINING)):
-			booths.append({"rect": r, "wall": Vector2i(0, 1)})
-			_block(g, r)
-	# The bar: counter, aisle, back bar.
+	# The fixed furniture first, so an entrance never opens onto the stove or the bar.
 	var counter := Rect2i(BAR.position.x, BAR.position.y, 1, BAR.size.y)
 	_block(g, counter)
 	_block(g, Rect2i(BAR.end.x - 1, BAR.position.y, 1, BAR.size.y))
@@ -124,14 +90,49 @@ static func layout(stubs: Array, seed: int) -> Dictionary:
 	for c in containers:
 		if c.type != "trauma_bag" and c.type != "pegboard":
 			_block(g, Rect2i(c.tile, Vector2i.ONE))
+		Common.reserve(g, Rect2i(c.tile, Vector2i.ONE))
 	var stalls := [Rect2i(MEN.position.x, MEN.end.y - 1, 2, 1), Rect2i(WOMEN.position.x + 3, WOMEN.end.y - 1, 2, 1)]
 	for s: Rect2i in stalls:
 		_block(g, s)
+	# The bar and the front door keep their walls; entrances go elsewhere.
+	Common.reserve(g, BAR.grow(1))
+	Common.reserve(g, Rect2i(FRONT_DOOR.x - 3, FRONT_DOOR.y, 8, 5))
+	Common.reserve(g, Rect2i(doors.kitchen[0].x - 2, DINING.end.y - 3, 6, 4))
+	Common.reserve(g, Rect2i(doors.corridor.x - 1, DINING.end.y - 3, 4, 4))
+	var walls := [
+		{"from": Vector2i(M, M + 3), "dir": Vector2i(0, 1), "len": 12, "ev": Vector2i(-1, 0)},
+		{"from": Vector2i(M + 3, M), "dir": Vector2i(1, 0), "len": W - 4, "ev": Vector2i(0, -1)},
+		{"from": Vector2i(INTERIOR.end.x, M + 3), "dir": Vector2i(0, 1), "len": 12, "ev": Vector2i(1, 0)},
+		{"from": Vector2i(KITCHEN.position.x + 2, INTERIOR.end.y), "dir": Vector2i(1, 0), "len": KITCHEN.size.x - 4, "ev": Vector2i(0, 1)},
+	]
+	var ports := Common.place_ports(g, stubs, walls, rng)
+
+	# Tables for four in a grid down the middle, booths along the walls where no entrance opens.
+	var tables: Array = []
+	for ty in range(DINING.position.y + 4, DINING.end.y - 3, 4):
+		for tx in range(DINING.position.x + 5, BAR.position.x - 2, 4):
+			var t := Vector2i(tx, ty)
+			if _free(g, Rect2i(t, Vector2i.ONE).grow(1)):
+				tables.append({"tile": t, "yaw": 0.0 if rng.randf() < 0.8 else PI * 0.25})
+				_block(g, Rect2i(t, Vector2i.ONE))
+	var booths: Array = []
+	# West wall: benches along y, the table against the wall.
+	for y in range(DINING.position.y + 1, DINING.end.y - 2, 3):
+		var r := Rect2i(DINING.position.x, y, 1, 2)
+		if _free(g, r.grow(1).intersection(Rect2i(DINING.position.x, DINING.position.y, DINING.size.x, DINING.size.y))):
+			booths.append({"rect": r, "wall": Vector2i(-1, 0)})
+			_block(g, r)
+	# South wall (the back of the dining room).
+	for x in range(DINING.position.x + 4, BAR.position.x - 1, 3):
+		var r := Rect2i(x, DINING.end.y - 1, 2, 1)
+		if _free(g, r.grow(1).intersection(DINING)):
+			booths.append({"rect": r, "wall": Vector2i(0, 1)})
+			_block(g, r)
 	var spawns := [Vector2i(DINING.position.x + 3, DINING.position.y + 2), Vector2i(KITCHEN.get_center().x, KITCHEN.position.y + 2),
 			Vector2i(DINING.end.x - 8, DINING.end.y - 3)]
 	var lamps: Array = []
-	for ly in [DINING.position.y + 4, DINING.position.y + 11]:
-		for lx in range(DINING.position.x + 5, BAR.position.x, 8):
+	for ly in [DINING.position.y + 3, DINING.position.y + 8, DINING.position.y + 13]:
+		for lx in range(DINING.position.x + 4, BAR.position.x, 7):
 			lamps.append(Vector2i(lx, ly))
 	return {"kind": "restaurant", "size": Vector2i(g.w, g.h), "grid": g, "rows": Common.rows(g), "ports": ports,
 			"tables": tables, "booths": booths, "counter": counter, "host": host, "counters": counters,
@@ -173,7 +174,7 @@ static func build(lay: Dictionary, origin: Vector2i, out: Dictionary) -> Node3D:
 	var geo := Common.Geo.new()
 	geo.mats["saltillo"] = _tex_mat("saltillo", _saltillo_tex(), 0.8, Vector3(0.5, 0.5, 1))
 	geo.mats["planks"] = _tex_mat("planks", _planks_tex(), 0.9, Vector3(0.35, 0.35, 1))
-	geo.mats["stucco"] = Common.tri_mat("rest_stucco", "mat/wall", Color(0.86, 0.50, 0.30), 0.35, 0.95)
+	geo.mats["stucco"] = Common.tri_mat("rest_stucco", "mat/wall", Color(1.0, 0.74, 0.52), 0.35, 0.95)
 	geo.mats["talavera"] = _tex_mat("talavera", _talavera_tex(), 0.35, Vector3(0.85, 0.85, 1))
 	geo.mats["wood_low"] = _tex_mat("wood_low", _planks_tex(), 0.85, Vector3(0.6, 0.3, 1))
 	geo.mats["kitchen_floor"] = Common.tri_mat("rest_kfloor", "mat/tile_floor", Color(0.62, 0.60, 0.56), 0.6, 0.6)
@@ -244,7 +245,7 @@ static func _saltillo_tex() -> Texture2D:
 		rng.seed = 91
 		var shades := []
 		for i in 16:
-			shades.append(Color(0.62, 0.30, 0.16).lerp(Color(0.74, 0.42, 0.24), rng.randf()).darkened(rng.randf() * 0.15))
+			shades.append(Color(0.56, 0.36, 0.26).lerp(Color(0.66, 0.46, 0.34), rng.randf()).darkened(rng.randf() * 0.12))
 		for y in n:
 			for x in n:
 				var cx := x * 4 / n
@@ -252,7 +253,7 @@ static func _saltillo_tex() -> Texture2D:
 				var lx := (x * 4) % n
 				var ly := (y * 4) % n
 				var grout := lx < 5 or ly < 5
-				var c: Color = Color(0.36, 0.32, 0.28) if grout else (shades[cy * 4 + cx] as Color)
+				var c: Color = Color(0.55, 0.52, 0.47) if grout else (shades[cy * 4 + cx] as Color)
 				var speck := sin(float(x * 12.9898 + y * 78.233)) * 43758.5453
 				c = c.darkened((speck - floor(speck)) * 0.07)
 				img.set_pixel(x, y, c)
@@ -433,8 +434,10 @@ static func _booths(props: Common.Props, body: StaticBody3D, lay: Dictionary, wo
 		for sx in [-0.42, 0.42]:
 			var sb := Basis(Vector3.UP, yaw + (PI * 0.5 if sx < 0.0 else -PI * 0.5))
 			props.add(setting, Transform3D(sb, p + Vector3(0, 0.765, 0) + b * Vector3(sx, 0, 0.05)), 18.0, false)
-		var size := Vector3(3.0, 1.6, 1.3)
-		Common.collider(body, Transform3D(b, p + Vector3(0, 0.8, 0)), size)
+		# Two benches and the table between them (an item set on the table rests on it).
+		for sx in [-1.12, 1.12]:
+			Common.collider(body, Transform3D(b, p + b * Vector3(sx, 0.8, 0.0)), Vector3(0.62, 1.6, 1.3))
+		Common.collider(body, Transform3D(b, p + b * Vector3(0.0, 0.38, -0.05)), Vector3(1.3, 0.76, 1.1))
 		Common.anchor(out, p + b * Vector3(0.0, 0.77, 0.25), yaw, "counter", "restaurant")
 
 
@@ -572,8 +575,13 @@ static func _front(root: Node3D, props: Common.Props, body: StaticBody3D, lay: D
 static func _kitchen(root: Node3D, props: Common.Props, body: StaticBody3D, lay: Dictionary, world: Callable, steel: Material, iron: Material, out: Dictionary) -> void:
 	var mb := Common.MeshBuilder.new()
 	var dark := Common.mat("rest_kdark", Color(0.08, 0.08, 0.09), 0.5, 0.5)
+	var taken := {}
+	for ct in lay.containers:
+		taken[ct.tile] = true
 	for c in lay.counters:
 		var t: Vector2i = c.tile
+		if taken.has(t):
+			continue   # a steel drawer unit stands there instead
 		var wall: Vector2i = c.wall
 		var p: Vector3 = world.call(Vector2(t) + Vector2(0.5, 0.5))
 		var off := Vector3(wall.x, 0, wall.y) * (T * 0.5 - 0.35)
@@ -787,7 +795,7 @@ static func _lights(root: Node3D, lay: Dictionary, world: Callable, out: Diction
 	var mb2 := Common.MeshBuilder.new()
 	for t: Vector2i in lay.lamps:
 		var p: Vector3 = world.call(Vector2(t) + Vector2(0.5, 0.5), DINING_CEIL - 0.85)
-		var node := Common.omni(lights, p - Vector3(0, 0.25, 0), 1.25, 8.5, warm, 0.8, false, 1.1)
+		var node := Common.omni(lights, p - Vector3(0, 0.25, 0), 1.7, 8.0, warm, 0.5, false, 1.0)
 		var mi := MeshInstance3D.new()
 		mi.mesh = shade
 		node.add_child(mi)

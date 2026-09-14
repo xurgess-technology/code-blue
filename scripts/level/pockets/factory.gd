@@ -142,10 +142,10 @@ static func layout(stubs: Array, seed: int) -> Dictionary:
 		_block(g, Rect2i(r.position.x + 2, r.end.y - 1, 2, 1))
 	# Lamps, a grid of high bays: most on, some flickering, some dead.
 	var lamps: Array = []
-	for ly in [HALL.position.y + 6, HALL.position.y + 20, HALL.position.y + 34]:
-		for lx in [HALL.position.x + 10, HALL.position.x + 30, HALL.position.x + 50]:
+	for ly in [HALL.position.y + 4, HALL.position.y + 16, HALL.position.y + 28, HALL.position.y + 38]:
+		for lx in [HALL.position.x + 4, HALL.position.x + 16, HALL.position.x + 28, HALL.position.x + 40, HALL.position.x + 52]:
 			var roll := rng.randf()
-			lamps.append({"tile": Vector2i(lx, ly), "mode": 0 if roll < 0.55 else (1 if roll < 0.8 else 2)})
+			lamps.append({"tile": Vector2i(lx, ly), "mode": 0 if roll < 0.5 else (1 if roll < 0.68 else 2)})
 	# Monster spawns out on the floor, away from the entrances.
 	var spawns: Array = []
 	var tries := 0
@@ -209,9 +209,9 @@ static func build(lay: Dictionary, origin: Vector2i, out: Dictionary) -> Node3D:
 		return ow + Vector3(t.x * T, y, t.y * T)
 
 	var geo := Common.Geo.new()
-	geo.mats["floor"] = Common.tri_mat("fac_floor", "mat/concrete", Color(0.36, 0.36, 0.34), 0.22, 0.92)
+	geo.mats["floor"] = Common.tri_mat("fac_floor", "mat/concrete", Color(0.62, 0.61, 0.57), 0.22, 0.92)
 	geo.mats["roof"] = _plain("fac_roof", Color(0.05, 0.055, 0.06), 0.95)
-	geo.mats["wall_low"] = Common.tri_mat("fac_wall_low", "mat/concrete", Color(0.33, 0.37, 0.34), 0.35, 0.9)
+	geo.mats["wall_low"] = Common.tri_mat("fac_wall_low", "mat/concrete", Color(0.52, 0.58, 0.53), 0.35, 0.9)
 	geo.mats["wall_up"] = _corrugated()
 	geo.mats["office_floor"] = Common.tri_mat("fac_office_floor", "mat/floor", Color(0.55, 0.52, 0.47), 0.6, 0.85)
 	geo.mats["office_ceiling"] = Common.HB.surface_mat("mat/ceiling", Color(0.30, 0.31, 0.31), 0.95)
@@ -226,7 +226,7 @@ static func build(lay: Dictionary, origin: Vector2i, out: Dictionary) -> Node3D:
 	Common.collider(body, Transform3D(Basis(), Vector3(hall_w.get_center().x, CEIL + 0.2, hall_w.get_center().y)), Vector3(hall_w.size.x, 0.4, hall_w.size.y))
 
 	var props := Common.Props.new()
-	var concrete := Common.tri_mat("fac_column", "mat/concrete", Color(0.44, 0.44, 0.42), 0.35, 0.9)
+	var concrete := Common.tri_mat("fac_column", "mat/concrete", Color(0.66, 0.66, 0.63), 0.35, 0.9)
 	var steel := Common.tri_mat("fac_steel", "mat/metal", Color(0.30, 0.31, 0.32), 0.6, 0.55, 0.6)
 	var rust := Common.tri_mat("fac_rust", "mat/metal", Color(0.36, 0.24, 0.16), 0.8, 0.8, 0.3)
 	var paint_g := Common.tri_mat("fac_paint_green", "mat/metal", Color(0.22, 0.34, 0.26), 0.7, 0.7, 0.2)
@@ -297,7 +297,7 @@ static func build(lay: Dictionary, origin: Vector2i, out: Dictionary) -> Node3D:
 		props.add(mesh, Transform3D(Basis(Vector3.UP, float(mc.yaw)), centre), 52.0)
 		var size := Vector3(r.size.x * T - 0.3, _machine_height(String(mc.kind)), r.size.y * T - 0.3)
 		Common.collider(body, Transform3D(Basis(), centre + Vector3(0, size.y * 0.5, 0)), size)
-		if String(mc.kind) == "lathe" or String(mc.kind) == "cabinet":
+		if String(mc.kind) == "lathe":
 			Common.anchor(out, centre + Vector3(0, _machine_height(String(mc.kind)), 0), 0.0, "counter", "factory_floor")
 
 	# Pallet racking.
@@ -330,7 +330,6 @@ static func build(lay: Dictionary, origin: Vector2i, out: Dictionary) -> Node3D:
 					props.add(_crate_mesh(), Transform3D(Basis(Vector3.UP, float(k % 2) * 0.1).scaled(Vector3(1.1, 1.0, 1.1)), cp), 40.0)
 		var rw := Vector3(r.size.x * T, 5.8, r.size.y * T)
 		Common.collider(body, Transform3D(Basis(), a + Vector3(rw.x * 0.5, 2.9, rw.z * 0.5)), rw - Vector3(0.2, 0, 0.2))
-		Common.anchor(out, a + (Vector3(T * 0.5, 0.35, 1.5) if along_x else Vector3(1.5, 0.35, T * 0.5)), 0.0, "counter", "factory_floor")
 
 	for cr in lay.crates:
 		var t: Vector2i = cr.tile
@@ -338,7 +337,8 @@ static func build(lay: Dictionary, origin: Vector2i, out: Dictionary) -> Node3D:
 		for k in int(cr.stack):
 			props.add(_crate_mesh(), Transform3D(Basis(Vector3.UP, float(cr.yaw) + k * 0.15).scaled(Vector3(1.15, 0.9, 1.15)), p + Vector3(0, k * 0.72, 0)), 44.0)
 		Common.collider(body, Transform3D(Basis(), p + Vector3(0, 0.36 * int(cr.stack), 0)), Vector3(1.1, 0.72 * int(cr.stack), 1.1))
-		Common.anchor(out, p + Vector3(0, 0.72 * int(cr.stack), 0), float(cr.yaw), "counter", "factory_floor")
+		if int(cr.stack) == 1:
+			Common.anchor(out, p + Vector3(0, 0.72, 0), float(cr.yaw), "counter", "factory_floor")
 
 	_build_catwalk(root, body, props, world, steel, paint_y, out)
 	_build_offices(root, body, props, lay, world, out)
@@ -612,7 +612,7 @@ static func _build_lamps(root: Node3D, props: Common.Props, lay: Dictionary, wor
 		var p: Vector3 = world.call(Vector2(t) + Vector2(0.5, 0.5), LAMP_Y)
 		var mode := int(l.mode)
 		props.add(shade if mode != 2 else shade_dead, Transform3D(Basis(), p), 0.0, false)
-		var node := Common.omni(lights, p - Vector3(0, 0.3, 0), 3.4, 17.0, Color(1.0, 0.82, 0.58), 1.6, mode == 0 and shadows < 2, 1.3)
+		var node := Common.omni(lights, p - Vector3(0, 0.3, 0), 4.2, 21.0, Color(1.0, 0.82, 0.58), 1.4, mode == 0 and shadows < 2, 1.0)
 		if mode == 0 and shadows < 2:
 			shadows += 1
 		var bulb: OmniLight3D = node.get_node("Bulb")

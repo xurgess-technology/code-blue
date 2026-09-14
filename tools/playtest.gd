@@ -31,6 +31,7 @@ var hits := 0
 var last_hp := 3
 var shifts_won := 0
 var _path := PackedVector3Array()
+var _space := ""   # POCKETS
 var _repath := 0.0
 var _goal := Vector3.INF
 var _press_cooldown := 0.0
@@ -323,6 +324,11 @@ func _walk_to(target: Vector3) -> void:
 		_goal = target
 		_repath = 0.0
 	_repath -= 1.0 / 60.0
+	# POCKETS: a path from before a seam crossing points back the way the bot came.
+	var space: String = game.pockets.space_of(bot.global_position) if game.pockets != null else ""
+	if space != _space:
+		_space = space
+		_repath = 0.0
 	var map := get_viewport().world_3d.navigation_map
 	if _repath <= 0.0:
 		_repath = 0.5
@@ -334,6 +340,9 @@ func _walk_to(target: Vector3) -> void:
 		if Vector2(p.x - bot.global_position.x, p.z - bot.global_position.z).length() > 0.7:
 			next = p
 			break
+	# POCKETS: past a seam link the path continues on the far side of the world; walk across the seam.
+	if game.pockets != null and game.pockets.active():
+		next = game.pockets.steer_point(bot.global_position, next)
 	var to_next := next - bot.global_position
 	to_next.y = 0.0
 	if to_next.length() < 0.05:
