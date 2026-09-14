@@ -1242,9 +1242,13 @@ func _sc_monsters():
 			return _end(false, "a hit on a sedated Walk-In (hp 2) did not stagger")
 		if not await _until(func(): return _count_msgs("mo_sedated") > 0 or _count_msgs("fail") > 0, 30.0, "the client to see it sedated"):
 			return
+		# Integration: combat owns dragging (it clears a dragged_by nobody's dragging_monster backs).
+		var dragger = game.players[_peer_of(1)]
+		dragger.dragging_monster = int(w.monster_id)
 		w.dragged_by = _peer_of(1)
 		if not await _until(func(): return _count_msgs("mo_dragged") > 0 or _count_msgs("fail") > 0, 30.0, "the client to see it dragged"):
 			return
+		dragger.dragging_monster = -1
 		w.dragged_by = 0
 		w.wake()
 		if not await _until(func(): return _count_msgs("mo_awake") > 0 or _count_msgs("fail") > 0, 30.0, "the client to see it wake"):

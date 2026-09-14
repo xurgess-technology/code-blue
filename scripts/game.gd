@@ -1878,6 +1878,8 @@ func _update_danger() -> void:
 	else:
 		var nearest := 999.0
 		for m in monsters.values():
+			if m.has_method("is_sedated") and m.is_sedated():
+				continue   # sweep 3: an out-cold monster is no danger
 			nearest = minf(nearest, m.global_position.distance_to(view.global_position))
 		danger = clampf(1.0 - nearest / 14.0, 0.0, 1.0)
 	Audio.heartbeat(danger)

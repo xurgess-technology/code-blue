@@ -44,6 +44,7 @@ var _blacklist := {}
 var _heartbeat := 30.0
 var _target_item := -1
 var _stare_t := 0.0
+var _shove_ready := 0.0
 var take_extra := false
 var skip_grace := false
 var _was_phase := -1
@@ -344,7 +345,29 @@ func _walk_to(target: Vector3) -> void:
 
 
 func _flee_if_hunted() -> bool:
-	return _stare_down_nurse() or _flee_discharged()
+	return _shove_close_walk_in() or _stare_down_nurse() or _flee_discharged()
+
+
+## Sweep 3: Walk-Ins crowd the wing entrances the bot walks through. Any awake one within arm's
+## reach (calm after a hit or not; they come straight back) gets shoved off, like a player would.
+func _shove_close_walk_in() -> bool:
+	if bot.operating:
+		return false
+	for m in game.monsters.values():
+		if m.kind != "walk_in" or m.mode == Monster.Mode.STUNNED or (m.has_method("is_sedated") and m.is_sedated()):
+			continue
+		var to: Vector3 = m.global_position - bot.global_position
+		to.y = 0.0
+		if to.length() > 2.2:
+			continue
+		bot.bot_yaw = atan2(-to.x, -to.z)
+		bot.bot_move = Vector2.ZERO
+		bot.bot_interact = false
+		if elapsed >= _shove_ready:
+			_shove_ready = elapsed + C.SHOVE_COOLDOWN
+			bot.shove_count += 1
+		return true
+	return false
 
 
 ## The Night Nurse only moves while nobody watches her in light: face her with the flashlight
