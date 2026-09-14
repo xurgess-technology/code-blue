@@ -439,3 +439,39 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   (signal 11) in about half of the headless runs. Removed; models load on first use.
 - **Running several Godot processes on one project directory at the same moment** (not separate
   worktrees) has also produced start-up segfaults; run headless tests one at a time per checkout.
+
+## Combat (sweep 3, combat worker)
+
+- **Built against stand-ins for the monsters API.** On the combat branch `monster.gd` has no
+  `take_hit`, `can_sedate`, `sedate`, `is_sedated`, `wake`, `dragged_by` or `sedation_left`, so
+  `scripts/combat/combat.gd` uses guarded fallbacks: a monster dies after 2 saw hits (or its
+  `max_hp`), a stagger is `game.knock_down_monster(m, dir, 1.0)`, "sedated" is a 76 s knock-down
+  tracked in combat (replicated as `cb.s`), the lying look tips the monster's model onto its back,
+  and combat pins a dragged monster itself (in `physics_tick` and `_process`). Each fallback turns
+  itself off once the real method or field exists; re-run `tools/combattest.tscn` and the nettest
+  `combat` scenario after the merge. The fallback lying Discharged keeps its IV pole standing
+  upright beside it (`tools/combat_shots/05_sedated_prompt.png`).
+- **Fallback only: shoving a sedated monster half wakes it.** `game.player_shoved` calls
+  `m.shoved()`, which replaces the long knock-down with a 2 s stun; the monster then wanders while
+  combat still counts it as sedated. Gone once `sedate()` / `is_sedated()` come from monster.gd.
+- **The dragged monster can clip into walls.** It is pinned `DRAG_BEHIND` (1.15 m) straight behind
+  the dragger with no collision; backing into a corner pushes it through the wall until you turn.
+  Putting it down there lands it on the dragger's spot instead (`_point_is_clear`).
+- **No arms on the swing, the jab or the drag.** The held saw / syringe moves on its own in front
+  of the camera (and in front of other players' heads); the dragger's hands do not reach back to
+  the monster's ankles (`tools/combat_shots/07_drag_other.png`). Fine for primitives, wants rigged
+  arms later.
+- **The HUD hold bar says "LIFTING..." while you start dragging a monster** (combat reuses
+  `Player.carry_hold` so the HUD needed no change). One word in `hud.gd` if it matters.
+- **Prompts over a bright surface are hard to read.** The cream prompt text under the crosshair
+  (`hud.gd _draw_prompt`, no outline) all but vanishes over the white patient table, so "Strap the
+  Discharged to the table" is barely visible (`tools/combat_shots/06_drag_fp.png`). Not combat's
+  code; an outline or a dark backing would fix every prompt.
+- **The strapped monster lies on the table as Bob.** `PatientBody.create("discharged")` warns and
+  builds Bob until the `dissection` worker's monster bodies land.
+- **Friendly fire respects invulnerability.** A teammate hit in the last 3 s (the normal
+  post-hit invulnerability) takes no saw damage, but the swing still counts as a hit (noise, break
+  roll). Deliberate, so a saw cannot chain-down a teammate.
+- **nettest `combat` under `--lag=120 --jitter=40 --loss=0.03`** passed on the second run; the
+  first failed before any combat, in the shared `_wait_shift_as_client` check ("saw crew=false
+  subtitles=false" on client 2), the same kind of lag flake as `leave_items` above.
