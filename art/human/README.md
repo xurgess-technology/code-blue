@@ -1,8 +1,10 @@
 # The human: Blender sources (art pass, for review)
 
-**Not in the game yet.** This pass builds the base human, the players/surgeons, Bob and the
+**In the game since 2026-09-14** (players, Bob, the paramedics and the downed player on the table:
+`scripts/human/human_model.gd`, `scripts/patients/bob_model_builder.gd`, docs/CONTRACTS.md "The human
+models"). The art pass below built the base human, the players/surgeons, Bob and the
 paramedics the same way as the Night Nurse (scripted in Blender 5.2.1, headless, no downloaded or
-generated models) and stops for review. No game script uses these models. The game copies are in
+generated models) and stopped for review; the wiring came after. The game copies are in
 `assets/models/characters/human/` (one GLB per variation, maps as separate PNGs); the look-dev
 viewer is `art/human/viewer/human_viewer.tscn`; sources, renders and screenshots are here.
 

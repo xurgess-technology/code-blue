@@ -149,9 +149,9 @@ var fx: Node3D
 var camera: Camera3D
 var flashlight: SpotLight3D
 var body_visual: Node3D
-## HUMAN HOOK: game.pinned_pose puts a carried player at (0.55, 1.3, 0) in the carrier's frame; the human
-## carrier's right shoulder is at (0.15, 1.535, 0.03).
-const HUMAN_CARRIED_OFFSET := Vector3(-0.40, 0.235, 0.03)
+## HUMAN HOOK: where a carried human's Carried clip origin (the belly) sits, in the carrier's frame: the
+## human carrier's right shoulder.
+const HUMAN_CARRIED_SHOULDER := Vector3(0.15, 1.535, 0.03)
 var name_tag: Label3D
 var hands: Node3D
 var game: Node = null
@@ -1154,7 +1154,12 @@ func _update_down_pose(delta: float) -> void:
 		# HUMAN HOOK: the human lies, crawls and hangs over the shoulder by its own clips; the Carried
 		# clip's origin (the belly on the shoulder) goes onto the carrier's right shoulder.
 		body_visual.rotation = Vector3(-0.2 if hive_view else 0.0, 0.0, 0.0)
-		body_visual.position = HUMAN_CARRIED_OFFSET if carried_by != 0 else Vector3.ZERO
+		body_visual.position = Vector3.ZERO
+		var carrier = game.players.get(carried_by) if carried_by != 0 and game != null else null
+		if carrier != null and is_instance_valid(carrier):
+			# on the carrier's right shoulder, facing where the carrier faces, whatever this body's own yaw
+			var cb := Basis(Vector3.UP, carrier.rotation.y)
+			body_visual.global_transform = Transform3D(cb, carrier.global_position + cb * HUMAN_CARRIED_SHOULDER)
 		return
 	if carried_by != 0:
 		# A fireman's carry over the right shoulder (game.pinned_pose puts the root there): legs

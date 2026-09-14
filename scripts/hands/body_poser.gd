@@ -85,6 +85,9 @@ func _generic(sk: Skeleton3D) -> void:
 		var d: Vector3 = (side[1] as Vector3).normalized()
 		# The elbow bends: the upper arm hangs lower than the forearm unless the arm is raised.
 		var up_dir := (d + Vector3(0.0, -0.65, 0.0) * (1.0 - maxf(0.0, d.y))).normalized()
+		if absf(d.x) > 0.6:
+			# a forearm across the body (the carry): the upper arm goes forward, the elbow bends in
+			up_dir = Vector3(d.x * 0.2, maxf(d.y, 0.0) * 0.5 - 0.15, 0.95).normalized()
 		_aim(sk, upper, up_dir, w)
 		if fore >= 0:
 			_aim(sk, fore, d, w)

@@ -1121,8 +1121,8 @@ Settings "carry_camera": "shoulder" (default) | "first_person"
   `Walk` at 1.45x (carrying, dragging, winding up), `Crawl` (downed; frozen when not moving), `Carried`,
   `Lying` (on the table), and the one-shots `PickUp` (an interact aimed at `it_*`) / `Interact` when an
   interact comes in standing still. `body_hands.lies_by_clip()` tells `Player._update_down_pose` not to
-  tip the body; carried, the body sits at `Player.HUMAN_CARRIED_OFFSET` (-0.40, 0.235, 0.03) so the
-  Carried clip's belly lands on the carrier's right shoulder. The first-person arms stay `fp_arms`.
+  tip the body; carried, the body is placed each frame at `Player.HUMAN_CARRIED_SHOULDER` (0.15, 1.535, 0.03)
+  in the carrier's frame and yaw, so the Carried clip's belly lands on the carrier's right shoulder. The first-person arms stay `fp_arms`.
 - **Carry camera**: while the local player carries a downed player or drags a monster (setting
   "shoulder"), `Head/FX` eases (0.35 s) to `CARRY_OFFSET` (-1.0, 0.45, 2.0) in the head's frame (over
   the left shoulder; the body rides the right) or `DRAG_OFFSET` (0.45, 1.0, 3.6) with a 0.45 rad

@@ -24,6 +24,8 @@ const HEIGHTS := {"surgeon_a": 1.80, "surgeon_b": 1.68, "surgeon_c": 1.75, "bob"
 
 ## Tools and perf A/B: force every caller onto its old Kenney / primitive path.
 static var disabled := false
+## Perf A/B (tools/perfprobe --humans --noshadow): spawn without shadow casting.
+static var cast_shadows := true
 static var _shaders := {}
 static var _tex := {}
 static var _skin_shared := {}
@@ -76,6 +78,8 @@ static func spawn(variant: String, tint := BAKED_TINT, own_skin := false) -> Nod
 	var skin: ShaderMaterial = null if own_skin else _skin_shared.get(variant)
 	for mi in root.find_children("*", "MeshInstance3D", true, false):
 		var m := mi as MeshInstance3D
+		if not cast_shadows:
+			m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		for i in m.mesh.get_surface_count():
 			var src := m.mesh.surface_get_material(i) as BaseMaterial3D
 			if src == null:

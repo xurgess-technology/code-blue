@@ -53,7 +53,7 @@ const HUMAN := {
 	# Poses that read differently on a two-bone arm (merged over POSES by pose_of()).
 	"poses": {
 		# The right arm wraps the carried legs across the front of the shoulder instead of pointing up.
-		"carry": {"arm_r": [Vector3(0.45, 0.35, 0.82), 1.0], "arm_l": [Vector3(0.3, -0.85, 0.3), 0.35], "torso": [0.12, -0.05, 1.0]},
+		"carry": {"arm_r": [Vector3(0.8, 0.0, 0.45), 1.0], "torso": [0.12, -0.05, 1.0]},
 		"hold": {"arm_r": [Vector3(-0.15, -0.35, 0.92), 1.0]},
 		"hold_both": {"arm_r": [Vector3(0.2, -0.05, 1.0), 1.0], "arm_l": [Vector3(-0.2, -0.05, 1.0), 1.0]},
 	},

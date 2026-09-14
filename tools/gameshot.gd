@@ -729,14 +729,17 @@ func _pose_human_crawl() -> void:
 	var og := _open_ground()
 	var from: Vector3 = og[0]
 	var dir: Vector3 = og[1]
+	if _mate2 != null and is_instance_valid(_mate2):
+		game._release_downed_links(_mate2)
+		_mate2.teleport(game.table_pos() + Vector3(0, -40, 0))
 	var m := _teammate()
 	_give(m, "")
-	m.teleport(game._floor_at(from + dir * 2.6))
+	m.teleport(game._floor_at(from + dir * 4.2 - dir.cross(Vector3.UP) * 0.6))
 	game.down_player(m, "test")
 	m.bot_yaw = atan2(dir.x, dir.z) + 0.6
 	m.bot_move = Vector2(0, -1)
 	bot.set_flashlight(true)
-	_look_from(from, from + dir * 2.6 + Vector3(0, 0.3, 0))
+	_look_from(from, from + dir * 4.2 + Vector3(0, 0.2, 0))
 
 
 func _pose_human_bob(ailment: String, flags: Dictionary) -> void:
