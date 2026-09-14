@@ -44,6 +44,8 @@ const SCENARIOS := [
 	{"name": "full_shift_lag", "scenario": "full_shift", "clients": 2, "timeout": 900, "lag": true, "extra": ["--seed=4247"]},
 	# loop (sweep 2): two patients on two tables, two clients operating at once.
 	{"name": "two_patients", "scenario": "two_patients", "clients": 2, "timeout": 300},
+	# brains (sweep 3): a client picks up and blends brains, uses Hive Eyes and Echo.
+	{"name": "brains", "scenario": "brains", "clients": 1, "timeout": 240},
 ]
 ## Not part of the default run: bandwidth measurements (4 players, no lag, --stats). `bandwidth`
 ## is Bob's gunshot (seed 4242, the case the pre-delta numbers were taken on); `bandwidth_amp`
