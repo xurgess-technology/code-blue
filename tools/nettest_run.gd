@@ -128,6 +128,8 @@ func _run_scenario(s: Dictionary, port: int) -> Dictionary:
 		var args: Array = base + common
 		if i == 0:
 			args += ["--role=host"]
+			if not lag.is_empty():
+				args += ["--lagged"]
 		else:
 			args += ["--role=client", "--index=%d" % i]
 			if not lag.is_empty():

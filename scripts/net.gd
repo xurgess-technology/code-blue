@@ -102,6 +102,39 @@ func _process(_delta: float) -> void:
 	if enet != null and enet.host != null:
 		bytes_sent += enet.host.pop_statistic(ENetConnection.HOST_TOTAL_SENT_DATA)
 		bytes_received += enet.host.pop_statistic(ENetConnection.HOST_TOTAL_RECEIVED_DATA)
+		_sample_link(enet)
+
+
+## Diagnostics for a dropped connection: the last round-trip estimate per peer and the longest
+## frame (a stretch without servicing the connection) of the last 10 to 20 seconds.
+var _link_stats: Dictionary = {}   # peer id -> String
+var _stall_ms := [0, 0]            # longest frame this window, previous window
+var _last_frame_ms := 0
+var _link_sample_ms := 0
+
+
+func _sample_link(enet: ENetMultiplayerPeer) -> void:
+	var now := Time.get_ticks_msec()
+	if _last_frame_ms > 0:
+		_stall_ms[0] = maxi(int(_stall_ms[0]), now - _last_frame_ms)
+	_last_frame_ms = now
+	if now - _link_sample_ms < 1000:
+		return
+	if now / 10000 != _link_sample_ms / 10000:
+		_stall_ms = [0, _stall_ms[0]]
+	_link_sample_ms = now
+	for id in names.keys():
+		if id == multiplayer.get_unique_id():
+			continue
+		var pp := enet.get_peer(id)
+		if pp != null:
+			_link_stats[id] = "rtt %d ms (var %d), loss %.1f%%" % [pp.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME), pp.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME_VARIANCE), pp.get_statistic(ENetPacketPeer.PEER_PACKET_LOSS) / 655.36]
+
+
+func _log_lost(id: int) -> void:
+	if backend != "enet":
+		return
+	print("[net] lost peer %d: last %s; longest frame lately %d ms" % [id, _link_stats.get(id, "no stats"), maxi(int(_stall_ms[0]), int(_stall_ms[1]))])
 
 
 func is_host() -> bool:
@@ -413,6 +446,8 @@ func _on_peer_connected(id: int) -> void:
 
 
 func _on_peer_disconnected(id: int) -> void:
+	if multiplayer.is_server():
+		_log_lost(id)
 	names.erase(id)
 	roster_changed.emit()
 	if multiplayer.is_server():
@@ -449,6 +484,7 @@ func _on_connect_failed() -> void:
 
 
 func _on_server_disconnected() -> void:
+	_log_lost(HOST_ID)
 	reset()
 	host_left.emit()
 

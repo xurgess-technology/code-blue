@@ -2437,6 +2437,7 @@ var _cl_full_acc := 0.0
 var _cl_seed_wait := false            # _rpc_shift built a new hospital; ignore older seeds
 var _pl_applied: Dictionary = {}      # peer id -> instance id of the Player node last applied
 var _cl_apply_queued := false
+var _revived_at: Dictionary = {}      # peer id -> [position, wall msec] of the last "revive" event
 var _cl_g_last: Dictionary = {}       # global group id -> its last complete fields (a copy)
 
 
@@ -3051,7 +3052,14 @@ func _apply_state(state: Dictionary, msg: Dictionary, keyframe: bool) -> void:
 			continue
 		if keyframe or pl_changed.has(id) or int(_pl_applied.get(id, 0)) != p.get_instance_id():
 			_pl_applied[id] = p.get_instance_id()
+			var was_pinned: bool = p.on_table or p.carried_by != 0
 			p.apply_remote_full(state.pl[id])
+			# downed: the reliable "revive" event put me beside the table, then an older snapshot
+			# pinned me back onto it; now that the snapshot lets go, stand where the host put me.
+			var rv = _revived_at.get(id)
+			if p.is_local and was_pinned and rv != null and not p.on_table and p.carried_by == 0 \
+					and Time.get_ticks_msec() - int(rv[1]) < 10000:
+				p.teleport(rv[0])
 	# downed: the player table's case, after the players so its patient's colour is known.
 	var pt = g.get("pt", {})
 	player_surgery.apply_net_state(pt if pt is Dictionary else {})
@@ -3196,6 +3204,7 @@ func _event(kind: String, data: Dictionary) -> void:
 				q.apply_knock(data.knock)
 		"revive":
 			var r = players.get(data.id)
+			_revived_at[data.id] = [data.pos, Time.get_ticks_msec()]  # net: see _apply_state
 			if r != null:
 				r.teleport(data.pos)
 				r.revive(int(data.get("hp", 2)))

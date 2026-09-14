@@ -49,6 +49,7 @@ var port := 7790
 var seed_value := 4242
 var timeout_s := 150.0
 var stats := false
+var lagged := false     # the runner simulates lag for the clients of this scenario
 
 var main: Node3D
 var game: Game
@@ -72,6 +73,7 @@ func _ready() -> void:
 			"seed": seed_value = int(v)
 			"timeout": timeout_s = float(v)
 			"stats": stats = true
+			"lagged": lagged = true
 	if role == "host":
 		index = 0
 	_t0 = _wall()
@@ -607,16 +609,22 @@ func _sc_two_patients():
 		_stock_shelf()
 		var ops := {_peer_of(1): tables[0], _peer_of(2): tables[1]}
 		_send("operate_tables", {"ops": ops})
-		var seen := {"both": false}
+		var seen := {"both": false, "a": false, "b": false}
 		var watch := func():
 			var a = game.surgery_for_table(tables[0])
 			var b = game.surgery_for_table(tables[1])
+			seen.a = seen.a or a.operator_id == _peer_of(1)
+			seen.b = seen.b or b.operator_id == _peer_of(2)
 			if a.operator_id == _peer_of(1) and b.operator_id == _peer_of(2):
 				seen.both = true
 		if not await _do_until(watch, func(): return int(game.cases[0].step_index) >= 1 and int(game.cases[1].step_index) >= 1, 150.0, "both first steps"):
 			return
 		if not seen.both:
-			return _end(false, "never saw both clients operating at the same time")
+			# Over a lagged link one bot can finish its short step before the other's request
+			# even reaches the host; then each must at least have operated its own table.
+			if not (lagged and seen.a and seen.b):
+				return _end(false, "never saw both clients operating at the same time (a=%s b=%s)" % [str(seen.a), str(seen.b)])
+			_say("the two operations did not overlap (lagged link); both tables were operated")
 		for c in game.cases:
 			if not (c.flags as Dictionary).has("sedation"):
 				return _end(false, "a step finished without its flags: %s" % str(c))
@@ -642,13 +650,15 @@ func _sc_two_patients():
 	var sys = game.surgery_for_table(mine)
 	var other_sys = game.surgery_for_table(other)
 	game.surgery_bot_skill = 1.0
-	if not await _do_until(func(): _press_at(game.table_position(mine), game.table_interact_id(mine)),
-			func(): return sys.is_local_operating(), 40.0, "the host to let me operate on table %d" % mine):
-		return
+	# Watch the other table from the start: over a lagged link its operation can begin (or even
+	# end) before the host has let me operate.
 	var st := {"states": {}}
 	var watch := func():
 		if other_sys.mg != null and other_sys.operator_id != 0 and other_sys.operator_id != Net.my_id():
 			st.states[str(other_sys.mg.net_state())] = true
+	if not await _do_until(func(): watch.call(); _press_at(game.table_position(mine), game.table_interact_id(mine)),
+			func(): return sys.is_local_operating(), 40.0, "the host to let me operate on table %d" % mine):
+		return
 	if not await _do_until(watch, func(): return int(game.case_on_table(mine).get("step_index", 0)) >= 1 and int(game.case_on_table(other).get("step_index", 0)) >= 1, 150.0, "both steps"):
 		return
 	if st.states.size() < 3:

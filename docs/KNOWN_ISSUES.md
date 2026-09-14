@@ -94,15 +94,16 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   a newer keyframe every tick, one never completed, so the ack never advanced (stuck at seq 216
   for 90 s). Replication is now per field with acks and messages of at most 1000 bytes (see
   CONTRACTS, Networking).
-- **Harsh links degrade through ENet's reliable channel, not snapshots.** At 200 ms, 80 ms jitter,
-  8% loss (4x speed), `deliver` and `full_shift_lag` pass but `surgery` / `two_patients` fail about
-  half the time: a client's level build stalls it for seconds right after joining, ENet's RTT
-  estimate jumps to 1-3 s (variance up to 2 s) and decays slowly, so a reliable RPC lost in that
-  window is retransmitted 8-10 s later (a nettest order arrives after the step it was about) and
-  two losses of one reliable packet exceed `Net.TIMEOUT_MAX_MS` (a disconnect). The same showed
-  once at 120/40/3% under heavy CPU load from other worktrees. Snapshots kept flowing throughout.
-  Building the level without blocking the network poll, or a longer timeout right after joining,
-  would help.
+- **Harsh links degrade through ENet's reliable channel, not snapshots.** A level build stalls a
+  machine for seconds (joining, a new hospital); ENet's round-trip estimate then jumps to 1-3 s
+  (variance up to 2 s) and decays slowly, so a reliable RPC lost in that window is resent 5-10 s
+  later, and two losses of one reliable packet can outlast the timeout. Peers now get patient
+  timeouts (`Net.PATIENT_*`: 10-20 s, limit 64) from connecting until `Game.NET_PATIENCE_MS`
+  (15 s) after their first acknowledgement, and for 15 s after every level build. Still, at
+  200 ms, 80 ms jitter, 8% loss (4x speed) a client occasionally drops (`[net] lost peer ...`
+  shows the last RTT and the longest frame) and nettest orders can arrive after the step they
+  were about. Snapshots keep flowing throughout. Building the level without blocking the network
+  poll would fix the cause.
 - **The lag relay reorders more than real links**: each datagram gets an independent uniform
   jitter, so +-40 ms at 4x game speed reorders several packets per tick. Snapshot messages are
   unordered and cope (`NET_REORDER_MS` 100 ms before a gap counts as a loss).
@@ -112,7 +113,8 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   resend, typically 100-400 ms).
 - **Monsters are the largest part of a snapshot** (about 2 KB/s per client with two or three
   moving). Sending their position at a lower rate or as smaller deltas would halve the total.
-- **A killed client takes 5 to 12 seconds to be noticed** (ENet timeout, `Net.TIMEOUT_*_MS`).
+- **A killed client takes 5 to 12 seconds to be noticed** (ENet timeout, `Net.TIMEOUT_*_MS`), up
+  to 20 s within 15 s of joining or of a new hospital (patient timeouts).
   Until then its surgeon stands frozen, and if it was operating, nobody else can start the step.
 - **`menu.gd` `_save_prefs()` overwrites `user://prefs.cfg`** without loading it first, which drops
   the saved graphics quality (pre-existing; the settings worker owns preferences now).
