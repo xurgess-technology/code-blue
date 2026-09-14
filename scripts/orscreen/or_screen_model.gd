@@ -102,6 +102,9 @@ static func _panel(game: Object, c: Dictionary, order: int, shelf_left: Dictiona
 		"ready": false,
 		"operator": "",
 		"progress": 0.0,
+		# SWEEP 3 HOOK (dissection): a strapped monster shows its brain's condition and its sedation.
+		"monster": bool(c.get("monster", false)),
+		"sedation": clampf(float((c.get("flags", {}) as Dictionary).get("sedation", 1.0)), 0.0, 1.0) if c.get("flags") is Dictionary else 1.0,
 	}
 	for i in steps.size():
 		var s: Dictionary = steps[i]

@@ -402,6 +402,8 @@ func _clock_out_blocker() -> String:
 	for c in game.cases:
 		if String(c.get("patient_id", "")) == "player":
 			continue
+		if bool(c.get("monster", false)):
+			continue   # SWEEP 3 HOOK (dissection): a strapped monster never holds up the clock
 		if String(c.state) == "incoming":
 			return "A patient is on the way."
 		if String(c.state) == "on_table":
@@ -569,7 +571,7 @@ func _roll(kind: String) -> Dictionary:
 		# Two of the same patient at once reads as a bug: bring the other one.
 		for c in game.cases:
 			if String(c.get("patient_id", "")) == pid and (String(c.state) == "on_table" or String(c.state) == "incoming"):
-				var ids: Array = Procedures.PATIENTS.keys()
+				var ids: Array = Procedures.human_patients()   # SWEEP 3 HOOK (dissection): never a monster
 				ids.sort()
 				pid = String(ids[(ids.find(pid) + 1) % ids.size()])
 				break

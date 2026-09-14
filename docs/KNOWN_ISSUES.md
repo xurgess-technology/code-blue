@@ -431,6 +431,47 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   on the client is only checked for `dragged_by`, not for following the pin; the lab checks the pin
   with a stand-in combat.
 
+## Dissection (sweep 3)
+
+- **`make_lying` is untested.** The monsters worker's still lying copy did not exist on this branch,
+  so every screenshot is the primitive fallback body. With `make_lying` present the builder hides the
+  copy's meshes that lie entirely past the head (by X extent, a heuristic) and puts its own, openable
+  head in their place: expect a size or style mismatch against the Kenney-rig bodies (the own head is
+  a smooth ellipsoid, 0.14 m half length) and possibly a missed or wrongly hidden part. Check it on
+  the merged build (`tools/dissectiontest.tscn -- --shots`).
+- **The primitive bodies are plainer than Bob and the seal**: smooth lofts, a painted face with
+  sphere eyes, no hands to speak of. They read as a patient in a gown / a grey eyeless patient with
+  big ears at table distance (`tools/dissection_shots/01*`, `02*`), less so up close.
+- **The saw's calm guide glow shows on the forehead before anyone saws** (the same idle glow limbs
+  have); the saw model itself is hidden until someone saws the skull.
+- **The brain step's camera looks from past the end of the table**, so the body appears upside down
+  above the opening (`05_brain_nerves.png`). Readable, but a surgeon standing at the head end would
+  be the natural view.
+- **The nerves are short**: the gap between the brain and the bone is 1-1.5 cm, so the cords are
+  small; the rings carry the read. A larger cavity (smaller brain) would show them better.
+- **Awake thrashing only adds botches, shrieks and body motion.** The operator's hand shake stays
+  the surgery system's stir (strongest at sedation 0, roughly every 2.5 s); there is no separate,
+  stronger jolt for an awake monster. The head barely moves so the work planes stay on it.
+- **An awake monster shrieks forever** (noise 0.7 every 3.5-6.5 s) until re-dosed, dissected or the
+  shift ends: a forgotten one keeps calling the Discharged to the OR. No strap breaks (by design).
+- **Monster cases never block clocking out** (`ShiftLoop._clock_out_blocker` skips them); the next
+  shift's `_clear_case` removes a strapped monster left behind. The softlock guard
+  (`_live_requirements`) still counts a monster case's bone saw and forceps.
+- **Holding anesthetic at a monster's table always re-doses** instead of offering to operate, from
+  either hand. Set the vials down (or on the shelf) to operate.
+- **`game.case` can be a monster case** (the alias is the first non-player case) when a monster is
+  strapped before the phone patient arrives. Old single-case code paths and tests that read
+  `game.case` would then look at the monster.
+- **Brain quality is the brain's condition only**; the saw's `cut_quality` is recorded in the flags
+  but not used.
+- **The minigame lab needs `--ailment=dissection`** for monster patients (it infers amputation for
+  the saw and gunshot for the forceps), and `--flags=skull_open:1` to show the opened skull.
+- **Shutdown noise in the nettest logs**: `Condition "!peers.has(p_id)" is true` repeats on clients as
+  the scenario ends; the dissection scenario passes regardless (not checked whether other scenarios
+  print it too).
+- **Warmup builds four more bodies and four more minigames** (both monsters, closed and opened, the
+  skull saw and the brain forceps). `tools/perfprobe.tscn` was not run for this change.
+
 ## Testing tips
 
 - Add `--fixed-fps 60` to headless runs: the game then steps as fast as the CPU allows (a 250 s

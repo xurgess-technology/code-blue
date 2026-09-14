@@ -183,7 +183,7 @@ static func stamps(kind: String) -> Array:
 
 static func weights_line() -> String:
 	var parts: Array = []
-	for pid in ProceduresDB.PATIENTS.keys():
+	for pid in ProceduresDB.human_patients():   # SWEEP 3 HOOK (dissection): monsters are not dosed by weight
 		var p: Dictionary = ProceduresDB.PATIENTS[pid]
 		parts.append("%s %d kg" % [p.get("name", pid), roundi(float(p.get("weight_kg", 0.0)))])
 	return ", ".join(parts)
@@ -273,7 +273,7 @@ static func procedure_page(ailment_id: String) -> Dictionary:
 		warnings.append("A weak tourniquet makes the saw step bloody.")
 	warnings.append("Every botch costs vitals. Vitals do not come back on their own.")
 	var patients: Array = []
-	for pid in ProceduresDB.PATIENTS.keys():
+	for pid in ProceduresDB.human_patients():   # SWEEP 3 HOOK (dissection): monsters are not dosed by weight
 		var p: Dictionary = ProceduresDB.PATIENTS[pid]
 		patients.append("%s: %d kg" % [p.get("full_name", pid), roundi(float(p.get("weight_kg", 0.0)))])
 	return {

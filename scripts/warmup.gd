@@ -72,7 +72,20 @@ static func run(game: Node) -> void:
 	# Patients, each showing every visual state a case can reach
 	var bodies := {}
 	var bx := -0.6
-	for pid in Procedures.PATIENTS.keys():
+	# SWEEP 3 HOOK (dissection): strapped monsters, one closed and awake (thrashing), one opened.
+	for mpid in Procedures.monster_patients():
+		for opened in [false, true]:
+			var mb: Node3D = BodyScript.create(mpid)
+			shelf.add_child(mb)
+			mb.position = Vector3(bx, -0.3, -0.8)
+			mb.scale = Vector3.ONE * 0.5
+			mb.set_ailment("dissection")
+			mb.apply_flags({"sedation": 1.0 if opened else 0.1, "skull_open": opened})
+			mb.set_bleeding("skull", 0.6)
+			if opened:
+				bodies["%s|dissection" % mpid] = mb
+			bx += 0.4
+	for pid in Procedures.human_patients():
 		for ail in Procedures.patient_ailments():
 			var b: Node3D = BodyScript.create(pid)
 			shelf.add_child(b)
@@ -140,7 +153,9 @@ static func run(game: Node) -> void:
 			var path: String = Procedures.MINIGAME_SCRIPTS.get(step.game, "")
 			if path == "" or not ResourceLoader.exists(path):
 				continue
-			for pid in (["player"] if Procedures.is_player_only(ail) else Procedures.PATIENTS.keys()):
+			# SWEEP 3 HOOK (dissection): the skull saw and brain forceps on the monster bodies.
+			var pids: Array = ["player"] if Procedures.is_player_only(ail) else (Procedures.monster_patients() if Procedures.is_monster_only(ail) else Procedures.human_patients())
+			for pid in pids:
 				var body: Node3D = bodies["%s|%s" % [pid, ail]]
 				var mg: Node3D = (load(path) as GDScript).new()
 				shelf.add_child(mg)

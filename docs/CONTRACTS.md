@@ -937,6 +937,84 @@ game.combat.last_result / swings_seen / rng / break_chance / anim_freeze / stop_
 - Tests: `tools/combattest.tscn` (headless, dev room), `tools/combatshot.tscn` (windowed shots to
   `tools/combat_shots/`), nettest scenario `combat`.
 
+## Dissection (dissection worker, sweep 3)
+
+Strapped monsters on the patient tables (`scripts/dissection/`, `game.dissection`). A monster case is
+an ordinary `game.cases` entry: `{table, patient_id: "walk_in" | "discharged", ailment_id: "dissection",
+monster: true, flags: {sedation}}` plus `doses` (re-doses given). The surgery systems operate it like
+any patient; everything below is host authoritative.
+
+```gdscript
+# Procedures (scripts/procedures.gd)
+PATIENTS.walk_in / .discharged        # monster: true (name, full_name, weight, blurbs.dissection)
+AILMENTS.dissection                   # monster_only: true; steps
+    # {id "open", "Saw open the skull", bone_saw, uses 0, game "saw", variant "skull", site "skull"}
+    # {id "harvest", "Pull out the brain", forceps, uses 0, game "forceps", variant "brain", site "brain"}
+Procedures.is_monster(patient_id) / is_monster_only(ailment_id)
+Procedures.human_patients() -> ["bob", "seal"]    # roll(), the dev panel, the loop's extra call, the guide
+Procedures.monster_patients() -> ["discharged", "walk_in"]
+# roll() and patient_ailments() never return a monster or dissection (same results as before).
+
+# game.dissection (scripts/dissection/dissection.gd), child "Dissection" of Game
+owns_case(c) -> bool / owns_table(table) -> bool      # every machine
+sedation(c) -> float                                    # host: precise; clients: replicated (hundredths)
+static sedation_state(s) -> "under" | "stirring" | "awake"   # STIR 0.75, AWAKE 0.35
+static dose_amount(n) -> float                          # DOSE * DOSE_FALLOFF^n = 0.6 * 0.6^n
+static brain_kind(patient_id) -> "brain_walk_in" | "brain_discharged"
+table_prompt(p, table) -> String                        # game._table_prompt hands monster tables here
+table_used(p, table) -> bool                            # host, from game._proxy_used: true = it was a re-dose
+redose(p, table) -> float                               # host: one vial from p's hands; returns the sedation added
+on_case_finished(c, won)                                # host, from game.finish_case
+spawn_brain(patient_id, quality, pos) -> Node           # host: game.brains.spawn_brain, else a plain loot item
+dev_strap(kind, sedation := 1.0, table := -1) -> int    # host: tests and the dev panel (request "strap_monster")
+set_sedation(case_id, s)                                # host, tests
+last_brain: {kind, quality, pos, node}                  # tests
+SEDATION_SECONDS 120, SAW_MULT 2.5, THRASH_BOTCH 1.5, THRASH_EVERY 3.0, SHRIEK_NOISE 0.7, REMOVE_AFTER 6.0
+```
+
+- **Sedation** falls from 1 to 0 in 120 s, 2.5x while the saw is held in the kerf. The host keeps the
+  precise value and writes `flags.sedation` snapped to 0.05 (so the case field is not resent every
+  tick); the global snapshot field `dx` = `{s: {"<case id>": hundredths}}` for every monster case on a
+  table, and clients write it back into their case flags right after the cases apply, so the
+  surgery system's stir code (`flags.sedation`) and the body read the same value everywhere.
+- 0.35..0.75 the surgery system's existing stirs. Under 0.35 awake: the body thrashes against the
+  straps (every machine, from the sedation), shrieks every 3.5-6.5 s (`emit_noise(table, 0.7,
+  "shriek")`, event `dx_shriek`), and while someone operates `surgery_botch(1.5)` every 3 s.
+- **Re-dose:** E on the table holding anesthetic (any hand; the selected stack first) re-doses instead
+  of operating, also while someone else operates. Prompt: `Re-dose <name> (sedation 42%, +36%)`;
+  otherwise `Operate: <step> (sedation 42%)` / `!<reason> (sedation 42%)`. Event `dx_dose`.
+- **Brain condition** is the case's `vitals`: `_sim_shift` does not drain it, and the host clamps it
+  so it never rises (the +8 of `surgery_step_done` is taken back). At 0 the case is lost ("The brain
+  is ruined."). Winning the last step: `spawn_brain(kind, condition / 100, pos)` at the specimen tray
+  beside the head (+0.12 m), event `dx_flatline`, the case becomes `stable` and is removed 6 s later
+  (dead cases too). `ShiftLoop.pay_for` pays 0; monster cases never block clocking out.
+- **Bodies** (`PatientBody.create` dispatches `Procedures.is_monster(id)` to
+  `scripts/dissection/monster_builder.gd`; the node is a normal `PatientBody`): lying along X, head
+  -X, sites `injection`, `skull`, `brain`, leather straps over chest/arms, hips/wrists, thighs, shins
+  (sized for the 0.7 m OR table). Flags `skull_open` (the cap lifts off along the cut over 0.9 s and
+  lies bone side up beside the head), `brain_removed` (empty cavity; the body flatlines), `sedation`.
+  `site_section("skull")` = `{half_up, half_side, axis_depth, shape}`; `site_section("brain")` also
+  carries `half_u`, `brain_radii`, `brain_seed`, `brain_y`, `tray` (site-local Vector3) and `table_up`.
+  Body meta `dx_brain_hidden` (set by the brain step while it draws the moving brain). The head is
+  always this file's own (it opens); below the neck it uses `make_lying(kind)` from `Monster` or
+  `scripts/monsters/monster_model.gd` when either exists (meshes entirely past the head are hidden),
+  else primitives: the Walk-In a greenish patient in a teal gown with a wristband, the Discharged
+  taller and thinner, grey, eyeless (scarred-over sockets), large clear ears, an IV line taped on.
+- **Minigames:** `saw.gd` variant `skull` (layers Scalp/Bone/Dura, no tourniquet, steady scalp bleed,
+  finishes `{skull_open: true, cut_quality}`; the saw model is hidden until someone saws). `forceps.gd`
+  variant `brain` hands every call to `scripts/dissection/brain_forceps.gd`: clamp each nerve at its
+  ring and draw it in along itself (yanking tears: 2.0), take the brain, lift it straight out (scraping
+  the bone: 1.5 per 0.5 s), carry it to the tray (dropping: 3.0); finishes `{brain_removed: true}`.
+  Net state keys `x y j c k s g l bx bz st h r dr p`. Limb and gunshot behaviour and their self-test
+  output are unchanged; `--selftest=saw` and `--selftest=forceps` also run the variants.
+- OR screen: panels carry `monster` and `sedation`; the canvas tags the number "BRAIN", shows
+  `SEDATION n%` (amber stirring, red and blinking AWAKE), and the status line says BRAIN HARVESTED /
+  BRAIN RUINED.
+- Sounds `dissection_shriek`, `dissection_strap` (creaks while thrashing, local), `dissection_snap`,
+  `dissection_plop`, `dissection_crack`, `dissection_inject` (`tools/gen_audio_dissection.mjs`).
+- Tests: `tools/dissectiontest.tscn` (headless; `-- --shots` windowed into `tools/dissection_shots/`),
+  minigame self-tests, nettest scenario `dissection`.
+
 ## Networking (net worker, sweep 2)
 
 `Net` autoload (`scripts/net.gd`):

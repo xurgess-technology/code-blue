@@ -466,6 +466,9 @@ func _apply_request(sender: int, action: String, a: Dictionary) -> void:
 			for c in game.cases:
 				if String(c.get("state", "")) == "on_table":
 					c.vitals = clampf(float(a.get("v", 100.0)), 1.0, 100.0)
+		"strap_monster":
+			# SWEEP 3 HOOK (dissection): a Walk-In or Discharged strapped to a patient table.
+			game.dissection.dev_strap(String(a.get("kind", "walk_in")), float(a.get("sedation", 1.0)), int(a.get("table", -1)))
 		"extra_patient":
 			game.dev_extra_patient()
 		"skip_grace":

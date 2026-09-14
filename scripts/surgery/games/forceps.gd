@@ -26,6 +26,10 @@ extends "res://scripts/surgery/minigame.gd"
 
 enum Stage { OUTSIDE, SEEK, AT_BULLET, GRIPPED, DONE }
 
+## dissection (sweep 3): the "brain" variant, built and driven by this child when ctx.variant is "brain".
+const BrainGameScript := preload("res://scripts/dissection/brain_forceps.gd")
+var _brain_game: Node3D = null
+
 # Channel ---------------------------------------------------------------------
 const SAMPLE := 0.001
 const RIM := 1.8               # rim width beyond the wall, in half-widths
@@ -157,7 +161,14 @@ var _b_rng := RandomNumberGenerator.new()
 
 func setup(context: Dictionary) -> void:
 	ctx = context
-	var ch := generate_channel(int(ctx.get("seed", 0)), float(ctx.get("difficulty", 1.0)))
+	if String(ctx.get("variant", "")) == "brain":
+		# dissection (sweep 3): "Pull out the brain" is its own game (scripts/dissection/brain_forceps.gd);
+		# every contract call below hands over to it.
+		_brain_game = BrainGameScript.new()
+		add_child(_brain_game)
+		_brain_game.setup(self, context)
+		return
+	var ch :=generate_channel(int(ctx.get("seed", 0)), float(ctx.get("difficulty", 1.0)))
 	pts = ch.pts
 	widths = ch.widths
 	length = ch.length
@@ -417,11 +428,15 @@ func project(p: Vector2, s_guess: float) -> Dictionary:
 # =============================================================================
 
 func plane_extent() -> Vector2:
-	var e := Vector2(maxf(absf(bbox.position.x), absf(bbox.end.x)), maxf(absf(bbox.position.y), absf(bbox.end.y)))
+	if _brain_game != null:
+		return _brain_game.plane_extent()
+	var e :=Vector2(maxf(absf(bbox.position.x), absf(bbox.end.x)), maxf(absf(bbox.position.y), absf(bbox.end.y)))
 	return Vector2(maxf(e.x + 0.03, 0.10), maxf(e.y + 0.03, 0.08))
 
 
 func camera_pose() -> Dictionary:
+	if _brain_game != null:
+		return _brain_game.camera_pose()
 	# Fit the channel vertically and the channel plus the dish horizontally in a 16:9 view.
 	var fov := 50.0
 	var half_v := tan(deg_to_rad(fov * 0.5))
@@ -450,6 +465,9 @@ func in_reach() -> bool:
 
 ## A stir's shake drags the tips about but never tears a wall.
 func on_jolt(_offset: Vector2, _strength: float, duration: float) -> void:
+	if _brain_game != null:
+		_brain_game.on_jolt(_offset, _strength, duration)
+		return
 	_jolt_t = duration + 0.15
 
 
@@ -466,6 +484,9 @@ func wall_push(p: Vector2, s_guess: float) -> float:
 
 
 func handle_cursor(p: Vector2, buttons: int, delta: float) -> void:
+	if _brain_game != null:
+		_brain_game.handle_cursor(p, buttons, delta)
+		return
 	if done or pts.size() < 2:
 		return
 	delta = maxf(delta, 1e-4)
@@ -614,6 +635,8 @@ func _publish() -> void:
 
 
 func hud_state() -> Dictionary:
+	if _brain_game != null:
+		return _brain_game.hud_state()
 	var hint := ""
 	match _d_stage:
 		Stage.OUTSIDE:
@@ -640,8 +663,10 @@ func hud_state() -> Dictionary:
 
 
 func net_state() -> Dictionary:
+	if _brain_game != null:
+		return _brain_game.net_state()
 	return {
-		"x": snappedf(_d_tip.x, 0.0001), "y": snappedf(_d_tip.y, 0.0001),
+		"x":snappedf(_d_tip.x, 0.0001), "y": snappedf(_d_tip.y, 0.0001),
 		"i": 1 if _d_inside else 0, "j": snappedf(_d_jaw, 0.01), "g": 1 if _d_gripped else 0,
 		"b": snappedf(_d_bullet_s, 0.0001), "st": _d_stage, "h": _d_hits,
 		"dm": snappedf(_d_damage, 0.1), "p": snappedf(progress, 0.001),
@@ -650,6 +675,9 @@ func net_state() -> Dictionary:
 
 
 func apply_net_state(s: Dictionary) -> void:
+	if _brain_game != null:
+		_brain_game.apply_net_state(s)
+		return
 	progress = float(s.get("p", progress))
 	_d_tip = Vector2(float(s.get("x", _d_tip.x)), float(s.get("y", _d_tip.y)))
 	_d_inside = int(s.get("i", 0)) == 1
@@ -672,6 +700,8 @@ func _bot_start() -> Vector2:
 
 
 func bot_input(t: float, skill: float) -> Dictionary:
+	if _brain_game != null:
+		return _brain_game.bot_input(t, skill)
 	var dt := 1.0 / 60.0 if _b_last_t < 0.0 else clampf(t - _b_last_t, 0.0, 0.1)
 	_b_last_t = t
 	if _b_cursor == null:
@@ -1278,6 +1308,9 @@ func _default_yaw() -> float:
 
 
 func tick(delta: float) -> void:
+	if _brain_game != null:
+		_brain_game.tick(delta)
+		return
 	if not _built or pts.size() < 2:
 		return
 	var operator: bool = ctx.get("operator", false)
@@ -1571,4 +1604,6 @@ static func self_test(parent: Node, count: int = 20) -> Dictionary:
 		var a: Dictionary = agg[m[0]]
 		print("[forceps-selftest] %-15s done %d/%d  mean time %.1fs (max %.1f)  mean vitals %.1f (min %.1f max %.1f)  mean botch events %.1f  drops %d" % [
 			m[0], a.done, a.runs, a.time / a.runs, a.max_time, a.botch / a.runs, a.min_botch, a.max_botch, float(a.botches) / a.runs, a.drops])
+	# dissection (sweep 3): the brain variant.
+	agg["brain"] = BrainGameScript.self_test(parent)
 	return agg

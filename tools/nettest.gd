@@ -38,6 +38,8 @@ extends Node
 ##                    points, the hive view and the echo noise
 ##   monsters         host + 1 client: a Walk-In sedated, hit, dragged and woken on the host; the
 ##                    client sees each (sweep 3)
+##   dissection       a Walk-In strapped to a table: client 1 saws the skull and pulls the brain,
+##                    client 2 re-doses it meanwhile; sedation replicates within 0.05
 ##
 ## Shifts start the way the loop does (sweep 2): the host clocks in, skips the grace period,
 ## answers the phone, and the paramedics wheel the patient onto a table.
@@ -136,6 +138,7 @@ func _run() -> void:
 		"combat": await _sc_combat()
 		"brains": await _sc_brains()
 		"monsters": await _sc_monsters()   # SWEEP 3 HOOK (monsters)
+		"dissection": await _sc_dissection()
 		_: _end(false, "unknown scenario " + scenario)
 
 
@@ -788,6 +791,138 @@ func _sc_two_patients():
 		return _end(false, "watched only %d distinct tool states at the other table" % st.states.size())
 	_send("watched_other", {"n": st.states.size()})
 	await _finish_together("operated table %d while watching %d tool states at table %d" % [mine, st.states.size(), other])
+
+
+## Dissection (sweep 3): a Walk-In strapped to the free table (already waking, sedation 0.45).
+## Client 1 saws the skull open and pulls the brain out; client 2, holding anesthetic, re-doses
+## it while client 1 operates. Every client's sedation stays within 0.05 of the host's; the host
+## sees the dose (one vial used), the brain handed over and the monster flatline.
+func _sc_dissection():
+	if role == "host":
+		if not await _start_shift_when_full():
+			return
+		var table: int = game.free_patient_table()
+		if table < 0:
+			return _end(false, "no free table for the monster")
+		var dx: Node = game.dissection
+		var cid: int = dx.dev_strap("walk_in", 0.45, table)
+		if cid < 0:
+			return _end(false, "could not strap a Walk-In to table %d" % table)
+		game.shelf["bone_saw"] = maxi(1, game.shelf_count("bone_saw"))
+		game.shelf["forceps"] = maxi(1, game.shelf_count("forceps"))
+		game.shelf_node.show_stock(game.shelf)
+		var doser = game.players.get(_peer_of(2))
+		doser.take_into("anesthetic", 2)
+		_send("dx", {"table": table, "case": cid, "op": _peer_of(1), "doser": _peer_of(2)})
+		var st := {"next": 0.0, "op_seen": false}
+		var tick := func():
+			var c: Dictionary = game.case_by_id(cid)
+			if c.is_empty():
+				return
+			if _wall() >= float(st.next):
+				st.next = _wall() + 0.25
+				_send("sed", {"s": dx.sedation(c), "st": String(c.state)})
+			if int(game.surgery_for_table(table).operator_id) == _peer_of(1):
+				st.op_seen = true
+		if not await _do_until(tick, func(): return String(game.case_by_id(cid).get("state", "")) == "stable", 200.0, "the brain to come out"):
+			return
+		var c2: Dictionary = game.case_by_id(cid)
+		var vials := 0
+		for s in doser.slots:
+			if String(s.kind) == "anesthetic":
+				vials += int(s.count)
+		if int(c2.get("doses", 0)) != 1 or vials != 1:
+			return _end(false, "expected one dose and one vial left, got doses=%d vials=%d" % [int(c2.get("doses", 0)), vials])
+		if not st.op_seen or dx.last_brain.is_empty() or not bool(c2.flags.get("brain_removed", false)):
+			return _end(false, "operator seen %s, brain %s, flags %s" % [str(st.op_seen), str(dx.last_brain), str(c2.flags)])
+		var body = game.body_for_table(table)
+		if body == null or not bool(body.get("_flat")):
+			return _end(false, "the monster did not flatline on the host")
+		_say("brain %s quality %.2f, doses %d, flags %s" % [dx.last_brain.kind, float(dx.last_brain.quality), int(c2.doses), str(c2.flags)])
+		if not await _until(func(): return _count_msgs("ok") >= 2 or _count_msgs("fail") > 0, 60.0, "both clients' reports"):
+			return
+		await _finish_together("client operated on a strapped monster, another re-dosed it, the brain came out")
+		return
+	if not await _wait_shift_as_client():
+		return
+	if not await _until(func(): return _count_msgs("dx") > 0, 60.0, "the monster order"):
+		return
+	var order: Dictionary = _msgs("dx")[0].data
+	var table := int(order.table)
+	var cid := int(order.case)
+	if not await _until(func(): return not game.case_by_id(cid).is_empty() and game.body_for_table(table) != null, 30.0, "the monster case and body"):
+		return
+	var sys = game.surgery_for_table(table)
+	# Replicated sedation: within 0.05 of the host's value, checked against every report.
+	var err := {"max": 0.0, "n": 0}
+	var check_sed := func():
+		var c: Dictionary = game.case_by_id(cid)
+		var msgs := _msgs("sed")
+		if c.is_empty() or msgs.is_empty() or String(c.get("state", "")) != "on_table" or String(msgs[msgs.size() - 1].data.st) != "on_table":
+			return
+		var host_s := float(msgs[msgs.size() - 1].data.s)
+		# Around the dose the host's last report can predate the jump: skip those moments.
+		var doses := int(c.get("doses", 0))
+		if doses != int(err.get("doses", 0)):
+			err.doses = doses
+			err.skip_until = _wall() + 1.0
+		if msgs.size() >= 2 and absf(float(msgs[msgs.size() - 2].data.s) - host_s) > 0.04:
+			err.skip_until = _wall() + 0.5
+		var mine := float((c.flags as Dictionary).get("sedation", -1.0))
+		# The dose's jump in my snapshot can arrive before the case's `doses` and the host's next report.
+		if absf(mine - float(err.get("last_mine", mine))) > 0.04:
+			err.skip_until = _wall() + 1.0
+		err.last_mine = mine
+		if _wall() < float(err.get("skip_until", 0.0)):
+			return
+		if absf(mine - host_s) > float(err.max):
+			err.worst = "mine %.3f host %.3f (report %d of %d) doses %d at %.2f s" % [mine, host_s, msgs.size(), _count_msgs("sed"), doses, _wall() - _t0]
+		err.max = maxf(float(err.max), absf(mine - host_s))
+		err.n = int(err.n) + 1
+	if int(order.op) == Net.my_id():
+		game.surgery_bot_skill = 1.0
+		var press := func(): check_sed.call(); _press_at(game.table_position(table), game.table_interact_id(table))
+		if not await _do_until(press, func(): return sys.is_local_operating(), 40.0, "the host to let me operate on the monster"):
+			return
+		if not await _do_until(check_sed, func(): return int(game.case_by_id(cid).get("step_index", 0)) >= 1, 90.0, "the skull to open"):
+			return
+		var body = game.body_for_table(table)
+		await _frames(10)
+		if not bool((body.get("_flags") as Dictionary).get("skull_open", false)):
+			return _end(false, "the skull is not open on my body: %s" % str(body.get("_flags")))
+		if not await _do_until(press, func(): return sys.is_local_operating() or String(game.case_by_id(cid).get("state", "")) != "on_table", 40.0, "operating the brain step"):
+			return
+		if not await _do_until(check_sed, func(): return String(game.case_by_id(cid).get("state", "")) != "on_table", 90.0, "the brain to come out"):
+			return
+		if String(game.case_by_id(cid).get("state", "")) != "stable":
+			return _end(false, "the case ended %s" % String(game.case_by_id(cid).get("state", "")))
+	else:
+		# The doser: wait for the vials and for the operator to be at work, then re-dose once.
+		if not await _do_until(check_sed, func(): return _me().holding("anesthetic") and int(sys.operator_id) == int(order.op), 60.0, "anesthetic in hand and the operation under way"):
+			return
+		var c0: Dictionary = game.case_by_id(cid)
+		var before := float((c0.flags as Dictionary).get("sedation", 1.0))
+		var press2 := func():
+			check_sed.call()
+			if int(game.case_by_id(cid).get("doses", 0)) == 0:
+				_press_at(game.table_position(table), game.table_interact_id(table))
+		if not await _do_until(press2, func(): return int(game.case_by_id(cid).get("doses", 0)) >= 1, 40.0, "my dose to go in"):
+			return
+		await _frames(8)
+		var after := float((game.case_by_id(cid).flags as Dictionary).get("sedation", 0.0))
+		if after < minf(1.0, before + 0.6) - 0.08:
+			return _end(false, "sedation went from %.2f to %.2f after my dose" % [before, after])
+		if int(sys.operator_id) != int(order.op) and String(game.case_by_id(cid).get("state", "")) == "on_table" and int(game.case_by_id(cid).get("step_index", 0)) == 0:
+			return _end(false, "my dose interrupted the operation")
+		_say("re-dosed: sedation %.2f -> %.2f" % [before, after])
+		if not await _do_until(check_sed, func(): return String(game.case_by_id(cid).get("state", "on_table")) != "on_table" or game.case_by_id(cid).is_empty(), 150.0, "the operation to end"):
+			return
+	# 0.05 is the contract. Under simulated lag the host's own report is as late as the snapshot and
+	# the game runs several times faster than the wall clock, so the comparison itself drifts more.
+	if int(err.n) < 20 or float(err.max) > (0.09 if lagged else 0.05):
+		return _end(false, "replicated sedation off by %.3f (%d samples; worst: %s)" % [float(err.max), int(err.n), String(err.get("worst", ""))])
+	_say("sedation within %.3f of the host over %d samples" % [float(err.max), int(err.n)])
+	await _finish_together("dissection %s: sedation within %.3f" % ["operated" if int(order.op) == Net.my_id() else "re-dosed", float(err.max)])
 
 
 ## Downed (sweep 2 wave 3): client 1 goes down, client 2 carries them to the player table and
