@@ -21,6 +21,7 @@ var _ab := false
 var _tune := false
 var _hitch := false
 var _orscreen := false
+var _models := false
 var _spikes: Array = []
 var _phase_label := ""
 var _phase_stats := {}
@@ -38,6 +39,7 @@ func _ready() -> void:
 			"tune": _tune = true
 			"hitch": _hitch = true
 			"orscreen": _orscreen = true
+			"models": _models = true
 			"quality":
 				_qualities = []
 				for q in v.split(","):
@@ -77,6 +79,9 @@ func _ready() -> void:
 		return
 	if _orscreen:
 		await _run_orscreen()
+		return
+	if _models:
+		await _run_models()
 		return
 	var scenarios := [
 		{"name": "lobby clock-in room", "setup": _lobby},
@@ -304,6 +309,88 @@ func _run_orscreen() -> void:
 	for r in _rows:
 		print("[perf] q%d %-32s avg %4.0f fps  1%%low %4.0f  worst %.1f ms  draws %d" % [r.q, r.name, r.fps, r.low_fps, r.worst, r.draws])
 	get_tree().quit(0)
+
+
+## MODELS HOOK (--models): what the loot and paramedic models cost. A room floor with every loot
+## kind three times over (63 stacks in view, the teal/gold rims on), the OR with its stocked shelf,
+## and the paramedic crew with its gurney in view, at medium: real models, then the old
+## primitives, twice, so the noise shows and both see the same machine load.
+func _run_models() -> void:
+	main.set_quality(1, false)
+	var crew_script: GDScript = load("res://scripts/loop/crew.gd")
+	# Alternate real models and the old primitives in the same run, twice, so the comparison
+	# shares whatever else the machine is doing.
+	for pass_i in 4:
+		var prim := pass_i % 2 == 1
+		ItemModels.primitives_only = prim
+		crew_script.set("shapes_only", prim)
+		var tag := "%s %d" % ["primitives" if prim else "models", pass_i / 2 + 1]
+		await _loot_room()
+		await _measure("loot room, 63 stacks (%s)" % tag, 1)
+		_clear_probe_loot()
+		await _or_view()
+		await _measure("OR, patient + shelf (%s)" % tag, 1)
+		await _crew_view()
+		await _measure("paramedics + gurney (%s)" % tag, 1)
+	ItemModels.primitives_only = false
+	crew_script.set("shapes_only", false)
+	print("[perf] ============================================================================")
+	for r in _rows:
+		print("[perf] %-40s avg %4.0f fps  1%%low %4.0f  worst %5.1f ms  draws %d" % [r.name, r.fps, r.low_fps, r.worst, r.draws])
+	get_tree().quit(0)
+
+
+var _probe_loot: Array = []
+
+
+func _loot_room() -> void:
+	await _ensure_shift()
+	if game.surgery.is_local_operating():
+		game.surgery.end(bot)
+	# The widest clear floor near a wing room: a monster spawn with 4 m free ahead.
+	var space := bot.get_world_3d().direct_space_state
+	var from: Vector3 = game.table_pos() + Vector3(0, 0, 3)
+	var dir := Vector3.FORWARD
+	for spot in game.level_info.get("monster_spawns", []):
+		var ok := false
+		for i in 8:
+			var d := Vector3(cos(TAU * i / 8.0), 0, sin(TAU * i / 8.0))
+			var q := PhysicsRayQueryParameters3D.create(spot + Vector3.UP * 0.5, spot + Vector3.UP * 0.5 + d * 4.5)
+			q.collision_mask = C.L_WORLD
+			if space.intersect_ray(q).is_empty():
+				from = spot
+				dir = d
+				ok = true
+				break
+		if ok:
+			break
+	var side := dir.cross(Vector3.UP)
+	var kinds: Array = preload("res://scripts/economy/loot_table.gd").kinds()
+	var n := 0
+	for rep in 3:
+		for k in kinds.size():
+			var at: Vector3 = from + dir * (1.4 + rep * 0.9) + side * ((k - kinds.size() * 0.5) * 0.16)
+			var it = game._spawn_item(kinds[k], 1, Transform3D(Basis(Vector3.UP, 0.3 * n), game._floor_at(at) + Vector3.UP * 0.02), WorldItem.State.LOOSE)
+			_probe_loot.append(it)
+			n += 1
+	_look(from - dir * 0.6, from + dir * 2.5)
+
+
+func _clear_probe_loot() -> void:
+	for it in _probe_loot:
+		if is_instance_valid(it):
+			game.world_items.erase(it.item_id)
+			it.queue_free()
+	_probe_loot.clear()
+
+
+func _crew_view() -> void:
+	var crew: Node3D = (load("res://scripts/loop/crew.gd") as GDScript).create("bob", "gunshot")
+	game.get_node("Entities").add_child(crew)
+	var t := game.table_pos()
+	crew.snap(t + Vector3(0, 0, 4.0), 0.0)
+	_look(t + Vector3(2.2, 0, 6.5), t + Vector3(0, 1.0, 4.0))
+	get_tree().create_timer(12.0).timeout.connect(crew.queue_free)
 
 
 func _screen_close() -> void:

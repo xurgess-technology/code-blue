@@ -77,6 +77,12 @@ const _KENNEY_CHAR_ANIMS := {
 ##          base onto the floor, x/z recentre the footprint on the origin
 ##   anims: logical -> actual animation name      (default {})
 ##   note:  free text, surfaced by info()/ASSETS.md
+##   models sweep 2 (all optional):
+##   pitch / roll: degrees about +X / +Z, applied before yaw (lay a watch face up)
+##   size:   longest side in metres; height: height in metres (characters) — either one makes
+##           spawn() measure the model and put its base on the floor, centred (no x/y/z needed)
+##   hide:   mesh node names measure() and ItemModels skip
+##   albedo: a replacement colour texture (the paramedics' recoloured colormaps)
 ## }
 const MODELS := {
 	# ---- characters -------------------------------------------------------
@@ -447,6 +453,85 @@ const MODELS := {
 		"note": "Poly Haven wheelchair_01. Size 0.82 x 1.10 x 1.09 m.",
 	},
 	# ---- end hospital ------------------------------------------------------
+
+	# ---- loot items (models, sweep 2) -------------------------------------
+	# ItemModels.make() checks `item/<loot kind>` first. `size` is the longest side in metres;
+	# the fixup measures the model and puts its base on the floor, centred. `hide` skips mesh
+	# nodes; `merge` lets ItemModels merge the parts into one mesh per material.
+	"item/thermometer": {
+		"path": "res://assets/models/items/milkandbanana/food_thermometer.glb", "size": 0.16, "pitch": -90,
+		"note": "MilkAndBanana Food Thermometer (poly.pizza): a handheld digital thermometer, lying on its back.",
+	},
+	"item/pill_bottle": {
+		"path": "res://assets/models/items/bottles/bottle20.glb", "size": 0.075,
+		"note": "Lyricsz 50 Bottles #20 (OpenGameArt): an amber bottle with a white cap.",
+	},
+	"item/patient_records": {
+		"path": "res://assets/models/items/reyshapes/folder.glb", "size": 0.31, "pitch": -90,
+		"note": "reyshapes Folder (poly.pizza), lying flat; ItemModels tints it manila.",
+	},
+	"item/desk_phone": {
+		"path": "res://assets/models/items/baked/desk_phone.glb", "size": 0.24, "yaw": 180,
+		"note": "JustinARay Red Table Phone (OpenGameArt), converted from FBX, cord decimated.",
+	},
+	"item/wheelchair_wheel": {
+		"path": "res://assets/models/items/baked/wheelchair_wheel.glb", "size": 0.6, "roll": 90,
+		"note": "One rear wheel cut out of Poly Haven wheelchair_01 (the same chair the wards use), lying flat.",
+	},
+	"item/sample_rack": {
+		"path": "res://assets/models/items/lab_assets/bottle_test_tube_rack.glb", "size": 0.22,
+		"note": "MilkAndBanana Lab Assets test tube rack (OpenGameArt); ItemModels adds the tubes.",
+	},
+	"item/sample_tube": {
+		"path": "res://assets/models/items/lab_assets/bottle_glassware_test_tube_small.glb", "size": 0.08,
+		"note": "MilkAndBanana Lab Assets small test tube, used in the blood sample rack.",
+	},
+	"item/laptop": {
+		"path": "res://assets/models/hospital/kenney_furniture/laptop.glb", "size": 0.34,
+		"note": "Kenney Furniture Kit laptop (the file the lab islands use).",
+	},
+	"item/gold_watch": {
+		"path": "res://assets/models/items/baked/gold_watch.glb", "size": 0.085, "pitch": -90,
+		"note": "Poly Haven vintage_pocket_watch, lying face up.",
+	},
+	"item/coffee_maker": {
+		"path": "res://assets/models/hospital/kenney_furniture/kitchenCoffeeMachine.glb", "size": 0.34,
+		"note": "Kenney Furniture Kit kitchenCoffeeMachine (the file the break room uses), with its mug.",
+	},
+	"item/heart_monitor": {
+		"path": "res://assets/models/items/polyhaven/television_02/television_02_1k.gltf", "size": 0.38,
+		"note": "Poly Haven television_02: a boxy CRT; ItemModels adds the green trace on the glass.",
+	},
+	"item/iv_pump": {
+		"path": "res://assets/models/items/baked/iv_pump.glb", "size": 0.3,
+		"note": "Poly Haven retro_multimeter: an upright box with a dial, a carry handle and leads. Stands in for an infusion pump.",
+	},
+	"item/defibrillator": {
+		"path": "res://assets/models/kenney_mini_characters/aid-defibrillator-green.glb", "size": 0.32,
+		"note": "Kenney Mini Characters aid-defibrillator-green: an AED case with a heart.",
+	},
+	"item/microscope": {
+		"path": "res://assets/models/items/baked/microscope.glb", "size": 0.42,
+		"note": "Poly Haven industrial_microscope (the file the lab benches use).",
+	},
+	"item/ultrasound": {
+		"path": "res://assets/models/items/baked/ultrasound.glb", "size": 0.42,
+		"note": "Poly Haven classic_laptop without its stand: a beige clamshell with a trackball, as a portable ultrasound.",
+	},
+	# ---- paramedics (models, sweep 2) ---------------------------------------
+	"crew/paramedic_a": {
+		"path": "res://assets/models/kenney_mini_characters/character-male-b.glb", "height": 1.8, "yaw": 180,
+		"albedo": "res://assets/models/kenney_mini_characters/Textures/paramedic_male.png",
+		"anims": _KENNEY_CHAR_ANIMS,
+		"note": "Kenney Mini Characters character-male-b in a recoloured colormap (green uniform).",
+	},
+	"crew/paramedic_b": {
+		"path": "res://assets/models/kenney_mini_characters/character-female-b.glb", "height": 1.74, "yaw": 180,
+		"albedo": "res://assets/models/kenney_mini_characters/Textures/paramedic_female.png",
+		"anims": _KENNEY_CHAR_ANIMS,
+		"note": "Kenney Mini Characters character-female-b in a recoloured colormap (green uniform).",
+	},
+	# ---- end models sweep 2 -------------------------------------------------
 }
 
 ## key -> texture-set folder + material tuning. All maps are optional; whichever
@@ -482,6 +567,11 @@ const MATERIALS := {
 		"dir": "res://assets/textures/metal", "uv_scale": 2.0, "metallic": 1.0,
 		"note": "ambientCG MetalPlates001 — brushed steel.",
 	},
+	# models sweep 2: the x-ray film loot's picture.
+	"mat/xray_film": {
+		"dir": "res://assets/textures/xray_film", "uv_scale": 1.0,
+		"note": "Mikael Häggström, normal PA chest radiograph (Wikimedia Commons, CC0), 224 x 256.",
+	},
 }
 
 const _MAP_FILES := {
@@ -493,11 +583,19 @@ const _MAP_FILES := {
 }
 
 var _scene_cache: Dictionary = {}
+var _fixup_cache: Dictionary = {}
 var _material_cache: Dictionary = {}
 var _warned: Dictionary = {}
 
 
 func _ready() -> void:
+	# models sweep 2: start loading the loot and paramedic models on worker threads while the
+	# menu is up, so the first shift's warmup does not wait on their textures. model() still
+	# works if a load has not finished (ResourceLoader.load waits for it).
+	for key in MODELS:
+		var k := String(key)
+		if (k.begins_with("item/") or k.begins_with("crew/")) and ResourceLoader.exists(MODELS[key]["path"]):
+			ResourceLoader.load_threaded_request(MODELS[key]["path"], "", true)
 	var gone := missing()
 	if not gone.is_empty():
 		push_warning("Assets: %d declared key(s) have no file on disk: %s"
@@ -633,20 +731,65 @@ func spawn(key: String) -> Node3D:
 			inner.queue_free()
 		return null
 	var e: Dictionary = MODELS[key]
-	var s := _num(e, "scale", 1.0)
-	var yaw := _num(e, "yaw", 0.0)
-	var y := _num(e, "y", 0.0)
-	var x := _num(e, "x", 0.0)
-	var z := _num(e, "z", 0.0)
 	var root := Node3D.new()
 	root.name = key.get_file().to_pascal_case()
 	root.add_child(inner)
-	var n3 := inner as Node3D
-	# scale, then yaw, then translate — offsets are expressed in the final frame.
-	var basis := Basis.from_euler(Vector3(0.0, deg_to_rad(yaw), 0.0)).scaled(Vector3(s, s, s))
-	n3.transform = Transform3D(basis, Vector3(x, y, z))
+	(inner as Node3D).transform = fixup(key)
 	root.set_meta("asset_key", key)
 	return root
+
+
+## The transform spawn() puts on the imported scene: scale, then roll / pitch / yaw, then the
+## offsets (expressed in the final frame). Entries with `size` (the longest side in metres) or
+## `height` (metres, characters) or `fit: true` measure the model once and compute the scale and the offsets that put its base on
+## the floor with the footprint centred (models sweep 2: every item/* entry works that way).
+func fixup(key: String) -> Transform3D:
+	key = _resolve(key)
+	if _fixup_cache.has(key):
+		return _fixup_cache[key]
+	var e: Dictionary = MODELS.get(key, {})
+	var rot := Basis.from_euler(Vector3(deg_to_rad(_num(e, "pitch", 0.0)), deg_to_rad(_num(e, "yaw", 0.0)), deg_to_rad(_num(e, "roll", 0.0))))
+	var s := _num(e, "scale", 1.0)
+	var off := Vector3(_num(e, "x", 0.0), _num(e, "y", 0.0), _num(e, "z", 0.0))
+	if e.has("size") or e.has("height") or bool(e.get("fit", false)):
+		var box := measure(key, Transform3D(rot, Vector3.ZERO))
+		if e.has("size") and box.size != Vector3.ZERO:
+			s = _num(e, "size", 1.0) / maxf(box.size.x, maxf(box.size.y, box.size.z))
+		elif e.has("height") and box.size.y > 0.0:
+			s = _num(e, "height", 1.0) / box.size.y
+		var c := box.get_center() * s
+		off += Vector3(-c.x, -box.position.y * s, -c.z)
+	var xf := Transform3D(rot.scaled(Vector3(s, s, s)), off)
+	_fixup_cache[key] = xf
+	return xf
+
+
+## Bounding box of a model key's meshes in the frame `xf` (applied to the imported scene root),
+## skipping mesh nodes listed in the entry's `hide`. Empty AABB when the model is missing.
+func measure(key: String, xf: Transform3D) -> AABB:
+	key = _resolve(key)
+	var scene := model(key)
+	if scene == null:
+		return AABB()
+	var inst := scene.instantiate()
+	var hide: Array = MODELS[key].get("hide", [])
+	var out := AABB()
+	var first := true
+	for n in inst.find_children("*", "MeshInstance3D", true, false):
+		var mi := n as MeshInstance3D
+		if mi.mesh == null or hide.has(String(mi.name)):
+			continue
+		var t := Transform3D()
+		var p: Node = mi
+		while p != null and p != inst:
+			if p is Node3D:
+				t = (p as Node3D).transform * t
+			p = p.get_parent()
+		var ab: AABB = (xf * t) * mi.mesh.get_aabb()
+		out = ab if first else out.merge(ab)
+		first = false
+	inst.free()
+	return out
 
 
 ## First AnimationPlayer anywhere under `node` (works on a spawn() result).

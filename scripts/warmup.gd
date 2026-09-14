@@ -113,6 +113,10 @@ static func run(game: Node) -> void:
 	crew.scale = Vector3.ONE * 0.4
 	crew.position = Vector3(1.2, -0.6, -1.2)
 	shelf.add_child(crew)
+	# MODELS HOOK: the look-alike crew must not collide with anything (its paramedics are rigged
+	# models now; their skinning and the merged gurney compile here).
+	for n in crew.find_children("*", "CollisionObject3D", true, false):
+		n.queue_free()
 	var ph: Node3D = (load("res://scripts/loop/phone.gd") as GDScript).create()
 	ph.remove_from_group("interactable")   # only a look-alike: never the real "phone"
 	ph.remove_meta("interact_id")

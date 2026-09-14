@@ -90,6 +90,23 @@ func _build() -> void:
 	cs.position = Vector3(0, 0.4, 0)
 	stand.add_child(cs)
 
+	# MODELS HOOK (models sweep 2): the red rotary desk phone model (the desk_phone loot's model)
+	# when it exists; the whole phone shivers while it rings.
+	var model_mesh: ArrayMesh = ItemModels.asset_mesh("desk_phone")
+	if model_mesh != null:
+		_handset = ItemModels.make("desk_phone")
+		_handset.name = "Handset"
+		_handset_rest = Vector3(0, 0.805, 0)
+		_handset.position = _handset_rest
+		add_child(_handset)
+		_lamp_mat = _mat(Color(0.25, 0.04, 0.03), 0.3)
+		_lamp_mat.emission_enabled = true
+		_lamp_mat.emission = Color(1.0, 0.12, 0.08)
+		_lamp_mat.emission_energy_multiplier = 0.0
+		add_child(_box(Vector3(0.03, 0.015, 0.03), Vector3(0.2, 0.812, 0.12), _lamp_mat))
+		_add_glow(Vector3(0.0, 1.05, 0.15))
+		_add_aim()
+		return
 	# The phone: a wedge body, a keypad, a cord and a handset lying across the cradle.
 	var beige := _mat(Color(0.78, 0.72, 0.6), 0.55)
 	var dark := _mat(Color(0.12, 0.12, 0.13), 0.6)
@@ -129,8 +146,11 @@ func _build() -> void:
 	_lamp_mat.emission_energy_multiplier = 0.0
 	add_child(_box(Vector3(0.025, 0.012, 0.018), Vector3(0.085, 0.878, 0.09), _lamp_mat))
 	_add_glow(Vector3(0.0, 1.05, 0.15))
+	_add_aim()
 
-	# The aim target for E.
+
+## The aim target for E, over the desk phone.
+func _add_aim() -> void:
 	var area := Area3D.new()
 	area.name = "Aim"
 	area.collision_layer = C.L_INTERACT

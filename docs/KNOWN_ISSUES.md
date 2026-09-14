@@ -182,8 +182,9 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   walking line. On the fallback ward (no `rows`) the result was not checked.
 - **Indoors the pile is capped at 2.6 m** and then grows side columns 1.35 m apart; those can go
   through nearby walls or furniture in the clock-in room or the dev room.
-- **No new CC0 models were downloaded**; all 21 loot kinds are primitives (`loot_models.gd`) and
-  `ASSETS.md` is unchanged. `Assets` keys `item/<kind>` replace any of them.
+- **Six loot kinds are still primitives** (models sweep: stethoscope, pulse oximeter, blood
+  pressure cuff, reflex hammer, otoscope, wedding ring): no CC0 model exists for them on the
+  vetted sources (searches in `ASSETS.md`). The other 15 are real models; see "Models" below.
 - **Rim overlays cost a draw call each**, now capped at the 5 biggest meshes per model. perfprobe
   `--ab` at 1600x900 medium: OR 72 fps (1% low 66), without rims 85 (69), loot hidden 89 (75);
   lobby and corridor within noise. Normal run: OR 63-73, lobby 72-91, corridor 94-119 across runs.
@@ -211,9 +212,9 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   `loop.objective_text()` still produces the line if a later HUD or the OR monitor wants it.
 - **The paycheck screen covers the view for 6 s** (the old win overlay, 72% black) and the game
   over screen for 8 s. Nothing can hurt you then (monsters are gone), but it is a long blackout.
-- **Paramedics are primitives** (capsule medics with hi-vis bands, a box gurney), have no
-  collision and walk through players, furniture and each other; two crews at once overlap at the
-  table. The patient's body on the gurney does not breathe (vitals fixed at 70).
+- **Two crews at once overlap at the table** (models sweep: the paramedics are rigged models
+  with collision now, see "Models" below). The patient's body on the gurney does not breathe
+  (vitals fixed at 70).
 - **The extra call rings once per shift**, 45 to 150 s after the first patient is on the table,
   even if the team is about to clock out; if the team clocks out first there is no extra call.
   The shift has no other pacing: a team that never answers still gets the first patient (the
@@ -269,6 +270,46 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   prompt; the monitor's idle screen says "clock in to start the shift" but it is in the OR. The
   `loop` worker's phone/flow should carry any new objective in the world or in messages.
 
+## Models (sweep 2 integration: loot and paramedic models)
+
+- **No CC0 gurney or stretcher exists**, so the crew's gurney is still built from shapes (now one
+  merged mesh with the brushed steel texture on the frame). Six loot kinds keep their primitive
+  for the same reason (see Inventory above). Swap in a model by registering `item/<kind>` in
+  `scripts/assets.gd`; nothing else changes.
+- **Paramedic collision is on the world layer** (`crew.gd` `_make_blockers`: a box over the
+  gurney, a capsule per medic, moved with the crew). Players and monsters cannot walk through
+  them and the crew's path is unaffected (the navigation mesh is baked from the level's meshes
+  before any crew exists), but: a crew walking into a player shoves them (a player pinned
+  against a wall can jitter), anything that ray casts the world layer sees them (the aim ray,
+  item drops, monster sight lines, the economy's free-floor search), and while the crew hands
+  over it stands where a surgeon would stand beside the table. A dedicated physics layer that
+  only players and monsters collide with would avoid the ray side effects but needs a hook in
+  `player.gd` and `monster.gd`. Tested: `looptest`, both `playtest --god` ailments and `devtest`
+  pass with it; nettest was not run.
+- **The paramedics are Kenney's big-headed mini characters** (the players' style) in recoloured
+  uniforms, not realistic figures. The front one walks with a plain walk (nothing to hold); the
+  back one plays the "holding-both" arm pose filtered over the walk, so its hands are near but
+  not exactly on the push handle.
+- **Bright flat-coloured models look gold-washed** in lit rooms (the Kenney laptop and coffee
+  maker): the loot rim's constant `base` term and the grazing-angle edge light up their big flat
+  faces. The inventory worker's note about box-shaped loot applies more now; lower the gold
+  `base` in `ItemModels.tint_material` if it bothers.
+- **Two loot models are also level decoration**: the lab islands' Kenney laptop and the break
+  room's coffee machine use the same files as the `laptop` and `coffee_maker` loot. Only the gold
+  rim tells the loot apart.
+- **Stand-ins**: the ultrasound is a beige 90s laptop with a trackball, the IV pump a retro
+  multimeter, the heart monitor a small CRT with a drawn trace, the gold watch a pocket watch,
+  the ear thermometer a food thermometer, the desk phone a red rotary phone. They read in play,
+  but a close look tells.
+- **First use of each loot model costs 10-300 ms** (loading the file and building the merged
+  mesh). `Assets` starts loading the `item/*` and `crew/*` files on threads at start-up and the
+  warmup builds every kind behind its cover: the warmup took 1.6-2.9 s in tool runs that start
+  a session straight away (1.3-1.5 s before; the tools skip the menu time the threads would use).
+- **Held small loot sits at the bottom-left edge** in first person (the desk phone is partly off
+  screen); the placement is `player.gd`'s, unchanged.
+- **The inventory screenshots' close-ups are still from standing eye height**, so small loot is
+  small in them; the item contact sheet the worker used for detail was a throwaway probe.
+
 ## Downed players (sweep 2 wave 3)
 
 - **The stitches operation is self-contained.** `game.add_case` / `game.cases` do not exist on this
@@ -319,6 +360,13 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 
 ## Performance (Radeon 890M, 1600x900, measured 2026-09-12)
 
+- Models sweep (2026-09-13, medium, `perfprobe --models`, real models and the old primitives
+  alternated in the same run, two passes each, with four other Godot processes from another
+  worker running): a room floor with all 21 loot kinds three times over, rims on, 88-91 fps
+  (1% low 79-82, 609-622 draws) with models against 72-76 (61-67, 1194-1197 draws) with
+  primitives; the OR 87-91 against 92-96 (same scene: its shelf holds surgical supplies, so this
+  is noise); paramedics and gurney in view 78-81 (66-75, 271-312 draws) against 78-79 (70, 312-333).
+  Before any change, without the other processes: loot room 107-121, OR 93-108, crew view 84-94.
 - Sweep 2 hospital (2026-09-13, medium, seed 4242, two runs each, nothing else running): OR
   114-116 fps (1% low 105-110, was 75/67 on the old map), break room 135 (120-129, was 88-93),
   corridor 104-105 (94-96, **was 123-124 / 115-120**: the new hallways are 80 m sightlines),
