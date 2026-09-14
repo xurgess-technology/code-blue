@@ -243,6 +243,7 @@ func host_release(p: Node, seq: int, claim: float) -> void:
 	s.rel = true
 	s.rheld = held
 	s["claim"] = claim
+	s["measured"] = measured
 
 
 ## Host: stop p's wind-up without a strike (hit, shoved, downed, stunned...). The cooldown starts.
@@ -373,7 +374,7 @@ func _host_strike(p: Node, s: Dictionary) -> void:
 	c = snappedf(c, 0.01)
 	_set_cooldown(id, k)
 	_to_strike(p, s, c)
-	last_strike = {"id": id, "k": k, "c": c, "held": float(s.rheld), "claim": float(s.get("claim", s.rheld)), "t": _now()}
+	last_strike = {"id": id, "k": k, "c": c, "held": float(s.rheld), "claim": float(s.get("claim", s.rheld)), "measured": float(s.get("measured", s.t)), "t": _now()}
 	game._broadcast("cb_swing", {"id": id, "k": k, "s": int(s.s), "c": c})
 	match k:
 		"shove":

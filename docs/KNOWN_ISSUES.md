@@ -650,12 +650,15 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   things are aimed at the way they look, but at 1 m to the side a table right in front of the head
   needs the crosshair on it, not the head pointed at it (bots that aim by yaw from the head, like
   `tools/downedtest.gd`, use `bot_aim_id` and are unaffected; `tools/carrycamtest.gd` aims the camera).
-- **nettest `combat` under `--lag=120 --jitter=40 --loss=0.03`** failed three times on this machine
-  with every process losing its ENet connection mid-scenario (rtt 240-380 ms, variance up to 186 ms)
-  while three Blender builds and another worker's tests held the CPU at 87%; the one run that got
-  through the combat part showed the watcher a strike with no wind-up before it (a resent packet
-  delivered both together), which `MIN_SHOWN_WINDUP` now covers. Unlagged it passes (10 wind-ups seen
-  before their strikes, the 5 s claim capped to 0.57 s). Re-run the lagged scenario on a quiet machine.
+- **nettest `combat` under `--lag=120 --jitter=40 --loss=0.03` is flaky here.** Of seven lagged runs,
+  three on `--port=9970` lost every connection because another session was running
+  `full_shift_lag` on the same port at the same time (use a free `--port`); on `--port=9990` three of
+  four passed the combat checks, the other lost client 2's connection near the end (the known lag
+  flake, with Blender builds holding the CPU at 70-100%). An early run showed the watcher a strike
+  with no wind-up before it (a resent packet delivered both together); `MIN_SHOWN_WINDUP` covers that
+  now. A resend can also stretch the host's measured gap between the wind-up and the release, so an
+  over-long claim is capped to that gap + 0.3 s, not to the real hold (seen: 1.22 s held for a 0.25 s
+  hold). Unlagged, `combat`, `monsters`, `downed` and `dissection` all pass.
 - **Wind-ups make every use feel 0.2-0.35 s slower** by design; the cooldown values are unchanged
   and start at the strike, so the saw's full cycle is 1.1 s (was 0.8) and the jab's 1.35 s (was 1.0).
   Tune `WINDUP_TIME` / cooldowns after playtests.

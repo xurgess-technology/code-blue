@@ -52,6 +52,7 @@ extends Node
 const NAMES := ["Host", "Álvaro", "Bea O'Neil", "Surgeon Chris"]
 const EconomyScript := preload("res://scripts/economy/economy.gd")
 const MonsterScript := preload("res://scripts/monster.gd")
+const WindupScript := preload("res://scripts/combat/windup.gd")
 
 var role := "host"
 var scenario := "deliver"
@@ -1096,9 +1097,11 @@ func _sc_combat():
 		if not await _do_until(watch, func(): return not seen.capped.is_empty(), 40.0, "client 1's over-long charge"):
 			return
 		var cap: Dictionary = seen.capped
-		if float(cap.held) > 1.0 or float(cap.held) >= float(cap.claim) or float(cap.c) >= 1.0:
+		# Retransmits under loss can stretch the measured gap, so the check is the rule itself.
+		var limit := minf(minf(float(cap.claim), float(cap.measured) + WindupScript.HOST_CHARGE_SLACK), WindupScript.SHOVE_MAX)
+		if float(cap.held) > limit + 0.001 or float(cap.held) >= float(cap.claim):
 			return _end(false, "the host did not cap the over-long charge: %s" % str(cap))
-		_say("client 1 claimed a %.1f s charge; the host capped it to %.2f s (charge %.2f)" % [float(cap.claim), float(cap.held), float(cap.c)])
+		_say("client 1 claimed a %.1f s charge after a short hold; the host measured %.2f s and capped it to %.2f s (charge %.2f)" % [float(cap.claim), float(cap.measured), float(cap.held), float(cap.c)])
 		if not await _until(func(): return _count_msgs("combat_done") > 0, 30.0, "the report from client 1"):
 			return
 		var r: Dictionary = _msgs("combat_done")[0].data
