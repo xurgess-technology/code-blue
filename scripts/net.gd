@@ -474,6 +474,7 @@ class LagProxy extends RefCounted:
 	var _client_port := 0
 	var _queue: Array = []   # [release_msec: int, to_host: bool, bytes: PackedByteArray], sorted
 	var _rng := RandomNumberGenerator.new()
+	const RECV_BUFFER := 1 << 22
 
 	func _init(lag: float, jitter: float, loss_rate: float) -> void:
 		lag_ms = lag
@@ -482,9 +483,11 @@ class LagProxy extends RefCounted:
 		_rng.randomize()
 
 	func start(host_ip: String, host_port: int) -> int:
-		if _listen.bind(0, "127.0.0.1") != OK:
+		# A roomy receive buffer: the relay only drains once per frame, and a slow frame must not
+		# drop datagrams on its own on top of the simulated loss.
+		if _listen.bind(0, "127.0.0.1", RECV_BUFFER) != OK:
 			return 0
-		if _up.bind(0) != OK:
+		if _up.bind(0, "*", RECV_BUFFER) != OK:
 			return 0
 		_up.set_dest_address(host_ip, host_port)
 		return _listen.get_local_port()

@@ -776,12 +776,32 @@ signal roster_changed, joined_ok, join_failed(reason), host_left, host_ready, ho
 
 Replication (networking section of `scripts/game.gd`):
 
-- Host -> each client, 20 Hz, unreliable: acked deltas of a state made of `g` (global fields,
-  with each table's surgery state flattened into `sg<table>.*` and `ms<table>.*`, the cases as
-  `cs` (ids), `c.<id>` (the case without vitals) and `v.<id>` (its vitals), and the shift loop
-  as `lp.*`), `pl` (Player.report_full per peer),
-  `mo` (Monster.report), `it` (WorldItem.report), `ct` (open containers only). Clients ack in
-  `_player_state(ack, Player.report_state())`. Keyframes on demand and every 10 s.
+- Host -> each client, 20 Hz, unreliable, **replicated per field with acks** (netfix, sweep 2
+  integration). The state is `g` (entity 0: global fields, with each table's surgery state
+  flattened into `sg<table>.*` and `ms<table>.*`, the cases as `cs` (ids), `c.<id>` (the case
+  without vitals) and `v.<id>` (its vitals), and the shift loop as `lp.*`), `pl`
+  (Player.report_full per peer), `mo` (Monster.report), `ct` (open containers: id -> `{}`) and
+  `it` (WorldItem.report); the `id` field of reports is stripped (the key says it).
+  - The host tracks, per client and per field, the confirmed value and the value in flight, and
+    sends only fields the client lacks. Lost or overdue messages (RTO from measured RTT, 250 ms to
+    2 s) make their fields unknown, so they go again with current values. Every message holds
+    absolute values; the client keeps the newest sequence per field, so any subset in any order
+    converges. There are no keyframes and no message depends on another.
+  - Existence is field `@` (a hash of the entity's field names, -1 once removed); the client
+    uses an entity only when it holds exactly those fields. A `null` value means the field left the report,
+    so **reports must not use null as a real value**.
+  - **No message exceeds `Game.NET_MSG_BYTES` (1000, estimated payload)**: one datagram on ENet
+    (MTU 1392) and one segment on Steam (SteamNetworkingSockets MTU about 1200; its 512 KB
+    `MAX_STEAM_PACKET_SIZE` is only the reliable/segmented limit, and an unreliable message split
+    into segments is lost if any segment is). Priority per tick: `g`, `pl`, `mo`, `ct`, `it`.
+    Bursts (clock-in loot, late joiners) spread over ticks: at most `NET_TICK_BYTES` (4000) per
+    client per tick and `NET_WINDOW_BYTES` (16000) unacknowledged, one message per tick while the
+    window is full, one every 4 ticks while a client has been silent for 1.5 s. A single field
+    bigger than a message still goes alone (fragmented): keep report fields small.
+  - Clients ack in `_player_state([newest seq, 64-bit mask of the ones before], Player.report_state())`.
+    Every 10 s a client re-applies its whole replica to its nodes locally (no bandwidth).
+  - `game.net_counters`: host `{msgs, bytes, acked, lost, max_msg}` (max_msg with `net_measure`),
+    client `{msgs, stale}`; nettest `--stats` prints them.
 - **Reports must be quantized and must not share mutable data with the live object** (return
   copies of arrays and dictionaries), or unchanged things resend forever or changes go unseen.
   `apply_remote(d)` / `apply_remote_full(d)` always receive the whole merged report, never a

@@ -462,6 +462,7 @@ func _sc_full_shift():
 			_tag(), sent, recv, secs, sent / secs, recv / secs,
 			"sent_per_client_Bps" if role == "host" else "upstream_Bps", per,
 			float(game.net_payload_bytes - int(st.get("payload", 0))) / secs / float(maxi(1, clients)) if role == "host" else 0.0])
+		print("[stats] %s counters %s" % [_tag(), str(game.net_counters)])
 		if role == "host":
 			var parts := []
 			for k in game.net_section_bytes.keys():
