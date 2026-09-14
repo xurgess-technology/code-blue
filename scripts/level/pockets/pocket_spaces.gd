@@ -101,7 +101,10 @@ static func build_into(kind: String, stubs: Array, pocket_seed: int, map_seed: i
 			wing = String(s.wing)
 	out["wing"] = wing
 	out["depth"] = depth
-	root.add_child(layout_script.build(lay, origin, out))
+	var interior: Node3D = layout_script.build(lay, origin, out)
+	for gi in interior.find_children("*", "GeometryInstance3D", true, false):
+		(gi as GeometryInstance3D).layers = 1 << Stub.POCKET_LAYER_BIT
+	root.add_child(interior)
 	# Entrance copies, seams and links.
 	var copies := Node3D.new()
 	copies.name = "Stubs"
@@ -520,7 +523,7 @@ func _make_light_mirror(src: SpotLight3D, t: Transform3D, into_pocket_copy: bool
 	for prop in ["light_color", "light_energy", "spot_range", "spot_angle", "spot_angle_attenuation", "spot_attenuation",
 			"shadow_enabled", "shadow_bias", "shadow_normal_bias", "light_volumetric_fog_energy"]:
 		l.set(prop, src.get(prop))
-	l.light_cull_mask = (1 << Stub.COPY_LAYER_BIT) if into_pocket_copy else (0xFFFFF & ~(1 << Stub.COPY_LAYER_BIT))
+	l.light_cull_mask = (src.light_cull_mask & ~(1 << Stub.POCKET_LAYER_BIT)) if into_pocket_copy else (src.light_cull_mask & ~(1 << Stub.COPY_LAYER_BIT))
 	add_child(l)
 	l.global_transform = t * src.global_transform
 	return {"src": src, "t": t, "parts": [], "light": l}

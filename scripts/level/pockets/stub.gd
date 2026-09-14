@@ -30,6 +30,9 @@ const MOUTH_MARGIN := 0.5
 ## Render layer (bit index) of the pocket copy's surfaces: the pocket's own lights leave it out, so
 ## nothing inside a pocket brightens the part of the stub the hospital side can see.
 const COPY_LAYER_BIT := 11
+## Render layer (bit index) of the pockets' own surfaces and props: the stub copy's lights leave it out (they
+## would light the pocket through the stub's walls) but light everything else, bodies and hands included.
+const POCKET_LAYER_BIT := 12
 
 const HB := preload("res://scripts/hospital_builder.gd")
 const Legacy := preload("res://scripts/level/legacy_builder.gd")
@@ -271,7 +274,7 @@ static func build_copy(stub: Dictionary, map_seed: int, hospital_lights: Array) 
 			node.set_meta("mode", mode)
 			node.set_meta("tile", tile)
 			var bulb: OmniLight3D = node.get_node("Bulb")
-			bulb.light_cull_mask = 1 << COPY_LAYER_BIT
+			bulb.light_cull_mask = 0xFFFFF & ~(1 << POCKET_LAYER_BIT)
 			if mode == 2:
 				bulb.visible = false
 			lights_root.add_child(node)
@@ -295,7 +298,7 @@ static func build_copy(stub: Dictionary, map_seed: int, hospital_lights: Array) 
 		mirror.light_color = Color(0.96, 0.98, 1.0) if bright else Color(1.0, 0.96, 0.90)
 		mirror.light_volumetric_fog_energy = 0.0
 		mirror.shadow_enabled = false
-		mirror.light_cull_mask = 1 << COPY_LAYER_BIT
+		mirror.light_cull_mask = 0xFFFFF & ~(1 << POCKET_LAYER_BIT)
 		mirror.add_to_group("fixture")
 		mirror.set_meta("mode", mode)
 		mirror.set_meta("seed", light_seed)

@@ -550,6 +550,22 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   can pick a pocket point, so hospital monsters sometimes wander into a pocket through a seam.
 - **The Factory reads dim**: pools of high-bay light 12-20 m apart and the flashlight; the far walls are
   lost in the (per-pocket) fog on purpose. Its machines are primitive silhouettes.
+- **The two copies of a stub are not pixel-identical**: the gameshot comparison (same pose in both copies,
+  post effects off, flicker clock frozen) differs by a mean of 0.1-0.3% with a 99th percentile of 0.8-2.1%
+  and single pixels up to about 29% (volumetric fog noise, the chamfered wall corners HospitalBuilder gives
+  collision only, filtering). Stub geometry copies `HospitalBuilder._build_surfaces`' corridor rules by hand
+  (`stub.gd` `build_copy`); a change to how hallways are drawn (doors' wall parts) must be mirrored there,
+  and `tools/gameshot.tscn -- --pocket=...` prints the difference.
+- **The playtest bot can wedge itself on a hallway trauma bag** (seed 1 with its restaurant: stuck at a
+  corner container `ct_20_24_0` for 800 s, the patient dies; the same seed with `--pocket=none` passes and
+  the stuck path does not touch the pocket). The pocket changes which rooms and containers a seed gets;
+  the bot's corner-cutting is the known weakness above.
+- **Perf** (`perfprobe -- --pockets --quality=1`, 1600x900, Radeon 890M, one other Godot and a Blender
+  process running): hospital corridor 65 fps (1% low 53) with no pocket, 75 (62) and 66 (55) on the two
+  pocket maps; Factory hall corner to corner 95 (71), down a production line 89 (72), from the catwalk
+  74 (60), an entrance from inside 120 (96), the seam from the hospital side 95 (83); Restaurant dining
+  room 90 (75), bar 116 (82), kitchen 69 (55), an entrance 85 (72), seam 92 (79). An earlier run with seven
+  Blender bakes on the machine was unusable (20-60 fps everywhere, baseline included).
 - **`mapcheck` takes about twice as long** (every seed is generated again with a pocket forced).
 - **The Restaurant is very warm-orange** under the game's teal/amber grade; the tables' tops and the booth
   wood read dark from a distance.

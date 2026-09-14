@@ -527,9 +527,11 @@ game.pockets.crossing_enabled      # tools only
   onto the hallway at v -1, leg 2 runs along the back, leg 3 at u w-2..w-1; `Stub.size_ok`: w >= 8 and
   `d - 2 - 4 / ((w - 4) / 2) >= 0.5`). The seam is the plane s = w / 2 across leg 2. The pocket copy is
   built from the same tiles in hospital coordinates under a Node3D with transform `t` (same vertices,
-  UVs, materials, fixture seeds), on render layer `Stub.COPY_LAYER_BIT` (12), lit only by its own
+  UVs, materials, fixture seeds), on render layer bit `Stub.COPY_LAYER_BIT` (11), lit by its own
   fixtures and copies of the hospital fixtures within reach of the stub (fixtures cast no shadows);
-  pocket lights leave that layer out. Leg 3 opens into the pocket through its outer wall.
+  those lights leave out `Stub.POCKET_LAYER_BIT` (12), the layer of every pocket surface and prop, and
+  pocket lights leave out the copy layer. Bodies, items and first-person hands stay on their own layers
+  and are lit by both. Leg 3 opens into the pocket through its outer wall.
 - **Crossing**: anything standing past the seam in its copy's unwalked half (hospital copy: s >= w/2;
   pocket copy: s < w/2) is moved through `t` / `t_inv`, keeping position relative to the stub,
   velocity and facing (players: `_yaw`, `bot_yaw`, `_knock`; monsters: `_target_*`, `_repath`; loose
