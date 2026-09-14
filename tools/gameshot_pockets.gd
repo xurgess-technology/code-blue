@@ -82,7 +82,42 @@ func run(gs: Node, pocket_kind: String) -> void:
 			fx.set_enabled(true)
 		pk.crossing_enabled = true
 		await _walk_shot(s, i)
+	await _ghost_shot(pk.seams[0])
 	LightFlicker._clock_driven = false
+
+
+## A teammate (a bot) walks ahead through the seam while we watch from the first bend: once it is past
+## the seam it is really in the pocket, and its ghost must still stand where we see it.
+func _ghost_shot(s: Dictionary) -> void:
+	var pk = game.pockets
+	var back := float(s.d) - 1.0
+	var mate = preload("res://scripts/player.gd").new_player(-77, "Teammate", false)
+	mate.is_bot = true
+	mate.bot_active = true
+	mate.bot_invulnerable = true
+	game.players[-77] = mate
+	game.get_node("Entities").add_child(mate)
+	mate.teleport(Stub.local_point(s.xh, 2.6, back))
+	_pose(Stub.local_point(s.xh, 0.8, back - 0.3), Stub.local_point(s.xh, float(s.w), back, 1.4))
+	await _settle(20)
+	var n0: int = pk.crossings.size()
+	for k in 400:
+		var frame: Transform3D = s.xp if pk.in_pocket(mate.global_position) else s.xh
+		var to: Vector3 = Stub.local_point(frame, float(s.w) - 1.0, back) - mate.global_position
+		to.y = 0.0
+		mate.bot_yaw = atan2(-to.x, -to.z)
+		mate.bot_move = Vector2(0, -1) if to.length() > 0.4 else Vector2.ZERO
+		await shot.get_tree().process_frame
+		var l := Stub.to_local(frame, mate.global_position)
+		if pk.in_pocket(mate.global_position) and l.x > Stub.seam_s(s.w) + 0.9:
+			break
+	mate.bot_move = Vector2.ZERO
+	await _settle(4)
+	var img := shot.get_viewport().get_texture().get_image()
+	img.save_png(ProjectSettings.globalize_path("%s/p_%s_ghost%s.png" % [OUT_DIR, kind, tag]))
+	print("[gameshot] teammate crossed %d time(s), in the pocket %s, ghosts %d" % [pk.crossings.size() - n0, str(pk.in_pocket(mate.global_position)), pk._ghosts.size()])
+	game.players.erase(-77)
+	mate.queue_free()
 
 
 func _settle(n: int) -> void:

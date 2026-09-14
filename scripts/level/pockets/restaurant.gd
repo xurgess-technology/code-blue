@@ -189,7 +189,7 @@ static func build(lay: Dictionary, origin: Vector2i, out: Dictionary) -> Node3D:
 	Common.collider(body, Transform3D(Basis(), Vector3(inter.get_center().x, DINING_CEIL + 0.2, inter.get_center().y)), Vector3(inter.size.x, 0.4, inter.size.y))
 
 	var props := Common.Props.new()
-	var wood := _tex_mat("wood", _planks_tex(), 0.7, Vector3(1.4, 1.4, 1.4), true)
+	var wood := Common.mat("rest_wood", Color(0.60, 0.40, 0.23), 0.55)
 	var dark_wood := Common.mat("rest_dark_wood", Color(0.20, 0.12, 0.07), 0.6)
 	var iron := Common.mat("rest_iron", Color(0.06, 0.06, 0.06), 0.5, 0.7)
 	var steel := Common.tri_mat("rest_steel", "mat/metal", Color(0.62, 0.64, 0.66), 1.2, 0.35, 0.9)
@@ -290,15 +290,18 @@ static func _talavera_tex() -> Texture2D:
 		return ImageTexture.create_from_image(img))
 
 
-static func _planks_tex() -> Texture2D:
-	return Common.cached_texture("planks", func():
+static func _planks_tex(light := false) -> Texture2D:
+	return Common.cached_texture("planks_light" if light else "planks", func():
 		var n := 128
 		var img := Image.create(n, n, true, Image.FORMAT_RGB8)
 		var rng := RandomNumberGenerator.new()
 		rng.seed = 17
 		var tones := []
 		for i in 8:
-			tones.append(Color(0.34, 0.20, 0.11).lerp(Color(0.48, 0.30, 0.16), rng.randf()))
+			if light:
+				tones.append(Color(0.62, 0.42, 0.24).lerp(Color(0.78, 0.56, 0.34), rng.randf()))
+			else:
+				tones.append(Color(0.34, 0.20, 0.11).lerp(Color(0.48, 0.30, 0.16), rng.randf()))
 		for y in n:
 			for x in n:
 				var plank := y * 8 / n

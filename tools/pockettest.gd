@@ -344,6 +344,7 @@ func _item_crosses(kind: String, pk) -> void:
 	var s: Dictionary = pk.seams[0]
 	var drop := Stub.local_point(s.xh, Stub.seam_s(s.w) + 0.35, float(s.d) - 1.0, 0.6)
 	var it = game._spawn_item("gauze", 2, Transform3D(Basis(), drop), WorldItem.State.LOOSE)
+	it.toss(Transform3D(Basis(), drop), Vector3(0.0, 0.5, 0.0))   # as game.drop_selected lets go of it
 	await _frames(30)
 	_check(is_instance_valid(it) and pk.in_pocket(it.global_position), "%s: an item dropped past the seam lands in the pocket copy" % kind)
 	if is_instance_valid(it):
