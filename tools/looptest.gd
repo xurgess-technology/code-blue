@@ -171,6 +171,12 @@ func _run() -> void:
 	_check(String(game.case_by_id(first_id).state) == "stable" and String(game.case_by_id(extra_id).state) == "stable", "both patients are stable (%s, %s)" % [game.case_by_id(first_id).state, game.case_by_id(extra_id).state])
 	_check(game.loop.can_clock_out(), "now the clock lets the team out")
 	_check(bot.holding(loot_kind), "the loot is still in hand")
+	# DOORS: what shift 1's wings looked like, and how many containers the bot left open in them.
+	var rows_before: PackedStringArray = (game.level_info.rows as PackedStringArray).duplicate()
+	var opened_before := 0
+	for n in get_tree().get_nodes_in_group("container"):
+		if n.has_method("is_open") and n.is_open() and String(n.get("container_type")) != "pegboard":
+			opened_before += 1
 	ok = await _do_until(func(): _go_use("clock", game.clock_pos(), true), func(): return game.phase == Game.Phase.WON, 120.0)
 	_check(ok, "holding E at the clock clocks out")
 	var want_pay: int = game.loop.pay_for({"state": "stable"}, 1) + game.loop.pay_for({"state": "stable", "optional": true}, 1)
@@ -182,6 +188,7 @@ func _run() -> void:
 	_check(bot.holding(loot_kind), "carried loot survives into the next lobby")
 	_check(bot.global_position.distance_to(pos_at_clock) < 1.0, "nobody is moved at the next lobby")
 	_check(game.cases.is_empty() and game.shelf.is_empty(), "no cases or shelf stock between shifts")
+	_check(game.doors.gates_locked, "the wing gates are locked between shifts")
 
 	# Walk out and sell, buy a bar.
 	_say("---- between shifts: sell, shop")
@@ -198,26 +205,34 @@ func _run() -> void:
 	_check(ok, "and bought a gold bar")
 
 	# ------------------------------------------------------------------ shift 2
-	_say("---- shift 2: same hospital, answering machine, a death, a declined call")
+	_say("---- shift 2: same run, new wings, answering machine, a death, a declined call")
 	var old_loot := -1
 	for it in game.world_items.values():
 		if Items.is_loot(it.kind):
 			old_loot = it.item_id
 			break
 	var seed_before: int = game.seed_value
-	var opened_before := 0
-	for n in get_tree().get_nodes_in_group("container"):
-		if n.has_method("is_open") and n.is_open() and String(n.get("container_type")) != "pegboard":
-			opened_before += 1
 	ok = await _do_until(func(): _go_use("clock", game.clock_pos(), true), func(): return game.phase == Game.Phase.SHIFT, 120.0)
 	_check(ok, "clock in for shift 2")
-	_check(game.seed_value == seed_before, "same hospital (seed %d)" % game.seed_value)
+	_check(game.seed_value == seed_before, "same run (seed %d)" % game.seed_value)
+	_check(not game.doors.gates_locked, "the gates unlocked at clock-in")
+	var rows_after: PackedStringArray = game.level_info.rows
+	var er: Rect2 = game.level_info.entrance_rect
+	var entrance_same := true
+	var wing_rows := 0
+	for y in rows_after.size():
+		if rows_after[y] != rows_before[y]:
+			wing_rows += 1
+		for x in rows_after[y].length():
+			if er.has_point(Vector2((x + 0.5) * C.TILE, (y + 0.5) * C.TILE)) and rows_after[y][x] != rows_before[y][x]:
+				entrance_same = false
+	_check(wing_rows > 10 and entrance_same, "the wings are new (%d rows differ), the entrance building is the same" % wing_rows)
 	_check(old_loot < 0 or not game.world_items.has(old_loot), "last shift's untouched loot was cleared")
 	var open_containers := 0
 	for n in get_tree().get_nodes_in_group("container"):
 		if n.has_method("is_open") and n.is_open() and String(n.get("container_type")) != "pegboard":   # pegboards have no door
 			open_containers += 1
-	_check(open_containers == 0 and opened_before > 0, "every container is closed again (%d open, %d were open)" % [open_containers, opened_before])
+	_check(open_containers == 0 and opened_before > 0, "every container in the new wings is closed (%d open, %d were open last shift)" % [open_containers, opened_before])
 	_check(game.loop.grace_left > game.loop.GRACE_SECONDS - 3.0, "grace restarted")
 	game.dev_skip_grace()
 	ok = await _do_until(func(): _halt(), func(): return game.loop.call_state == "ringing", 10.0)

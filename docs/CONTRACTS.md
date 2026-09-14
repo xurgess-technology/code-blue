@@ -456,8 +456,12 @@ neutral area outside the main doors. `HospitalBuilder.build(gen, info)` builds i
 `scripts/level/legacy_builder.gd` with the old keys only.
 
 Tiles: `#` wall, `.` indoor floor, `+` doorway, `,` outdoor ground, `=` the fence, `P` player
-spawn, `T` tool spawn, `M` monster spawn. Walkable: `. + , P T M`. Doorways are open (no door
-leaves) and one tile wide; open rooms (nurse station, waiting room, cafeteria) have archways.
+spawn, `T` tool spawn, `M` monster spawn. Walkable: `. + , P T M`. Every doorway has a door (see
+"Doors and the per-shift wings" below): one tile wide for most rooms, two for the cafeteria,
+radiology and the morgue (double doors); the nurse station and the waiting room keep archways.
+Since the doors sweep the entrance building sits at a fixed tile origin (`MapGen.ENTRANCE_ORIGIN`,
+32, 34) on a fixed 92 x 74 map for every seed, and `MapGen.generate(run_seed, wing_seed)` lays out
+the wings from their own seed.
 
 `level_info`, world metres, +Y up; positions are on the floor unless noted:
 
@@ -748,11 +752,13 @@ loop.pay_for(case, shift) -> int   # stable 200 (+25/shift), extra stable 300 (+
 - The clock allows clocking out once the first call was taken and no case is incoming or on a
   table (a ringing extra call is declined by clocking out). Pay goes through `game.add_money`
   (a dead patient's penalty clamps at $0). Monsters are removed at clock-out.
-- **Next shift: same hospital.** The seed stays for the whole run; `shift` goes up. At the next
-  clock-in the items the spawners left and nobody touched are removed, containers close, and loot,
-  monsters and (per case) supplies spawn fresh from `seed + shift`. Nobody is moved and hands are
-  kept at the next lobby; the dead and late joiners get up at the start. Game over builds a new
-  hospital (`seed + 7919`). Clients learn the phase from `_rpc_shift`/snapshots and move themselves.
+- **Next shift: same entrance, new wings** (doors sweep). The seed stays for the whole run; `shift`
+  goes up. The next lobby rebuilds the wings behind the locked gates (`game.wing_loader`, see "Doors
+  and the per-shift wings"); anyone still in a wing is walked out to the entrance hall and what was
+  left lying in the wings goes with them. At clock-in (which waits for the wings) loot, monsters
+  and (per case) supplies spawn fresh, and the gates unlock. Hands are kept at the next lobby; the
+  dead and late joiners get up at the start. Game over builds a new hospital (`seed + 7919`).
+  Clients learn the phase from `_rpc_shift`/snapshots and move themselves.
 - Game over: during a shift, `game.all_players_out()` (downed worker: every non-waiting player is
   downed or dead). Never in the dev room. At the next shift's lobby the dead and the downed get
   up at the start.
@@ -1323,6 +1329,168 @@ game.brains.dev_request(sender, action, args)   # "br_spawn_brain" {kind, qualit
   `brains_hive_out` (`tools/gen_audio_brains.mjs`).
 - Tests: `tools/braintest.tscn` (headless, 71 checks), nettest scenario `brains`,
   `tools/brainshot.tscn` (windowed shots to `tools/brain_shots/`), `tools/perfprobe.tscn -- --brains`.
+
+## Doors and the per-shift wings (doors worker, 2026-09-14)
+
+Every doorway has a door; the wings behind the entrance building's gates are rebuilt for every
+shift. Files: `scripts/level/door_plan.gd` (which door where, as data), `scripts/doors/door.gd`
+(one door node), `scripts/doors/door_models.gd` (procedural meshes), `scripts/doors/doors.gd`
+(`game.doors`), `scripts/level/wing_loader.gd` (`game.wing_loader`), `tools/gen_audio_doors.mjs`,
+`tools/doortest.*`.
+
+### The map
+
+```gdscript
+MapGen.generate(run_seed, wing_seed := -1)   # -1: the run seed (shift 1). Entrance, neutral area and
+                                             # the wing count come from the run seed only
+MapGen.wing_seed_for(run_seed, generation) -> int   # generation 1 -> run_seed
+MapGen.ENTRANCE_ORIGIN = Vector2i(32, 34)    # every run, every shift; the map is always 92 x 74
+gen.doors: [{id "dr_<x>_<y>", kind "hinged"|"double"|"gate"|"auto"|"sliding", tiles, n, s, plane,
+             width, hinge, max_in, max_out, room, zone, wing, depth, base}]   # tile space
+DoorPlan.leaves(d) / leaf_points(d, leaf, deg, side) / passable(d) / check(state, gen, start)
+```
+
+- Kinds: `sliding` the main entrance (four glass panels into the wall), `gate` the doorway into each
+  wing (heavy double doors, small wired windows, hazard band, a lock lamp), `auto` the OR (the same
+  in light steel), `double` the cafeteria, radiology and morgue, `hinged` every other room door.
+- Each doorway is a tunnel one tile deep. A door hangs just inside one face (`n` points out of it):
+  room doors at the hallway face, gates and the OR at the side you reach first from the entrance
+  building, the sliding doors at the outside face. Swinging toward -n folds a leaf into the tunnel
+  (always 90 degrees, nothing stands in a doorway); toward +n needs room: `max_out` is the widest
+  angle whose whole sweep (10 degree steps) meets no wall, furniture below 2.2 m, container or other
+  door, and a single leaf's hinge is on the end that allows more. `validate()` runs
+  `DoorPlan.check`: a door in every doorway, every sweep clear, every room reachable through doors
+  that open at least 75 degrees (hinged) or 40 (pairs).
+- `base` doors (the entrance building's) never change within a run; the rest belong to the wings.
+
+### Builder parts
+
+```gdscript
+HospitalBuilder.PART_BASE / PART_WINGS
+HospitalBuilder.part_of(gen, x, y)           # entrance and outdoor (and unused solid) tiles are the base
+HospitalBuilder.warm_parts()                 # main thread, before any prepare() on a thread
+HospitalBuilder.prepare(gen, part) -> Dictionary      # data only (mesh arrays, MultiMesh buffers,
+                                             # collision faces per chunk, lists); thread-safe after warm_parts
+HospitalBuilder.commit_steps(prep, parent) -> Array[Callable]   # small node-creating steps
+HospitalBuilder.finish_info(gen, info, base_prep, wings_prep)
+HospitalBuilder.bake_nav(gen) -> NavigationMesh       # data only; door tiles are walkable
+info.wings_root   # the Hospital's "Wings" node (everything PART_WINGS)
+info.base_part    # the base part's committed lists (anchors, lights, doors), kept for rebuilds
+info.door_nodes   # every door node of the level; info.doors the plan data; info.wing_gen, wing_seed
+info.occluders_built   # true: the builder made per-part wall occluders, game._add_occluders skips
+```
+
+A wall face belongs to the part of the open tile it looks into. `build(gen, info)` is unchanged for
+callers: it prepares and commits both parts at once.
+
+### Doors (`game.doors`, child "Doors" of Game, every machine)
+
+```gdscript
+doors.doors: {id: door node}; doors.near(pos) -> Array; doors.door_at_tile(t); doors.nearest(pos)
+doors.register(nodes) / unregister_wings() / clear()
+doors.gates_locked (host), doors.unlocking, doors.agents_open_doors (tests), doors.force_jam (-1/0/1)
+doors.prompt_for(d, p) / player_used(d, p)   # Door.interact_prompt / interact go here
+doors.swing_side(d, pos) -> -1 | 1
+doors.set_gates_locked(locked, sound) / set_all(open) / amount_of(id)
+doors.sound_factor(from, to) -> float        # 0.55 per closed door on the straight line
+doors.net_fields() -> {"dl", "du", "d.<id>": int}   # host; merged into the global snapshot fields
+doors.apply_net(g) / on_event(kind, data)    # clients; events "dr_*"
+doors.stats                                  # opens by who, slams, jams (tests)
+# door.gd
+door.kind, door_id, data, amount (hinged -1..1 signed side; automatic 0..1), target, speed, locked,
+door.swing (automatic pairs: -1 into the tunnel, +1 out), max_in, max_out, normal, along, centre,
+door.leaf_bodies (AnimatableBody3D on C.L_WORLD, each with an Area3D "Aim" on C.L_INTERACT),
+door.occluder (QuadOccluder3D, visible while shut), door.lamp_state ("locked" | "unlocking" | "open")
+door.is_closed() / is_hinged() / is_automatic() / limit(side) / leaf_xform(i, a) / snap_to(a) / step(dt, check)
+```
+
+- **Automatic doors** open while anyone is within 3.4 m in front of either face (4.6 m for a crew):
+  players (downed too), paramedic crews, monsters. Closed pairs pick their swing then: into the
+  tunnel, or out of the face when the nearest one is coming through the tunnel and there is room.
+  They close 1.2 s after nobody is near. A locked gate opens for nobody.
+- **Gates** are locked (host: `phase != SHIFT or not wing_loader.wings_ready`, never in the dev room),
+  shut, lamp red, prompt "!Locked until the shift starts", E plays `doors_locked`. Unlocking plays
+  `doors_unlock` and holds each gate open 2.6 s. While a clock-in waits for the wings the lamps
+  blink amber. **Jams**: a gate of one of the two deepest wings (three or more wings), once per
+  opening and not on the unlock, 30% chance: it stops at about 55% (a passable gap) and shudders
+  for 1.6-3.4 s with `doors_jam` (noise 0.35), then opens; 45-90 s cooldown.
+- **Hinged doors**: E toggles. Opening swings away from the player (into the tunnel if the far side
+  has under 80 degrees of room), at 1.9/s; closing at 1.6/s, or a slam (5.5/s, noise 0.95) if the
+  door was still moving or the player sprints. Doors stay where they are left. Bots, and players
+  carrying someone or dragging a monster (E is taken), push them open by walking into them. A door
+  sweeping into a player stops and waits (a dropped item stops a closing door too); the one who
+  opened it is not in its way.
+- **Monsters**: agents walking into a hinged door open it by kind while wandering or rushing: the
+  Walk-In pushes slowly (0.42/s, a creak, noise 0.5), the Discharged rushing bursts it (7/s, a slam,
+  0.95) and otherwise creaks it open, the Night Nurse opens it silently (2.2/s) only while she is not
+  observed and nobody is watching the doorway (`Perception.observed_any` at the door, 5 Hz). Doors
+  never close by themselves, so a door left shut can be open later.
+- **Sight and light**: leaves are on `C.L_WORLD`, so every sight ray (perception, the Walk-In's eyes,
+  the flashlight check) and the flashlight's shadow stop at a closed door. A leaf folded open past
+  90% stops colliding (its aim area stays). The Discharged's hearing multiplies a noise's reach by
+  `sound_factor` (a hook in `discharged_brain.gd`).
+- **Replication**: global fields `d.<id>` (amount in fiftieths; automatic pairs signed by swing) in
+  group `"dr"`, `dl` (gates locked), `du` (unlocking), `wg` (the wings' generation). Clients animate
+  toward the replicated amount and never halt on their own; their gates also stay locked while their
+  own wings are still building. Sounds go through `game._sound` events.
+- Sounds (`tools/gen_audio_doors.mjs`): `doors_hiss`, `doors_heavy`, `doors_creak_01/02`,
+  `doors_latch`, `doors_slam`, `doors_locked`, `doors_unlock`, `doors_jam`.
+
+### The wings per shift (`game.wing_loader`, child "WingLoader" of Game, every machine)
+
+```gdscript
+wing_loader.generation      # the wings the level has or is building (replicated as "wg")
+wing_loader.wings_ready / busy
+wing_loader.regenerate(generation)   # host: game._to_next_shift (and the dev panel); clients: on "wg"
+wing_loader.finish_now()             # tools, begin_shift
+wing_loader.generation_for_build(shift) / next_generation / on_level_built(info) / cancel()
+wing_loader.has_wings() / gate_front(wing_id, slot) / evict_players()
+wing_loader.stats            # frames, max_frame_ms, slowest_step(_ms), thread_ms, wall_ms, finish_ms,
+                             # steps {label: [count, total ms, worst ms]}
+signal wings_torn_down                              # POCKETS HOOK: tear down extra wing content here
+signal wings_built(info, wing_seed, generation)     # POCKETS HOOK: build extra wing content here
+wing_loader.extra_builders   # objects with build_wings(info, wing_seed, generation) / teardown_wings()
+game.clock_in_pending        # host: clock-in waits for the wings
+```
+
+- `_to_next_shift` calls `regenerate(max(shift, generation + 1))`. Host: players (and bots) in a wing
+  are put in the entrance hall in front of that wing's gate (a reliable `dr_evict` to a client);
+  world items in the wings are removed (the guide goes back to its lectern); monsters in the wings
+  go quietly (only a dev rebuild during a shift has any). Every machine: the old wings leave
+  `level_info` (containers, lights, anchors, tool and monster spawns drop to the base part's),
+  `wings_torn_down` fires, the old nodes are freed a few per frame; MapGen, `prepare` and the
+  navigation bake run on a WorkerThreadPool task; `commit_steps` and the fixtures' flicker
+  controllers run within 5 ms per frame; then `level_info` gets the new wings, the navigation mesh
+  is swapped, doors register, `wings_ready` turns true and `wings_built` fires. During a shift (dev)
+  loot and monsters respawn for the new wings.
+- `clock_in()` while the wings build sets `clock_in_pending` ("The wing doors are unlocking...") and
+  clocks in the moment they are ready; `begin_shift()` finishes them at once.
+- Joining: the snapshot's `wg` is applied before a joining client builds the level
+  (`next_generation`), so it builds the host's current wings directly.
+- Extra per-shift wing content (the `pockets` worker's pocket spaces) builds in `wings_built` and
+  tears down in `wings_torn_down` (or via `extra_builders`). `wings_built` also fires after a full
+  level build. Hallway stubs that are not `+` doorway tiles never get a door.
+- Containers are the costly step (primitive meshes merged by `ContainerBase.bake`, 10-30 ms each
+  in a window). `bake` now caches the merged mesh by its parts (primitive kind and size, transform,
+  material), so a container built the same way again shares it: a rebuild's container steps went
+  from 57 steps / 1330 ms (worst 35-43 ms) to 163 ms (worst 8 ms). Children that are not primitive
+  meshes skip the cache. Keep container materials shared (`ContainerMats`), or every build misses.
+
+### Dev room
+
+- The pen has two partitions with doors (`dr_dev_hinged`, `dr_dev_double`); monsters spawn in its
+  middle bay and reach the side bays through them.
+- Panel section "Doors": "Open all doors", "Close all doors" (hinged doors; requests `doors_all
+  {open}`), "Regenerate wings now" (`regen_wings`; in the dev room it says there are none). After a
+  visit to the dev room (`DevRoom.tools_unlocked`, per process) F1 in a hospital run opens a small
+  panel with just these three buttons, and the host accepts those two requests there.
+
+### Tests
+
+`tools/doortest.tscn` (headless: 75 checks; `-- --shots` windowed into `tools/door_shots/`;
+`-- --frames` windowed frame times while the wings rebuild), `tools/mapcheck.gd` (door checks through
+`validate`, door nodes in builds, later shifts keep the entrance), `tools/looptest.tscn` (new wings at
+shift 2), nettest scenario `doors`, devtest door checks, `tools/perfprobe.tscn -- --doors`.
 
 ## Design decisions (locked)
 

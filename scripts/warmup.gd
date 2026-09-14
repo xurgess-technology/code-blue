@@ -23,6 +23,9 @@ const PlayerBodyScript := preload("res://scripts/downed/player_body.gd")  # DOWN
 const PlayerTableScript := preload("res://scripts/downed/player_table.gd")  # DOWNED HOOK
 const OrScreenScript := preload("res://scripts/orscreen/or_screen.gd")  # ORSCREEN HOOK
 const BrainsScript := preload("res://scripts/brains/brains.gd")  # SWEEP 3 HOOK (brains)
+const DoorScript := preload("res://scripts/doors/door.gd")  # DOORS HOOK
+const DoorModels := preload("res://scripts/doors/door_models.gd")  # DOORS HOOK
+const HospitalBuilderScript := preload("res://scripts/hospital_builder.gd")  # DOORS HOOK
 
 
 ## Run once. Safe to call again; later calls return immediately.
@@ -164,6 +167,35 @@ static func run(game: Node) -> void:
 	shelf.add_child(ph)
 	ph.set_ringing(true)
 
+	# DOORS HOOK: every furniture kind's shared meshes (the first level only built the kinds it uses;
+	# the wing loader's thread needs them all), then one door of every kind (the laminate, steel and glass leaves, the frames, the gate's
+	# lamp in each state), as look-alikes: no collision, not interactable.
+	var wp0 := Time.get_ticks_msec()
+	HospitalBuilderScript.warm_parts()
+	var warm_parts_ms := Time.get_ticks_msec() - wp0
+	var dx := -1.5
+	for kind in ["hinged", "double", "gate", "auto", "sliding"]:
+		var w := 4.0 if kind == "sliding" else (2.0 if kind != "hinged" else 1.0)
+		var door: Node3D = DoorScript.create({"id": "warm_" + kind, "kind": kind, "tiles": [], "n": Vector2i(0, 1),
+				"s": Vector2i(1, 0), "plane": Vector2.ZERO, "width": w, "hinge": -1, "max_in": 90.0, "max_out": 90.0,
+				"base": true})
+		door.remove_from_group("interactable")
+		door.remove_from_group("door")
+		door.remove_meta("interact_id")
+		door.snap_to(0.4)
+		for n in door.find_children("*", "CollisionObject3D", true, false):
+			n.collision_layer = 0
+		shelf.add_child(door)
+		door.position = Vector3(dx, -1.2, -3.0)
+		door.scale = Vector3.ONE * 0.3
+		dx += 1.0
+		if kind == "gate":
+			for state in ["unlocking", "open", "locked"]:
+				var lens := MeshInstance3D.new()
+				lens.mesh = DoorModels.lamp_lens()
+				lens.material_override = DoorModels.lamp_material(state)
+				door.add_child(lens)
+
 	# Every surgery minigame, set up on a patient the way the surgery system does it
 	var games := []
 	for ail in Procedures.AILMENTS.keys():
@@ -211,7 +243,7 @@ static func run(game: Node) -> void:
 	root.process_mode = Node.PROCESS_MODE_DISABLED
 	AudioServer.set_bus_mute(master, was_muted)
 	cover.queue_free()
-	print("[warmup] built and drew everything once in %d ms" % (Time.get_ticks_msec() - started))
+	print("[warmup] built and drew everything once in %d ms (furniture kinds %d ms)" % [Time.get_ticks_msec() - started, warm_parts_ms])
 
 
 static func _make_cover() -> CanvasLayer:
