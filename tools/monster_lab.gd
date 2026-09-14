@@ -929,7 +929,6 @@ func _run_shots() -> void:
 		["nurse_lunge", _shot_nurse_lunge],
 		["nurse_face", _shot_head.bind("night_nurse", false, 0.9, 0.35)],
 		["nurse_corpse", _shot_nurse_corpse],
-		["nurse_lying_copy", _shot_lying.bind("night_nurse")],
 		["walk_in_4m", _shot_walk_in.bind(4.0, false)],
 		["walk_in_1_5m", _shot_walk_in.bind(1.5, false)],
 		["walk_in_face", _shot_head.bind("walk_in", false, 0.75, 0.45)],
@@ -1198,16 +1197,7 @@ func _shot_sedated() -> void:
 	place_player(cor(24.5, 0.8), cor(19.8, 0.0) + Vector3.UP * 0.1, true)
 
 
-func _shot_lying(kind := "") -> void:
-	if kind != "":
-		var c: Node3D = MonsterScript.make_lying(kind)
-		c.position = cor(21.0, 0.0) + Vector3.UP * 0.9
-		add_child(c)
-		c.add_to_group("monster")
-		set_light(1, true)
-		place_player(cor(21.0, 2.2) + Vector3(0, 0.5, 0), cor(21.0, 0.0) + Vector3.UP * 0.9, true)
-		await wait(0.4)
-		return
+func _shot_lying() -> void:
 	var a: Node3D = MonsterScript.make_lying("walk_in")
 	a.position = cor(21.0, -0.7) + Vector3.UP * 0.9
 	add_child(a)

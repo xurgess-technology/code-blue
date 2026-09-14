@@ -3,7 +3,7 @@ extends SkeletonModifier3D
 ##
 ## `build(model)` spawns the GLB under the MonsterModel, points the model's `rig`, `skeleton` and
 ## `anim` at it and adds this modifier to its skeleton, plus a BoneAttachment3D named `Head` on the
-## head bone (eye_transform, the lab's head shots and the dissection body look for it).
+## head bone (Monster.eye_transform and the lab's head shots look for it).
 ##
 ## Clips (Assets anims): Idle (4 s loop), Walk (1.6 s loop, in place, no root motion), Frozen (the
 ## still, wrong pose). The monster picks the clip and the rate (monster.gd `_update_visual`); this
@@ -12,8 +12,9 @@ extends SkeletonModifier3D
 ##   lunge   0..1  both arms reach forward and up, the head pushes out (the attack)
 ##   recoil  0..1  knocked back: torso and head thrown back, arms flung out (a dev gun knock-down)
 ##   slump   0..1  dead: head dropped, shoulders fallen, arms loose (the dev room's corpse)
-##   arm_l / arm_r / legs  radians: strapped to a table, limbs lifting against the straps
-##   hide_head     the head bone collapses to nothing (the dissection body wears an openable copy)
+##
+## She is never sedated, dragged or strapped to a table (docs/SWEEP3.md: unfightable, no brain), so
+## there is no lying or thrashing pose; `MonsterModel.make_lying` still gives her rest pose if asked.
 ##
 ## Every value is in skeleton space (+Y up, +Z her front, +X her left), so the numbers do not depend
 ## on how each bone's local axes were authored. Nothing runs while every value is zero.
@@ -31,10 +32,6 @@ const WALK_LIFT := 0.035
 var lunge := 0.0
 var recoil := 0.0
 var slump := 0.0
-var arm_l := 0.0
-var arm_r := 0.0
-var legs := 0.0
-var hide_head := false
 
 var _b := {}
 
@@ -110,7 +107,7 @@ func _turn(sk: Skeleton3D, bone: String, axis: Vector3, angle: float) -> void:
 
 
 func _process_modification_with_delta(_delta: float) -> void:
-	if lunge == 0.0 and recoil == 0.0 and slump == 0.0 and arm_l == 0.0 and arm_r == 0.0 and legs == 0.0 and not hide_head:
+	if lunge == 0.0 and recoil == 0.0 and slump == 0.0:
 		return
 	var sk := get_skeleton()
 	if sk == null:
@@ -144,19 +141,3 @@ func _process_modification_with_delta(_delta: float) -> void:
 		_turn(sk, "forearm.L", X, -0.35 * k)
 		_turn(sk, "forearm.R", X, -0.35 * k)
 		_turn(sk, "head", X, -0.25 * k)
-	if arm_l != 0.0 or arm_r != 0.0 or legs != 0.0:
-		# Lying on her back: toward +Z is up off the table; arms also pull outward.
-		_turn(sk, "upperarm.L", X, -arm_l)
-		_turn(sk, "upperarm.L", Z, arm_l * 0.35)
-		_turn(sk, "upperarm.R", X, -arm_r)
-		_turn(sk, "upperarm.R", Z, -arm_r * 0.35)
-		_turn(sk, "forearm.L", X, -arm_l * 0.6)
-		_turn(sk, "forearm.R", X, -arm_r * 0.6)
-		_turn(sk, "thigh.L", X, -legs)
-		_turn(sk, "thigh.R", X, -legs * 0.8)
-		_turn(sk, "shin.L", X, legs * 0.9)
-		_turn(sk, "shin.R", X, legs * 0.7)
-	if hide_head:
-		var hi := _bone(sk, "head")
-		if hi >= 0:
-			sk.set_bone_pose_scale(hi, Vector3.ONE * 0.001)

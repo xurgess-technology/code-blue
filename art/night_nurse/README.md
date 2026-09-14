@@ -49,9 +49,8 @@ godot --path . --resolution 1280x720 tools/monster_lab.tscn -- --shots --only=nu
 `nn_glb_extern.py` writes `assets/models/monsters/night_nurse/night_nurse.glb` and its `textures/`.
 The PNGs keep their `.import` files (VRAM compressed, mipmaps, normal-map mode for the normals), so a
 rebuild keeps those settings. If the rig, the head proportions or the height change, re-check the
-constants in `night_nurse_rig.gd` (`WALK_SPEED`, `EYE_OFFSET`, `WALK_LIFT`) and
-`scripts/dissection/monster_rig_look.gd` (`RIG["night_nurse"]`); `tools/dissectiontest.tscn` checks
-the head bone and the fit on the table.
+constants in `night_nurse_rig.gd` (`WALK_SPEED`, `EYE_OFFSET`, `WALK_LIFT`); the monster lab checks
+the playback rate and the eye height.
 
 ## How it is made
 
