@@ -94,6 +94,7 @@ func _run() -> void:
 	await _auto_for_player_and_crew()
 	await _sight_and_noise()
 	await _monsters_and_doors()
+	await _drag_through()
 	await _jam()
 	await _regeneration()
 
@@ -188,6 +189,48 @@ func _bot_pushes() -> void:
 	me.bot_move = Vector2.ZERO
 	_check(through, "the bot got through the door (%.1f s, door %.2f)" % [t - start, d.amount])
 	_check(int(game.doors.stats.get("bot", 0)) >= 1, "it pushed the door open itself")
+	game.doors.agents_open_doors = false
+	game.doors.set_all(false)
+	await _seconds(1.2)
+
+
+## Dragging a sedated Walk-In through a closed door: the door opens for the dragger and the body
+## follows through the doorway.
+func _drag_through() -> void:
+	_say("---- dragging a monster through a door")
+	var d := _pick_hinged()
+	game.doors.set_all(false)
+	await _seconds(1.2)
+	game.doors.agents_open_doors = true
+	var w: Node = game._add_monster("walk_in", d.global_position + d.normal * 3.0)
+	await _frames(3)
+	w.sedate(90.0)
+	await _seconds(0.8)
+	_stand(d.global_position + d.normal * 1.9)
+	await _frames(2)
+	if game.combat.has_method("start_drag"):
+		game.combat.start_drag(me, w)
+	await _frames(3)
+	_check(int(me.get("dragging_monster")) >= 0, "the bot drags the sedated Walk-In")
+	var to: Vector3 = d.global_position - d.normal * 3.2
+	var start := t
+	var through := false
+	while t < start + 14.0:
+		var dir := to - me.global_position
+		me.bot_yaw = atan2(-dir.x, -dir.z)
+		me.bot_move = Vector2(0, -1)
+		await get_tree().physics_frame
+		if (me.global_position - to).length() < 0.9:
+			through = true
+			break
+	me.bot_move = Vector2.ZERO
+	await _seconds(0.5)
+	var body_side: float = (d.global_transform.affine_inverse() * w.global_position).z
+	_check(through, "the dragger went through the door (%.1f s, door %.2f)" % [t - start, d.amount])
+	_check(body_side < 0.0, "the dragged body came through the doorway after them (%.2f m past the door)" % -body_side)
+	if game.combat.has_method("drop_dragged"):
+		game.combat.drop_dragged(me)
+	game.kill_monster(w)
 	game.doors.agents_open_doors = false
 	game.doors.set_all(false)
 	await _seconds(1.2)
