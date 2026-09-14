@@ -19,7 +19,7 @@ const COLOURS := {
 	"player": Color(0.9, 0.95, 1.0),
 	"surgical": Color(0.25, 0.95, 0.85),
 	"loot": Color(1.0, 0.72, 0.22),
-	"container": Color(0.32, 0.42, 0.48),
+	"container": Color(0.16, 0.24, 0.28),
 }
 ## Metres per second the echo's wave front travels: things light up as it passes them.
 const WAVE_SPEED := 26.0
@@ -33,8 +33,8 @@ uniform float fill = 0.06;
 instance uniform float fade = 0.0;
 void fragment() {
 	float facing = abs(dot(normalize(NORMAL), normalize(VIEW)));
-	float edge = pow(1.0 - facing, 2.4);
-	ALBEDO = col * (edge * 1.7 + fill) * fade;
+	float edge = pow(1.0 - facing, 2.0);
+	ALBEDO = col * (edge * 2.2 + fill) * fade;
 }
 """
 
@@ -48,8 +48,8 @@ void fragment() {
 	float r = length(d * vec2(1.6, 1.0));
 	// Dark, bluish at the edges, with a faint ring rushing outward as the shriek goes out.
 	float band = smoothstep(0.05, 0.0, abs(r - ring)) * (1.0 - ring) * 0.35;
-	ALBEDO = vec3(0.01, 0.02, 0.04) + vec3(0.05, 0.12, 0.16) * band;
-	ALPHA = clamp(amount * (0.82 + r * 0.18), 0.0, 0.96);
+	ALBEDO = vec3(0.004, 0.008, 0.016) + vec3(0.05, 0.12, 0.16) * band;
+	ALPHA = clamp(amount * (0.9 + r * 0.1), 0.0, 0.97);
 }
 """
 
@@ -208,6 +208,8 @@ func _ghost(src: MeshInstance3D, cat: String, dist: float) -> void:
 	g.material_override = ghost_material(cat)
 	g.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	g.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
+	g.ignore_occlusion_culling = true   # the level's occluders would hide exactly what Echo is for
+	g.extra_cull_margin = 0.5
 	_root.add_child(g)
 	g.global_transform = src.global_transform
 	if src.skin != null and not src.skeleton.is_empty():

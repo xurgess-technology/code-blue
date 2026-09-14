@@ -10,7 +10,7 @@ extends Node3D
 
 const SWIRL_SHADER := """
 shader_type spatial;
-render_mode cull_disabled, unshaded;
+render_mode cull_disabled;
 uniform float level = 0.0;
 uniform float spin = 0.0;
 uniform float swirl_t = 0.0;
@@ -21,9 +21,12 @@ void fragment() {
 	if (obj.y + 0.5 > level) { discard; }
 	float a = atan(obj.z, obj.x);
 	float bands = sin(a * 3.0 + obj.y * 18.0 - swirl_t * 9.0) * 0.5 + 0.5;
-	vec3 pink = vec3(0.78, 0.36, 0.42);
-	vec3 dark = vec3(0.42, 0.07, 0.1);
-	ALBEDO = mix(dark, pink, bands * 0.7 + 0.15) * (0.55 + 0.45 * spin);
+	vec3 pink = vec3(0.62, 0.3, 0.32);
+	vec3 dark = vec3(0.3, 0.05, 0.06);
+	float chunks = step(0.8, fract(sin(dot(floor(vec2(a * 6.0, obj.y * 30.0 - swirl_t * 3.0)), vec2(12.9, 78.2))) * 43758.5));
+	ALBEDO = mix(mix(dark, pink, bands * 0.8 + 0.1), vec3(0.55, 0.45, 0.42), chunks * 0.5 * (1.0 - spin * 0.6));
+	ROUGHNESS = 0.25;
+	SPECULAR = 0.6;
 }
 """
 

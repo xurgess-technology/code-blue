@@ -28,7 +28,7 @@ void fragment() {
 	vec2 d = UV - vec2(0.5);
 	float vig = smoothstep(0.78, 0.22, length(d * vec2(1.35, 1.0)));
 	float blink = 1.0 - 0.85 * smoothstep(0.95, 1.0, sin(time_s * 0.9) * 0.5 + 0.5);
-	vec3 outc = (sick + grain * 0.2) * scan * vig * blink;
+	vec3 outc = (sick + grain * 0.13) * scan * vig * blink;
 	COLOR = vec4(mix(c, outc, amount), 1.0);
 }
 """
