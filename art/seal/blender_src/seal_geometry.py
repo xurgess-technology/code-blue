@@ -838,7 +838,7 @@ def mirror_part_z(P, name):
 
 
 # ---------------------------------------------------------------- stump cap (the cut face on the stub) and the severed face
-BONES_UV = [(0.002, -0.019, 0.0125, 0.0078), (0.005, 0.021, 0.0078, 0.0062)]   # (u, v, radius v, radius u): radius, ulna
+BONES_UV = [(0.0030, -0.019, 0.0150, 0.0068), (-0.0030, 0.0135, 0.0062, 0.0050)]   # (u, v, radius v, radius u): radius (big, off to one side), ulna (small, lower)
 
 
 def flipper_thetas(segs):
@@ -875,7 +875,7 @@ def build_cap(res, severed=False):
                 e = ((u - bu) / ru) ** 2 + ((v - bv) / rv) ** 2
                 bone = max(bone, math.exp(-e ** 2 * 0.8))
             dist = radius[j] * (1.0 - sc)
-            recess = -0.0045 * smooth01(dist / 0.012) * (1 - bone) + 0.0025 * bone
+            recess = -0.0040 * smooth01(dist / 0.012) * (1 - bone) + 0.0008 * bone
             wob = 0.0012 * noise.noise(Vector((u * 90.0, v * 90.0, 1.7))) * smooth01(dist / 0.006)
             q = q + T * sgn * (recess + wob) * (1.0 if k > 0 else 0.0)
             ring.append(q)

@@ -417,40 +417,76 @@ def detail_material():
     rough = b.fmix(claw, rough, b.fmix(stri, 0.26, 0.4))
     h = b.add(h, b.mul(claw, b.math('SUBTRACT', stri, 0.5), 0.3))
 
-    # the cut face: skin rim, thin fat, dark wet muscle with fibre ends, radius and ulna with marrow
+    # the cut face: a ragged skin edge, an uneven layer of fat, dark maroon muscle in bundles with
+    # pale fascia between them, the radius (big, off-centre) and ulna (small) as irregular cortex rings
+    # around spongy bone and marrow, all under a wet film with blood welling at the rim and pooling low.
     d = cap_d
-    muscle = b.mix(b.noise(b.vscale(F, (1.0, 1.0, 0.0)), 180.0, 5, 0.6), (0.11, 0.008, 0.010), (0.24, 0.025, 0.022))
-    fib = b.voronoi(b.vscale(F, (1.0, 1.0, 0.0)), 520.0, 1.0, 'DISTANCE_TO_EDGE').outputs['Distance']
-    muscle = b.mix(b.mul(b.mr(fib, 0.05, 0.0), 0.5), muscle, (0.30, 0.10, 0.08))
-    fascia = b.lines(b.noise(b.warp(b.vscale(F, (1, 1, 0)), 60.0, 0.004), 40.0, 3), 0.018)
-    muscle = b.mix(b.mul(fascia, 0.6), muscle, (0.45, 0.30, 0.22))
-    fat = b.mix(b.noise(F, 300.0, 3), (0.50, 0.40, 0.24), (0.62, 0.52, 0.32))
-    ccap = b.mix(b.mr(d, 0.0055, 0.0075), fat, muscle)
-    ccap = b.mix(b.mr(d, 0.0028, 0.0018), ccap, (0.035, 0.033, 0.032))
+    Fc = b.vscale(F, (1.0, 1.0, 0.0))
+    Fw = b.warp(Fc, 90.0, 0.0025)
+    # layers, with noisy, uneven boundaries
+    skin_w = b.add(0.0012, b.mul(b.noise(Fc, 260.0, 4, 0.7), 0.0022))
+    fat_w = b.add(skin_w, b.mul(b.mr(b.noise(b.voff(Fc, (2.0, 5.0, 0)), 45.0, 3), 0.40, 0.62), 0.0042))
+    in_skin = b.math('SUBTRACT', 1.0, b.mr(d, skin_w, b.add(skin_w, 0.0006)))
+    in_fat = b.math('SUBTRACT', 1.0, b.mr(d, fat_w, b.add(fat_w, 0.0009)))
+    # muscle: bundles of different tint, thin fascia between them, fibre-end stipple, dark clots
+    Fb = b.warp(Fc, 35.0, 0.012)
+    bun = b.voronoi(Fb, 75.0, 1.0)
+    bun_r = b.n('ShaderNodeSeparateColor')
+    b.link(bun.outputs['Color'], bun_r.inputs[0])
+    tint = bun_r.outputs[0]
+    muscle = b.mix(tint, (0.050, 0.008, 0.012), (0.105, 0.020, 0.020))
+    muscle = b.mix(b.mul(b.mr(b.noise(Fc, 30.0, 3), 0.45, 0.65), 0.7), muscle, (0.030, 0.006, 0.010))
+    muscle = b.mix(b.mul(b.mr(b.noise(Fc, 22.0, 3), 0.5, 0.7), 0.5), muscle, (0.12, 0.045, 0.035))
+    edge = b.voronoi(Fb, 75.0, 1.0, 'DISTANCE_TO_EDGE').outputs['Distance']
+    fascia = b.mul(b.mr(edge, 0.02, 0.0), b.mr(b.noise(Fc, 40.0, 3), 0.5, 0.65))
+    muscle = b.mix(b.mul(fascia, 0.35), muscle, (0.16, 0.08, 0.07))
+    stip = b.voronoi(Fc, 900.0, 1.0).outputs['Distance']
+    muscle = b.mix(b.mul(b.mr(stip, 0.25, 0.05), 0.35), muscle, (0.03, 0.002, 0.005))
+    clot = b.mr(b.noise(b.warp(Fc, 50.0, 0.003), 55.0, 6, 0.7), 0.60, 0.68)
+    muscle = b.mix(b.mul(clot, 0.85), muscle, (0.028, 0.002, 0.004))
+    fat = b.mix(b.noise(Fc, 400.0, 4, 0.6), (0.26, 0.15, 0.09), (0.38, 0.26, 0.15))
+    fat = b.mix(b.mul(b.mr(b.noise(Fc, 90.0, 3), 0.45, 0.65), 0.75), fat, (0.16, 0.04, 0.04))
+    ccap = b.mix(in_fat, muscle, fat)
+    skin_c = b.mix(b.noise(Fc, 500.0, 2), (0.022, 0.020, 0.019), (0.07, 0.055, 0.05))
+    ccap = b.mix(in_skin, ccap, skin_c)
+    # bones: irregular outlines (warped coordinates), a thick uneven cortex, spongy bone inside
     bone_ring = None
     bone_fill = None
-    for bu, bv, rv, ru in G.BONES_UV:
-        du = b.math('DIVIDE', b.math('SUBTRACT', cap_u, bu), ru)
-        dv = b.math('DIVIDE', b.math('SUBTRACT', cap_v, bv), rv)
+    for i, (bu, bv, rv, ru) in enumerate(G.BONES_UV):
+        wu = b.add(cap_u, b.mul(b.math('SUBTRACT', b.noise(Fc, 110.0 + 40 * i, 3, 0.6), 0.5), ru * 1.1))
+        wv = b.add(cap_v, b.mul(b.math('SUBTRACT', b.noise(b.voff(Fc, (3.1, 1.3, 0)), 110.0, 3, 0.6), 0.5), rv * 0.9))
+        du = b.math('DIVIDE', b.math('SUBTRACT', wu, bu), ru)
+        dv = b.math('DIVIDE', b.math('SUBTRACT', wv, bv), rv)
         rr = b.math('SQRT', b.add(b.mul(du, du), b.mul(dv, dv)))
-        rr = b.add(rr, b.mul(b.math('SUBTRACT', b.noise(F, 400.0, 3), 0.5), 0.12))
-        ring_ = b.mul(b.mr(rr, 1.05, 0.95), b.mr(rr, 0.55, 0.68))
-        fill = b.mr(rr, 0.70, 0.55)
+        cortex_in = b.add(0.55 + 0.08 * i, b.mul(b.noise(b.voff(Fc, (7.0 * i, 2.0, 0)), 90.0, 3), 0.30))
+        ring_ = b.mul(b.mr(rr, 1.02, 0.94), b.mr(rr, b.math('SUBTRACT', cortex_in, 0.04), cortex_in))
+        fill = b.mr(rr, b.math('SUBTRACT', cortex_in, 0.02), b.math('SUBTRACT', cortex_in, 0.10))
         bone_ring = ring_ if bone_ring is None else b.math('MAXIMUM', bone_ring, ring_)
         bone_fill = fill if bone_fill is None else b.math('MAXIMUM', bone_fill, fill)
-    saw = b.add(0.5, b.mul(b.math('SINE', b.mul(cap_v, 2400.0)), 0.5))
-    bone_c = b.mix(b.mul(saw, 0.25), b.mix(b.noise(F, 500.0, 3), (0.55, 0.50, 0.40), (0.70, 0.65, 0.54)), (0.40, 0.34, 0.26))
-    marrow = b.mix(b.noise(F, 600.0, 4), (0.20, 0.03, 0.03), (0.34, 0.10, 0.06))
+    saw = b.add(0.5, b.mul(b.math('SINE', b.add(b.mul(cap_v, 2200.0), b.mul(b.noise(Fc, 60.0, 2), 6.0))), 0.5))
+    bone_c = b.mix(b.noise(Fc, 700.0, 4, 0.6), (0.19, 0.14, 0.11), (0.28, 0.22, 0.17))
+    bone_c = b.mix(b.mul(saw, 0.35), bone_c, (0.17, 0.12, 0.10))
+    bone_c = b.mix(b.mul(b.mr(b.noise(Fc, 95.0, 5, 0.65), 0.40, 0.56), 0.9), bone_c, (0.07, 0.012, 0.014))
+    spongy = b.voronoi(Fc, 1500.0, 1.0).outputs['Distance']
+    marrow = b.mix(b.mr(spongy, 0.12, 0.42), (0.17, 0.12, 0.09), (0.08, 0.035, 0.03))
+    marrow = b.mix(b.mul(b.mr(b.noise(Fc, 200.0, 4), 0.5, 0.62), 0.8), marrow, (0.05, 0.010, 0.010))
     ccap = b.mix(bone_ring, ccap, bone_c)
     ccap = b.mix(bone_fill, ccap, marrow)
-    # blood welling toward the lowest part of the face
-    pool = b.mul(b.mr(cap_u, -0.005, -0.03), b.mr(b.noise(F, 60.0, 4), 0.3, 0.55))
-    ccap = b.mix(b.mul(pool, 0.7, b.math('SUBTRACT', 1.0, bone_ring)), ccap, (0.08, 0.004, 0.006))
+    # blood: welling along the rim, running down and pooling at the lowest edge, a few drops over bone
+    rim_blood = b.mul(b.mr(d, 0.009, 0.002), b.mr(b.noise(b.warp(Fc, 60.0, 0.004), 45.0, 5, 0.65), 0.42, 0.56))
+    pool = b.mul(b.mr(cap_u, -0.004, -0.022), b.mr(b.noise(Fc, 35.0, 4), 0.35, 0.55))
+    blood = b.math('MAXIMUM', rim_blood, pool)
+    blood_c = b.mix(b.noise(Fc, 150.0, 3), (0.022, 0.002, 0.003), (0.075, 0.006, 0.008))
+    ccap = b.mix(b.mul(blood, 0.9), ccap, blood_c)
     col = b.mix(cap, col, ccap)
-    rough_cap = b.fmix(bone_ring, b.fmix(b.mr(d, 0.0028, 0.0018), 0.14, 0.45), 0.42)
+    wet = b.fmix(b.noise(Fc, 120.0, 3), 0.05, 0.18)
+    rough_cap = b.fmix(bone_ring, wet, 0.30)
+    rough_cap = b.fmix(in_skin, rough_cap, 0.45)
+    rough_cap = b.fmix(blood, rough_cap, 0.04)
     rough = b.fmix(cap, rough, rough_cap)
-    hcap = b.add(b.mul(b.math('SUBTRACT', b.noise(F, 180.0, 5), 0.5), 0.5), b.mul(bone_ring, 0.5), b.mul(saw, bone_ring, 0.15),
-                 b.mul(b.mr(fib, 0.05, 0.0), -0.2))
+    hcap = b.add(b.mul(b.mr(edge, 0.0, 0.04), 0.15), b.mul(bone_ring, 0.35), b.mul(saw, bone_ring, 0.12),
+                 b.mul(b.math('SUBTRACT', b.noise(Fc, 250.0, 5), 0.5), 0.35), b.mul(clot, 0.2), b.mul(in_fat, 0.15),
+                 b.mul(b.mr(stip, 0.25, 0.05), -0.12), b.mul(blood, 0.1))
     h = b.fmix(cap, h, hcap)
 
     # fishing line: scuffed green-grey monofilament with a crust of algae
