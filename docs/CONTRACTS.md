@@ -780,6 +780,76 @@ game.downed_view           # scripts/downed/downed_view.gd: blood trails, the lo
 - Tests: `tools/downedtest.tscn` (headless), `tools/downedshot.tscn` (windowed shots into
   `tools/downed_shots/`), nettest scenario `downed`, devtest downed checks.
 
+## Combat (combat worker, sweep 3)
+
+`scripts/combat/combat.gd`, `game.combat` (child "Combat" of Game, every machine). The design is
+`docs/SWEEP3.md` "Combat"; this is what the code guarantees.
+
+```gdscript
+SAW_BREAK_CHANCE 0.12  SWING_COOLDOWN 0.8  SAW_REACH 2.0  SEDATE_SECONDS 75.0  JAB_COOLDOWN 1.0  JAB_REACH 1.8
+DRAG_HOLD 1.0  DRAG_SPEED_K 0.55  DRAG_BEHIND 1.15  JAB_KNOCKOUT 8.0  NOISE_HIT 0.9  NOISE_SWING 0.3
+game.combat.is_usable(kind) -> bool          # "bone_saw", "anesthetic"
+game.combat.use(p)                           # host (game.player_used): swing or jab with the selected stack
+game.combat.local_try_use(p) -> bool         # the clicking machine: its own cooldown, starts the animation
+game.combat.find_target(p, reach, cone_deg) -> {node, kind: "monster"|"player", point, dist} or {}
+game.combat.knock_out(q, seconds)            # host: the teammate jab (hands drop, stun + "stun" event)
+game.combat.is_sedated(m) / can_sedate(m) / sedation_left(m)   # guarded monster API
+game.combat.dragging(p) -> int               # monster id, -1 none (Player.dragging_monster, report key "dm")
+game.combat.dragger_of(m) -> Player or null  # every machine
+game.combat.monster_pin(m) -> Transform3D    # every machine, see below
+game.combat.can_drag(q, m, check_hands := true) / start_drag(q, m) / drop_dragged(p)   # host
+game.combat.dragger_pressed_interact(q, aim_id)   # host, from Player._consume_actions while dragging
+game.combat.strap(q, table_index) -> case id # host
+game.combat.table_index_for(interact_id) / strap_problem(table_index) -> "" or why not
+game.combat.animate_held(p, delta, fp, tp)   # Player._process
+game.combat.last_result / swings_seen / rng / break_chance / anim_freeze / stop_anim(p) / set_sedation_left(m, s)   # tests, tools
+```
+
+- **Saw** (host): a cone of 38 degrees around the aim from the eyes (yaw from `rotation.y`, pitch
+  from `head.rotation.x`), the nearest monster or standing player within `SAW_REACH` plus its
+  radius, with a clear line (`C.L_WORLD`). Monster: `take_hit(dir, 1, "saw:<name>")`; `"killed"` ->
+  `game.kill_monster(m)` (pays nothing); `"immune"` -> `combat_clang`. Player:
+  `game.damage_player(q, 1, "saw:<name>", knock)` unless invulnerable or in god mode. Every
+  connecting hit (the Night Nurse included) rolls `breaks()`; a snap clears the saw's slot, plays
+  `combat_snap` and says "X's bone saw snapped.". Noise 0.9 at the hit (kind "saw"), 0.3 through
+  air ("swing").
+- **Jab** (host): a 30 degree cone within `JAB_REACH`. A teammate: one vial, `knock_out(q, 8)`. A
+  monster that is not capturable (the Night Nurse): nothing used, "The needle will not go in.".
+  Already sedated: nothing. `can_sedate(m)`: one vial and `sedate(SEDATE_SECONDS)`. Otherwise
+  nothing used, `m.alert_to(p)`, "It shrugged off the needle.".
+- `use` is refused while downed, stunned, carrying or carried, dragging or operating. The host
+  cooldown is 0.8 x the item's cooldown; the clicking machine enforces the full one.
+- **Drag**: every monster gets an `Area3D` child "CombatAim" (interact_id `mo_<id>`, a 0.9 x 0.7
+  x 2.1 box centred 0.35 m up, in the monster's own space), on `C.L_INTERACT` only while
+  `is_sedated(m)` and nobody drags it. Hold E for `DRAG_HOLD` with empty hands (host-simulated like
+  carrying; progress shows through `Player.carry_hold`). While dragging the player walks at
+  `DRAG_SPEED_K`, cannot sprint, shove, use, drop or change slots, and `_update_aim` offers only
+  `Strap the X to the table` on a free patient table (aim id = the table's interact id) or `Put
+  the X down`. Hit (`damage_player`), shoved, knocked out, downed, dead or gone: the monster is let
+  go where it lies. Waking while dragged (`is_sedated` false): dropped, turned to the dragger,
+  `alert_to`, `game.monster_hit_player(m, q)`.
+- **`monster_pin(m)`**: origin on the floor under the middle of the body, `DRAG_BEHIND` behind the
+  dragger; basis = the dragger's yaw, so the pin's -Z points at the dragger and the body lies along
+  Z, feet toward -Z, head toward +Z. Not dragged: the monster's own transform. A monster with a
+  `dragged_by` field places itself there every frame on every machine; `start_drag`,
+  `drop_dragged` and `strap` set and clear `m.dragged_by`, and combat clears a stale one.
+- **Strap**: `strap_problem(ti)` is "" in `Phase.SHIFT` with no case on the table and no crew
+  heading there. The case is exactly `game.add_case({table, patient_id: m.kind, ailment_id:
+  "dissection", monster: true, flags: {sedation: lerp(0.35, 1.0, sedation_left / 75), snapped to
+  0.01}})`; then `game.monsters.erase(id)`, `on_monster_removed(m)`, `m.queue_free()` (no death
+  effect, no `monster_killed` event), `combat_strap` and "X strapped the Y to the table.".
+- **Network**: `cb_swing {id, k: "saw"|"jab"}` (reliable) animates the use on every other machine;
+  `net_state()` (`g.cb`) is `{}` or `{s: [monster ids]}` (the fallback sedated set only). Drags ride
+  in `Player.report_full` as `dm`.
+- **Animation**: `anim_pose(k, t, rest, third)` gives the held stack's pose in camera space (first
+  person) or body space (others: in front of the head). The jab shows `make_syringe()` (needle along
+  -Z, warmed in `warmup.gd`) and hides the vials. `SWING_TIME` 0.55 s, `JAB_TIME` 0.45 s.
+- Sounds (`tools/gen_audio_combat.mjs`): `combat_swing_01/_02`, `combat_jab_swish`,
+  `combat_hit_01/_02`, `combat_clang`, `combat_snap`, `combat_jab`, `combat_needle_fail`,
+  `combat_drag`, `combat_strap`.
+- Tests: `tools/combattest.tscn` (headless, dev room), `tools/combatshot.tscn` (windowed shots to
+  `tools/combat_shots/`), nettest scenario `combat`.
+
 ## Networking (net worker, sweep 2)
 
 `Net` autoload (`scripts/net.gd`):

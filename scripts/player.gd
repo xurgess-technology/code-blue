@@ -95,6 +95,12 @@ var downed_aim: Area3D
 const CRAWL_SPEED := 0.75
 const CARRY_SPEED_K := 0.6
 
+## SWEEP 3 HOOK (combat): the monster id this player drags (scripts/combat/combat.gd), -1 for none.
+## Host authoritative, report key `dm`. A dragger walks slowly and cannot shove, use, drop or
+## change slots; E straps the monster to a free patient table or puts it down.
+var dragging_monster: int = -1
+const CombatScript := preload("res://scripts/combat/combat.gd")
+
 var _shove_seen: int = 0
 var _drop_seen: int = 0
 var _interact_seen: int = 0
@@ -471,7 +477,7 @@ func _local_step(delta: float) -> void:
 			and aim_id != "" and aim_hold <= 0.0 and not aim_prompt.begins_with("!"):
 		interact_count += 1
 	# Downed hook: downed, E calls for help; carrying, E puts them down (or on the table, above).
-	elif can_move and not bot_active and Input.is_action_just_pressed("interact") and (downed or carrying != 0):
+	elif can_move and not bot_active and Input.is_action_just_pressed("interact") and (downed or carrying != 0 or dragging_monster >= 0):
 		interact_count += 1
 
 	rotation.y = _yaw
@@ -485,7 +491,7 @@ func _local_step(delta: float) -> void:
 		return
 
 	moving = input_dir.length() > 0.1 and not operating
-	sprinting = moving and can_move and want_sprint and stamina > 0.0 and not downed and carrying == 0
+	sprinting = moving and can_move and want_sprint and stamina > 0.0 and not downed and carrying == 0 and dragging_monster < 0
 	stamina = clampf(stamina + (-delta / 4.5 if sprinting else delta / 5.0), 0.0, 1.0)
 
 	var speed: float = 0.0 if operating else (C.SPRINT_SPEED if sprinting else C.WALK_SPEED)
@@ -494,6 +500,8 @@ func _local_step(delta: float) -> void:
 		speed = CRAWL_SPEED
 	elif carrying != 0:
 		speed *= CARRY_SPEED_K
+	elif dragging_monster >= 0:
+		speed *= CombatScript.DRAG_SPEED_K   # SWEEP 3 HOOK (combat): dragging a sedated monster
 	var dir := (transform.basis * Vector3(input_dir.x, 0.0, input_dir.y)).normalized()
 	var target := dir * speed + _knock
 	var a: float = ACCEL if is_on_floor() else AIR_ACCEL
@@ -516,7 +524,7 @@ func _local_step(delta: float) -> void:
 			set_flashlight(not flashlight_on)
 			Audio.play("click")
 		_shove_cd = maxf(0.0, _shove_cd - delta)
-		if downed or carrying != 0:
+		if downed or carrying != 0 or dragging_monster >= 0:
 			_shove_cd = maxf(_shove_cd, 0.2)   # downed hook: no shoving, dropping or slot changes
 		# DEV HOOK: with the dev gun out, the left mouse button fires instead of shoving.
 		var gun_out: bool = g != null and g.dev_mode and g.dev.has_gun(peer_id) and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
@@ -525,23 +533,27 @@ func _local_step(delta: float) -> void:
 			shove_count += 1
 		# SWEEP 3 HOOK: left mouse uses the held item when it has a use (saw, anesthetic), else it
 		# shoves like Q. R triggers the brain ability unless R would open the guide.
-		if Input.is_action_just_pressed("use") and not gun_out and not downed and carrying == 0:
+		if Input.is_action_just_pressed("use") and not gun_out and not downed and carrying == 0 and dragging_monster < 0:
 			if g != null and g.combat != null and g.combat.is_usable(selected_stack().kind):
-				use_count += 1
+				# SWEEP 3 HOOK (combat): the swing / jab animates here at once; a click during the
+				# cooldown does nothing.
+				if g.combat.local_try_use(self):
+					use_count += 1
 			elif _shove_cd <= 0.0:
 				_shove_cd = C.SHOVE_COOLDOWN
 				shove_count += 1
 		if Input.is_action_just_pressed("read") and not downed and not _would_read_guide():
 			ability_count += 1
-		if Input.is_action_just_pressed("drop") and selected_stack().kind != "":
+		if Input.is_action_just_pressed("drop") and selected_stack().kind != "" and dragging_monster < 0:
 			drop_count += 1
-		for i in C.CARRY_CAP:
-			if Input.is_action_just_pressed("slot_%d" % (i + 1)):
-				selected = i
-		if Input.is_action_just_pressed("slot_next"):
-			select_step(1)
-		if Input.is_action_just_pressed("slot_prev"):
-			select_step(-1)
+		if dragging_monster < 0:   # SWEEP 3 HOOK (combat): no slot changes while dragging
+			for i in C.CARRY_CAP:
+				if Input.is_action_just_pressed("slot_%d" % (i + 1)):
+					selected = i
+			if Input.is_action_just_pressed("slot_next"):
+				select_step(1)
+			if Input.is_action_just_pressed("slot_prev"):
+				select_step(-1)
 
 	# Footsteps (a crawl makes none)
 	if moving and is_on_floor() and not downed:
@@ -622,7 +634,7 @@ func _consume_actions() -> void:
 	if game == null:
 		return
 	# Downed hook: a downed player only calls for help; a carrier only puts down or places.
-	var busy := downed or carrying != 0
+	var busy := downed or carrying != 0 or dragging_monster >= 0   # SWEEP 3 HOOK (combat): dragging
 	# SWEEP 3 HOOK: item use and the brain ability (the systems decide what a busy player may do).
 	if use_count != _use_seen:
 		_use_seen = use_count
@@ -646,6 +658,8 @@ func _consume_actions() -> void:
 			game.downed_call_out(self)
 		elif alive and carrying != 0:
 			game.carrier_pressed_interact(self, aim_id)
+		elif alive and dragging_monster >= 0 and game.combat != null:
+			game.combat.dragger_pressed_interact(self, aim_id)   # SWEEP 3 HOOK (combat)
 		elif alive:
 			game.player_pressed_interact(self, aim_id)
 
@@ -676,11 +690,17 @@ func _update_aim() -> void:
 		q.collide_with_areas = true
 		q.exclude = [get_rid()]
 		var hit := get_world_3d().direct_space_state.intersect_ray(q)
-		if hit.is_empty():
+		if hit.is_empty() and dragging_monster < 0:   # SWEEP 3 HOOK (combat): a dragger always gets a prompt
 			return
-		node = hit.collider
+		node = hit.get("collider")
 		while node != null and not node.has_meta("interact_id"):
 			node = node.get_parent()
+	# SWEEP 3 HOOK (combat): a dragger can only strap the monster to a free patient table, or put it down.
+	if dragging_monster >= 0 and game != null and game.combat != null:
+		var da: Array = game.combat.drag_aim(self, node)
+		aim_id = String(da[0])
+		aim_prompt = String(da[1])
+		return
 	# Downed hook: a carrier can only put someone on the player table, or down anywhere else.
 	if carrying != 0:
 		var who = game.players.get(carrying) if game != null else null
@@ -878,6 +898,8 @@ func holding(kind: String) -> bool:
 
 func _process(_delta: float) -> void:
 	_update_down_pose(_delta)  # DEV HOOK
+	if game != null and game.combat != null:
+		game.combat.animate_held(self, _delta, _held_fp, _held_tp)   # SWEEP 3 HOOK (combat): swing / jab
 	var s: Dictionary = selected_stack()
 	var key := "%s:%d" % [s.kind, s.count]
 	if key == _held_key:
@@ -963,6 +985,7 @@ func revive_full() -> void:
 	slots = empty_slots()
 	selected = 0
 	operating = false
+	dragging_monster = -1   # SWEEP 3 HOOK (combat)
 	_clear_downed()
 	_set_visible_alive(true)
 
@@ -1124,6 +1147,7 @@ func report_full() -> Dictionary:
 		# downed hook
 		"dn": downed, "bl": snappedf(bleed, 1.0), "cb": carried_by, "ca": carrying, "ot": on_table,
 		"ch": snappedf(carry_hold, 0.1),
+		"dm": dragging_monster,   # SWEEP 3 HOOK (combat)
 	}
 
 
@@ -1155,6 +1179,7 @@ func apply_remote_full(s: Dictionary) -> void:
 	carrying = int(s.get("ca", 0))
 	on_table = bool(s.get("ot", false))
 	carry_hold = float(s.get("ch", 0.0))
+	dragging_monster = int(s.get("dm", -1))   # SWEEP 3 HOOK (combat)
 	var host_bleed := float(s.get("bl", 0.0))
 	if not downed or absf(host_bleed - bleed) > 1.5:
 		bleed = host_bleed

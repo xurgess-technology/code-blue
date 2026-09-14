@@ -62,6 +62,10 @@ static func run(game: Node) -> void:
 		x += 0.2
 	EconomyScript.warm(shelf)
 	OrScreenScript.warm(shelf)  # ORSCREEN HOOK: the wall monitor's glass shader and viewport
+	# SWEEP 3 HOOK (combat): the syringe the jab draws (its glass is alpha-blended).
+	var syringe: Node3D = preload("res://scripts/combat/combat.gd").make_syringe()
+	shelf.add_child(syringe)
+	syringe.position = Vector3(x, 0.3, 0.3)
 
 	# Patients, each showing every visual state a case can reach
 	var bodies := {}
