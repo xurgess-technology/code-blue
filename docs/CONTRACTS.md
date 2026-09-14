@@ -377,8 +377,35 @@ func eye_transform() -> Transform3D                         # every machine: eye
 - Tests: `tools/monster_lab.tscn` (headless scenarios 1-10: hearing, darkness, the Nurse, contact,
   roster, client mirrors, the Walk-In, hits/sedation/waking, dragging/lying copies, placement over
   generated hospitals), `-- --shots` (windowed close-ups into `tools/monster_shots/`), `-- --perf`
-  (Walk-In frame cost, windowed), `-- --real` (a bot in a generated hospital), and the nettest
-  scenario `monsters`.
+  (Walk-In frame cost, windowed; `-- --perf --nurses`: 0, 1 and 4 Night Nurses in view), `-- --real`
+  (a bot in a generated hospital), and the nettest scenario `monsters`.
+
+### The Night Nurse's model (2026-09-14)
+
+Asset `monster/night_nurse` (`assets/models/monsters/night_nurse/`, built in Blender from
+`art/night_nurse/`, see `ASSETS.md`): 2.30 m, feet at y 0, faces -Z after the registry's yaw 180,
+clips `Idle`, `Walk` (in place, no root motion), `Frozen`. `MonsterModel.setup("night_nurse")` builds
+it through `scripts/monsters/night_nurse_rig.gd`; without the asset she falls back to the reshaped
+Kenney rig and `night_nurse_look.gd` (unchanged).
+
+```gdscript
+model.nurse                  # NursePoser (SkeletonModifier3D) or null; lunge, recoil, slump (0..1)
+model.rig / skeleton / anim  # the GLB's root, Skeleton3D and AnimationPlayer (the lab and tests read anim)
+model.play(logical, rate, blend)   # "idle" Idle, "walk"/"run"/"attack" Walk, "frozen"/"static" Frozen
+model.hand_point(left)       # the hand.L / hand.R bone, world
+model.eye_offset()           # eyes in the Head node's frame: (0, 0.134, 0.079) for her, (0, 0.13, 0.1) the rig looks
+NurseRig.WALK_SPEED 1.0      # m/s at which Walk's planted foot keeps pace; rate = speed / WALK_SPEED
+```
+
+- A `BoneAttachment3D` named `Head` rides her head bone (`Monster.eye_transform`, the lab's head shots).
+- `Monster._nurse_visual` (every machine, from the report): watched (`ob`) stops the clip on its frame
+  (`anim.speed_scale = 0`) and holds every pose; moving (or lunging) plays Walk at `speed / WALK_SPEED`
+  (0.3..4x) with the model lifted `WALK_LIFT` 3.5 cm; lunging adds the `lunge` reach; a calm that starts
+  outside a retreat (a dev gun knock-down) throws her back (`recoil`, 0.6 s) and then holds `Frozen`
+  while she stands down; otherwise Idle. Footstep squeaks follow the clip (0.8 s / speed).
+- She never lies down, is never dragged, sedated or strapped (sweep 3 locked design), so she has no
+  lying or dissection body. `make_lying("night_nurse")` returns her rest pose if anyone asks.
+- The dev room's corpse (`dev_gun.gd monster_corpse`) shows her `Frozen` pose with `slump` 1.
 
 ## Medical guide (guide worker)
 
@@ -553,6 +580,16 @@ knocked down, no movement; a `"stun"` event plus the dev snapshot block), `nocli
 - World changes from the panel or tests: `game.dev.request(action, args)`; the host applies,
   a client sends. Shots: `game.dev.fire(shooter, from, dir, "kill" | "knock")`.
 - Sounds `dev_zap`, `dev_thump`, `dev_defib` from `tools/gen_audio_dev.mjs`.
+- **Night Nurse section** (2026-09-14): requests `nurse_ignore_watch {on}`, `nurse_walk {mode: "" |
+  "follow" | "loop"}` (follow: the sender; loop: a 6 x 3.5 m rectangle round where the sender stands,
+  long side along their facing, corners snapped to the navigation mesh) and `nurse_pace {i}`
+  (`NURSE_PACES` 3.4 / 1.6 / 0.8 m/s); the panel's "Nurse in front" is `spawn_monster {night_nurse,
+  front}`. Host fields `nurse_ignore_watch`, `nurse_walk`, `nurse_pace`, `nurse_who`, `nurse_loop`;
+  the dv snapshot carries `nn: [ignore, walk, pace]`; `reset_state` clears them.
+  `dev.nurse_settings() -> {ignore_watch, walk, who, loop, speed}` is what `Monster.dev_nurse()` hands
+  the nurse brain (empty outside the dev room). Ignoring: `observed` stays false (so the report's `ob`
+  and every client's clip keep running) and she does not stalk; follow stops at 2.5 m and walk modes
+  never lunge or hit. The pace replaces her 3.4 m/s in every walk, hunting included.
 
 ## Inventory and money (inventory worker, sweep 2 wave 2)
 

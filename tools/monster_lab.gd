@@ -15,6 +15,7 @@ const MonsterScript := preload("res://scripts/monster.gd")
 const PlayerScript := preload("res://scripts/player.gd")
 const Percept := preload("res://scripts/perception.gd")
 const Modes := preload("res://scripts/monsters/modes.gd")
+const NurseRig := preload("res://scripts/monsters/night_nurse_rig.gd")
 const SHOT_DIR := "res://tools/monster_shots"
 
 ## The stand-in game: exactly the surface monsters and Perception use.
@@ -344,6 +345,8 @@ func _scenario_nurse() -> void:
 	var n: Node = spawn("night_nurse", cor(20.0), PI * 0.5)
 	place_player(cor(8.0), cor(20.0) + Vector3.UP * 1.3, true)
 	await wait(0.3)
+	check("the Night Nurse wears her Blender model (clips %s)" % (str(n.model.anim.get_animation_list()) if n.model.anim != null else "none"),
+		n.model.nurse != null and n.model.anim.has_animation("Walk") and n.model.anim.has_animation("Idle") and n.model.anim.has_animation("Frozen"))
 	var start: Vector3 = n.global_position
 	var frozen_anim := true
 	for i in 120:
@@ -361,6 +364,13 @@ func _scenario_nurse() -> void:
 	moved = n.global_position.distance_to(start)
 	check("the player turns away: it moves (%.2f m in 1 s)" % moved, moved > 2.0, "observed=%s mode=%d" % [n.observed, n.mode])
 	check("it moves at about 3.4 m/s (%.2f)" % n.speed, n.speed > 3.0 and n.speed < 3.8)
+	var clip: String = n.model.anim.current_animation
+	var rate: float = n.model.anim.speed_scale
+	check("walking: the Walk clip plays at speed / %.1f m/s so the feet keep pace (%s at %.2fx for %.2f m/s)" % [NurseRig.WALK_SPEED, clip, rate, n.speed],
+		clip == "Walk" and absf(rate - n.speed / NurseRig.WALK_SPEED) < 0.35)
+	var eyes: Transform3D = n.eye_transform()
+	check("eye_transform on her head bone (%.2f m up, %.2f m from her feet)" % [eyes.origin.y, Vector2(eyes.origin.x - n.global_position.x, eyes.origin.z - n.global_position.z).length()],
+		eyes.origin.y > 1.75 and eyes.origin.y < 2.3 and Vector2(eyes.origin.x - n.global_position.x, eyes.origin.z - n.global_position.z).length() < 0.5)
 
 	# Look back at it: frozen within one observation tick.
 	place_player(p1.global_position, n.global_position + Vector3.UP * 1.3, true)
@@ -911,6 +921,13 @@ func _run_shots() -> void:
 		["nurse_4m", _shot_nurse.bind(4.0)],
 		["nurse_1_5m", _shot_nurse.bind(1.5)],
 		["nurse_door", _shot_nurse_door],
+		["nurse_walk_flashlight", _shot_nurse_walk.bind(4.5, 1.6)],
+		["nurse_frozen_watched", _shot_nurse_frozen],
+		["nurse_idle", _shot_nurse_idle],
+		["nurse_knocked", _shot_nurse_knocked],
+		["nurse_lunge", _shot_nurse_lunge],
+		["nurse_face", _shot_head.bind("night_nurse", false, 0.9, 0.35)],
+		["nurse_corpse", _shot_nurse_corpse],
 		["walk_in_4m", _shot_walk_in.bind(4.0, false)],
 		["walk_in_1_5m", _shot_walk_in.bind(1.5, false)],
 		["walk_in_face", _shot_head.bind("walk_in", false, 0.75, 0.45)],
@@ -935,6 +952,7 @@ func _run_shots() -> void:
 		var path := "%s/%s.png" % [SHOT_DIR, s[0]]
 		img.save_png(ProjectSettings.globalize_path(path))
 		print("[monster_lab] wrote ", path)
+		_shot_tick = Callable()
 	get_tree().quit(0)
 
 
@@ -986,6 +1004,91 @@ func _shot_nurse_door() -> void:
 	(bulbs[4] as OmniLight3D).light_energy = HB.LIGHT_ENERGY * 0.6
 	place_player(cor(door.x - 10.0, 0.3), door + Vector3.UP * 1.3, true)
 	await wait(0.3)
+
+
+## Called every physics frame while a shot waits for its capture (cleared after each capture).
+var _shot_tick := Callable()
+
+
+func _physics_process(_delta: float) -> void:
+	if _shot_tick.is_valid():
+		_shot_tick.call()
+
+
+## Walking across the dark corridor toward the camera's side, nobody watching it (the dev room's
+## "ignores being watched"), lit only by the flashlight. The clip runs right up to the capture.
+func _shot_nurse_walk(dist: float, spd: float) -> void:
+	var pos := cor(20.0, 0.6)
+	var n: Node = spawn("night_nurse", pos, -PI * 0.5)
+	var yaw := -PI * 0.5 - 0.75
+	place_player(cor(20.0 + dist, -1.0), pos + Vector3.UP * 1.3, true)
+	_shot_tick = func():
+		if is_instance_valid(n):
+			_pose(n, pos, yaw, Modes.Mode.WANDER, true, spd)
+	await wait(0.5)
+
+
+## Caught mid-stride: walking, then the host says observed; the capture is 1 s after the freeze.
+func _shot_nurse_frozen() -> void:
+	var pos := cor(20.0, 0.5)
+	var n: Node = spawn("night_nurse", pos, -PI * 0.5)
+	var yaw := -PI * 0.5 - 0.9
+	place_player(cor(23.8, -0.9), pos + Vector3.UP * 1.3, true)
+	var frame := [0]
+	_shot_tick = func():
+		frame[0] += 1
+		if is_instance_valid(n):
+			_pose(n, pos, yaw, Modes.Mode.WANDER, frame[0] < 23, 1.6 if frame[0] < 23 else 0.0, {"ob": frame[0] >= 23})
+	await wait(0.0)
+
+
+func _shot_nurse_idle() -> void:
+	var pos := cor(20.0, 0.2)
+	var n: Node = spawn("night_nurse", pos, -PI * 0.5)
+	set_light(1, true)
+	(bulbs[1] as OmniLight3D).light_energy = HB.LIGHT_ENERGY * 0.45
+	_pose(n, pos, -PI * 0.5 - 0.35, Modes.Mode.IDLE, false, 0.0)
+	place_player(pos + Vector3(3.6, 0, 0.6), pos + Vector3.UP * 1.3, true)
+	await wait(1.5)
+
+
+## A dev gun knock-down: calm starts outside a retreat, she is thrown back, then holds the Frozen pose.
+func _shot_nurse_knocked() -> void:
+	var pos := cor(20.0, 0.3)
+	var n: Node = spawn("night_nurse", pos, -PI * 0.5)
+	var yaw := -PI * 0.5 - 0.6
+	place_player(cor(23.4, -0.9), pos + Vector3.UP * 1.4, true)
+	var frame := [0]
+	# Walking, then (about 0.25 s before the capture) the knock-down lands.
+	_shot_tick = func():
+		frame[0] += 1
+		if is_instance_valid(n):
+			if frame[0] < 62:
+				_pose(n, pos, yaw, Modes.Mode.WANDER, true, 1.6)
+			else:
+				_pose(n, pos, yaw, Modes.Mode.IDLE, false, 0.0, {"cm": true})
+	await wait(0.0)
+
+
+func _shot_nurse_lunge() -> void:
+	var pos := cor(20.0, 0.3)
+	var n: Node = spawn("night_nurse", pos, -PI * 0.5)
+	place_player(cor(22.6, -0.7), pos + Vector3.UP * 1.5, true)
+	_shot_tick = func():
+		if is_instance_valid(n):
+			_pose(n, pos, -PI * 0.5 - 0.45, Modes.Mode.WANDER, true, 3.4, {"lg": true})
+	await wait(0.3)
+
+
+func _shot_nurse_corpse() -> void:
+	var pos := cor(20.0, 0.0)
+	var root := Node3D.new()
+	root.add_to_group("monster")
+	add_child(root)
+	(load("res://scripts/dev/dev_gun.gd") as GDScript).monster_corpse(root, "night_nurse", pos, -PI * 0.5 + 0.6)
+	set_light(1, true)
+	place_player(pos + Vector3(2.6, 0, 1.6), pos + Vector3.UP * 0.3, true)
+	await wait(0.2)
 
 
 func _shot_walk_in(dist: float, _unused: bool) -> void:
@@ -1329,6 +1432,9 @@ func _run_perf() -> void:
 		bot.bot_move = Vector2.ZERO
 		bot.flashlight_on = true
 
+	if OS.get_cmdline_user_args().has("--nurses"):
+		await _perf_nurses(g, bot, first, best_dir, look, frames)
+		return
 	for pass_i in 2:
 		# A: no Walk-Ins at all (what the game had before).
 		g._spawn_monsters()
@@ -1359,9 +1465,50 @@ func _run_perf() -> void:
 	get_tree().quit(0)
 
 
+## `-- --perf --nurses`: the same view with no monsters, then 1 and 4 Night Nurses 3-6 m in front of
+## the camera, walking in place (posed like a client, so they animate and never reach the camera).
+func _perf_nurses(g: Node, bot: Node, first: Vector3, best_dir: Vector3, look: Callable, frames: int) -> void:
+	for pass_i in 2:
+		for count in [0, 1, 4]:
+			g._clear_monsters()
+			await get_tree().process_frame
+			var list: Array = []
+			for i in count:
+				var side := best_dir.cross(Vector3.UP) * (0.7 if i % 2 == 0 else -0.7)
+				var p: Vector3 = first + best_dir * (3.0 + i * 1.0) + side * (0.0 if count == 1 else 1.0)
+				var m: Node = g._add_monster("night_nurse", p)
+				m.set_physics_process(false)
+				list.append(m)
+			look.call()
+			_perf_tick = func():
+				for m in list:
+					if is_instance_valid(m):
+						var to: Vector3 = bot.global_position - m.global_position
+						m.rotation.y = atan2(-to.x, -to.z)
+						m.apply_remote({"pos": m.global_position, "y": m.rotation.y, "md": Modes.Mode.WANDER, "mv": true, "sp": 1.6, "ob": false})
+						m._update_visual(get_process_delta_time())
+			await _perf_measure("%d Night Nurse%s in view #%d" % [count, "" if count == 1 else "s", pass_i + 1], frames, bot)
+			if pass_i == 0 and count > 0:
+				# What was measured, to check the nurses really were in view.
+				await RenderingServer.frame_post_draw
+				DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(SHOT_DIR))
+				get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("%s/perf_%d_nurses.png" % [SHOT_DIR, count]))
+			_perf_tick = Callable()
+	print("[perf] ============================================================================")
+	print("[perf] %-40s avg fps  1%%low  worst ms  phys ms  proc ms  draws" % "scenario")
+	for r in _perf_rows:
+		print("[perf] %-40s %7.0f  %5.0f  %8.1f  %7.2f  %7.2f  %5d" % [r.name, r.fps, r.low, r.worst, r.phys, r.proc, r.draws])
+	get_tree().quit(0)
+
+
+var _perf_tick := Callable()
+
+
 func _perf_measure(label: String, frames: int, bot: Node) -> void:
 	for i in 60:
 		await get_tree().process_frame
+		if _perf_tick.is_valid():
+			_perf_tick.call()
 	var times: Array[float] = []
 	var phys := 0.0
 	var proc := 0.0
@@ -1369,6 +1516,8 @@ func _perf_measure(label: String, frames: int, bot: Node) -> void:
 	var cam_pos: Vector3 = bot.global_position
 	for i in frames:
 		await get_tree().process_frame
+		if _perf_tick.is_valid():
+			_perf_tick.call()
 		if bot.global_position.distance_to(cam_pos) > 0.3:
 			bot.teleport(cam_pos)
 		times.append(get_process_delta_time() * 1000.0)

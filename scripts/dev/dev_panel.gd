@@ -7,6 +7,7 @@ const ACCENT := Color(0.3, 0.95, 0.8)
 const DIM := Color(0.6, 0.68, 0.7)
 const PANEL_W := 400.0
 const LootTableScript := preload("res://scripts/economy/loot_table.gd")
+const DevRoomScript := preload("res://scripts/dev/dev_room.gd")   # NURSE HOOK: pace names
 
 var game: Node = null
 var main: Node = null
@@ -187,6 +188,21 @@ func _build() -> void:
 	_button(s3, "Kill all monsters", func(): _req("kill_monsters"))
 	_c["monster_count"] = _label(s3, "", 12, DIM)
 
+	# ---- NURSE HOOK (night nurse model): watch her walk under a flashlight
+	_section(col, "Night Nurse")
+	var nn1 := _row(col)
+	_c["nurse_ignore"] = _check(nn1, "Nurse ignores being watched", func(on): _req("nurse_ignore_watch", {"on": on}))
+	_button(nn1, "Nurse in front", func(): _req("spawn_monster", {"kind": "night_nurse", "where": "front"}))
+	var nn2 := _row(col)
+	var walks := ["", "follow", "loop"]
+	var walk := _option(nn2, ["Hunts players", "Follows me", "Walks a loop here"])
+	walk.item_selected.connect(func(i): _req("nurse_walk", {"mode": walks[i]}))
+	_c["nurse_walk"] = walk
+	var pace := _option(nn2, DevRoomScript.NURSE_PACE_NAMES)
+	pace.item_selected.connect(func(i): _req("nurse_pace", {"i": i}))
+	_c["nurse_pace"] = pace
+	_label(col, "Follows me: stops 2.5 m away, never attacks. A loop is a 6 x 3.5 m rectangle round where you stand, long side the way you face.", 11, DIM)
+
 	# ---- brains (SWEEP 3 HOOK, scripts/brains/brains.gd dev_request)
 	_section(col, "Brains")
 	var br1 := _row(col)
@@ -353,6 +369,12 @@ func _refresh() -> void:
 	(_c["pen"] as CheckBox).set_pressed_no_signal(dev.pen_open)
 	(_c["freeze"] as CheckBox).set_pressed_no_signal(dev.freeze_vitals)
 	(_c["auto_revive"] as CheckBox).set_pressed_no_signal(dev.auto_revive)
+	(_c["nurse_ignore"] as CheckBox).set_pressed_no_signal(dev.nurse_ignore_watch)   # NURSE HOOK
+	var walk_i: int = ["", "follow", "loop"].find(dev.nurse_walk)
+	if (_c["nurse_walk"] as OptionButton).selected != walk_i:
+		(_c["nurse_walk"] as OptionButton).select(maxi(0, walk_i))
+	if (_c["nurse_pace"] as OptionButton).selected != int(dev.nurse_pace):
+		(_c["nurse_pace"] as OptionButton).select(int(dev.nurse_pace))
 	if not _dragging.has("ts"):
 		(_c["ts"] as HSlider).set_value_no_signal(dev.time_scale)
 		(_c["ts_label"] as Label).text = "%.2fx" % dev.time_scale

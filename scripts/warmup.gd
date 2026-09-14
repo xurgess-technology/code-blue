@@ -114,7 +114,9 @@ static func run(game: Node) -> void:
 	ptable.position = Vector3(0.0, -1.4, -2.2)
 	ptable.scale = Vector3.ONE * 0.5
 
-	# Monsters: the visual model only, so nothing starts thinking or moving
+	# Monsters: the visual model only, so nothing starts thinking or moving. NURSE HOOK: "night_nurse"
+	# builds her Blender model (monster/night_nurse: its two skinned materials, shadow mesh and the
+	# first load of its six maps), so the first Night Nurse of a session does not hitch.
 	var mx := -1.0
 	for kind in ["discharged", "night_nurse", "walk_in"]:  # SWEEP 3 HOOK (monsters): the Walk-In
 		var model: Node3D = MonsterModel.new()

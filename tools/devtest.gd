@@ -52,7 +52,7 @@ func _ready() -> void:
 
 func _physics_process(delta: float) -> void:
 	t += delta
-	if _now() > (420.0 if net_role == "" else 90.0) and not _done:
+	if _now() > (480.0 if net_role == "" else 150.0) and not _done:
 		_fail("timed out")
 		_finish()
 
@@ -309,11 +309,114 @@ func _run_solo() -> void:
 	dev.request("money", {"reset": true})
 	_check(game.money == 0 and game.gold_bars == 0, "the panel's money reset clears money and bars")
 
+	await _nurse_watch_solo()
+
 	# Leaving resets the global state.
 	main._back_to_menu("")
 	await _frames(3)
 	_check(not game.dev_mode and is_equal_approx(Engine.time_scale, 1.0), "leaving the dev room resets it")
+	_check(not dev.nurse_ignore_watch and dev.nurse_walk == "" and dev.nurse_pace == 0, "leaving the dev room resets the Night Nurse settings")
 	_finish()
+
+
+## NURSE HOOK (night nurse model): the panel's "Night Nurse" section. Watched in the lit room she
+## freezes; with "Nurse ignores being watched" she walks her loop in plain view, animating; off
+## again she freezes; "Follows me" stops short of you and never hits; the pace sets her speed and
+## the Walk clip's rate with it.
+func _nurse_watch_solo() -> void:
+	dev.request("kill_monsters")
+	dev.request("god", {"on": false})
+	dev.request("lights", {"on": true})
+	await _frames(3)
+	me.revive_full()
+	_stand(Vector3(20.0, 0, 12.5), PI / 2.0)
+	await _frames(3)
+	_press_panel("Nurse in front")
+	await _frames(3)
+	var nurse = _first_nurse()
+	_check(nurse != null and nurse.model.nurse != null and nurse.global_position.distance_to(me.global_position) < 5.0,
+		"the panel's Nurse in front spawns a Night Nurse in her Blender model in front of you")
+	if nurse == null:
+		return
+	var box: CheckBox = main.dev_panel._c["nurse_ignore"]
+	_check(box.text == "Nurse ignores being watched", "the panel has the 'Nurse ignores being watched' toggle")
+	var watch := func(seconds: float) -> Dictionary:
+		var start: Vector3 = nurse.global_position
+		var out := {"moved": 0.0, "observed_ever": false, "lit_and_seen": 0, "frames": 0, "anim_moving": 0, "walk": 0}
+		var last: Vector3 = start
+		var end := t + seconds
+		while t < end:
+			_look_at(nurse.global_position + Vector3.UP * 1.4)
+			await get_tree().physics_frame
+			out.moved += nurse.global_position.distance_to(last)
+			last = nurse.global_position
+			out.frames += 1
+			if nurse.observed:
+				out.observed_ever = true
+			if Perception.observed_any(game, nurse.brain.body_points(nurse.global_position)):
+				out.lit_and_seen += 1
+			if nurse.model.anim.speed_scale > 0.0:
+				out.anim_moving += 1
+			if nurse.model.anim.current_animation == "Walk":
+				out.walk += 1
+		return out
+	await watch.call(0.6)
+	var w0: Dictionary = await watch.call(1.0)
+	_check(w0.moved < 0.02 and nurse.observed and nurse.model.anim.speed_scale == 0.0,
+		"watched in the lit room she stands frozen (moved %.3f m, clip rate %.2f)" % [w0.moved, nurse.model.anim.speed_scale])
+	box.button_pressed = true
+	var walk_opt: OptionButton = main.dev_panel._c["nurse_walk"]
+	walk_opt.select(2)
+	walk_opt.item_selected.emit(2)
+	var pace_opt: OptionButton = main.dev_panel._c["nurse_pace"]
+	pace_opt.select(1)
+	pace_opt.item_selected.emit(1)
+	await _frames(2)
+	_check(dev.nurse_ignore_watch and dev.nurse_walk == "loop" and dev.nurse_loop.size() == 4 and dev.nurse_pace == 1,
+		"the toggle, 'Walks a loop here' and the pace reach the dev room (loop %d corners)" % dev.nurse_loop.size())
+	var w1: Dictionary = await watch.call(4.0)
+	var hp_before: int = me.hp
+	_check(w1.moved > 3.0 and not w1.observed_ever and w1.lit_and_seen > w1.frames * 0.8,
+		"with the toggle on she walks her loop in plain view (%.1f m in 4 s, lit and seen %d of %d frames)" % [w1.moved, w1.lit_and_seen, w1.frames])
+	_check(w1.anim_moving > w1.frames * 0.9 and w1.walk > w1.frames * 0.6 and absf(nurse.model.anim.speed_scale - 1.6) < 0.5,
+		"and animates while watched: Walk %d of %d frames, rate %.2f at the stalk pace" % [w1.walk, w1.frames, nurse.model.anim.speed_scale])
+	box.button_pressed = false
+	await watch.call(0.4)
+	var w2: Dictionary = await watch.call(1.0)
+	_check(w2.moved < 0.02 and nurse.observed and nurse.model.anim.speed_scale == 0.0 and not dev.nurse_ignore_watch,
+		"the toggle off: she freezes again (moved %.3f m)" % w2.moved)
+	# Follow me: she comes to 2.5 m and stands; with the pace at creep she walks at 0.8 m/s.
+	box.button_pressed = true
+	walk_opt.select(1)
+	walk_opt.item_selected.emit(1)
+	pace_opt.select(2)
+	pace_opt.item_selected.emit(2)
+	_stand(Vector3(13.5, 0, 16.0), PI / 2.0)
+	var sp := 0.0
+	var rate := 0.0
+	var end := t + 14.0
+	while t < end:
+		_look_at(nurse.global_position + Vector3.UP * 1.4)
+		await get_tree().physics_frame
+		if nurse.moving and nurse.global_position.distance_to(me.global_position) > 4.0:
+			sp = nurse.speed
+			rate = nurse.model.anim.speed_scale
+		if not nurse.moving and nurse.global_position.distance_to(me.global_position) < 3.2 and t > end - 10.0:
+			break
+	await _seconds(1.0)
+	var gap: float = Vector2(nurse.global_position.x - me.global_position.x, nurse.global_position.z - me.global_position.z).length()
+	_check(gap > 2.0 and gap < 3.3 and not nurse.moving and me.hp == hp_before and me.hp == me.max_hp,
+		"'Follows me' brings her to %.2f m and she stands there without hitting (hp %d)" % [gap, me.hp])
+	_check(absf(sp - 0.8) < 0.15 and absf(rate - sp) < 0.2, "the creep pace: %.2f m/s, Walk at %.2fx" % [sp, rate])
+	dev.request("kill_monsters")
+	await _frames(3)
+
+
+func _first_nurse():
+	for m in game.monsters.values():
+		if m.kind == "night_nurse":
+			return m
+	return null
 
 
 func _loop_hooks() -> void:
@@ -396,6 +499,16 @@ func _run_host() -> void:
 	_check(ok, "the client's shots and bot request landed on the host (monsters %d, dummy alive %s)" % [game.monsters.size(), str(game.players[_host_dummy].alive)])
 	var client_id: int = Net.peer_ids()[-1]
 	_check(dev.has_gun(client_id), "the client holds the dev gun on the host")
+	# NURSE HOOK: the client turns "Nurse ignores being watched" on (with a loop), off, then asks for
+	# "follow" as its last request.
+	var seen := {"on": false, "loop": 0}
+	ok = await _until(func():
+		if dev.nurse_ignore_watch:
+			seen.on = true
+		seen.loop = maxi(int(seen.loop), dev.nurse_loop.size())
+		return seen.on and dev.nurse_walk == "follow" and not dev.nurse_ignore_watch, 70.0)
+	_check(ok and int(seen.loop) == 4 and dev.nurse_who == client_id,
+		"the client's Night Nurse requests landed on the host (loop corners %d, follows peer %d)" % [int(seen.loop), dev.nurse_who])
 	await _seconds(1.0)
 	_finish()
 
@@ -460,8 +573,64 @@ func _run_client() -> void:
 				return true
 		return false, 5.0)
 	_check(ok, "a bot the client asked for appears on the client")
+
+	# NURSE HOOK: a Night Nurse the client watches under the lights: frozen, then walking with the
+	# host's "ignores being watched" on, then frozen again when it goes off.
+	_stand(Vector3(20.0, 0, 12.5), PI / 2.0)
+	await _seconds(0.8)
+	dev.request("spawn_monster", {"kind": "night_nurse", "where": "front"})
+	ok = await _until(func(): return _first_nurse() != null, 6.0)
+	_check(ok and _first_nurse().model.nurse != null, "the client sees the Night Nurse it asked for, in her model")
+	if ok:
+		var nurse = _first_nurse()
+		await _watch_client(nurse, 1.5)
+		var f0: Dictionary = await _watch_client(nurse, 1.5)
+		_check(f0.moved < 0.05 and nurse.observed and nurse.model.anim.speed_scale == 0.0,
+			"client: watched, she is frozen and her clip is stopped (moved %.3f m)" % f0.moved)
+		dev.request("nurse_pace", {"i": 1})
+		dev.request("nurse_walk", {"mode": "loop"})
+		dev.request("nurse_ignore_watch", {"on": true})
+		ok = await _until(func(): return dev.nurse_ignore_watch and dev.nurse_walk == "loop" and dev.nurse_pace == 1, 6.0)
+		_check(ok, "client: the host's Night Nurse settings replicate back (ignore %s, walk '%s', pace %d)" % [str(dev.nurse_ignore_watch), dev.nurse_walk, dev.nurse_pace])
+		await _watch_client(nurse, 1.0)
+		var f1: Dictionary = await _watch_client(nurse, 4.0)
+		if shots:
+			# Windowed client (`-- --net=client --shots`): what the client sees while she walks.
+			DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(SHOT_DIR))
+			dev.request("lights", {"on": false})
+			await _watch_client(nurse, 2.0)
+			await _shot("12_client_nurse_walking_watched")
+			dev.request("lights", {"on": true})
+		_check(f1.moved > 2.0 and not f1.observed_ever and f1.anim_moving > f1.frames * 0.8 and f1.walk > f1.frames * 0.5,
+			"client: with the toggle on she keeps walking while it watches (%.1f m in 4 s, animating %d / walk %d of %d frames)" % [f1.moved, f1.anim_moving, f1.walk, f1.frames])
+		dev.request("nurse_ignore_watch", {"on": false})
+		await _until(func(): return not dev.nurse_ignore_watch, 6.0)
+		await _watch_client(nurse, 1.5)
+		var f2: Dictionary = await _watch_client(nurse, 1.5)
+		_check(f2.moved < 0.05 and nurse.observed and nurse.model.anim.speed_scale == 0.0,
+			"client: toggle off, she freezes again (moved %.3f m)" % f2.moved)
+	dev.request("nurse_walk", {"mode": "follow"})
 	await _seconds(2.0)
 	_finish()
+
+
+## Client: look at the nurse for `seconds` (real time) and report what it did.
+func _watch_client(nurse: Node, seconds: float) -> Dictionary:
+	var out := {"moved": 0.0, "observed_ever": false, "frames": 0, "anim_moving": 0, "walk": 0}
+	var last: Vector3 = nurse.global_position
+	var end := _now() + seconds
+	while _now() < end and is_instance_valid(nurse):
+		_look_at(nurse.global_position + Vector3.UP * 1.4)
+		await get_tree().physics_frame
+		out.moved += nurse.global_position.distance_to(last)
+		last = nurse.global_position
+		out.frames += 1
+		out.observed_ever = out.observed_ever or nurse.observed
+		if nurse.model.anim.speed_scale > 0.0:
+			out.anim_moving += 1
+		if nurse.model.anim.current_animation == "Walk":
+			out.walk += 1
+	return out
 
 
 # =========================================================================
@@ -525,6 +694,35 @@ func _take_shots() -> void:
 	await _until(func(): return game.players[bid].operating, 60.0)
 	await _seconds(3.0)
 	await _shot("09_bot_operating")
+	# NURSE HOOK: the Night Nurse section. Lights off, flashlight on her, "ignores being watched" on,
+	# walking a loop round you at the stalk pace.
+	dev.remove_bot(bid)
+	dev.request("clear_patient")
+	dev.request("kill_monsters")
+	dev.request("lights", {"on": false})
+	_stand(Vector3(20.0, 0, 12.5), PI / 2.0)
+	await _seconds(0.3)
+	dev.request("spawn_monster", {"kind": "night_nurse", "where": "front"})
+	dev.request("nurse_ignore_watch", {"on": true})
+	dev.request("nurse_pace", {"i": 1})
+	dev.request("nurse_walk", {"mode": "loop"})
+	me.set_flashlight(true)
+	var nurse = _first_nurse()
+	var end := t + 3.3
+	while t < end:
+		_look_at(nurse.global_position + Vector3.UP * 1.3)
+		await get_tree().physics_frame
+	await _shot("10_nurse_walks_in_the_flashlight")
+	main.dev_panel.toggle(true)
+	await _seconds(0.4)
+	await _shot("11_panel_night_nurse")
+	main.dev_panel.toggle(false)
+	dev.request("nurse_ignore_watch", {"on": false})
+	end = t + 1.5
+	while t < end:
+		_look_at(nurse.global_position + Vector3.UP * 1.3)
+		await get_tree().physics_frame
+	await _shot("12_nurse_frozen_toggle_off")
 
 
 func _shot(name: String) -> void:

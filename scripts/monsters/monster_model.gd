@@ -1,12 +1,14 @@
 extends Node3D
-## The visual of one monster: the reshaped Kenney rig plus hand-built geometry.
-## Knows nothing about behaviour; the Monster tells it what to show every frame.
+## The visual of one monster: the reshaped Kenney rig plus hand-built geometry, or for the Night
+## Nurse her own Blender-made model (night_nurse_rig.gd; the reshaped rig is her fallback when the
+## asset is missing). Knows nothing about behaviour; the Monster tells it what to show every frame.
 
 const Shaper := preload("res://scripts/monsters/rig_shaper.gd")
 const Shapes := preload("res://scripts/monsters/shapes.gd")
 const DischargedLook := preload("res://scripts/monsters/discharged_look.gd")
 const NurseLook := preload("res://scripts/monsters/night_nurse_look.gd")
 const WalkInLook := preload("res://scripts/monsters/walk_in_look.gd")
+const NurseRig := preload("res://scripts/monsters/night_nurse_rig.gd")
 
 const RIG_KEY := "patient/human"
 const LOOPING := ["idle", "walk", "sprint"]
@@ -16,6 +18,8 @@ var rig: Node3D = null
 var skeleton: Skeleton3D = null
 var anim: AnimationPlayer = null
 var shaper: Shaper = null
+## The Night Nurse's model: its pose modifier (night_nurse_rig.gd), null for every other look.
+var nurse = null
 var iv: Node3D = null            ## the Discharged's IV pole, top-level
 ## Movable ears: [{node: Node3D pivot on the head, side: +1 left / -1 right, rest: outward radians}]
 var ears: Array = []
@@ -31,6 +35,9 @@ var _fallback: Node3D = null
 func setup(monster_kind: String) -> void:
 	kind = monster_kind
 	name = "Model"
+	if kind == "night_nurse" and NurseRig.build(self):
+		play("idle")
+		return
 	rig = Assets.spawn(RIG_KEY) if Assets.has(RIG_KEY) else null
 	if rig != null:
 		add_child(rig)
@@ -91,10 +98,16 @@ static func make_lying(monster_kind: String) -> Node3D:
 		m.iv = null
 	if m.shaper != null:
 		m.shaper.lying = 1.0
-	m.play("idle", 0.0, 0.0)
+	var back := 0.12 if monster_kind == "walk_in" else 0.09
+	if m.nurse != null:
+		# Her rest pose is the lying pose: straight, arms at her sides. No clip plays.
+		m.anim.stop()
+		m.skeleton.reset_bone_poses()
+		back = 0.1   # the dress at her shoulder blades; the flared skirt sinks into whatever she lies on
+	else:
+		m.play("idle", 0.0, 0.0)
 	# The model's up (+Y, feet to head) becomes -X, its front (-Z) becomes +Y.
 	var tall := 2.1 if monster_kind == "discharged" else (2.3 if monster_kind == "night_nurse" else 1.75)
-	var back := 0.12 if monster_kind == "walk_in" else 0.09
 	m.transform = Transform3D(Basis(Vector3(0, 0, 1), Vector3(-1, 0, 0), Vector3(0, -1, 0)), Vector3(tall * 0.5, back, 0.0))
 	return root
 
@@ -116,7 +129,14 @@ func _make_loops() -> void:
 	anim.add_animation_library("", copy)
 
 
+## Where the eyes are in the frame of the node named `Head` (+Y up the head, +Z the face).
+func eye_offset() -> Vector3:
+	return NurseRig.EYE_OFFSET if nurse != null else Vector3(0.0, 0.13, 0.1)
+
+
 func body_material(m: Material) -> void:
+	if skeleton == null:
+		return
 	var body := skeleton.get_node_or_null("body-mesh") as MeshInstance3D
 	if body != null:
 		body.material_override = m
@@ -129,7 +149,7 @@ func play(logical: String, rate := 1.0, blend := 0.18) -> void:
 	if anim == null:
 		return
 	if logical != _logical:
-		var real := Assets.anim_name(RIG_KEY, logical)
+		var real := Assets.anim_name(NurseRig.KEY if nurse != null else RIG_KEY, logical)
 		if real != "" and anim.has_animation(real):
 			anim.play(real, blend)
 			_logical = logical
@@ -141,7 +161,7 @@ func current() -> String:
 
 
 func attack_length() -> float:
-	var real := Assets.anim_name(RIG_KEY, "attack")
+	var real := Assets.anim_name(NurseRig.KEY if nurse != null else RIG_KEY, "attack")
 	return anim.get_animation(real).length if anim != null and anim.has_animation(real) else 0.4
 
 
@@ -154,6 +174,8 @@ func add_part(node: Node3D, bone: String, offset := Transform3D.IDENTITY, tip :=
 
 
 func hand_point(left := true) -> Vector3:
+	if nurse != null:
+		return nurse.bone_world("hand.L" if left else "hand.R")
 	if shaper == null:
 		return global_position + Vector3.UP
 	var h: Vector3 = shaper.hand_left if left else shaper.hand_right

@@ -166,7 +166,11 @@ static func monster_corpse(parent: Node, kind: String, pos: Vector3, yaw: float)
 	var model: Node3D = MonsterModel.new()
 	root.add_child(model)
 	model.setup(kind)
-	if model.has_method("play"):
+	if model.get("nurse") != null:
+		# NURSE HOOK: her own model has no death clip: the still pose, slumped from the bones.
+		model.play("frozen", 0.0, 0.0)
+		model.nurse.slump = 1.0
+	elif model.has_method("play"):
 		model.play("idle", 0.0, 0.0)
 	var tw := root.create_tween()
 	tw.tween_property(model, "rotation:x", PI / 2.0 * 0.96, 0.45).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
