@@ -63,6 +63,7 @@ func _ready() -> void:
 			"skill": skill = float(v)
 			"shifts": want_shifts = int(v)
 			"seed": fixed_seed = int(v)
+			"pocket": preload("res://scripts/level/pockets/pocket_plan.gd").force_kind = v   # POCKETS: none | factory | restaurant
 			"ailment": force_ailment = v
 			"patient": force_patient = v
 			"extra": take_extra = true
@@ -282,7 +283,7 @@ func _go_use(id: String, pos: Vector3, hold: bool) -> void:
 		_heartbeat = 30.0
 		_say("t=%.0f heading for %s at %s, bot at %s, hands %s, aim '%s'" % [elapsed, id, str(pos.snappedf(0.1)),
 			str(bot.global_position.snappedf(0.1)), str(bot.slots.map(func(s): return s.kind)), bot.aim_id])
-	var flat := Vector3(pos.x, bot.global_position.y, pos.z)
+	var flat :=Vector3(pos.x, bot.global_position.y, pos.z)
 	var d := bot.global_position.distance_to(flat)
 	bot.bot_aim_id = id
 	# The navmesh can keep the bot just beyond REACH of something against a wall; once it has

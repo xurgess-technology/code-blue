@@ -40,6 +40,9 @@ extends Node
 ##                    client sees each (sweep 3)
 ##   dissection       a Walk-In strapped to a table: client 1 saws the skull and pulls the brain,
 ##                    client 2 re-doses it meanwhile; sedation replicates within 0.05
+##   pockets          (--pocket=factory) client 1 walks through a seam into the pocket holding gauze
+##                    (the host sees it arrive and stay, client 2 sees it jump, never slide across the
+##                    world); client 2 goes down, client 1 walks out, lifts it and carries it in
 ##
 ## Shifts start the way the loop does (sweep 2): the host clocks in, skips the grace period,
 ## answers the phone, and the paramedics wheel the patient onto a table.

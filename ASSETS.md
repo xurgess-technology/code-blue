@@ -362,6 +362,29 @@ reads well at the sizes the game shows it.
 
 ---
 
+## Pocket spaces (2026-09-14, pockets worker) — no new files
+
+The Factory and the Restaurant (`scripts/level/pockets/`) add **no downloaded assets**. Everything is
+procedural geometry (merged box and cylinder meshes, MultiMesh props) over textures and models already
+recorded above, looked up through `Assets` and degrading to flat colours when a key does not resolve:
+
+| Key | Used for |
+| --- | --- |
+| `mat/concrete` | Factory floor, lower walls, columns, office roof slab (world-triplanar, tinted) |
+| `mat/metal` | Factory machines, conveyors, catwalk grating, racks, beams; restaurant kitchen steel |
+| `mat/floor`, `mat/wall`, `mat/ceiling` | Factory site offices; restaurant stucco (tinted terracotta) and back-room ceilings |
+| `mat/tile_floor`, `mat/wall_tile` | Restaurant kitchen and restrooms (tinted) |
+| `mat/linoleum`, `mat/ceiling`, `mat/wall` | the pocket copy of each entrance stub (the hospital's hallway materials) |
+| `hosp/fridge_kitchen`, `hosp/sink_cabinet` | the restaurant kitchen |
+| `hosp/toilet`, `hosp/sink_wall`, `hosp/mirror` | the restaurant restrooms |
+| `hosp/plant` | the restaurant's corners and front door |
+| existing container scripts | pegboards, drawer units, a medicine fridge, trauma bags, station drawers |
+
+Generated at runtime, in-house (no third-party source): the Factory's corrugated cladding, and the
+Restaurant's saltillo floor tiles, Talavera wainscot tiles, wood planks and four small paintings
+(`Image` pixel loops in `factory.gd` / `restaurant.gd`), plus the sign and menu text textures
+(`legacy_builder.gd` `_text_texture`).
+
 ## Keys that do not resolve
 
 The game asks for these; they return `null` and the caller must keep its

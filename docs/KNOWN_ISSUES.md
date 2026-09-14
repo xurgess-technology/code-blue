@@ -518,6 +518,42 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 - **Warmup builds four more bodies and four more minigames** (both monsters, closed and opened, the
   skull saw and the brain forceps). `tools/perfprobe.tscn` was not run for this change.
 
+## Pocket spaces (2026-09-14, pockets worker)
+
+- **Built once per run, not per shift, until doors lands.** On this branch the hospital is built once per
+  run, so its pocket (and its stubs, which are carved into the wings) is too. The doors worker regenerates
+  the wings from each shift's seed behind the gates; `game.pockets.teardown()` / `build(gen, info, parent)`
+  must then run with every wing rebuild (and the pocket root should hang under the wings' root).
+- **A pocket build stalls the level-building frame**: layout, surfaces, props and the navigation bake take
+  60-200 ms (cold, first textures: up to about 1.3 s) on top of the hospital build. It is one synchronous
+  call; the doors worker's frame-spread wing loader should split it (layout on a thread, commit steps).
+- **Navigation regions update asynchronously**: right after a build the pocket's and the hospital's
+  regions join the map a few frames apart. `tools/mapcheck.gd` waits for both; code that paths the frame
+  after a build may get a hospital-only path.
+- **Things the mirrors do not carry across a seam**: a player's head glow, held-item models' own lights,
+  monster sounds (a Discharged's rattle is heard where it really is), the Echo outlines and Hive Eyes. A
+  Walk-In does not see a player on the other side of a seam (its sight rays go to the real position), and
+  the danger heartbeat counts only monsters in the same space. Hearing does cross: a noise within 26 m of
+  a seam is mirrored into the other copy, pulled into the stub (the Discharged comes through and then
+  hears the real noise).
+- **Mirrors copy meshes, not animation state**: a mirror shares the body's skeleton, so it animates, but
+  anything drawn without a MeshInstance3D (particles, decals, Label3D name tags) does not show.
+- **Only moving items cross**: an item that settles (freezes) inside a stub's unwalked half stays there.
+  A dropped item never settles before the host moves it, so this only happens to items placed there by code.
+- **The room doors inside the pockets are placeholders** (the doors system is not on this branch): the
+  kitchen's swing door is two static leaves standing ajar, the restrooms and the Factory's site offices
+  have open doorways. Rewire to `scripts/doors/` after the merge.
+- **The Restaurant's fourth entrance wall is the kitchen's back wall**, so an entrance can open into the
+  kitchen between the stove and the sink (only when the dining room's walls are taken).
+- **The pockets add loot, containers and monster spawn points** to the map's lists, so a map with a pocket
+  has more loot, and a Discharged or a Night Nurse may spawn inside the pocket. `Monster.random_nav_point`
+  can pick a pocket point, so hospital monsters sometimes wander into a pocket through a seam.
+- **The Factory reads dim**: pools of high-bay light 12-20 m apart and the flashlight; the far walls are
+  lost in the (per-pocket) fog on purpose. Its machines are primitive silhouettes.
+- **`mapcheck` takes about twice as long** (every seed is generated again with a pocket forced).
+- **The Restaurant is very warm-orange** under the game's teal/amber grade; the tables' tops and the booth
+  wood read dark from a distance.
+
 ## Testing tips
 
 - Add `--fixed-fps 60` to headless runs: the game then steps as fast as the CPU allows (a 250 s

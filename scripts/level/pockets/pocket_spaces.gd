@@ -496,15 +496,34 @@ func _update_ghosts() -> void:
 				if not _in_stub(s, pos, from_h):
 					continue
 				want["%s|%d|%s" % [b[2], int(s.id), str(from_h)]] = [b[1], s.t if from_h else s.t_inv]
+				# A teammate's flashlight lights the other copy too (the hospital's layers from the
+				# pocket side, only the copy's layer from the hospital side).
+				var fl = (b[0] as Node).get("flashlight")
+				if fl != null and (fl as Light3D).is_visible_in_tree():
+					want["%s|%d|%s|light" % [b[2], int(s.id), str(from_h)]] = [fl, s.t if from_h else s.t_inv, from_h]
 	for key in _mirrors.keys():
 		if not want.has(key) or not is_instance_valid(_mirrors[key].src):
 			_free_mirror(_mirrors[key])
 			_mirrors.erase(key)
 	for key in want.keys():
 		if not _mirrors.has(key):
-			_mirrors[key] = _make_mirror(want[key][0], want[key][1])
+			if want[key].size() > 2:
+				_mirrors[key] = _make_light_mirror(want[key][0], want[key][1], bool(want[key][2]))
+			else:
+				_mirrors[key] = _make_mirror(want[key][0], want[key][1])
 		else:
 			_mirrors[key].t = want[key][1]
+
+
+func _make_light_mirror(src: SpotLight3D, t: Transform3D, into_pocket_copy: bool) -> Dictionary:
+	var l := SpotLight3D.new()
+	for prop in ["light_color", "light_energy", "spot_range", "spot_angle", "spot_angle_attenuation", "spot_attenuation",
+			"shadow_enabled", "shadow_bias", "shadow_normal_bias", "light_volumetric_fog_energy"]:
+		l.set(prop, src.get(prop))
+	l.light_cull_mask = (1 << Stub.COPY_LAYER_BIT) if into_pocket_copy else (0xFFFFF & ~(1 << Stub.COPY_LAYER_BIT))
+	add_child(l)
+	l.global_transform = t * src.global_transform
+	return {"src": src, "t": t, "parts": [], "light": l}
 
 
 func _process_mirrors() -> void:
@@ -513,6 +532,11 @@ func _process_mirrors() -> void:
 		if not is_instance_valid(e.src):
 			continue
 		var t: Transform3D = e.t
+		if e.has("light"):
+			var l: SpotLight3D = e.light
+			l.global_transform = t * (e.src as Node3D).global_transform
+			l.visible = (e.src as Node3D).is_visible_in_tree()
+			continue
 		for part in e.parts:
 			var mi: MeshInstance3D = part[0]
 			if not is_instance_valid(mi):
@@ -556,6 +580,8 @@ func _exit_tree() -> void:
 
 
 func _free_mirror(e: Dictionary) -> void:
+	if e.has("light") and is_instance_valid(e.light):
+		(e.light as Node).queue_free()
 	for part in e.parts:
 		RenderingServer.free_rid(part[1])
 
