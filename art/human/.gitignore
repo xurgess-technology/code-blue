@@ -1,0 +1,7 @@
+__pycache__/
+*.log
+*.blend1
+renders/_cell.png
+renders/preview/
+# hu_build.py exports these, then hu_glb_extern.py writes the game copies under assets/models/characters/human/
+*_embedded.glb
