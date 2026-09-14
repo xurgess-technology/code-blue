@@ -623,11 +623,11 @@ func _take_shots() -> void:
 	await _shot("05_gate_open")
 	# 3. A hinged door opening, seen from its corridor.
 	var d := _pick_hinged()
-	_stand(d.global_position + d.normal * 3.0 + d.along * 1.2)
+	_stand(d.global_position + d.normal * 2.3 + d.along * 1.0)
 	_look_at(d.centre)
 	await _seconds(0.6)
 	await _shot("06_hinged_closed")
-	doors._drive(d, 1.0 if d.max_out >= 80.0 else -1.0, 1.0)
+	doors._drive(d, -1.0, 1.0)
 	await _seconds(0.5)
 	await _shot("07_hinged_opening")
 	await _seconds(0.8)
@@ -643,11 +643,11 @@ func _take_shots() -> void:
 			dd = x
 			break
 	if dd != null:
-		_stand(dd.global_position + dd.normal * 3.6)
+		_stand(dd.global_position + dd.normal * 2.35 - dd.along * 0.6)
 		_look_at(dd.centre)
 		await _seconds(0.5)
 		await _shot("10_double_closed")
-		doors._drive(dd, 1.0 if dd.max_out >= 80.0 else -1.0, 0.8)
+		doors._drive(dd, -1.0, 0.8)
 		await _seconds(0.7)
 		await _shot("11_double_opening")
 	# 5. A jammed gate.
@@ -696,19 +696,24 @@ func _hallway_view() -> Array:
 	for d in game.doors.doors.values():
 		if not d.is_hinged() or bool(d.data.get("base", false)):
 			continue
-		var n := 0
-		for e in game.doors.doors.values():
-			if e == d or not e.is_hinged():
-				continue
-			var rel: Vector3 = e.global_position - d.global_position
-			if absf(rel.dot(d.normal)) < 0.2 and absf(rel.dot(d.along)) < 16.0 and e.normal.dot(d.normal) > 0.9:
-				n += 1
-		if n > best_n:
-			var from: Vector3 = d.global_position + d.normal * 0.9 - d.along * 1.5
-			var at: Vector3 = d.global_position + d.normal * 0.6 + d.along * 12.0 + Vector3.UP * 1.3
-			if HB.zone_of(game.level_info, from) != "" and game._point_is_clear(from):
-				best_n = n
-				out = [from, at]
+		# Doors further along the same wall, in one direction, within 14 m.
+		for dirn in [1.0, -1.0]:
+			var n := 0
+			var far := 0.0
+			for e in game.doors.doors.values():
+				if e == d or not e.is_hinged():
+					continue
+				var rel: Vector3 = e.global_position - d.global_position
+				var ahead: float = rel.dot(d.along) * dirn
+				if absf(rel.dot(d.normal)) < 0.2 and ahead > 1.0 and ahead < 14.0 and e.normal.dot(d.normal) > 0.9:
+					n += 1
+					far = maxf(far, ahead)
+			if n > best_n:
+				var from: Vector3 = d.global_position + d.normal * 2.2 - d.along * dirn * 2.0
+				var at: Vector3 = d.global_position + d.normal * 0.4 + d.along * dirn * maxf(6.0, far * 0.6) + Vector3.UP * 1.15
+				if HB.zone_of(game.level_info, from) != "" and game._point_is_clear(from):
+					best_n = n
+					out = [from, at]
 	return out
 
 

@@ -107,6 +107,12 @@ func setup(d: Dictionary) -> void:
 				var x := -width * 0.5 + width * 0.125 + width * 0.25 * i
 				_add_panel(Models.sliding_panel(pw), x, -0.13 if i == 0 or i == 3 else -0.05)
 	_add_frame()
+	# Like the furniture, room doors past the fog's reach are not drawn (the automatic doors, seen
+	# down the long halls, a little further).
+	var reach := 36.0 if is_hinged() else 60.0
+	for mi in find_children("*", "MeshInstance3D", true, false):
+		(mi as MeshInstance3D).visibility_range_end = reach
+		(mi as MeshInstance3D).visibility_range_end_margin = 4.0
 	if kind != "sliding":
 		occluder = OccluderInstance3D.new()
 		occluder.name = "Occluder"

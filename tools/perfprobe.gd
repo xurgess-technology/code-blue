@@ -330,6 +330,11 @@ func _run_orscreen() -> void:
 func _run_doors() -> void:
 	main.set_quality(1, false)
 	var ds: Node = game.doors
+	var hide_doors := func(hidden: bool) -> void:
+		for d in ds.doors.values():
+			d.visible = not hidden
+			if d.occluder != null:
+				d.occluder.visible = not hidden and d.is_closed()
 	var set_doors := func(open: bool, occluders: bool) -> void:
 		ds.set_all(open)
 		for d in ds.doors.values():
@@ -345,6 +350,11 @@ func _run_doors() -> void:
 	for pass_i in 2:
 		for scen in [{"name": "hallway of doors", "setup": _doors_hallway}, {"name": "corridor", "setup": _corridor}, {"name": "OR", "setup": _or_view}]:
 			await scen.setup.call()
+			# As before the doors: every door open and hidden (no leaves drawn, no occluders).
+			await set_doors.call(true, false)
+			hide_doors.call(true)
+			await _measure("%s: no doors (as before) %d" % [scen.name, pass_i + 1], 1)
+			hide_doors.call(false)
 			await set_doors.call(false, true)
 			await _measure("%s: doors shut %d" % [scen.name, pass_i + 1], 1)
 			await set_doors.call(false, false)
@@ -372,10 +382,10 @@ func _doors_hallway() -> void:
 			var rel: Vector3 = e.global_position - d.global_position
 			if absf(rel.dot(d.normal)) < 0.2 and absf(rel.dot(d.along)) < 16.0 and e.normal.dot(d.normal) > 0.9:
 				n += 1
-		var from: Vector3 = d.global_position + d.normal * 0.9 - d.along * 1.5
+		var from: Vector3 = d.global_position + d.normal * 2.0 - d.along * 2.5
 		if n > best_n and game._point_is_clear(from):
 			best_n = n
-			_look(from, d.global_position + d.normal * 0.6 + d.along * 12.0 + Vector3.UP * 1.3)
+			_look(from, d.global_position + d.normal * 0.2 + d.along * 7.0 + Vector3.UP * 1.2)
 
 
 func _run_brains() -> void:
