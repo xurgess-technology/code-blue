@@ -35,9 +35,14 @@ func _build(attached: bool) -> void:
 		collision_layer = C.L_INTERACT
 		var size := Vector3(2.4, 1.7, 1.8) if role == "sell_bin" else Vector3(1.6, 1.8, 1.6)
 		_shape(size, Vector3(0, size.y * 0.5, 0))
-		var tag := _label("SELL LOOT" if role == "sell_bin" else "GOLD BARS", 64, Color(1.0, 0.82, 0.4))
+		# brains (sweep 3): the sell bin is the dumpster, the only place loot and brains are sold.
+		var tag := _label("DUMPSTER" if role == "sell_bin" else "GOLD BARS", 64, Color(1.0, 0.82, 0.4))
 		tag.position = Vector3(0, 2.25 if role == "sell_bin" else 2.5, 0)
 		tag.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+		if role == "sell_bin":
+			var sub := _label("LOOT AND BRAINS, CASH OUT", 34, Color(1.0, 0.9, 0.65))
+			sub.position = Vector3(0, 2.02, 0)
+			sub.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
 		if role == "shop":
 			_price = _label("", 44, Color(1.0, 0.95, 0.8))
 			_price.position = Vector3(0, 2.2, 0)
@@ -130,10 +135,10 @@ func _build_bin() -> void:
 	_box(Vector3(0.66, 0.012, 0.012), Vector3(0, 1.085, 0.16), gold, Vector3(-12, 0, 0))
 	_box(Vector3(0.66, 0.012, 0.012), Vector3(0, 1.07, 0.04), gold, Vector3(-12, 0, 0))
 	_box(Vector3(0.5, 0.16, 0.01), Vector3(0, 0.72, 0.315), _mat("bin_plate", Color(0.85, 0.8, 0.6), 0.5, 0.6))
-	var l := _label("SELL", 72, Color(0.15, 0.1, 0.02))
+	var l := _label("DUMPSTER", 40, Color(0.15, 0.1, 0.02))
 	l.outline_size = 0
 	l.position = Vector3(0, 0.72, 0.322)
-	var tag := _label("LOOT IN, CASH OUT", 36, Color(1.0, 0.85, 0.45))
+	var tag := _label("LOOT AND BRAINS IN, CASH OUT", 32, Color(1.0, 0.85, 0.45))
 	tag.position = Vector3(0, 1.35, 0.1)
 	_lamp(Vector3(0, 1.5, 0.5), Color(1.0, 0.8, 0.45), 0.7, 2.6)
 	_shape(Vector3(0.94, 1.1, 0.66), Vector3(0, 0.55, 0))
@@ -199,10 +204,14 @@ func interact_prompt(player) -> String:
 	var s: Dictionary = player.selected_stack() if player.has_method("selected_stack") else player.slots[player.selected]
 	var kind := String(s.kind)
 	if kind == "":
-		return "!Sell bin: bring loot (the gold glow)"
+		return "!Dumpster: bring loot or a brain (the gold glow)"
 	if not Items.is_loot(kind):
 		return "!Surgical supplies go on the OR shelf" if Items.is_surgical(kind) else "!Not worth anything"
-	return "Sell %s for $%d" % [Items.stack_label(kind, int(s.count)), int(s.get("v", 0))]
+	# brains (sweep 3): a brain is worth less the longer it has been out.
+	var worth: int = int(g.brains.current_value(s)) if g.get("brains") != null else int(s.get("v", 0))
+	if g.get("brains") != null and g.brains.is_brain(kind):
+		return "Sell the %s %s for $%d at the dumpster" % [g.brains.condition(g.brains.factor_of(s)), Items.display_name(kind).to_lower(), worth]
+	return "Sell %s for $%d at the dumpster" % [Items.stack_label(kind, int(s.count)), worth]
 
 
 func interact_hold() -> float:

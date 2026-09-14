@@ -22,6 +22,7 @@ const EconomyScript := preload("res://scripts/economy/economy.gd")  # INVENTORY 
 const PlayerBodyScript := preload("res://scripts/downed/player_body.gd")  # DOWNED HOOK
 const PlayerTableScript := preload("res://scripts/downed/player_table.gd")  # DOWNED HOOK
 const OrScreenScript := preload("res://scripts/orscreen/or_screen.gd")  # ORSCREEN HOOK
+const BrainsScript := preload("res://scripts/brains/brains.gd")  # SWEEP 3 HOOK (brains)
 
 
 ## Run once. Safe to call again; later calls return immediately.
@@ -66,6 +67,7 @@ static func run(game: Node) -> void:
 	var syringe: Node3D = preload("res://scripts/combat/combat.gd").make_syringe()
 	shelf.add_child(syringe)
 	syringe.position = Vector3(x, 0.3, 0.3)
+	BrainsScript.warm(shelf)  # SWEEP 3 HOOK (brains): the blender, Echo's ghosts and veil, Hive Eyes' screen
 
 	# Patients, each showing every visual state a case can reach
 	var bodies := {}

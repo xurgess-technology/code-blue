@@ -925,6 +925,80 @@ Tests: `godot --headless --path . --script tools/nettest_run.gd` runs every mult
 scenario (`-- --only=a,b`, `--lag=MS --jitter=MS --loss=P`, `--only=bandwidth`). Add a scenario
 for anything that changes what crosses the wire.
 
+## Brains (brains worker, sweep 3)
+
+`game.brains` (`scripts/brains/brains.gd`, child "Brains" of Game on every machine; parts in
+`scripts/brains/`: `brain_model.gd`, `blender.gd`, `echo_view.gd`, `hive_view.gd`).
+
+```gdscript
+game.brains.spawn_brain(kind: String, quality: float, pos: Vector3) -> Node   # host: a WorldItem on
+    # whatever is under pos; value = base * quality (min $1); spoil clock starts now; squelch sound
+Brains.is_brain(kind) -> bool              # "brain_walk_in", "brain_discharged" (static)
+Brains.spoil_factor(age_seconds) -> float  # 1.0 for 45 s, linear to 0.15 at 225 s, then 0.15 (static)
+Brains.condition(factor) -> String         # "fresh" (>= 0.6), "spoiling" (>= 0.3), "rotten" (static)
+Brains.base_value(kind) -> int             # 150 / 350 (loot_table.gd "value")
+game.brains.current_value(stack_or_item) -> int   # a hand slot {kind, v, bt} or a WorldItem: v * factor
+    # for brains (min $1), the plain value for any other kind
+game.brains.factor_of(stack_or_item) / age_of(stack_or_item)
+game.brains.points(peer_id, path) -> float # path "walk_in" | "discharged"; 0..3, steps of 0.25
+game.brains.level(peer_id, path) -> int    # floor(points), 0..3
+game.brains.best_path(peer_id) -> String   # more points wins, a tie is "discharged" (Echo), "" none
+game.brains.add_points(peer_id, path, amount)   # host (the blender, dev, tests)
+game.brains.ability(p)                     # host, from game.player_ability (R)
+game.brains.on_reset()                     # host, from game.reset_money (game over, new session)
+game.brains.blender                        # the placed blender node (interact_id "blender") or null
+game.brains.blend_progress(peer_id) -> float    # 0..1 while that player holds E on the blender
+game.brains.camera() -> Camera3D           # every machine: the Hive Eyes camera while the LOCAL
+                                           # player looks through a Walk-In (main.gd renders it), else null
+game.brains.local_hive_active() / local_exit()  # main.gd: Esc during Hive Eyes
+game.brains.spawn_walk_in(pos) -> Node     # host (dev, tests): a Walk-In; a stand-in Discharged body
+                                           # with kind "walk_in" while Monster.WALK_IN does not exist
+game.brains.dev_request(sender, action, args)   # "br_spawn_brain" {kind, quality, age}, "br_levels"
+                                           # {amount, id}, "br_reset", "br_walk_in" (dev_room forwards br_*)
+```
+
+- **Brain items.** Loot kinds `brain_walk_in` ($150) and `brain_discharged` ($350) in
+  `loot_table.gd` with `brain: true`, fragile, not stackable, not bulky, no rooms / surfaces /
+  containers (the loot spawner never picks them). The model is one merged mesh with the gold rim.
+- **Spoil time `bt`** (world_time of the harvest): `WorldItem.bt` (default -1e6 = none; any value
+  above -1e5 is a real clock, it may be negative early in a run), reported as `bt` (snapped 0.5);
+  in a hand slot as `slots[i].bt`. Carried by `game.pickup_item`, `drop_selected`, `_drop_hands`
+  (a violent drop cracks the brain like other fragile loot, the clock stays), `_drop_hands_in_place`
+  and the dev room's `hand_over`. **Anything else that moves a stack between hands and the world
+  must carry `bt` too.** The host stamps `bt = world_time` on any brain found without one (4 Hz).
+- **The dumpster** is the existing sell bin (interact_id `sell_bin`, unchanged): its sign says
+  DUMPSTER, its prompt `Sell X for $N at the dumpster` with the current value, `game.sell_selected`
+  pays `current_value`. The HUD slot and the world item prompt show the current value (and the
+  condition for brains).
+- **Blender:** on a break-room counter top found with downward rays over `level_info.rooms` kind
+  `break_room` (the free end nearest the time clock, backed toward the wall), else on a steel stand
+  on free floor beside `level_info.economy.shop` (dev room), else near the clock. Placed two physics
+  frames after a new `game.level`, same spot on every machine. Holding a brain selected: hold E
+  (`interact_hold` 1.5 s; the host simulates it from `wants_interact` + `aim_id`, like the clock).
+  Drinking: +1.0 fresh, +0.75 spoiling, +0.5 rotten to that path, capped at 3.0.
+- **R:** in Hive Eyes, R ends it. Otherwise `best_path`; none: "Nothing happens." (at most once a
+  second). Cooldowns: Echo 20 s from the shriek, Hive Eyes 12 s from when the view ends (R presses
+  in the 0.5 s after a view ends are ignored). Not while downed; Hive Eyes not while carrying or
+  operating. Scaling is literal: `12 + 6 * level` m and `2.5 + 0.75 * level` s for Echo, `20 + 10 *
+  level` m and `5 + 2 * level` s for Hive Eyes, so a half point (level 0) already works at the base.
+- **Echo** (host): `game.emit_noise(pos + 1.5 up, 1.2, "echo")`, event `br_echo {id, pos, r, s}`:
+  everyone hears `brains_shriek` at pos (the shrieker hears it 2D); the shrieker's machine runs
+  `echo_view.start`: a dark veil quad on the camera and at most 40 things / 150 mesh outlines
+  (monsters red, other players white, surgical items teal, loot gold, containers dim) through walls
+  (`depth_test_disabled`, `ignore_occlusion_culling`), lit as a 26 m/s wave passes. Freed when it ends.
+- **Hive Eyes** (host): the nearest `kind == "walk_in"` monster within range (through walls, not
+  `is_sedated()`); `Player.hive_view = true` (report key `hv`), `br.hv[peer] = [monster id, end
+  world_time]`, event `br_hive {id, on}`. Ends on time, R / E / Esc, the monster leaving
+  `game.monsters` (killed, strapped) or `is_sedated()`, and the player's hp dropping, being downed,
+  stunned or carried. While `hive_view` the Player ignores movement, mouse look, aim, use, shove,
+  drop and interact (E and R bump `ability_count`); remote copies droop the head and lean.
+- **Replication:** `net_state()` = `{"p": {peer: [walk_in, discharged]}, "hv": {peer: [id, end]},
+  "bh": {peer: progress}}` (copies, quantized; empty dictionaries when idle).
+- Sounds `brains_squelch`, `brains_blend`, `brains_gulp`, `brains_shriek`, `brains_hive_in`,
+  `brains_hive_out` (`tools/gen_audio_brains.mjs`).
+- Tests: `tools/braintest.tscn` (headless, 71 checks), nettest scenario `brains`,
+  `tools/brainshot.tscn` (windowed shots to `tools/brain_shots/`), `tools/perfprobe.tscn -- --brains`.
+
 ## Design decisions (locked)
 
 - Each patient is Bob or the seal with one ailment (gunshot or amputation). Sweep 2: one patient

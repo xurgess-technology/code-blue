@@ -21,6 +21,9 @@ var anchor: int = -1
 ## Sell value of the whole stack in dollars (loot only; 0 for everything else). Rolled by the
 ## loot spawner, carried into a hand slot as "v" and back out when dropped.
 var value: int = 0
+## SWEEP 3 HOOK (brains): world_time a brain was harvested, -1 for everything else. Carried into a
+## hand slot as "bt" and back out when dropped; the dumpster pays game.brains.current_value().
+var bt: float = -1000000.0   # "no spoil clock" (a real one can be negative early in a run)
 
 var _visual: Node3D
 var _shape: CollisionShape3D
@@ -156,7 +159,11 @@ func interact_prompt(player) -> String:
 		if ct != null and ct.has_method("is_open") and not ct.is_open():
 			return ""
 	var label := Items.stack_label(kind, count)
-	if value > 0:
+	var g2 := _game()
+	if g2 != null and g2.get("brains") != null and g2.brains.is_brain(kind):
+		# SWEEP 3 HOOK (brains): what it is worth now, and how far gone it is.
+		label += " ($%d, %s)" % [g2.brains.current_value(self), g2.brains.condition(g2.brains.factor_of(self))]
+	elif value > 0:
 		label += " ($%d)" % value
 	if player != null and player.has_method("can_take") and not player.can_take(kind):
 		return "!Needs two free hands" if Items.is_bulky(kind) else "!Hands full"
@@ -183,6 +190,8 @@ func report() -> Dictionary:
 	var d := {"id": item_id, "k": kind, "n": count, "st": state, "ct": container_id, "sl": slot}
 	if value > 0:
 		d["v"] = value
+	if bt > -100000.0:
+		d["bt"] = snappedf(bt, 0.5)   # SWEEP 3 HOOK (brains)
 	if state != State.IN_CONTAINER:
 		var q := global_basis.get_rotation_quaternion()
 		d["p"] = global_position.snappedf(0.005)
@@ -197,6 +206,7 @@ func apply_remote(s: Dictionary) -> void:
 	container_id = String(s.ct)
 	slot = int(s.sl)
 	value = int(s.get("v", 0))
+	bt = float(s.get("bt", -1000000.0))   # SWEEP 3 HOOK (brains)
 	set_count(int(s.n))
 	if not s.has("p"):
 		return   # in a container: _physics_process follows the slot

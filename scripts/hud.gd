@@ -223,7 +223,9 @@ func _draw_hands(w: float, h: float, me) -> void:
 		if int(s.count) > 1:
 			_text(r.position + Vector2(0, 37), "x%d" % int(s.count), 10, Color("c9d1d9"), HORIZONTAL_ALIGNMENT_CENTER, box.x)
 		elif int(s.get("v", 0)) > 0:
-			_text(r.position + Vector2(0, 37), "$%d" % int(s.v), 10, Color(SLOT_GOLD, 0.95), HORIZONTAL_ALIGNMENT_CENTER, box.x)
+			# SWEEP 3 HOOK (brains): a brain shows what it is worth now.
+			var worth: int = int(game.brains.current_value(s)) if game.brains != null else int(s.v)
+			_text(r.position + Vector2(0, 37), "$%d" % worth, 10, Color(SLOT_GOLD, 0.95), HORIZONTAL_ALIGNMENT_CENTER, box.x)
 		if int(s.count) > 1 and int(s.get("v", 0)) > 0:
 			_text(r.position + Vector2(box.x - 34, 13), "$%d" % int(s.v), 10, Color(SLOT_GOLD, 0.95))
 
@@ -294,6 +296,9 @@ func _draw_holds(w: float, h: float) -> void:
 	elif me != null and me.carry_hold > 0.0:   # downed hook
 		progress = clampf(me.carry_hold / Game.CARRY_HOLD, 0.0, 1.0)
 		label = "LIFTING"
+	elif me != null and game.brains != null and game.brains.blend_progress(me.peer_id) > 0.0:   # SWEEP 3 HOOK (brains)
+		progress = game.brains.blend_progress(me.peer_id)
+		label = "BLENDING"
 	if progress <= 0.0:
 		return
 	drawn.append("hold")

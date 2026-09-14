@@ -1093,6 +1093,8 @@ func pickup_item(p: Node, it: Node) -> void:
 		tell(p, "That needs two free hands." if Items.is_bulky(it.kind) else "Your hands are full.")
 		return
 	p.selected = i
+	if float(it.bt) > -100000.0:
+		p.slots[i]["bt"] = float(it.bt)   # SWEEP 3 HOOK (brains): the spoil clock travels with it
 	var pos: Vector3 = it.global_position
 	world_items.erase(it.item_id)
 	it.queue_free()
@@ -1112,6 +1114,7 @@ func drop_selected(p: Node) -> void:
 	var from := Transform3D(p.global_basis, p.head.global_position + fwd * 0.5 + Vector3.DOWN * 0.3)
 	var it := _spawn_item(s.kind, s.count, from, WorldItem.State.LOOSE)
 	it.value = int(s.get("v", 0))
+	it.bt = float(s.get("bt", -1000000.0))   # SWEEP 3 HOOK (brains)
 	it.toss(from, fwd * 1.2 + Vector3.UP * 0.6 + p.velocity * 0.5)
 	p.clear_slot(head)
 	_sound("thud", from.origin)
@@ -1143,6 +1146,7 @@ func _drop_hands(p: Node, violent: bool) -> void:
 		var from := Transform3D(Basis(), p.global_position + Vector3.UP * 1.1 + dir * 0.3)
 		var it := _spawn_item(s.kind, n, from, WorldItem.State.LOOSE)
 		it.value = v
+		it.bt = float(s.get("bt", -1000000.0))   # SWEEP 3 HOOK (brains)
 		it.toss(from, dir * randf_range(2.0, 3.5) + Vector3.UP * 2.0)
 		p.clear_slot(i)
 		emit_noise(from.origin, 0.4, "drop")
@@ -1257,13 +1261,14 @@ func sell_selected(p: Node) -> void:
 	var s: Dictionary = p.slots[head]
 	if s.kind == "" or not Items.is_loot(s.kind):
 		return
-	var value := maxi(0, int(s.get("v", 0)))
+	# SWEEP 3 HOOK (brains): a brain pays what it is worth now (spoilage); the sell bin is the dumpster.
+	var value: int = maxi(0, int(brains.current_value(s))) if brains != null else maxi(0, int(s.get("v", 0)))
 	var label := Items.stack_label(s.kind, int(s.count))
 	p.clear_slot(head)
 	add_money(value, "sell:%s" % s.kind)
 	var at: Vector3 = economy.sell_bin_position()
 	_sound("economy_sell", at)
-	say("%s sold %s for $%d." % [p.player_name, label.to_lower() if int(s.count) > 1 else label, value], 2.5)
+	say("%s tossed %s in the dumpster for $%d." % [p.player_name, label.to_lower(), value], 2.5)
 
 
 ## Host: buy one gold bar at the shop. False (and a message) without the money.
@@ -3235,6 +3240,7 @@ func _drop_hands_in_place(p: Node) -> bool:
 		var xf := Transform3D(Basis(Vector3.UP, randf() * TAU), at)
 		var it := _spawn_item(s.kind, int(s.count), xf, WorldItem.State.LOOSE)
 		it.value = int(s.get("v", 0))  # inventory: loot keeps its value
+		it.bt = float(s.get("bt", -1000000.0))   # SWEEP 3 HOOK (brains)
 		it.toss(xf, Vector3(cos(a), 0.0, sin(a)) * 0.4)
 		p.clear_slot(i)
 	if any:

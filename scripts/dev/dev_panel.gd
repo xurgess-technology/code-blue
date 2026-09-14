@@ -187,6 +187,17 @@ func _build() -> void:
 	_button(s3, "Kill all monsters", func(): _req("kill_monsters"))
 	_c["monster_count"] = _label(s3, "", 12, DIM)
 
+	# ---- brains (SWEEP 3 HOOK, scripts/brains/brains.gd dev_request)
+	_section(col, "Brains")
+	var br1 := _row(col)
+	_button(br1, "Spawn brain: Walk-In", func(): _req("br_spawn_brain", {"kind": "brain_walk_in"}))
+	_button(br1, "Discharged", func(): _req("br_spawn_brain", {"kind": "brain_discharged"}))
+	_button(br1, "Rotten", func(): _req("br_spawn_brain", {"kind": "brain_discharged", "age": 200.0}))
+	var br2 := _row(col)
+	_button(br2, "Give brain levels (+1)", func(): _req("br_levels", {"amount": 1.0}))
+	_button(br2, "Reset", func(): _req("br_reset"))
+	_button(br2, "Walk-In in front", func(): _req("br_walk_in"))
+
 	# ---- money (inventory, sweep 2)
 	_section(col, "Money")
 	var mo1 := _row(col)

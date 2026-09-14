@@ -32,6 +32,10 @@ extends Node
 ##   combat           sweep 3: client 1 kills a monster with the bone saw, shoves and jabs another,
 ##                    drags it and straps it to a free patient table; the host checks the case and
 ##                    client 2 watches the swings, the drag and the strapped case
+##   brains           (sweep 3) the client picks up a Walk-In brain (its spoil clock replicated),
+##                    blends and drinks it at the blender, looks through a Walk-In with Hive Eyes and
+##                    comes back, then drinks a Discharged brain and shrieks Echo; the host sees the
+##                    points, the hive view and the echo noise
 ##
 ## Shifts start the way the loop does (sweep 2): the host clocks in, skips the grace period,
 ## answers the phone, and the paramedics wheel the patient onto a table.
@@ -128,6 +132,7 @@ func _run() -> void:
 		"two_patients": await _sc_two_patients()
 		"downed": await _sc_downed()
 		"combat": await _sc_combat()
+		"brains": await _sc_brains()
 		_: _end(false, "unknown scenario " + scenario)
 
 
@@ -599,6 +604,110 @@ func _sc_economy():
 	if not me.holding(KEEP):
 		return _end(false, "the %s did not survive the shift change: %s" % [KEEP, str(me.slots)])
 	await _finish_together("sold loot, bought %d bars, and kept the %s through a whole shift" % [game.gold_bars, KEEP])
+
+
+## SWEEP 3 (brains): a client picks up a brain, blends it, uses Hive Eyes and Echo.
+func _sc_brains():
+	if role == "host":
+		if not await _until(func(): return Net.names.size() == clients + 1 and game.players.size() == clients + 1 and game.brains.blender != null, 90.0, "the client and the blender"):
+			return
+		await _wall_wait(1.0)
+		var c1 = game.players.get(_peer_of(1))
+		var at: Vector3 = c1.global_position
+		var map := get_viewport().world_3d.navigation_map
+		var b1: Node = game.brains.spawn_brain("brain_walk_in", 1.0, at + Vector3(1.0, 0.3, 0.0))
+		var b2: Node = game.brains.spawn_brain("brain_discharged", 0.5, at + Vector3(-1.0, 0.3, 0.0))
+		var b3: Node = game.brains.spawn_brain("brain_discharged", 0.3, at + Vector3(0.0, 0.3, 1.0))
+		b3.bt = game.world_time - 400.0   # rotten long ago (fresh / spoiling depend on how fast the bot is)
+		var wi: Node = game.brains.spawn_walk_in(NavigationServer3D.map_get_closest_point(map, at + Vector3(0, 0, 9)))
+		wi.set_physics_process(false)   # a still Walk-In: the test is about the view, not the chase
+		_send("brains", {"items": [b1.item_id, b2.item_id, b3.item_id], "bts": [b1.bt, b2.bt, b3.bt], "walk_in": wi.monster_id})
+		var seen := {"hive": false, "echo": false}
+		var watch := func():
+			if c1.hive_view and not seen.hive:
+				seen.hive = true
+				_say("the client is looking through a Walk-In (hv)")
+			for n in game.recent_noises(1.5):
+				if String(n.kind) == "echo" and is_equal_approx(float(n.loudness), 1.2) and (n.pos as Vector3).distance_to(c1.global_position) < 4.0:
+					if not seen.echo:
+						_say("heard the client's Echo (noise 1.2)")
+					seen.echo = true
+		if not await _do_until(watch, func(): return seen.hive and seen.echo and _count_msgs("ok") >= 1, 200.0, "the client's hive view and echo (hive %s echo %s)" % [str(seen.hive), str(seen.echo)]):
+			return
+		var w: float = game.brains.points(c1.peer_id, "walk_in")
+		var d: float = game.brains.points(c1.peer_id, "discharged")
+		# Walk-In fresh 1.0; the second Discharged brain was fresh or spoiling by the time it was drunk
+		# (1.0 or 0.75), the third rotten (0.5).
+		if w != 1.0 or not (is_equal_approx(d, 1.25) or is_equal_approx(d, 1.5)):
+			return _end(false, "host points for the client: walk_in %.2f discharged %.2f, expected 1.00 / 1.25..1.5" % [w, d])
+		await _finish_together("the client drank three brains (%.2f / %.2f), looked through a Walk-In and shrieked Echo" % [w, d])
+		return
+	if not await _until(func(): return game.phase != Game.Phase.MENU and _me() != null and _count_msgs("brains") > 0 and game.brains.blender != null, 90.0, "the brains"):
+		return
+	var me := _me()
+	me.bot_active = true
+	me.bot_invulnerable = true
+	var ids: Dictionary = _msgs("brains")[0].data
+	var bs := game.brains
+	for pass_i in 3:
+		var kind := "brain_walk_in" if pass_i == 0 else "brain_discharged"
+		var item_id := int(ids.items[pass_i])
+		if not await _until(func(): return game.world_items.has(item_id), 20.0, "the %s on my machine" % kind):
+			return
+		var it = game.world_items[item_id]
+		if not await _until(func(): return float(it.bt) > -100000.0, 10.0, "the %s's spoil clock on my machine" % kind):
+			return
+		if absf(float(it.bt) - float(ids.bts[pass_i])) > 0.51:
+			return _end(false, "brain %d's spoil clock is %.1f here, %.1f on the host" % [pass_i, float(it.bt), float(ids.bts[pass_i])])
+		if pass_i == 2 and bs.condition(bs.factor_of(it)) != "rotten":
+			return _end(false, "the old brain should look rotten on my machine, factor %.2f" % bs.factor_of(it))
+		var take := func():
+			var node = game.world_items.get(item_id)
+			if node != null:
+				_press_at(node.global_position, "it_%d" % item_id)
+		if not await _do_until(take, func(): return me.holding(kind), 40.0, "picking up the " + kind):
+			return
+		me.selected = _slot_of(kind)
+		if not await _until(func(): return me.slots[_slot_of(kind)].has("bt"), 10.0, "bt in my hand slot"):
+			return
+		var path := "walk_in" if pass_i == 0 else "discharged"
+		var blend := func():
+			var i := _slot_of(kind)
+			if i >= 0:
+				me.selected = i
+			_press_at(bs.blender.global_position, "blender", true)
+		var before: float = bs.points(Net.my_id(), path)
+		if not await _do_until(blend, func(): return not me.holding(kind) and bs.points(Net.my_id(), path) > before, 40.0, "blending the " + kind):
+			return
+		me.bot_interact = false
+		me.bot_aim_id = ""
+		_say("drank the %s: walk_in %.2f discharged %.2f" % [kind, bs.points(Net.my_id(), "walk_in"), bs.points(Net.my_id(), "discharged")])
+		if pass_i == 0:
+			# Hive Eyes: R, then R again to come back.
+			me.teleport(_stand_spot(game.monsters[int(ids.walk_in)].global_position + Vector3(0, 0, -8)))
+			await _wall_wait(0.5)
+			me.bot_ability += 1
+			if not await _until(func(): return me.hive_view and bs.local_hive_active() and bs.camera() != null, 20.0, "Hive Eyes on my machine"):
+				return
+			_say("hive view on at t=%.1f: %s" % [game.world_time, str(bs._hive)])
+			await _frames(30)   # game time: the view lasts 7 game seconds at level 1
+			var cam: Camera3D = bs.camera()
+			var wm = game.monsters.get(int(ids.walk_in))
+			if cam == null or wm == null or cam.global_position.distance_to(wm.global_position) > 2.5:
+				return _end(false, "the Hive Eyes camera is not at the Walk-In: cam %s, walk-in %s, target %d, hive %s" % [str(cam.global_position if cam != null else null), str(wm.global_position if wm != null else null), int(bs.hive_view.monster_id), str(bs._hive)] + " msg=" + game.message + " t=%.1f" % game.world_time)
+			me.bot_ability += 1
+			if not await _until(func(): return not me.hive_view and not bs.local_hive_active(), 20.0, "coming back from Hive Eyes"):
+				return
+			_say("looked through the Walk-In and came back")
+	# 1.00 Walk-In against 1.25 Discharged: R is Echo now.
+	if bs.best_path(Net.my_id()) != "discharged":
+		return _end(false, "expected Echo to be the stronger path (walk_in %.2f discharged %.2f)" % [bs.points(Net.my_id(), "walk_in"), bs.points(Net.my_id(), "discharged")])
+	await _wall_wait(0.5)
+	me.bot_ability += 1
+	if not await _until(func(): return bs.echo_view.active and float(bs.last_echo.get("r", 0.0)) >= 18.0, 20.0, "Echo on my machine"):
+		return
+	_say("Echo: %d outlines of %d things" % [bs.echo_view.ghosts.size(), bs.echo_view.target_count])
+	await _finish_together("picked up and drank three brains, used Hive Eyes and Echo")
 
 
 ## loop (sweep 2): two patients on two tables, two clients operating on different tables at once.

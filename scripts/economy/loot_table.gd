@@ -123,6 +123,17 @@ const LOOT := {
 		"rooms": {"radiology": 2.0, "ward": 0.3, "storage": 0.3, "*": 0.02},
 		"surfaces": ["counter", "gurney"], "containers": {},
 	},
+	# BRAINS (sweep 3, scripts/brains): harvested from a dissected monster, never found. No rooms,
+	# surfaces or containers, so the loot spawner never picks them; `value` is the full price of a
+	# perfect brain (scaled by its condition when harvested, then by spoilage, see brains.gd).
+	"brain_walk_in": {
+		"name": "Walk-In brain", "short": "Walk-In brains", "value": [150, 150], "tier": 3, "fragile": true,
+		"brain": true, "rooms": {}, "surfaces": [], "containers": {},
+	},
+	"brain_discharged": {
+		"name": "Discharged brain", "short": "Discharged brains", "value": [350, 350], "tier": 3, "fragile": true,
+		"brain": true, "rooms": {}, "surfaces": [], "containers": {},
+	},
 }
 
 ## Weight multiplier by tier on the surface (depth 0); deeper rooms lift the rare tiers.
