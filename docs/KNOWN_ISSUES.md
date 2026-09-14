@@ -99,11 +99,13 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   (variance up to 2 s) and decays slowly, so a reliable RPC lost in that window is resent 5-10 s
   later, and two losses of one reliable packet can outlast the timeout. Peers now get patient
   timeouts (`Net.PATIENT_*`: 10-20 s, limit 64) from connecting until `Game.NET_PATIENCE_MS`
-  (15 s) after their first acknowledgement, and for 15 s after every level build. Still, at
-  200 ms, 80 ms jitter, 8% loss (4x speed) a client occasionally drops (`[net] peer ... disconnected`
-  shows the last RTT and the longest frame) and nettest orders can arrive after the step they
-  were about. Snapshots keep flowing throughout. Building the level without blocking the network
-  poll would fix the cause.
+  (15 s) after their first acknowledgement, and for 15 s after every level build. At 200 ms,
+  80 ms jitter, 8% loss (4x speed) `deliver`, `surgery` and `full_shift_lag` pass; `two_patients`
+  fails about half the time because one client's order arrives after the other's two-second
+  (game time) step is over, so the operations do not overlap and that client sees none of it.
+  Earlier runs also saw the odd client drop (`[net] peer ... disconnected` prints the last RTT and
+  the longest frame). Snapshots keep flowing throughout. Building the level without blocking the
+  network poll would fix the cause.
 - **The lag relay reorders more than real links**: each datagram gets an independent uniform
   jitter, so +-40 ms at 4x game speed reorders several packets per tick. Snapshot messages are
   unordered and cope (`NET_REORDER_MS` 100 ms before a gap counts as a loss).
