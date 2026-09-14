@@ -15,6 +15,7 @@ const Kit := preload("res://scripts/patients/patient_kit.gd")
 const BobBuilder := preload("res://scripts/patients/bob_builder.gd")
 const SealBuilder := preload("res://scripts/patients/seal_builder.gd")
 const DummyBuilder := preload("res://scripts/patients/dummy_builder.gd")
+const MonsterBuilder := preload("res://scripts/dissection/monster_builder.gd")
 
 var patient_id := "bob"
 var ailment_id := ""
@@ -71,7 +72,11 @@ static func create(id: String) -> Node3D:
 	b.add_child(b.rig)
 	var body_kind := String(Procedures.PATIENTS.get(id, {}).get("body", id))
 	var ok := false
-	if body_kind == "seal":
+	if Procedures.is_monster(id):
+		# dissection (sweep 3): a strapped monster; scripts/dissection/monster_builder.gd builds it.
+		ok = MonsterBuilder.build(b)
+		b._builder = MonsterBuilder
+	elif body_kind == "seal":
 		ok = SealBuilder.build(b)
 		b._builder = SealBuilder
 	else:

@@ -62,6 +62,17 @@ const LAYERS := [
 	{"name": "Bone", "to": 0.64, "res": 2.2, "tear": 1.2, "bleed": 0.55, "col": Color(0.82, 0.76, 0.62)},
 	{"name": "Far side", "to": 1.0, "res": 0.9, "tear": 0.8, "bleed": 1.0, "col": Color(0.55, 0.05, 0.06)},
 ]
+## dissection (sweep 3), variant "skull": saw open a strapped monster's skull along the line across
+## its forehead. Same strokes, guide and verdicts as the limb; its own layers, no tourniquet (the
+## scalp bleeds a steady SKULL_BLEED), and at depth 1 the flags get `skull_open` instead of
+## `amputated` (the body lifts the cap off and lays it beside the head).
+const SKULL_LAYERS := [
+	{"name": "Scalp", "to": 0.16, "res": 0.5, "tear": 0.5, "bleed": 0.5, "col": Color(0.5, 0.52, 0.42)},
+	{"name": "Bone", "to": 0.84, "res": 2.0, "tear": 0.75, "bleed": 0.35, "col": Color(0.86, 0.8, 0.66)},
+	{"name": "Dura", "to": 1.0, "res": 0.8, "tear": 0.9, "bleed": 0.8, "col": Color(0.6, 0.28, 0.3)},
+]
+const SKULL_BLEED := 0.35
+const K_SKULL := 0.05
 const MAX_SPLATS := 28
 const MAX_SCORES := 10
 const GUIDE_COLORS := {
@@ -83,6 +94,9 @@ var bleed := 0.5                  # 0 clean .. 1 pouring, from the tourniquet
 var line_tol := LINE_TOL
 var distal := 1.0
 var size_k := 1.0                 # botch rates per pass shrink for thick limbs so the total stays fair
+var skull := false                # dissection: the "skull" variant
+var layers: Array = LAYERS        # SKULL_LAYERS for the skull
+var _bone_i := 2                  # index of the "Bone" layer in `layers`
 
 # -- shared state (the operator simulates it, spectators get it from net_state) -------------------
 var bz := 0.0                     # blade centre along the cut line (plane Z)
@@ -178,6 +192,14 @@ func setup(context: Dictionary) -> void:
 	k_cut = K_BASE * pow(0.05 / maxf(0.02, limb_r), 0.75) / pow(diff, 0.8)
 	line_tol = LINE_TOL / sqrt(diff)
 	size_k = 0.05 / maxf(0.02, limb_r)
+	if String(ctx.get("variant", "")) == "skull":
+		skull = true
+		layers = SKULL_LAYERS
+		_bone_i = 1
+		tourniquet = 1.0
+		bleed = SKULL_BLEED
+		k_cut = K_SKULL / pow(diff, 0.8)
+		size_k = 1.0
 	_rng.seed = int(ctx.get("seed", 1)) ^ 0x5a3
 	_update_progress()
 
@@ -207,17 +229,17 @@ func camera_pose() -> Dictionary:
 func layer_index(f: float = -1.0) -> int:
 	if f < 0.0:
 		f = depth
-	for i in LAYERS.size():
-		if f < float(LAYERS[i].to):
+	for i in layers.size():
+		if f < float(layers[i].to):
 			return i
-	return LAYERS.size() - 1
+	return layers.size() - 1
 
 
 ## Blade speed (m/s) above which this layer tears.
 func fast_speed(li: int = -1) -> float:
 	if li < 0:
 		li = layer_index()
-	return (V_FAST_BONE if LAYERS[li].name == "Bone" else V_FAST) / sqrt(diff)
+	return (V_FAST_BONE if layers[li].name == "Bone" else V_FAST) / sqrt(diff)
 
 
 func _update_progress() -> void:
@@ -306,7 +328,7 @@ func _seg_reset_acc() -> void:
 
 func _judge_pass(length: float, dur: float) -> void:
 	var li := layer_index()
-	var layer: Dictionary = LAYERS[li]
+	var layer: Dictionary = layers[li]
 	var speed := length / dur
 	var vf := fast_speed(li)
 	var rushed := clampf((speed - vf) / (vf * 0.4), 0.0, 1.0)
@@ -346,7 +368,7 @@ func _judge_pass(length: float, dur: float) -> void:
 		verdict = Verdict.GOOD
 
 	# Bleeding: the weaker the tourniquet, the more every pass spurts, and rushing makes it worse.
-	if depth > float(LAYERS[0].to) * 0.5:
+	if depth > float(layers[0].to) * 0.5:
 		var spurt := bleed * float(layer.bleed) * (0.6 + 0.4 * badness)
 		blood = minf(1.0, blood + spurt * 0.03)
 		if spurt > 0.2 or rushed > 0.5:
@@ -360,7 +382,10 @@ func _judge_pass(length: float, dur: float) -> void:
 	if depth >= 1.0:
 		var body = ctx.get("body")
 		_amputate_body(body)
-		finish({"amputated": true, "cut_quality": cut_quality()})
+		if skull:
+			finish({"skull_open": true, "cut_quality": cut_quality()})
+		else:
+			finish({"amputated": true, "cut_quality": cut_quality()})
 
 
 func cut_quality() -> float:
@@ -376,7 +401,7 @@ func _amputate_body(body) -> void:
 		return
 	# apply_flags replaces the body's flag set, so carry the earlier results (the tourniquet).
 	var f: Dictionary = (ctx.get("flags", {}) as Dictionary).duplicate()
-	f["amputated"] = true
+	f["skull_open" if skull else "amputated"] = true
 	body.apply_flags(f)
 
 
@@ -397,7 +422,7 @@ func hud_state() -> Dictionary:
 	var title := String(ctx.get("step", {}).get("label", "Saw through the limb"))
 	var hint := "Hold left click and saw back and forth along the line."
 	if done or depth >= 1.0:
-		hint = "It's off."
+		hint = "It's open." if skull else "It's off."
 	elif held:
 		if off_now > 0.35 or verdict == Verdict.OFF:
 			hint = "Off the line! Steer back onto the cut."
@@ -405,7 +430,7 @@ func hud_state() -> Dictionary:
 			hint = "Too fast, the saw is jumping. Ease off."
 		elif verdict == Verdict.SHORT:
 			hint = "Longer strokes. Use the whole blade."
-		elif LAYERS[layer_index()].name == "Bone":
+		elif layers[layer_index()].name == "Bone":
 			hint = "Bone. Steady strokes, don't rush it."
 		else:
 			hint = "That's biting. Keep going."
@@ -474,6 +499,25 @@ static func self_test() -> Array:
 					pid, skill, cond.tq, cond.sed, "DONE" if tally.done else "UNFINISHED", g.strokes, t, tally.n, tally.v, tally.q, str(tally.reasons)]
 				print(line)
 				out.append({"patient": pid, "skill": skill, "tq": cond.tq, "done": tally.done, "time": t, "botches": tally.n, "vitals": tally.v, "q": tally.q})
+				g.free()
+	# dissection (sweep 3): the skull variant on both monsters, sedated, stirring and awake (the
+	# awake thrashing botches come from the dissection system, not from here).
+	for sed in [1.0, 0.5, 0.2]:
+		for pid in ["walk_in", "discharged"]:
+			for skill in [1.0, 0.5, 0.0]:
+				var g = script.new()
+				var tally := {"n": 0, "v": 0.0, "done": false, "q": 0.0, "flag": false, "reasons": {}}
+				g.botched.connect(func(a, r): tally.n += 1; tally.v += a; tally.reasons[r] = int(tally.reasons.get(r, 0)) + 1)
+				g.finished.connect(func(r): tally.done = true; tally.q = float(r.get("cut_quality", 0.0)); tally.flag = bool(r.get("skull_open", false)) and not r.has("amputated"))
+				g.setup({"patient_id": pid, "patient": Procedures.patient(pid), "ailment_id": "dissection",
+					"step": Procedures.step("dissection", 0), "variant": "skull", "shift": 1,
+					"difficulty": Procedures.difficulty(1), "flags": {"sedation": sed},
+					"seed": hash("skull" + pid), "body": null, "operator": true})
+				var t2: float = load("res://scripts/surgery/games/gauze.gd")._run_bot(g, skill, float(sed), hash(pid) + int(skill * 100))
+				var line2 := "[saw self-test] skull %-10s skill=%.2f sed=%.1f  %s  passes=%3d  time=%5.1fs  botches=%2d vitals=%5.1f  q=%.2f  skull_open=%s  %s" % [
+					pid, skill, sed, "DONE" if tally.done else "UNFINISHED", g.strokes, t2, tally.n, tally.v, tally.q, str(tally.flag), str(tally.reasons)]
+				print(line2)
+				out.append({"patient": pid, "variant": "skull", "skill": skill, "sed": sed, "done": tally.done and tally.flag, "time": t2, "botches": tally.n, "vitals": tally.v, "q": tally.q})
 				g.free()
 	return out
 
@@ -666,20 +710,20 @@ func _update_visuals(delta: float) -> void:
 	_jagged.size = Vector3(width * 1.7, _jagged.size.y, len_z * 1.06)
 	_jagged.modulate = Color(1, 1, 1, clampf(jag * 1.8 - 0.1, 0.0, 1.0))
 	_tissue.size = Vector3(width * 0.3, _tissue.size.y, len_z * 0.9)
-	var tcol: Color = LAYERS[li].col
+	var tcol: Color = layers[li].col
 	_tissue.modulate = Color(tcol.r, tcol.g, tcol.b, 0.8)
 	var kb := clampf(0.12 + 0.25 * f + blood * 1.6, 0.0, 1.0)
-	if LAYERS[li].name == "Bone":
+	if layers[li].name == "Bone":
 		kb = minf(kb, 0.35 + blood * 0.4)
 	_kerf_blood.size = Vector3(width * 0.8, _kerf_blood.size.y, len_z * 0.95)
 	_kerf_blood.modulate = Color(1, 1, 1, kb)
 	# Bone dust builds up once the saw reaches bone.
-	var bone_from := float(LAYERS[1].to)
-	var bone_amt := clampf((f - bone_from) / (float(LAYERS[2].to) - bone_from), 0.0, 1.0)
+	var bone_from := float(layers[_bone_i - 1].to)
+	var bone_amt := clampf((f - bone_from) / (float(layers[_bone_i].to) - bone_from), 0.0, 1.0)
 	_dust_decal.visible = bone_amt > 0.02 and not _finale
 	_dust_decal.position.x = kx
 	_dust_decal.size = Vector3(width * 1.8, _dust_decal.size.y, len_z + 0.02)
-	_dust_decal.modulate = Color(1, 1, 1, clampf(bone_amt * 1.2, 0.0, 0.55) * (1.0 - blood * 0.8) * clampf(1.0 - (f - float(LAYERS[2].to)) / 0.12, 0.0, 1.0))
+	_dust_decal.modulate = Color(1, 1, 1, clampf(bone_amt * 1.2, 0.0, 0.55) * (1.0 - blood * 0.8) * clampf(1.0 - (f - float(layers[_bone_i].to)) / 0.12, 0.0, 1.0))
 	# Pooled blood grows over the cut line and hides the marks.
 	_pool.visible = blood > 0.02
 	var ps := lerpf(0.03, 0.2, sqrt(blood))
@@ -763,7 +807,7 @@ func _update_visuals(delta: float) -> void:
 			_hop = 1.0
 			_audio("surgery_saw_grind", at, 0.0, 0.25)
 			_audio("surgery_saw_squelch", at, -6.0, 0.15)
-		elif LAYERS[li].name == "Bone":
+		elif layers[li].name == "Bone":
 			_audio("surgery_saw_grind", at, -3.0 if verdict == Verdict.GOOD else -8.0, 0.08)
 			_dust.position = Vector3(kx, 0.004, side)
 			_dust.restart()
@@ -772,13 +816,13 @@ func _update_visuals(delta: float) -> void:
 			if blood > 0.25 and strokes % 3 == 0:
 				_audio("surgery_saw_squelch", at, -9.0, 0.1)
 		if verdict == Verdict.GOOD or verdict == Verdict.RUSHED:
-			_chips.color = LAYERS[li].col.lightened(0.1)
+			_chips.color = layers[li].col.lightened(0.1)
 			_chips.position = Vector3(kx, 0.006, side * 0.6)
 			_chips.restart()
 	if li != _seen_layer:
 		# Into the next layer: a clunk as the teeth meet bone, a softer give past it.
 		if li > _seen_layer and _built and not _finale:
-			_audio("surgery_saw_thunk" if LAYERS[li].name == "Bone" else "surgery_saw_squelch", global_position, -12.0 if LAYERS[li].name == "Bone" else -8.0, 0.1)
+			_audio("surgery_saw_thunk" if layers[li].name == "Bone" else "surgery_saw_squelch", global_position, -12.0 if layers[li].name == "Bone" else -8.0, 0.1)
 		_seen_layer = li
 
 	if body != null and is_instance_valid(body) and body.has_method("set_bleeding") and not _finale:
@@ -808,8 +852,9 @@ func _place_splat(i: int) -> void:
 
 func _start_finale(body) -> void:
 	_finale = true
-	# A static copy of the limb drops away while the body shows its stump.
-	if body != null and is_instance_valid(body) and body.has_method("make_severed_limb"):
+	# A static copy of the limb drops away while the body shows its stump. (The skull: the body
+	# itself lifts the cap off when it gets `skull_open`.)
+	if not skull and body != null and is_instance_valid(body) and body.has_method("make_severed_limb"):
 		_severed = body.make_severed_limb(self)
 	_amputate_body(body)
 	var at := global_position

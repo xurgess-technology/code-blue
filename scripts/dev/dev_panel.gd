@@ -198,7 +198,7 @@ func _build() -> void:
 	# ---- patient
 	_section(col, "Patient")
 	var p1 := _row(col)
-	var pids: Array = Procedures.PATIENTS.keys()
+	var pids: Array = Procedures.human_patients()  # SWEEP 3 HOOK (dissection): monsters strap below
 	var aids: Array = Procedures.patient_ailments()  # downed hook: stitches is for players only
 	var patients := _option(p1, pids.map(func(k): return Procedures.patient(k).name))
 	var ailments := _option(p1, aids.map(func(k): return Procedures.ailment(k).name))
@@ -228,6 +228,11 @@ func _build() -> void:
 	_c["vitals_label"] = _label(p3, "100", 13, ACCENT)
 	(_c["vitals_label"] as Label).custom_minimum_size.x = 40
 	vit.value_changed.connect(func(v): (_c["vitals_label"] as Label).text = "%d" % int(v))
+	# SWEEP 3 HOOK (dissection): strap a monster to a patient table, sedated or already waking.
+	var pm := _row(col)
+	_button(pm, "Strap Walk-In", func(): _req("strap_monster", {"kind": "walk_in"}))
+	_button(pm, "Strap Discharged", func(): _req("strap_monster", {"kind": "discharged"}))
+	_button(pm, "...waking", func(): _req("strap_monster", {"kind": "walk_in", "sedation": 0.4}))
 	var p4 := _row(col)
 	_button(p4, "Stock shelf", func(): _req("stock_shelf"))
 	_button(p4, "Clear shelf", func(): _req("clear_shelf"))

@@ -802,6 +802,8 @@ func _table_prompt(p, table_index: int) -> String:
 	var c := case_on_table(table_index)
 	if c.is_empty() or String(c.get("patient_id", "")) == "player":
 		return ""
+	if dissection.owns_case(c):
+		return dissection.table_prompt(p, table_index)   # SWEEP 3 HOOK (dissection): re-dose / sedation
 	var pname: String = Procedures.patient(String(c.patient_id)).get("name", "The patient")
 	if String(c.state) == "stable":
 		return "!%s is stable." % pname
@@ -826,6 +828,8 @@ func _proxy_used(id: String, p: Node) -> void:
 	for t in patient_tables:
 		if table_interact_id(int(t.index)) != id:
 			continue
+		if dissection.table_used(p, int(t.index)):
+			return   # SWEEP 3 HOOK (dissection): anesthetic in hand re-doses a strapped monster
 		var sys := surgery_for_table(int(t.index))
 		if sys == null:
 			return
@@ -1363,6 +1367,12 @@ func finish_case(id: int, won: bool) -> void:
 		if int(s.table_index) == int(c.get("table", -2)):
 			s.end_current()
 	_apply_cases_locally()
+	if dissection.owns_case(c):
+		# SWEEP 3 HOOK (dissection): a strapped monster: the brain is handed over (or ruined) with its
+		# own wording and no paycheck sting; the case clears itself a few seconds later.
+		dissection.on_case_finished(c, won)
+		loop.on_case_finished(c)
+		return
 	var pname: String = Procedures.patient(String(c.patient_id)).get("name", "The patient")
 	if String(c.patient_id) == "player":
 		pname = "The patient"

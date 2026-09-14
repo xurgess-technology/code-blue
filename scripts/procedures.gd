@@ -6,7 +6,7 @@ extends RefCounted
 ## ("injection", "gunshot", "limb_cut") and each patient body provides a marker
 ## for every site. Adding a patient means placing those markers on a new model.
 
-const SITES := ["injection", "gunshot", "limb_cut", "limb"]
+const SITES := ["injection", "gunshot", "limb_cut", "limb", "skull", "brain"]
 
 const PATIENTS := {
 	"bob": {
@@ -31,6 +31,34 @@ const PATIENTS := {
 		"blurbs": {
 			"gunshot": "Found behind the loading dock. Nobody is admitting to anything.",
 			"amputation": "Tangled in fishing line for weeks. The flipper has to go.",
+		},
+	},
+	# dissection (sweep 3): strapped monsters. `monster: true` keeps them out of roll(), the dev
+	# panel's patient list and anything else that means a human patient (human_patients()). Their
+	# bodies are built by scripts/dissection/monster_builder.gd; the only ailment they take is
+	# `dissection`.
+	"walk_in": {
+		"name": "The Walk-In",
+		"full_name": "Walk-In, unregistered",
+		"body": "walk_in",
+		"monster": true,
+		"weight_kg": 70.0,
+		"limb_name": "",
+		"limb_radius_m": 0.05,
+		"blurbs": {
+			"dissection": "Came in through the front door and never left. Still in the gown.",
+		},
+	},
+	"discharged": {
+		"name": "The Discharged",
+		"full_name": "Discharged patient, no records",
+		"body": "discharged",
+		"monster": true,
+		"weight_kg": 88.0,
+		"limb_name": "",
+		"limb_radius_m": 0.05,
+		"blurbs": {
+			"dissection": "Signed out years ago. The IV line is still taped to its arm.",
 		},
 	},
 }
@@ -67,6 +95,17 @@ const AILMENTS := {
 			{"id": "stitch", "label": "Stitch the wound closed", "item": "suture_kit", "uses": 1, "game": "stitches", "site": "gash"},
 		],
 	},
+	# dissection (sweep 3): a strapped monster on a patient table. `monster_only` keeps it out of
+	# roll() and patient_ailments(). The saw and forceps steps play their "skull" / "brain" variants.
+	"dissection": {
+		"name": "Dissection",
+		"code": "DX",
+		"monster_only": true,
+		"steps": [
+			{"id": "open", "label": "Saw open the skull", "item": "bone_saw", "uses": 0, "game": "saw", "variant": "skull", "site": "skull"},
+			{"id": "harvest", "label": "Pull out the brain", "item": "forceps", "uses": 0, "game": "forceps", "variant": "brain", "site": "brain"},
+		],
+	},
 }
 
 ## Where each minigame script lives. The surgery system loads these by id.
@@ -84,8 +123,7 @@ const MINIGAME_SCRIPTS := {
 static func roll(seed_value: int, shift: int) -> Dictionary:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash("%d|case|%d" % [seed_value, shift])
-	var patient_ids := PATIENTS.keys()
-	patient_ids.sort()
+	var patient_ids := human_patients()
 	var ailment_ids := patient_ailments()
 	return {
 		"patient": patient_ids[rng.randi_range(0, patient_ids.size() - 1)],
@@ -93,11 +131,12 @@ static func roll(seed_value: int, shift: int) -> Dictionary:
 	}
 
 
-## Ailments a patient case can have, sorted (everything but the player-only ones such as stitches).
+## Ailments a patient case can have, sorted (everything but the player-only ones such as stitches
+## and the monster-only dissection).
 static func patient_ailments() -> Array:
 	var out := []
 	for id in AILMENTS.keys():
-		if not bool(AILMENTS[id].get("player_only", false)):
+		if not bool(AILMENTS[id].get("player_only", false)) and not bool(AILMENTS[id].get("monster_only", false)):
 			out.append(id)
 	out.sort()
 	return out
@@ -105,6 +144,36 @@ static func patient_ailments() -> Array:
 
 static func is_player_only(ailment_id: String) -> bool:
 	return bool(AILMENTS.get(ailment_id, {}).get("player_only", false))
+
+
+## dissection (sweep 3): the ailment only a strapped monster has.
+static func is_monster_only(ailment_id: String) -> bool:
+	return bool(AILMENTS.get(ailment_id, {}).get("monster_only", false))
+
+
+## dissection (sweep 3): a monster patient (walk_in, discharged).
+static func is_monster(patient_id: String) -> bool:
+	return bool(PATIENTS.get(patient_id, {}).get("monster", false))
+
+
+## The human patients a phone call can bring, sorted (bob, seal): every patient but the monsters.
+static func human_patients() -> Array:
+	var out := []
+	for id in PATIENTS.keys():
+		if not bool(PATIENTS[id].get("monster", false)):
+			out.append(id)
+	out.sort()
+	return out
+
+
+## The monster patients, sorted.
+static func monster_patients() -> Array:
+	var out := []
+	for id in PATIENTS.keys():
+		if bool(PATIENTS[id].get("monster", false)):
+			out.append(id)
+	out.sort()
+	return out
 
 
 static func patient(id: String) -> Dictionary:
