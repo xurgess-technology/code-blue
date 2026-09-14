@@ -207,7 +207,15 @@ func _sc_surgery():
 		return
 	if not await _wait_shift_as_client():
 		return
-	if not await _until(func(): return _count_msgs("operate") > 0, 30.0, "operate order"):
+	# Watch from the start: the order can reach the spectator after the operation began.
+	var st := {"states": {}, "ops": {}}
+	var watch := func():
+		var op := int(game.surgery.operator_id)
+		if op != 0 and op != Net.my_id():
+			st.ops[op] = true
+			if game.surgery.mg != null:
+				st.states[str(game.surgery.mg.net_state())] = true
+	if not await _do_until(watch, func(): return _count_msgs("operate") > 0, 30.0, "operate order"):
 		return
 	var op_id: int = _msgs("operate")[0].data.peer
 	if op_id == Net.my_id():
@@ -217,16 +225,10 @@ func _sc_surgery():
 			return
 		await _finish_together("operated step 0 to completion")
 	else:
-		var st := {"states": {}, "op": false}
-		var watch := func():
-			if game.surgery.operator_id == op_id:
-				st.op = true
-			if game.surgery.mg != null:
-				st.states[str(game.surgery.mg.net_state())] = true
 		if not await _do_until(watch, func(): return int(game.case.get("step_index", 0)) >= 1, 120.0, "the operator to finish"):
 			return
-		if not st.op or st.states.size() < 5:
-			return _end(false, "spectator saw operator=%s and only %d distinct tool states" % [str(st.op), st.states.size()])
+		if not st.ops.has(op_id) or st.states.size() < 5:
+			return _end(false, "spectator saw operator=%s and only %d distinct tool states" % [str(st.ops.has(op_id)), st.states.size()])
 		_send("watched", {"states": st.states.size()})
 		await _finish_together("watched %d distinct tool states and the step completing" % st.states.size())
 
@@ -470,7 +472,11 @@ func _sc_full_shift():
 			_tag(), sent, recv, secs, sent / secs, recv / secs,
 			"sent_per_client_Bps" if role == "host" else "upstream_Bps", per,
 			float(game.net_payload_bytes - int(st.get("payload", 0))) / secs / float(maxi(1, clients)) if role == "host" else 0.0])
-		print("[stats] %s counters %s" % [_tag(), str(game.net_counters)])
+		var during := {}
+		for k in game.net_counters.keys():
+			if k != "max_msg":
+				during[k] = int(game.net_counters[k]) - int(st.get("counters", {}).get(k, 0))
+		print("[stats] %s snapshot messages while the shift ran %s, whole session %s" % [_tag(), str(during), str(game.net_counters)])
 		if role == "host":
 			var parts := []
 			for k in game.net_section_bytes.keys():
@@ -818,6 +824,7 @@ func _shift_bot(st: Dictionary) -> void:
 		st.sent = Net.bytes_sent
 		st.recv = Net.bytes_received
 		st.payload = game.net_payload_bytes
+		st.counters = game.net_counters.duplicate()
 		game.net_section_bytes = {}
 		_say("patient on the table: %s/%s" % [game.case.patient_id, game.case.ailment_id])
 	if int(game.case.get("step_index", 0)) != int(st.last_step):

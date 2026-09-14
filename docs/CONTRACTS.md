@@ -783,8 +783,9 @@ Replication (networking section of `scripts/game.gd`):
   (Player.report_full per peer), `mo` (Monster.report), `ct` (open containers: id -> `{}`) and
   `it` (WorldItem.report); the `id` field of reports is stripped (the key says it).
   - The host tracks, per client and per field, the confirmed value and the value in flight, and
-    sends only fields the client lacks. Lost or overdue messages (RTO from measured RTT, 250 ms to
-    2 s) make their fields unknown, so they go again with current values. Every message holds
+    sends only fields the client lacks. Lost messages (a later one acked 100 ms-newer without
+    them, or no ack within srtt + 4 rttvar, 250 ms to 2 s, counted from the client's latest ack
+    packet) make their fields unknown, so they go again with current values. Every message holds
     absolute values; the client keeps the newest sequence per field, so any subset in any order
     converges. There are no keyframes and no message depends on another.
   - Existence is field `@` (a hash of the entity's field names, -1 once removed); the client
@@ -793,7 +794,7 @@ Replication (networking section of `scripts/game.gd`):
     ordinary value). `g` is split into groups whose names change together (`""` fixed fields,
     `cs` cases, `lp` loop, `s<table>` surgery), each its own entity; a client keeps using a
     group's last whole copy while a newer one is incomplete.
-  - **No message exceeds `Game.NET_MSG_BYTES` (1000, estimated payload)**: one datagram on ENet
+  - **No message exceeds `Game.NET_MSG_BYTES` (1000 estimated; 1016 serialized seen)**: one datagram on ENet
     (MTU 1392) and one segment on Steam (SteamNetworkingSockets MTU about 1200; its 512 KB
     `MAX_STEAM_PACKET_SIZE` is only the reliable/segmented limit, and an unreliable message split
     into segments is lost if any segment is). Priority per tick: `g`, `pl`, `mo`, `ct`, `it`.

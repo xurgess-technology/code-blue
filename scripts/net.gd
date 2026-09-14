@@ -134,7 +134,7 @@ func _sample_link(enet: ENetMultiplayerPeer) -> void:
 func _log_lost(id: int) -> void:
 	if backend != "enet":
 		return
-	print("[net] lost peer %d: last %s; longest frame lately %d ms" % [id, _link_stats.get(id, "no stats"), maxi(int(_stall_ms[0]), int(_stall_ms[1]))])
+	print("[net] peer %d disconnected: last %s; longest frame lately %d ms" % [id, _link_stats.get(id, "no stats"), maxi(int(_stall_ms[0]), int(_stall_ms[1]))])
 
 
 func is_host() -> bool:

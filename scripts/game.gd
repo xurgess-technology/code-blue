@@ -2546,7 +2546,7 @@ static func _global_groups(g: Dictionary) -> Dictionary:
 
 func _repl_new(state: Dictionary, now: int) -> Dictionary:
 	var r := {"seq": 0, "ents": {}, "dirty": {}, "pend": {}, "inflight": 0,
-		"srtt": 200.0, "last_ack": now, "acked_max": 0, "tick": 0}
+		"srtt": 200.0, "rttvar": 50.0, "last_ack": now, "last_rx": now, "acked_max": 0, "tick": 0}
 	for sec in NET_SECS:
 		r.ents[sec] = {}
 		var d := {}
@@ -2557,10 +2557,15 @@ func _repl_new(state: Dictionary, now: int) -> Dictionary:
 
 
 ## Host: messages to one client whose acknowledgement is overdue count as lost.
-func _repl_expire(r: Dictionary, now: int) -> void:
-	var rto := clampf(float(r.srtt) * 2.0 + 100.0, 250.0, 2000.0)
+## Measured against when this client's acknowledgements last arrived, not the clock: a host frame
+## that stalls, or acks that sit unprocessed until after this runs, must not count as loss. A client
+## that stopped acknowledging altogether expires nothing (the window throttles it instead); its
+## next ack sorts out what arrived.
+func _repl_expire(r: Dictionary, _now: int) -> void:
+	var rto := clampf(float(r.srtt) + 4.0 * float(r.rttvar) + 50.0, 250.0, 2000.0)
+	var ref := int(r.last_rx)
 	for seq in r.pend.keys():
-		if now - int(r.pend[seq].t) > rto:
+		if ref - int(r.pend[seq].t) > rto:
 			_repl_resolve(r, seq, false)
 
 
@@ -2749,13 +2754,16 @@ func _player_state(ack: Array, s: Array) -> void:
 		var latest := int(ack[0])
 		var mask := int(ack[1])
 		var now := Time.get_ticks_msec()
+		r.last_rx = now
 		if latest > int(r.acked_max):
 			if int(r.acked_max) == 0 and int(_net_patience.get(id, 0)) == -1:
 				_net_patience[id] = now + NET_PATIENCE_MS   # it has built the level: settle soon
 			r.acked_max = latest
 			r.last_ack = now
 			if r.pend.has(latest):
-				r.srtt = lerpf(float(r.srtt), float(now - int(r.pend[latest].t)), 0.125)
+				var sample := float(now - int(r.pend[latest].t))
+				r.rttvar = lerpf(float(r.rttvar), absf(sample - float(r.srtt)), 0.25)
+				r.srtt = lerpf(float(r.srtt), sample, 0.125)
 		var newest_acked_t := -1
 		for seq in r.pend.keys():
 			var d: int = latest - int(seq)

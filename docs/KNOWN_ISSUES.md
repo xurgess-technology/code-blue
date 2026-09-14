@@ -100,7 +100,7 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   later, and two losses of one reliable packet can outlast the timeout. Peers now get patient
   timeouts (`Net.PATIENT_*`: 10-20 s, limit 64) from connecting until `Game.NET_PATIENCE_MS`
   (15 s) after their first acknowledgement, and for 15 s after every level build. Still, at
-  200 ms, 80 ms jitter, 8% loss (4x speed) a client occasionally drops (`[net] lost peer ...`
+  200 ms, 80 ms jitter, 8% loss (4x speed) a client occasionally drops (`[net] peer ... disconnected`
   shows the last RTT and the longest frame) and nettest orders can arrive after the step they
   were about. Snapshots keep flowing throughout. Building the level without blocking the network
   poll would fix the cause.
