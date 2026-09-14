@@ -87,6 +87,8 @@ var _lunge_amt := 0.0
 var _stagger := 0.0
 var _flinch := 0.0
 var _lie := 0.0
+var _shape: CollisionShape3D = null
+var _shape_lying := false
 var _sedated_remote := false
 var _rng := RandomNumberGenerator.new()
 
@@ -193,6 +195,7 @@ func _build() -> void:
 	shape.shape = capsule
 	shape.position.y = height * 0.5
 	add_child(shape)
+	_shape = shape
 
 	agent = NavigationAgent3D.new()
 	agent.radius = 0.45
@@ -372,6 +375,19 @@ func wake() -> void:
 	if dragger != null and is_instance_valid(dragger) and dragger.global_position.distance_to(global_position) < 3.0 \
 			and game.has_method("monster_hit_player"):
 		game.monster_hit_player(self, dragger)
+
+
+## Every machine: where its eyes are and which way they look (-Z forward), following the
+## animated head (for a camera riding a Walk-In). Falls back to a fixed height on the body.
+func eye_transform() -> Transform3D:
+	var head: Node3D = model.find_child("Head", true, false) as Node3D if model != null else null
+	if head != null and head.is_inside_tree():
+		# Head attachments face +Z; the eyes sit about 13 cm up and 9 cm forward of the neck bone.
+		var hb := head.global_transform.basis.orthonormalized()
+		var origin := head.global_transform.origin + hb.y * 0.13 + hb.z * 0.1
+		return Transform3D(Basis(-hb.x, hb.y, -hb.z), origin)
+	var eye_h := 1.5 if kind == WALK_IN else height - 0.25
+	return Transform3D(global_transform.basis.orthonormalized(), global_position + Vector3.UP * eye_h)
 
 
 # =========================================================================
@@ -660,6 +676,12 @@ func _update_visual(delta: float) -> void:
 	if hit_count != _last_hits:
 		_flinch = 1.0
 	var lying := mode == Mode.SEDATED
+	if lying != _shape_lying and _shape != null:
+		# The capsule lies down with the body (along local Z, centred), so aim and hits find it.
+		_shape_lying = lying
+		var r: float = (_shape.shape as CapsuleShape3D).radius
+		_shape.rotation.x = PI * 0.5 if lying else 0.0
+		_shape.position = Vector3(0.0, r if lying else height * 0.5, 0.0)
 	_lie = move_toward(_lie, 1.0 if lying else 0.0, delta * (2.2 if lying else 1.4))
 
 	if model == null:

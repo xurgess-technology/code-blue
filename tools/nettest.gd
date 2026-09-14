@@ -29,6 +29,8 @@ extends Node
 ##                    on different tables at the same time and each watches the other
 ##   downed           client 1 goes down and crawls; client 2 carries them to the player table and
 ##                    stitches them up; the host and both clients see each stage
+##   monsters         host + 1 client: a Walk-In sedated, hit, dragged and woken on the host; the
+##                    client sees each (sweep 3)
 ##
 ## Shifts start the way the loop does (sweep 2): the host clocks in, skips the grace period,
 ## answers the phone, and the paramedics wheel the patient onto a table.
@@ -123,6 +125,7 @@ func _run() -> void:
 		"economy": await _sc_economy()
 		"two_patients": await _sc_two_patients()
 		"downed": await _sc_downed()
+		"monsters": await _sc_monsters()   # SWEEP 3 HOOK (monsters)
 		_: _end(false, "unknown scenario " + scenario)
 
 
@@ -789,6 +792,60 @@ func _sc_downed():
 	if not await _until(func(): return not target.downed and target.alive, 90.0, "the stitches to finish"):
 		return
 	await _finish_together("carried a downed teammate to the table and stitched them up")
+
+
+## SWEEP 3 HOOK (monsters): the combat surface crosses the wire. The host sedates a Walk-In, hits
+## it, marks it dragged by the client and wakes it; the client sees the Walk-Ins of the roster,
+## the lying pose, the hit, who drags it, and it standing up again.
+func _sc_monsters():
+	if role == "host":
+		if not await _start_shift_when_full():
+			return
+		var w: Node = null
+		var walk_ins := 0
+		for m in game.monsters.values():
+			if m.kind == "walk_in":
+				walk_ins += 1
+				if w == null:
+					w = m
+		if w == null:
+			return _end(false, "no Walk-Ins in the shift's roster (%s)" % str(game.monsters.values().map(func(m): return m.kind)))
+		_send("mo_start", {"id": w.monster_id, "walk_ins": walk_ins})
+		w.shoved(Vector3.FORWARD)
+		if not w.can_sedate() or not w.sedate(60.0):
+			return _end(false, "could not sedate a shoved Walk-In")
+		if w.take_hit(Vector3.FORWARD, 1, "nettest") != "stagger":
+			return _end(false, "a hit on a sedated Walk-In (hp 2) did not stagger")
+		if not await _until(func(): return _count_msgs("mo_sedated") > 0 or _count_msgs("fail") > 0, 30.0, "the client to see it sedated"):
+			return
+		w.dragged_by = _peer_of(1)
+		if not await _until(func(): return _count_msgs("mo_dragged") > 0 or _count_msgs("fail") > 0, 30.0, "the client to see it dragged"):
+			return
+		w.dragged_by = 0
+		w.wake()
+		if not await _until(func(): return _count_msgs("mo_awake") > 0 or _count_msgs("fail") > 0, 30.0, "the client to see it wake"):
+			return
+		await _finish_together("sedated, hit, dragged and woke a Walk-In; the client saw each")
+		return
+	if not await _wait_shift_as_client():
+		return
+	if not await _until(func(): return _count_msgs("mo_start") > 0, 60.0, "the monster test to start"):
+		return
+	var d: Dictionary = _msgs("mo_start")[0].data
+	var id: int = d.id
+	if not await _until(func(): return game.monsters.values().filter(func(m): return m.kind == "walk_in").size() == int(d.walk_ins) and game.monsters.has(id), 20.0, "%d Walk-Ins on my machine" % int(d.walk_ins)):
+		return
+	var w: Node = game.monsters[id]
+	if not await _until(func(): return is_instance_valid(w) and w.is_sedated() and w.model.rotation.x > 1.4 and w.hit_count >= 1, 20.0, "the Walk-In lying sedated, hit once"):
+		return
+	_send("mo_sedated", {})
+	if not await _until(func(): return int(w.dragged_by) == Net.my_id(), 20.0, "dragged_by = me"):
+		return
+	_send("mo_dragged", {})
+	if not await _until(func(): return not w.is_sedated() and w.model.rotation.x < 0.3, 20.0, "the Walk-In getting up"):
+		return
+	_send("mo_awake", {})
+	await _finish_together("saw the Walk-Ins, one sedated (lying), hit, dragged by me and waking")
 
 
 ## One frame of a simple co-op bot through the loop: clock in, answer the phone, bring what the

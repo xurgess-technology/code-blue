@@ -6,7 +6,10 @@ extends RefCounted
 ##            0.8-1.2 s (the rattle stops, which is the tell)
 ##   RUSH     a fast awkward lope to where the noise was, 5.2 m/s
 ##   SEARCH   picks at that spot for a few seconds, twitching, then gives up
-##   STUNNED  shoved: 2 s of staggering
+##   STUNNED  shoved: 2 s of staggering; struck by the saw: a short stagger, then it rushes the
+##            spot the blow came from (stun(dir, seconds, push, then_hunt)); woken from sedation:
+##            1.2 s getting up, then it rushes the nearest player (woke(pos))
+##   SEDATED  (Monster.sedate) lies still; this brain does not run at all
 ##   RETREAT  after landing a hit it backs off, then stays calm (deaf) for a while
 ##
 ## Hearing: a noise of loudness L is heard within L * HEAR_PER_LOUDNESS metres, halved

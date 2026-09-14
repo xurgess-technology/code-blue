@@ -19,6 +19,10 @@ extends SkeletonModifier3D
 ##          dynamic listen / twitch values. The Kenney head mesh is hidden; our head
 ##          geometry rides the bone through `attach()`.
 ##
+## Optional cfg: `limp` (0..1, the right leg drags and the body rolls over the left each step),
+## `lean` (a constant sideways tilt). Dynamic `lying` (0..1) flattens the pose for a body on its
+## back (the Monster tips the whole model over; this straightens legs, torso, arms and head).
+##
 ## Attachments are plain Node3D children of the Skeleton3D that follow a bone's
 ## orthonormal frame, so hand-built meshes are never sheared by the bone scales.
 

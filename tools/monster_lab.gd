@@ -558,6 +558,10 @@ func _scenario_walk_in() -> void:
 	var w: Node = spawn("walk_in", cor(10.0), -PI * 0.5)
 	await wait(0.5)
 	check("it sees a player 8 m ahead in the dark and comes (mode RUSH, state CHASE)", w.mode == Modes.Mode.RUSH and w.state == Modes.State.CHASE, "mode=%d" % w.mode)
+	var eyes: Transform3D = w.eye_transform()
+	var look_dir: Vector3 = -eyes.basis.z
+	check("eye_transform: at eye height (%.2f m), looking the way it walks (%.2f, %.2f, %.2f)" % [eyes.origin.y, look_dir.x, look_dir.y, look_dir.z],
+		eyes.origin.y > 1.3 and eyes.origin.y < 1.8 and look_dir.x > 0.6 and absf(eyes.origin.x - w.global_position.x) < 0.5)
 	var top := 0.0
 	for i in 90:
 		await get_tree().physics_frame
@@ -648,7 +652,13 @@ func _scenario_walk_in() -> void:
 	var built: Node = MonsterScript.new_monster(990, "walk_in", cor(40.0))
 	var build_ms := float(Time.get_ticks_usec() - tb) / 1000.0
 	built.free()
-	check("building another Walk-In takes %.1f ms (parts baked once and cached)" % build_ms, build_ms < 15.0)
+	var others := ""
+	for k in ["discharged", "night_nurse"]:
+		var tk := Time.get_ticks_usec()
+		var o: Node = MonsterScript.new_monster(991, k, cor(40.0))
+		others += " %s %.1f ms" % [k, float(Time.get_ticks_usec() - tk) / 1000.0]
+		o.free()
+	check("building another Walk-In takes %.1f ms (parts baked once and cached;%s)" % [build_ms, others], build_ms < 15.0)
 
 	# Cost: several Walk-Ins in sight of the player, rays per second.
 	await clear_monsters()

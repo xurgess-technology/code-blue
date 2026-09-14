@@ -358,6 +358,41 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 - **`tools/mapcheck.gd` reports seed 112** (a morgue tray anchor 3.3 m off the navmesh); the same
   on `main` before the pod removal.
 
+## Monsters (sweep 3, monsters worker)
+
+- **Spawning a Walk-In costs about 6-8 ms** on the machine that builds it (the rig, its animation
+  library copy, a few dozen primitives and materials; the baked part meshes are cached after the
+  first one, which the warmup builds), about what a Discharged (9 ms) or Night Nurse (8 ms) costs.
+  Clock-in now spawns 4-8 of them in the same frame on the host, and a client builds them as the
+  snapshot arrives: 25-60 ms more in an already heavy frame. Spreading the spawns over frames, or
+  pooling models, would remove it; not yet seen as a stall in play.
+- **Baking changed the monsters' surface noise a little.** `Shapes.bake` merges each part's
+  primitives into one mesh per material, and the shared shader reads object-space positions, so
+  small primitives (fingers, knuckles, ears, the Night Nurse's buttons) now take their mottle and
+  stains from the part's metres instead of their own unit sphere: flatter on tiny pieces. All three
+  monsters are affected; the screenshots looked the same at play distance.
+- **A sedated monster's capsule lies down at once** (every machine, when mode becomes SEDATED),
+  while the model takes about 0.6 s to fall, and stands up at once on waking. Only queries on
+  `C.L_MONSTER` see it (the dev gun, combat's aim if it uses the body); players never collide.
+- **Lying down picks a clear facing with 12 rays**, but only against walls: furniture without a
+  collider, other lying monsters and the patient tables are not checked. The fall also slides the
+  model back half its height while it tips, which reads a little like being pulled.
+- **Walk-Ins do not avoid each other** (navigation avoidance is off for every monster), so a group
+  chasing the same player bunches into one silhouette at the end of a corridor.
+- **The danger heartbeat and music count sedated monsters** by distance (`game._update_danger`).
+- **Walk-In placement is deterministic per shift but not tuned**: every group sits within 12 m of
+  its wing's first hallway tile, so on small wings the Walk-Ins can be visible from the entrance
+  doorway. `MIN_ENTRANCE_DIST` (5 m) and `SHALLOW_BAND` (12 m) in `monster.gd` are the knobs.
+- **wake() while dragged hits the dragger itself** (the contract says combat drops the monster and
+  it hits the dragger); combat must not add its own hit, or the dragger takes two.
+- **The Discharged's ears only read up close.** At 4 m or more in flashlight they are a small
+  bump on each side of the head; the listening flare is visible in the lab's
+  `discharged_ears_listen` close-up. The face is primitives (brow, sealed sockets with a stitched
+  seam, a slit mouth) and still looks a bit mask-like in profile.
+- **The nettest `monsters` scenario uses the combat stub** (no `monster_pin`), so a dragged monster
+  on the client is only checked for `dragged_by`, not for following the pin; the lab checks the pin
+  with a stand-in combat.
+
 ## Testing tips
 
 - Add `--fixed-fps 60` to headless runs: the game then steps as fast as the CPU allows (a 250 s
