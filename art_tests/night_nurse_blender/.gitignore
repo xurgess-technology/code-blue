@@ -1,8 +1,0 @@
-__pycache__/
-*.log
-*.err
-*.blend1
-renders/_cell.png
-# Godot extracts the GLB's embedded textures on import; they regenerate from night_nurse.glb
-night_nurse_NN_*.png
-night_nurse_NN_*.png.import

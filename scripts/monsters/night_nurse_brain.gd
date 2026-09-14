@@ -15,6 +15,11 @@ extends RefCounted
 ##
 ## Cost: observation is evaluated OBSERVE_NEAR times a second when a player is within
 ## NEAR_RANGE, OBSERVE_FAR otherwise, staggered per nurse; never per frame.
+##
+## Dev room (Monster.dev_nurse(), the dev panel's "Night Nurse" section): `ignore_watch` makes her
+## move as if nobody were looking (observed stays false, no stalking), `walk` "follow" walks her to
+## FOLLOW_GAP from the player who asked and stops, "loop" walks her round the dev room's loop
+## points; neither ever touches a player. `speed` replaces SPEED for every walk.
 
 const M := preload("res://scripts/monsters/modes.gd")
 const Percept := preload("res://scripts/perception.gd")
@@ -32,6 +37,8 @@ const DOOR_LINGER := Vector2(0.5, 1.4)
 const RETREAT_TIME := 1.6
 const CALM_AFTER_HIT := 3.0
 const LUNGE_RANGE := 1.3
+const FOLLOW_GAP := 2.5
+const LOOP_REACHED := 0.6
 
 var m: CharacterBody3D
 var rng := RandomNumberGenerator.new()
@@ -43,6 +50,7 @@ var linger := 0.0
 var retreat_timer := 0.0
 var retreat_from := Vector3.ZERO
 var _last_door := Vector2i(-999, -999)
+var _loop_i := 0
 ## How many observation evaluations ran, for the lab's performance report.
 var evaluations := 0
 
@@ -63,13 +71,20 @@ func think(delta: float) -> void:
 	m.calm = maxf(0.0, m.calm - delta)
 	observe_timer -= delta
 	var target: Node = m.nearest_player()
-	if observe_timer <= 0.0:
+	var dev: Dictionary = m.dev_nurse()
+	var ignore_watch := bool(dev.get("ignore_watch", false))
+	var walk := String(dev.get("walk", ""))
+	var speed := float(dev.get("speed", SPEED))
+	if ignore_watch:
+		m.observed = false
+		ahead_blocked = false
+	elif observe_timer <= 0.0:
 		var near: bool = target != null and target.global_position.distance_to(m.global_position) < NEAR_RANGE
 		observe_timer = OBSERVE_NEAR if near else OBSERVE_FAR
 		evaluations += 1
 		m.observed = Percept.observed_any(g, body_points(m.global_position))
 		ahead_blocked = false
-		if not m.observed and near and m.calm <= 0.0:
+		if not m.observed and near and m.calm <= 0.0 and walk == "":
 			var next: Vector3 = m.agent.get_next_path_position()
 			if next.distance_to(m.global_position) < 0.05:
 				next = target.global_position
@@ -94,6 +109,10 @@ func think(delta: float) -> void:
 		var away: Vector3 = m.global_position - retreat_from
 		away.y = 0.0
 		m.step_toward(m.global_position + (away.normalized() if away.length() > 0.05 else Vector3.FORWARD), SPEED_RETREAT, delta)
+		return
+
+	if walk != "" and m.calm <= 0.0:
+		_dev_walk(dev, walk, speed, delta)
 		return
 
 	if target == null or m.calm > 0.0:
@@ -130,8 +149,44 @@ func think(delta: float) -> void:
 		linger = rng.randf_range(DOOR_LINGER.x, DOOR_LINGER.y)
 
 	m.mode = M.Mode.WANDER
-	m.nav_move(target.global_position, SPEED, delta)
+	m.nav_move(target.global_position, speed, delta)
 	m.try_contact(LUNGE_RANGE)
+
+
+## Dev room: walk for watching. "follow": to FOLLOW_GAP from the player who asked (else the nearest),
+## then stand facing them. "loop": round the loop points. Never lunges or hits.
+func _dev_walk(dev: Dictionary, walk: String, speed: float, delta: float) -> void:
+	m.state = M.State.WANDER
+	if walk == "loop":
+		var pts: Array = dev.get("loop", [])
+		if pts.is_empty():
+			m.mode = M.Mode.IDLE
+			m.stop()
+			return
+		_loop_i = _loop_i % pts.size()
+		var goal: Vector3 = pts[_loop_i]
+		if Vector2(goal.x - m.global_position.x, goal.z - m.global_position.z).length() < LOOP_REACHED:
+			_loop_i = (_loop_i + 1) % pts.size()
+			goal = pts[_loop_i]
+		m.mode = M.Mode.WANDER
+		m.nav_move(goal, speed, delta)
+		return
+	var who: Node = m.game.players.get(int(dev.get("who", 0)))
+	if who == null or not is_instance_valid(who) or not who.alive:
+		who = m.nearest_player()
+	if who == null:
+		m.mode = M.Mode.IDLE
+		m.stop()
+		return
+	var d: float = Vector2(who.global_position.x - m.global_position.x, who.global_position.z - m.global_position.z).length()
+	if d > FOLLOW_GAP:
+		m.mode = M.Mode.WANDER
+		# Eases in over the last metre so she does not stop dead from full pace.
+		m.nav_move(who.global_position, speed * clampf(d - FOLLOW_GAP + 0.3, 0.35, 1.0), delta)
+	else:
+		m.mode = M.Mode.IDLE
+		m.stop()
+		m.face_dir(who.global_position - m.global_position, delta, 3.0)
 
 
 func _hold(target: Node, delta: float) -> void:

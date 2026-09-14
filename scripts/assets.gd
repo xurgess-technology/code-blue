@@ -106,6 +106,15 @@ const MODELS := {
 		"anims": _KENNEY_CHAR_ANIMS,
 		"note": "Kenney Graveyard Kit zombie, scaled slightly over human height.",
 	},
+	# The Night Nurse (2026-09-14): built in-house from Python in Blender (art/night_nurse/), 2.30 m
+	# to the top of her cap, feet at y 0, authored facing +Z like every glTF here. 19k triangles, 53
+	# bones, textures as separate VRAM-compressed PNGs beside it. No root motion.
+	"monster/night_nurse": {
+		"path": "res://assets/models/monsters/night_nurse/night_nurse.glb",
+		"scale": 1.0, "yaw": 180,
+		"anims": {"idle": "Idle", "walk": "Walk", "run": "Walk", "attack": "Walk", "frozen": "Frozen", "static": "Frozen"},
+		"note": "Night Nurse, made for Code Blue with Blender scripts (art/night_nurse/blender_src). No third-party licence.",
+	},
 	"monster/lurker": {
 		"path": "res://assets/models/monsters/lurker.gltf",
 		"scale": 0.573, "yaw": 180, "y": 0.017,

@@ -28,7 +28,12 @@ const GUN_FP_POS := Vector3(0.24, -0.23, -0.46)
 const GUN_FP_LAYER := 1 << 17
 const ORDERS := ["follow", "stay", "carry", "operate"]
 const MONSTER_KINDS := ["walk_in", "discharged", "night_nurse"]  # SWEEP 3 HOOK (monsters): the Walk-In
-const BOT_NAMES := ["Dr. Botsworth", "Nurse Unit", "Intern 404", "Dr. Clank", "Orderly-9", "Dr. Servo", "Scrub Bot", "Dr. Byte"]
+## NURSE HOOK: the panel's pace choices for the Night Nurse, m/s (her hunting speed first).
+const NURSE_PACES := [3.4, 1.6, 0.8]
+const NURSE_PACE_NAMES := ["Hunt (3.4 m/s)", "Stalk (1.6 m/s)", "Creep (0.8 m/s)"]
+## Half extents of the "walk a loop" rectangle around the player who asked, metres (along, across).
+const NURSE_LOOP := Vector2(3.0, 1.75)
+const BOT_NAMES :=["Dr. Botsworth", "Nurse Unit", "Intern 404", "Dr. Clank", "Orderly-9", "Dr. Servo", "Scrub Bot", "Dr. Byte"]
 
 const LevelScript := preload("res://scripts/dev/dev_level.gd")
 const BotBrain := preload("res://scripts/dev/dev_bot.gd")
@@ -51,6 +56,13 @@ var noclip := {}   # peer id -> true
 var gun := {}      # peer id -> true
 ## Bots and dummies: id (negative) -> {name, kind: "bot"|"dummy", order, item, to, owner, status, done}
 var bots := {}
+## NURSE HOOK (night nurse model): watching her walk. Every Night Nurse ignores being watched; how she
+## walks ("" hunts as normal, "follow" the player who asked, "loop" round `nurse_loop`); her pace.
+var nurse_ignore_watch := false
+var nurse_walk := ""
+var nurse_pace := 0
+var nurse_who := 0       # host: who asked for "follow"
+var nurse_loop: Array = []   # host: the loop's corners on the navigation mesh
 
 # ---- host ----
 var brains := {}   # id -> BotBrain
@@ -142,6 +154,11 @@ func reset_state() -> void:
 	pen_open = false
 	freeze_vitals = true
 	auto_revive = true
+	nurse_ignore_watch = false
+	nurse_walk = ""
+	nurse_pace = 0
+	nurse_who = 0
+	nurse_loop = []
 	_applied_gate = false
 	_applied_lights = true
 	state_changed.emit()
@@ -466,6 +483,12 @@ func _apply_request(sender: int, action: String, a: Dictionary) -> void:
 			for c in game.cases:
 				if String(c.get("state", "")) == "on_table":
 					c.vitals = clampf(float(a.get("v", 100.0)), 1.0, 100.0)
+		"nurse_ignore_watch":
+			nurse_ignore_watch = bool(a.get("on", not nurse_ignore_watch))
+		"nurse_walk":
+			set_nurse_walk(String(a.get("mode", "")), who)
+		"nurse_pace":
+			nurse_pace = clampi(int(a.get("i", 0)), 0, NURSE_PACES.size() - 1)
 		"strap_monster":
 			# SWEEP 3 HOOK (dissection): a Walk-In or Discharged strapped to a patient table.
 			game.dissection.dev_strap(String(a.get("kind", "walk_in")), float(a.get("sedation", 1.0)), int(a.get("table", -1)))
@@ -596,6 +619,35 @@ func spawn_monster(kind: String, where: String, who: Node = null) -> Node:
 	var m = game._add_monster(kind, pos)
 	game.say("A %s crawls out." % MonsterScript3.display_name(kind), 2.0)  # SWEEP 3 HOOK (monsters)
 	return m
+
+
+## NURSE HOOK: what every Night Nurse's brain reads in the dev room (Monster.dev_nurse()).
+func nurse_settings() -> Dictionary:
+	return {"ignore_watch": nurse_ignore_watch, "walk": nurse_walk, "who": nurse_who, "loop": nurse_loop,
+		"speed": float(NURSE_PACES[clampi(nurse_pace, 0, NURSE_PACES.size() - 1)])}
+
+
+## Host: "" hunts as normal, "follow" follows `who`, "loop" walks a rectangle round where `who` stands
+## (corners snapped to the navigation mesh, long side along their facing).
+func set_nurse_walk(mode: String, who: Node) -> void:
+	if not is_host():
+		return
+	nurse_walk = mode if mode in ["follow", "loop"] else ""
+	nurse_who = who.peer_id if who != null else 0
+	nurse_loop = []
+	if nurse_walk != "loop":
+		return
+	var centre: Vector3 = who.global_position if who != null else game.spawn_points()[0]
+	var fwd: Vector3 = -who.global_transform.basis.z if who != null else Vector3.FORWARD
+	fwd.y = 0.0
+	fwd = fwd.normalized() if fwd.length() > 0.01 else Vector3.FORWARD
+	var side := fwd.cross(Vector3.UP)
+	var world: World3D = who.get_world_3d() if who != null else (game as Node3D).get_world_3d()
+	var map: RID = world.navigation_map
+	var has_nav := NavigationServer3D.map_get_iteration_id(map) > 0
+	for c in [Vector2(1, 1), Vector2(1, -1), Vector2(-1, -1), Vector2(-1, 1)]:
+		var p: Vector3 = centre + fwd * c.x * NURSE_LOOP.x + side * c.y * NURSE_LOOP.y
+		nurse_loop.append(NavigationServer3D.map_get_closest_point(map, p) if has_nav else p)
 
 
 func set_patient(patient_id: String, ailment_id: String) -> void:
@@ -768,6 +820,7 @@ func net_state() -> Dictionary:
 	return {
 		"ts": time_scale, "lo": lights_on, "po": pen_open, "fv": freeze_vitals, "ar": auto_revive,
 		"gd": god.keys(), "nc": noclip.keys(), "gn": gun.keys(), "bt": bots, "st": stun,
+		"nn": [nurse_ignore_watch, nurse_walk, nurse_pace],   # NURSE HOOK
 	}
 
 
@@ -784,6 +837,11 @@ func apply_net_state(s: Dictionary) -> void:
 	god = _as_set(s.get("gd", []))
 	noclip = _as_set(s.get("nc", []))
 	gun = _as_set(s.get("gn", []))
+	var nn: Array = s.get("nn", [false, "", 0])   # NURSE HOOK
+	if nn.size() >= 3:
+		nurse_ignore_watch = bool(nn[0])
+		nurse_walk = String(nn[1])
+		nurse_pace = int(nn[2])
 	var remote_bots: Dictionary = s.get("bt", {})
 	var changed := remote_bots.size() != bots.size()
 	for id in remote_bots.keys():

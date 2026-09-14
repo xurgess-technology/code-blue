@@ -37,6 +37,7 @@ const DischargedBrain := preload("res://scripts/monsters/discharged_brain.gd")
 const NurseBrain := preload("res://scripts/monsters/night_nurse_brain.gd")
 const WalkInBrain := preload("res://scripts/monsters/walk_in_brain.gd")
 const Zones := preload("res://scripts/hospital_builder.gd")
+const NurseRig := preload("res://scripts/monsters/night_nurse_rig.gd")
 
 var monster_id: int = 0
 var kind: String = DISCHARGED
@@ -87,6 +88,9 @@ var _lunge_amt := 0.0
 var _stagger := 0.0
 var _flinch := 0.0
 var _lie := 0.0
+var _recoil := 0.0          ## the Night Nurse model: a knock-down's recoil pose, 1 -> 0
+var _walk_lift := 0.0
+var _vis_calm := false
 var _shape: CollisionShape3D = null
 var _shape_lying := false
 var _sedated_remote := false
@@ -384,7 +388,8 @@ func eye_transform() -> Transform3D:
 	if head != null and head.is_inside_tree():
 		# Head attachments face +Z; the eyes sit about 13 cm up and 9 cm forward of the neck bone.
 		var hb := head.global_transform.basis.orthonormalized()
-		var origin := head.global_transform.origin + hb.y * 0.13 + hb.z * 0.1
+		var eo: Vector3 = model.eye_offset() if model.has_method("eye_offset") else Vector3(0.0, 0.13, 0.1)
+		var origin := head.global_transform.origin + hb.x * eo.x + hb.y * eo.y + hb.z * eo.z
 		return Transform3D(Basis(-hb.x, hb.y, -hb.z), origin)
 	var eye_h := 1.5 if kind == WALK_IN else height - 0.25
 	return Transform3D(global_transform.basis.orthonormalized(), global_position + Vector3.UP * eye_h)
@@ -686,6 +691,9 @@ func _update_visual(delta: float) -> void:
 
 	if model == null:
 		return
+	if model.nurse != null:
+		_nurse_visual(delta)
+		return
 	# Lying down: the whole model tips over backwards, face up, and settles centred on the
 	# monster's origin (head toward local +Z) so it is no longer than it needs to be either way.
 	var e := _lie * _lie * (3.0 - 2.0 * _lie)
@@ -754,6 +762,50 @@ func _update_visual(delta: float) -> void:
 		model.play("idle", 1.4 if mode == Mode.SEARCH else 0.7, 0.3)
 
 
+## The Night Nurse's own model (monster/night_nurse): which clip, how fast, and the procedural poses.
+##   watched      the clip stops on the frame it is on (speed_scale 0) and every pose holds
+##   moving       Walk, played at speed / WALK_SPEED so the planted foot keeps pace with the ground
+##   lunging      Walk plus both arms reaching (poser `lunge`)
+##   knocked down calm starts outside a retreat: thrown back (poser `recoil`), then the Frozen pose
+##                while it stands down
+##   standing     Idle (stalking in the dark, waiting, calm after a retreat)
+## She never lies down: she cannot be sedated, and a kill is the dev room's corpse (dev_gun.gd).
+func _nurse_visual(delta: float) -> void:
+	var nr = model.nurse
+	var calm_now := calm > 0.0
+	if observed:
+		model.play(model.current(), 0.0)
+		_vis_calm = calm_now
+		return
+	if calm_now and not _vis_calm and mode != Mode.RETREAT:
+		_recoil = 1.0
+	_vis_calm = calm_now
+	_recoil = maxf(0.0, _recoil - delta * 1.6)
+	nr.recoil = _recoil * _recoil * (3.0 - 2.0 * _recoil)
+	nr.lunge = _lunge_amt
+	var walking := moving or lunge_t > 0.0
+	if walking:
+		model.play("walk", clampf(maxf(speed, 0.6) / NurseRig.WALK_SPEED, 0.3, 4.0), 0.2)
+	elif calm_now and mode != Mode.RETREAT:
+		model.play("frozen", 1.0, 0.15)
+	else:
+		model.play("idle", 1.0, 0.35)
+	_walk_lift = move_toward(_walk_lift, 1.0 if walking else 0.0, delta * 4.0)
+	if model.rig != null:
+		model.rig.position.y = NurseRig.WALK_LIFT * _walk_lift
+
+
+## Dev room settings for the Night Nurse (dev_room.gd `nurse_settings()`): {ignore_watch, walk
+## ("" | "follow" | "loop"), who, loop: Array of Vector3, speed}. Empty outside the dev room.
+func dev_nurse() -> Dictionary:
+	if game == null or not ("dev_mode" in game) or not game.dev_mode:
+		return {}
+	var dv = game.get("dev")
+	if dv == null or not dv.has_method("nurse_settings"):
+		return {}
+	return dv.nurse_settings()
+
+
 func _update_sound(delta: float) -> void:
 	var viewer: Node = game.viewed_player() if game.has_method("viewed_player") else null
 	var near_viewer: bool = viewer == null or viewer.global_position.distance_to(global_position) < 30.0
@@ -809,7 +861,8 @@ func _update_sound(delta: float) -> void:
 	else:
 		if moving and not observed:
 			if _sound_timer <= 0.0:
-				_sound_timer = 0.667 / (2.0 * maxf(0.3, speed / 3.4))
+				# One squeak per footfall of the Walk clip (two steps per 1.6 s at WALK_SPEED).
+				_sound_timer = 0.8 * NurseRig.WALK_SPEED / maxf(0.3, speed)
 				Audio.play("monsters_squeak", global_position + Vector3.UP * 0.05, -3.0, 0.08)
 			_lullaby_timer -= delta
 			if _lullaby_timer <= 0.0 and viewer != null and viewer.global_position.distance_to(global_position) < 14.0:

@@ -342,6 +342,26 @@ reads well at the sizes the game shows it.
 
 ---
 
+## The Night Nurse (made in-house, 2026-09-14) — `assets/models/monsters/night_nurse/`
+
+| Key | File | Source | Author | Licence | size (m) | Fix-ups |
+| --- | --- | --- | --- | --- | --- | --- |
+| `monster/night_nurse` | `night_nurse.glb` + `textures/NN_{Cloth,Skin}_{albedo,normal,roughness}.png` | Built for Code Blue from Python scripts in Blender 5.2 (`art/night_nurse/blender_src/`) | Code Blue (made with Claude) | None needed: original work of this project, no third-party content | 0.53 × **2.30** × 0.44 | scale 1.0, yaw 180 |
+
+- **Not downloaded, not made by an AI image or mesh service.** Every vertex, UV, weight,
+  keyframe and texel comes from `nn_geometry.py`, `nn_materials.py`, `nn_rig.py` and `nn_build.py`
+  (procedural Cycles materials baked to 2048 px maps). `art/night_nurse/README.md` explains the
+  build and how to rebuild it (about 6 minutes); `art/night_nurse/` has a `.gdignore`, so the
+  Blender sources, bake inputs and renders are kept in the repo but never imported.
+- 19,036 triangles, 2 materials, 53 bones, clips `Frozen`, `Idle`, `Walk` (in place). Godot
+  generates mesh LODs on import. The six maps are separate files (the GLB references them) so their
+  import settings stick: VRAM compressed with mipmaps, the normal maps in normal-map mode. The GLB
+  is 0.9 MB, the maps 24 MB of PNG.
+- `nn_build.py` exports an embedded GLB (not committed) and runs `nn_glb_extern.py`, which writes
+  the game copy and its textures here.
+
+---
+
 ## Keys that do not resolve
 
 The game asks for these; they return `null` and the caller must keep its
