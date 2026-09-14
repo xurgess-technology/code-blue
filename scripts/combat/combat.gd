@@ -53,6 +53,8 @@ var break_chance := SAW_BREAK_CHANCE
 var last_result: Dictionary = {}
 ## Every machine: cb_swing animations started per peer id (tests).
 var swings_seen: Dictionary = {}
+## Tools: hold every animation at its current time (screenshots set _anims[peer].t themselves).
+var anim_freeze := false
 
 var _cd: Dictionary = {}          # host: peer id -> world_time its next use is accepted
 var _local_next := 0.0            # this machine: the local player's own cooldown (msec)
@@ -758,6 +760,17 @@ func _start_anim(p: Node, k: String) -> void:
 		Audio.play("combat_jab_swish", at, -6.0, 0.1)
 
 
+## Tools: end p's animation now; the held model goes back to rest next frame.
+func stop_anim(p: Node) -> void:
+	var a = _anims.get(p.peer_id)
+	if a != null:
+		a.t = 99.0
+		var was := anim_freeze
+		anim_freeze = true
+		animate_held(p, 0.0, p._held_fp, p._held_tp)
+		anim_freeze = was
+
+
 func _clear_props(peer: int) -> void:
 	var a = _anims.get(peer)
 	if a == null:
@@ -769,52 +782,66 @@ func _clear_props(peer: int) -> void:
 
 
 ## Player._process, every machine, every frame: move the held stack's model through the swing or
-## the jab. `fp` / `tp` are HeldFirstPerson / HeldThirdPerson.
+## the jab. `fp` / `tp` are HeldFirstPerson (under the camera) / HeldThirdPerson (under the body).
 func animate_held(p: Node, delta: float, fp: Node3D, tp: Node3D) -> void:
 	var a = _anims.get(p.peer_id)
 	if a == null:
 		return
-	a.t = float(a.t) + delta
-	var dur := SWING_TIME if a.k == "saw" else JAB_TIME
-	var done := float(a.t) >= dur
-	var off := Transform3D.IDENTITY if done else anim_offset(String(a.k), float(a.t))
+	if not anim_freeze:
+		a.t = float(a.t) + delta
+	var jab: bool = a.k == "jab"
+	var done := float(a.t) >= (JAB_TIME if jab else SWING_TIME)
 	for holder in [fp, tp]:
 		if holder == null or holder.get_child_count() == 0:
 			continue
 		var pivot := holder.get_child(holder.get_child_count() - 1) as Node3D
 		if pivot == null or pivot.is_queued_for_deletion():
 			continue
-		var k := 1.0 if holder == fp else 1.5
-		pivot.transform = Transform3D(off.basis, off.origin * k)
-		if a.k == "jab" and not done and not pivot.has_node("CombatSyringe"):
-			var syr := make_syringe()
-			syr.name = "CombatSyringe"
-			pivot.add_child(syr)
-			a.props.append(syr)
+		if done:
+			pivot.transform = Transform3D.IDENTITY
+		else:
+			var pose := anim_pose(String(a.k), float(a.t), holder.transform, holder == tp)
+			pivot.transform = holder.transform.affine_inverse() * pose
+		if jab:
+			# The syringe drawn from the vials does the jab; the vials stay out of sight meanwhile.
+			for c in pivot.get_children():
+				if c.name != "CombatSyringe" and c is Node3D:
+					(c as Node3D).visible = done
+			if not done and not pivot.has_node("CombatSyringe"):
+				var syr := make_syringe()
+				syr.name = "CombatSyringe"
+				pivot.add_child(syr)
+				a.props.append(syr)
 	if done:
 		_clear_props(p.peer_id)
 		_anims.erase(p.peer_id)
 
 
-## The held model's offset (in the holder's space) `t` seconds into a swing ("saw") or jab.
-static func anim_offset(k: String, t: float) -> Transform3D:
-	# Keys: [time, position, rotation in degrees (x, y, z)]
+## Where the held model is `t` seconds into a swing ("saw") or a jab, in the holder's parent space
+## (camera space in first person; body space for others, `third`). `rest` is the holder's own
+## transform: the pose starts and ends there.
+##   Saw model: blade along +X from the grip, teeth toward +Z, flat face +Y.
+##   Syringe: needle along -Z.
+static func anim_pose(k: String, t: float, rest: Transform3D, third := false) -> Transform3D:
+	# Keys: [time, origin, blade (+X) direction, teeth (+Z) direction]; null: the resting pose.
 	var keys: Array
 	if k == "saw":
+		# A diagonal chop from high on the right down across the view to the lower left.
 		keys = [
-			[0.0, Vector3.ZERO, Vector3.ZERO],
-			[0.13, Vector3(0.10, 0.16, 0.10), Vector3(-30.0, 25.0, 40.0)],
-			[0.27, Vector3(0.34, -0.16, -0.22), Vector3(50.0, -40.0, -55.0)],
-			[0.36, Vector3(0.36, -0.2, -0.18), Vector3(58.0, -45.0, -60.0)],
-			[SWING_TIME, Vector3.ZERO, Vector3.ZERO],
+			[0.0, null],
+			[0.14, Vector3(0.2, 0.02, -0.5), Vector3(0.3, 1.0, 0.25), Vector3(-0.3, 0.0, -1.0)],
+			[0.26, Vector3(0.05, -0.2, -0.5), Vector3(-1.0, -0.45, -0.55), Vector3(-0.3, -1.0, 0.2)],
+			[0.34, Vector3(-0.08, -0.34, -0.46), Vector3(-1.0, -0.8, -0.35), Vector3(-0.4, -1.0, 0.4)],
+			[SWING_TIME, null],
 		]
 	else:
+		# The syringe comes up from the lower left and stabs forward toward the middle of the view.
 		keys = [
-			[0.0, Vector3.ZERO, Vector3.ZERO],
-			[0.11, Vector3(0.06, 0.03, 0.12), Vector3(-10.0, -8.0, 0.0)],
-			[0.2, Vector3(0.2, 0.08, -0.3), Vector3(-6.0, -24.0, 0.0)],
-			[0.27, Vector3(0.2, 0.07, -0.28), Vector3(-6.0, -24.0, 0.0)],
-			[JAB_TIME, Vector3.ZERO, Vector3.ZERO],
+			[0.0, null],
+			[0.12, Vector3(-0.16, -0.18, -0.34), Vector3(1.0, 0.0, -0.3), Vector3(-0.3, -0.3, 1.0)],
+			[0.2, Vector3(-0.06, -0.1, -0.5), Vector3(1.0, 0.0, -0.3), Vector3(-0.3, -0.22, 1.0)],
+			[0.28, Vector3(-0.06, -0.1, -0.49), Vector3(1.0, 0.0, -0.3), Vector3(-0.3, -0.22, 1.0)],
+			[JAB_TIME, null],
 		]
 	for i in range(1, keys.size()):
 		if t <= float(keys[i][0]) or i == keys.size() - 1:
@@ -822,11 +849,22 @@ static func anim_offset(k: String, t: float) -> Transform3D:
 			var t1 := float(keys[i][0])
 			var u := clampf((t - t0) / maxf(0.001, t1 - t0), 0.0, 1.0)
 			u = u * u * (3.0 - 2.0 * u)
-			var pos: Vector3 = (keys[i - 1][1] as Vector3).lerp(keys[i][1], u)
-			var rot: Vector3 = (keys[i - 1][2] as Vector3).lerp(keys[i][2], u)
-			var b := Basis.from_euler(Vector3(deg_to_rad(rot.x), deg_to_rad(rot.y), deg_to_rad(rot.z)))
-			return Transform3D(b, pos)
-	return Transform3D.IDENTITY
+			var from := _key_pose(keys[i - 1], rest, third)
+			var to := _key_pose(keys[i], rest, third)
+			return from.interpolate_with(to, u)
+	return rest
+
+
+static func _key_pose(key: Array, rest: Transform3D, third: bool) -> Transform3D:
+	if key.size() < 4 or key[1] == null:
+		return rest
+	var x: Vector3 = (key[2] as Vector3).normalized()
+	var z: Vector3 = key[3]
+	z = (z - x * z.dot(x)).normalized()
+	var o: Vector3 = key[1]
+	if third:
+		o = Vector3(o.x * 1.6, 1.4 + o.y * 1.5, o.z * 1.2 - 0.4)   # out in front of the body's (big) head
+	return Transform3D(Basis(x, z.cross(x), z), o)
 
 
 ## A syringe drawn from the vial for the jab: the needle points along -Z.
@@ -863,7 +901,7 @@ static func make_syringe() -> Node3D:
 		mi.rotation_degrees = Vector3(90.0, 0.0, 0.0)
 		mi.position = e[3]
 		root.add_child(mi)
-	root.position = Vector3(0.0, 0.07, -0.02)
+	root.scale = Vector3.ONE * 1.6
 	return root
 
 
