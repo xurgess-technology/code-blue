@@ -52,6 +52,8 @@ const SCENARIOS := [
 	{"name": "monsters", "scenario": "monsters", "clients": 1, "timeout": 240},
 	# dissection (sweep 3): a client operates on a strapped monster while another re-doses it.
 	{"name": "dissection", "scenario": "dissection", "clients": 2, "timeout": 300},
+	# DOORS: gates locked and unlocking, E on a door, a late joiner, the next shift's wings.
+	{"name": "doors", "scenario": "doors", "clients": 2, "timeout": 400, "start_after": {2: "[marker] doors_open"}},
 ]
 ## Not part of the default run: bandwidth measurements (4 players, no lag, --stats). `bandwidth`
 ## is Bob's gunshot (seed 4242, the case the pre-delta numbers were taken on); `bandwidth_amp`
