@@ -125,7 +125,17 @@ func _process(delta: float) -> void:
 	var sway := sin(_t * 2.3) * 0.02
 	var bob := sin(_t * 4.6) * 0.012
 	var eye: Vector3 = (m as Node3D).global_position + Vector3.UP * (eye_h + bob) + fwd * 0.34
-	camera.global_transform = Transform3D(Basis.from_euler(Vector3(-0.1 + bob, yaw, sway)), eye)
+	var pitch := -0.1 + bob
+	if m.has_method("eye_transform"):
+		# Integration: ride the Walk-In's animated head (Monster.eye_transform, -Z forward), a little in
+		# front of the face so its own head never fills the view; keep the horizon level.
+		var ex: Transform3D = m.eye_transform()
+		var look := -ex.basis.z
+		if Vector2(look.x, look.z).length() > 0.05:
+			yaw = atan2(-look.x, -look.z)
+			pitch = clampf(asin(clampf(look.y, -1.0, 1.0)), -0.5, 0.3) + bob
+		eye = ex.origin + Vector3(-sin(yaw), 0.0, -cos(yaw)) * 0.12
+	camera.global_transform = Transform3D(Basis.from_euler(Vector3(pitch, yaw, sway)), eye)
 	_layer.visible = true
 	_mat.set_shader_parameter("amount", _fade)
 	_mat.set_shader_parameter("time_s", _t)

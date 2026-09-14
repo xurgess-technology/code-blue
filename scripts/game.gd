@@ -1453,7 +1453,8 @@ func _sync_player_case() -> void:
 
 func _alias_case() -> Dictionary:
 	for c in cases:
-		if String(c.get("patient_id", "")) != "player":
+		# Sweep 3 integration: a strapped monster is never "the patient" the legacy alias means.
+		if String(c.get("patient_id", "")) != "player" and not bool(c.get("monster", false)):
 			return c
 	return {}
 
