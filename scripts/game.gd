@@ -2357,7 +2357,8 @@ func _in_shove_cone(from: Node, target: Vector3, forward: Vector3) -> bool:
 #
 # Snapshots (host -> each client, unreliable, SNAPSHOT_HZ):
 #   The host builds one "state" per tick: sections of entity reports keyed by id
-#     g   one entity (id 0): the global fields (time, phase, cases, shelf, surgery, loop...)
+#     g   the global fields (time, phase, cases, shelf, surgery, loop...) as a few entities
+#         grouped by which fields come and go together (_global_groups)
 #     pl  players, mo monsters, it world items: id -> report dictionary (without "id")
 #     ct  open containers: interact_id -> {} (absent means closed)
 #   Replication is per field with acknowledgements, so no message ever depends on another one
@@ -2400,6 +2401,8 @@ const NET_WINDOW_BYTES := 16000
 ## A field whose last message was lost: never equal to any real value, so it is sent again.
 const NET_UNKNOWN := "unknown"
 const ACK_BITS := 64
+## A message is lost once one sent this much later (wall ms) was acknowledged without it.
+const NET_REORDER_MS := 100
 
 ## Peers that joined mid-shift and spectate until the next lobby: peer id -> true. Replicated.
 var waiting_peers: Dictionary = {}
@@ -2428,6 +2431,7 @@ var _cl_full_acc := 0.0
 var _cl_seed_wait := false            # _rpc_shift built a new hospital; ignore older seeds
 var _pl_applied: Dictionary = {}      # peer id -> instance id of the Player node last applied
 var _cl_apply_queued := false
+var _cl_g_last: Dictionary = {}       # global group id -> its last complete fields (a copy)
 
 
 func _net_tick(delta: float) -> void:
@@ -2505,7 +2509,27 @@ func _build_state() -> Dictionary:
 	for n in get_tree().get_nodes_in_group("container"):
 		if n.has_meta("interact_id") and n.has_method("is_open") and n.is_open():
 			ct[String(n.get_meta("interact_id"))] = {}
-	return {"g": {0: _global_fields()}, "pl": pl, "mo": mo, "ct": ct, "it": it}
+	return {"g": _global_groups(_global_fields()), "pl": pl, "mo": mo, "ct": ct, "it": it}
+
+
+## The global fields as a few entities whose field names change together, so a client missing
+## one new field (a case added, a minigame started) only holds back that group:
+## "" the fixed fields, "cs" the cases, "lp" the loop, "s<table>" a table's surgery.
+static func _global_groups(g: Dictionary) -> Dictionary:
+	var out := {"": {}}
+	for k in g.keys():
+		var key := String(k)
+		var gid := ""
+		if key == "cs" or key.begins_with("c.") or key.begins_with("v."):
+			gid = "cs"
+		elif key.begins_with("lp."):
+			gid = "lp"
+		elif (key.begins_with("sg") or key.begins_with("ms")) and key.contains("."):
+			gid = "s" + key.substr(2, key.find(".") - 2)
+		if not out.has(gid):
+			out[gid] = {}
+		out[gid][k] = g[k]
+	return out
 
 
 func _repl_new(state: Dictionary, now: int) -> Dictionary:
@@ -2713,14 +2737,22 @@ func _player_state(ack: Array, s: Array) -> void:
 			r.last_ack = now
 			if r.pend.has(latest):
 				r.srtt = lerpf(float(r.srtt), float(now - int(r.pend[latest].t)), 0.125)
+		var newest_acked_t := -1
 		for seq in r.pend.keys():
 			var d: int = latest - int(seq)
 			if d < 0:
 				continue
 			if d == 0 or (d <= ACK_BITS and (mask >> (d - 1)) & 1 == 1):
+				newest_acked_t = maxi(newest_acked_t, int(r.pend[seq].t))
 				_repl_resolve(r, seq, true)
 			elif d > ACK_BITS:
 				_repl_resolve(r, seq, false)
+		# Fast loss: a message sent well after this one arrived and this one did not. The margin
+		# covers reordering by network jitter.
+		if newest_acked_t >= 0:
+			for seq in r.pend.keys():
+				if int(seq) < latest and int(r.pend[seq].t) < newest_acked_t - NET_REORDER_MS:
+					_repl_resolve(r, seq, false)
 	var p = players.get(id)
 	if p != null and not s.is_empty():
 		p.apply_remote_state(s)
@@ -2867,16 +2899,20 @@ func _snapshot(msg: Dictionary) -> void:
 				recs.erase(eid)
 				dead[eid] = [int(seqs["@"]), now]
 				state_sec.erase(eid)
+				if sec == "g":
+					_cl_g_last.erase(eid)
 				_cl_mark(_cl_removed, sec, eid)
 				if _cl_changed.has(sec):
 					_cl_changed[sec].erase(eid)
 				continue
 			if vals.has("@") and _keys_sig(vals) == int(vals["@"]):
+				if sec == "g":
+					_cl_g_last[eid] = vals.duplicate()   # used until the group is whole again
 				state_sec[eid] = vals
 				_cl_mark(_cl_changed, sec, eid)
 				if _cl_removed.has(sec):
 					_cl_removed[sec].erase(eid)
-			elif state_sec.has(eid):
+			elif state_sec.has(eid) and sec != "g":
 				state_sec.erase(eid)   # a field is missing again: wait for it
 	# Forget removals old enough that nothing in flight can still mention them.
 	if int(net_counters.get("msgs", 0)) % 200 == 0:
@@ -2904,10 +2940,11 @@ static func _cl_mark(where: Dictionary, sec: String, eid) -> void:
 
 ## Client: put what the replica holds onto the game: the changed entities, or all of them.
 func _repl_apply() -> void:
-	var gsec: Dictionary = _cl_state.get("g", {})
-	if not gsec.has(0):
+	if not _cl_g_last.has(""):
 		return
-	var g: Dictionary = gsec[0]
+	var g := {}
+	for gid in _cl_g_last.keys():
+		g.merge(_cl_g_last[gid])
 	if not g.has("sd"):
 		return
 	if phase == Phase.MENU:
@@ -3052,6 +3089,7 @@ func _net_client_reset() -> void:
 func _net_client_forget() -> void:
 	_cl_recs.clear()
 	_cl_state.clear()
+	_cl_g_last.clear()
 	_cl_dead.clear()
 	_cl_changed.clear()
 	_cl_removed.clear()

@@ -239,6 +239,7 @@ func _sc_leave_items():
 		if not await _until(func(): return _count_msgs("standing") > 0, 40.0, "the leaver to take position"):
 			return
 		var spot: Vector3 = _msgs("standing")[0].data.pos
+		_send("standing_ok", {})
 		if not await _until(func(): return not game.players.has(leaver), 30.0, "the leaver to disconnect"):
 			return
 		await _frames(90)   # let the dropped stacks settle
@@ -264,7 +265,10 @@ func _sc_leave_items():
 		_me().teleport(spot)
 		await _wall_wait(1.5)
 		_send("standing", {"pos": _me().global_position})
-		await _wall_wait(0.5)
+		# Leaving closes the connection: a reliable message still being retransmitted over a lossy
+		# link would die with it, so wait for the host to confirm it heard us.
+		await _until(func(): return _count_msgs("standing_ok") > 0, 20.0, "the host to hear where I stand")
+		await _wall_wait(0.3)
 		_say("PASS: leaving with %s" % str(_me().slots))
 		_done = true
 		Net.leave()
@@ -728,6 +732,11 @@ func _sc_downed():
 			return
 		if not (seen.carried and seen.table and seen.op):
 			return _end(false, "downed client saw carried=%s table=%s minigame=%s" % [str(seen.carried), str(seen.table), str(seen.op)])
+		# The snapshot saying "standing" and the reliable revive event (which puts me beside the
+		# table) travel separately; over a lossy link either can land first.
+		var t_rev := _wall()
+		while (me.hp != Game.REVIVE_HP or me.global_position.y > 0.5) and _wall() - t_rev < 10.0:
+			await _frames(1)
 		if me.hp != Game.REVIVE_HP or me.global_position.y > 0.5:
 			return _end(false, "revived with hp %d at %s" % [me.hp, str(me.global_position)])
 		await _finish_together("went down, crawled, was carried and stitched back up (hp %d)" % me.hp)
