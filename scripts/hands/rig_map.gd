@@ -30,7 +30,42 @@ const KENNEY := {
 	"scale": 2.687,
 }
 
-const RIGS := [KENNEY]
+## HUMAN HOOK: the Blender humans (art/human/README.md, scripts/human/human_model.gd): 53 bones, Y
+## along every bone, a two-bone arm with a hand bone. `generic` makes body_poser.gd turn bones in
+## skeleton space (no rest-direction assumptions) and body_hands.gd pick the extra clips.
+const HUMAN := {
+	"name": "human",
+	"generic": true,
+	"bones": {"torso": "chest", "head": "head", "arm_r": "upperarm.R", "arm_l": "upperarm.L"},
+	"fore": {"arm_r": "forearm.R", "arm_l": "forearm.L"},
+	"hand_bone": {"arm_r": "hand.R", "arm_l": "hand.L"},
+	# The trunk lean is spread over these bones.
+	"torso_chain": ["spine", "chest", "upperchest"],
+	"arm_rest": {"arm_r": Vector3(0, 1, 0), "arm_l": Vector3(0, 1, 0)},
+	# The palm in the hand bone's space (bone +Y runs wrist -> knuckles).
+	"hand": {
+		"arm_r": {"offset": Vector3(0.0, 0.055, 0.0)},
+		"arm_l": {"offset": Vector3(0.0, 0.055, 0.0)},
+	},
+	"clips": {"idle": "Idle", "walk": "Jog", "run": "Sprint", "slow": "Walk", "crawl": "Crawl", "carried": "Carried",
+		"lying": "Lying", "interact": "Interact", "pickup": "PickUp"},
+	"scale": 1.0,
+	# Poses that read differently on a two-bone arm (merged over POSES by pose_of()).
+	"poses": {
+		# The right arm wraps the carried legs across the front of the shoulder instead of pointing up.
+		"carry": {"arm_r": [Vector3(0.45, 0.35, 0.82), 1.0], "arm_l": [Vector3(0.3, -0.85, 0.3), 0.35], "torso": [0.12, -0.05, 1.0]},
+		"hold": {"arm_r": [Vector3(-0.15, -0.35, 0.92), 1.0]},
+		"hold_both": {"arm_r": [Vector3(0.2, -0.05, 1.0), 1.0], "arm_l": [Vector3(-0.2, -0.05, 1.0), 1.0]},
+	},
+}
+
+const RIGS := [HUMAN, KENNEY]
+
+
+## HUMAN HOOK: a pose for this rig (its own override first, then the shared table).
+static func pose_of(rig: Dictionary, name: String) -> Dictionary:
+	var own: Dictionary = rig.get("poses", {})
+	return own.get(name, POSES.get(name, {}))
 
 
 ## Which rig a spawned body uses (by its bone names), or {} for a body without a rig.

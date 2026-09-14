@@ -23,6 +23,7 @@ const PlayerBodyScript := preload("res://scripts/downed/player_body.gd")  # DOWN
 const PlayerTableScript := preload("res://scripts/downed/player_table.gd")  # DOWNED HOOK
 const OrScreenScript := preload("res://scripts/orscreen/or_screen.gd")  # ORSCREEN HOOK
 const BrainsScript := preload("res://scripts/brains/brains.gd")  # SWEEP 3 HOOK (brains)
+const HumanModelScript := preload("res://scripts/human/human_model.gd")  # HUMAN HOOK
 
 
 ## Run once. Safe to call again; later calls return immediately.
@@ -111,7 +112,8 @@ static func run(game: Node) -> void:
 			# SEAL HOOK: the seal's Blender model (patient/seal) builds here; its stump cap is shown by
 			# the amputated flags above. The severed paddle the saw drops is a static (unskinned) mesh
 			# with the same materials, a different shader variant, so draw one copy too.
-			if pid == "seal" and ail == "amputation" and b.has_method("make_severed_limb"):
+			# HUMAN HOOK: Bob's Blender model bakes his severed forearm the same way.
+			if pid in ["seal", "bob"] and ail == "amputation" and b.has_method("make_severed_limb"):
 				var sev: Node3D = b.make_severed_limb(shelf)
 				if sev != null:
 					sev.position = Vector3(bx, -0.3, -0.8)
@@ -126,6 +128,19 @@ static func run(game: Node) -> void:
 		pb.apply_flags({"stitched": stitched})
 		bodies["player|stitches"] = pb
 		bx += 0.4
+	# HUMAN HOOK: every Blender surgeon a player can wear (their maps, the tinted cloth shader), posed
+	# by the idle clip, so a teammate joining does not hitch.
+	for v in HumanModelScript.SURGEONS:
+		var hb: Node3D = HumanModelScript.spawn(v, C.PLAYER_COLORS[1])
+		if hb != null:
+			shelf.add_child(hb)
+			hb.position = Vector3(bx, -0.3, -0.8)
+			hb.scale = Vector3.ONE * 0.5
+			HumanModelScript.show_piece(hb, "Human_TopRolled", true)
+			var hap := HumanModelScript.anim_player(hb)
+			if hap != null and hap.has_animation("Idle"):
+				hap.play("Idle")
+			bx += 0.4
 	var ptable := PlayerTableScript.make()
 	shelf.add_child(ptable)
 	ptable.position = Vector3(0.0, -1.4, -2.2)
