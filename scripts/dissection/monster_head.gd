@@ -141,8 +141,18 @@ static func build(parent: Node3D, r: Vector3, look: Dictionary, seed_v: int) -> 
 	cap.name = "SkullCap"
 	cap.position = centre
 	parent.add_child(cap)
-	var cap_mesh := _shell(cap_rings, r, mp, e1, e2, colour_fn, -centre)
-	var cap_mi := _mi(cap, cap_mesh, vmat("mh_skin"), "Scalp")
+	# A rig monster's head wears the walking monster's own skin material (and hair shell) instead
+	# of the vertex-coloured skin.
+	var skin_mat: Material = look.get("skin_mat", null)
+	var hair_mat: Material = look.get("hair_mat", null)
+	var hair_fn: Callable = look.get("hair_fn", Callable())
+	var shell_mat: Material = skin_mat if skin_mat != null else vmat("mh_skin")
+	var cap_mesh := _shell(cap_rings, r, mp, e1, e2, colour_fn, -centre, skin_mat == null)
+	var cap_mi := _mi(cap, cap_mesh, shell_mat, "Scalp")
+	if hair_mat != null and hair_fn.is_valid():
+		var ch := _hair_shell(cap_rings, r * 1.012, mp, e1, e2, hair_fn, -centre)
+		if ch != null:
+			_mi(cap, ch, hair_mat, "CapHair").cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	cap_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	var ring_local := PackedVector3Array()
 	for p in info.ring:
@@ -153,9 +163,13 @@ static func build(parent: Node3D, r: Vector3, look: Dictionary, seed_v: int) -> 
 	var cap_in := _annulus(ring_local, Vector3.ZERO, 1.0 - BONE_T, 0.0, CUT_DIR * 0.004, Color(0.55, 0.3, 0.3), true)
 	_mi(cap, cap_in, vmat("mh_membrane", 0.4, 0.6, true), "CapInside")
 
-	var rest_mesh := _shell(rest_rings, r, mp, e1, e2, colour_fn, Vector3.ZERO)
-	var rest_mi := _mi(parent, rest_mesh, vmat("mh_skin"), "Head")
+	var rest_mesh := _shell(rest_rings, r, mp, e1, e2, colour_fn, Vector3.ZERO, skin_mat == null)
+	var rest_mi := _mi(parent, rest_mesh, shell_mat, "Head")
 	rest_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	if hair_mat != null and hair_fn.is_valid():
+		var rh := _hair_shell(rest_rings, r * 1.012, mp, e1, e2, hair_fn, Vector3.ZERO)
+		if rh != null:
+			_mi(parent, rh, hair_mat, "Hair")
 	# The open skull: a bone rim, then a dark wet cavity a little below the cut.
 	var rim := Node3D.new()
 	rim.name = "OpenSkull"
@@ -196,7 +210,7 @@ static func _mi(parent: Node3D, mesh: Mesh, mat: Material, nm: String) -> MeshIn
 
 
 ## An ellipsoid band between the polar angles in `rings` (around pole `mp`), scaled by r, offset.
-static func _shell(rings: PackedFloat32Array, r: Vector3, mp: Vector3, e1: Vector3, e2: Vector3, colour_fn: Callable, offset: Vector3) -> ArrayMesh:
+static func _shell(rings: PackedFloat32Array, r: Vector3, mp: Vector3, e1: Vector3, e2: Vector3, colour_fn: Callable, offset: Vector3, coloured := true) -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var inv := Vector3(1.0 / r.x, 1.0 / r.y, 1.0 / r.z)
@@ -209,7 +223,8 @@ static func _shell(rings: PackedFloat32Array, r: Vector3, mp: Vector3, e1: Vecto
 				q = mp
 			var p := q * r
 			st.set_normal((q * inv).normalized())
-			st.set_color(colour_fn.call(q))
+			if coloured:
+				st.set_color(colour_fn.call(q))
 			st.add_vertex(p + offset)
 	for j in rings.size() - 1:
 		for s in SEGS:
@@ -219,6 +234,38 @@ static func _shell(rings: PackedFloat32Array, r: Vector3, mp: Vector3, e1: Vecto
 			var d := c + 1
 			st.add_index(a); st.add_index(b); st.add_index(c)
 			st.add_index(b); st.add_index(d); st.add_index(c)
+	return st.commit()
+
+
+## The quads of a slightly larger shell band where `hair_fn(p)` (head-local point) is true: hair
+## lying on the scalp. Null when there is none.
+static func _hair_shell(rings: PackedFloat32Array, r: Vector3, mp: Vector3, e1: Vector3, e2: Vector3, hair_fn: Callable, offset: Vector3) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var inv := Vector3(1.0 / r.x, 1.0 / r.y, 1.0 / r.z)
+	var quads := 0
+	for j in rings.size() - 1:
+		for s in SEGS:
+			var tc := (rings[j] + rings[j + 1]) * 0.5
+			var pc := TAU * (float(s) + 0.5) / float(SEGS)
+			var qc := (e1 * cos(pc) + e2 * sin(pc)) * sin(tc) + mp * cos(tc)
+			if not bool(hair_fn.call(qc * r)):
+				continue
+			quads += 1
+			var corners: Array[Vector3] = []
+			for c in [[j, s], [j, s + 1], [j + 1, s], [j + 1, s + 1]]:
+				var th := rings[c[0]]
+				var ph := TAU * float(c[1]) / float(SEGS)
+				var q := (e1 * cos(ph) + e2 * sin(ph)) * sin(th) + mp * cos(th)
+				if th < 1e-4:
+					q = mp
+				corners.append(q)
+			for k in [0, 1, 2, 1, 3, 2]:
+				var q: Vector3 = corners[k]
+				st.set_normal((q * inv).normalized())
+				st.add_vertex(q * r + offset)
+	if quads == 0:
+		return null
 	return st.commit()
 
 

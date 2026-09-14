@@ -20,7 +20,8 @@ extends SkeletonModifier3D
 ##          geometry rides the bone through `attach()`.
 ##
 ## Optional cfg: `limp` (0..1, the right leg drags and the body rolls over the left each step),
-## `lean` (a constant sideways tilt). Dynamic `lying` (0..1) flattens the pose for a body on its
+## `lean` (a constant sideways tilt), `lying_spread` (degrees the arms spread out when lying, default
+## 11; a strapped body on a table keeps them in). Dynamic `lying` (0..1) flattens the pose for a body on its
 ## back (the Monster tips the whole model over; this straightens legs, torso, arms and head).
 ##
 ## Attachments are plain Node3D children of the Skeleton3D that follow a bone's
@@ -172,7 +173,7 @@ func _process_modification_with_delta(_delta: float) -> void:
 		back = lerpf(back, deg_to_rad(-80.0), lunge * float(o.get("lunge", 1.0)))
 		spread = lerpf(spread, deg_to_rad(14.0), lunge * float(o.get("lunge", 1.0)))
 		back = lerpf(back, deg_to_rad(6.0), lying)
-		spread = lerpf(spread, deg_to_rad(11.0), lying)
+		spread = lerpf(spread, deg_to_rad(float(cfg.get("lying_spread", 11.0))), lying)
 		var twist: float = deg_to_rad(float(o.get("twist", 0.0)))
 		var hang := Quaternion(Vector3.BACK, -sgn * (PI * 0.5 - spread))
 		var q := Quaternion(Vector3.RIGHT, back) * Quaternion(Vector3.UP, twist * sgn) * hang
