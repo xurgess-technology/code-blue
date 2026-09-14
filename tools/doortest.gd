@@ -605,28 +605,48 @@ func _entrance_signature() -> String:
 
 func _frame_times() -> void:
 	var g := _first_gate()
+	game.begin_shift()
 	_stand(g.global_position + g.normal * 4.0)
 	_look_at(g.centre)
-	await _seconds(2.0)
-	var worst := 0.0
-	var frames := 0
-	var sum := 0.0
+	await _seconds(4.0)
+	# The same view with nothing rebuilding, for comparison.
+	var base := await _time_frames(func(): return true, 3000)
+	_say("windowed, shift, no rebuild: %d frames, average %.1f ms, worst %.1f ms, frames over 33 ms %d" % [base.frames, base.avg, base.worst, base.over])
 	game._end_shift(true, "")
-	await _until(func(): return game.phase == Game.Phase.LOBBY, 30.0)
+	# Wait through the paycheck screen, then time every frame from the new lobby's first frame (the
+	# rebuild starts there) until the wings are ready and a second more.
+	while game.phase != Game.Phase.LOBBY:
+		await get_tree().process_frame
 	_stand(g.global_position + g.normal * 4.0)
 	_look_at(g.centre)
+	var done_at := {"ms": -1}
+	var rebuild := await _time_frames(func():
+		if not game.wing_loader.busy and done_at.ms < 0:
+			done_at.ms = Time.get_ticks_msec()
+		return done_at.ms < 0 or Time.get_ticks_msec() - int(done_at.ms) < 1000, 60000)
+	_say("windowed rebuild: %d frames, average %.1f ms, worst frame %.1f ms, frames over 33 ms %d, stats %s" % [rebuild.frames, rebuild.avg, rebuild.worst, rebuild.over, str(game.wing_loader.stats)])
+	_check(int(game.wing_loader.stats.get("frames", 0)) > 0, "the rebuild ran during the timing")
+	_check(rebuild.worst < 50.0, "no frame over 50 ms while the wings rebuild (worst %.1f ms)" % rebuild.worst)
+
+
+## Process frame times while `cond` holds (or for `max_ms`): {frames, avg, worst, over (> 33 ms)}.
+func _time_frames(cond: Callable, max_ms: int) -> Dictionary:
+	var out := {"frames": 0, "avg": 0.0, "worst": 0.0, "over": 0}
+	var sum := 0.0
 	var last := Time.get_ticks_usec()
 	var t0 := Time.get_ticks_msec()
-	while (game.wing_loader.busy or Time.get_ticks_msec() - t0 < 1000) and Time.get_ticks_msec() - t0 < 60000:
+	while Time.get_ticks_msec() - t0 < max_ms and cond.call():
 		await get_tree().process_frame
 		var now := Time.get_ticks_usec()
 		var ms := float(now - last) / 1000.0
 		last = now
-		frames += 1
+		out.frames = int(out.frames) + 1
 		sum += ms
-		worst = maxf(worst, ms)
-	_say("windowed rebuild: %d frames, average %.1f ms, worst frame %.1f ms, stats %s" % [frames, sum / maxf(1, frames), worst, str(game.wing_loader.stats)])
-	_check(worst < 50.0, "no frame over 50 ms while the wings rebuild (worst %.1f ms)" % worst)
+		out.worst = maxf(float(out.worst), ms)
+		if ms > 33.0:
+			out.over = int(out.over) + 1
+	out.avg = sum / maxf(1.0, float(out.frames))
+	return out
 
 
 # =========================================================================

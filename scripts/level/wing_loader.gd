@@ -230,10 +230,16 @@ func _process(_delta: float) -> void:
 		var s0 := Time.get_ticks_usec()
 		_steps[_step_i].call()
 		var ms := float(Time.get_ticks_usec() - s0) / 1000.0
+		var labels: Array = _job.prep.get("step_labels", []) if not _job.is_empty() else []
+		var label: String = labels[_step_i] if _step_i < labels.size() else "flicker"
 		if ms > float(stats.get("slowest_step_ms", 0.0)):
 			stats["slowest_step_ms"] = ms
-			var labels: Array = _job.prep.get("step_labels", []) if not _job.is_empty() else []
-			stats["slowest_step"] = labels[_step_i] if _step_i < labels.size() else "flicker %d" % _step_i
+			stats["slowest_step"] = label
+		# Per kind of step: [count, total ms, worst ms].
+		var by: Dictionary = stats.get("steps", {})
+		var e: Array = by.get(label, [0, 0.0, 0.0])
+		by[label] = [int(e[0]) + 1, snappedf(float(e[1]) + ms, 0.1), snappedf(maxf(float(e[2]), ms), 0.1)]
+		stats["steps"] = by
 		_step_i += 1
 	if _step_i >= _steps.size():
 		_finish()
