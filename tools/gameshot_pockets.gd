@@ -115,7 +115,7 @@ func _ghost_shot(s: Dictionary) -> void:
 	await _settle(4)
 	var img := shot.get_viewport().get_texture().get_image()
 	img.save_png(ProjectSettings.globalize_path("%s/p_%s_ghost%s.png" % [OUT_DIR, kind, tag]))
-	print("[gameshot] teammate crossed %d time(s), in the pocket %s, ghosts %d" % [pk.crossings.size() - n0, str(pk.in_pocket(mate.global_position)), pk._ghosts.size()])
+	print("[gameshot] teammate crossed %d time(s), in the pocket %s, ghosts %d" % [pk.crossings.size() - n0, str(pk.in_pocket(mate.global_position)), pk._mirrors.size()])
 	game.players.erase(-77)
 	mate.queue_free()
 

@@ -40,7 +40,6 @@ var seams: Array = []
 var crossings: Array = []
 ## Tools (screenshots of both copies): false stops moving anything across seams.
 var crossing_enabled := true
-var _ghosts := {}
 
 
 func setup(g: Node) -> void:
@@ -219,10 +218,9 @@ static func _make_seam(s: Dictionary, port: Dictionary, origin: Vector2i) -> Dic
 
 func teardown() -> void:
 	_blend_environment(0.0)
-	for g in _ghosts.values():
-		if is_instance_valid(g):
-			g.queue_free()
-	_ghosts.clear()
+	for e in _mirrors.values():
+		_free_mirror(e)
+	_mirrors.clear()
 	if not pocket.is_empty() and is_instance_valid(pocket.get("root")):
 		(pocket.root as Node).queue_free()
 	pocket = {}
@@ -422,6 +420,7 @@ var _air_k := 0.0
 func _process(_delta: float) -> void:
 	if pocket.is_empty():
 		return
+	_process_mirrors()
 	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
 	if cam == null:
 		return
@@ -467,50 +466,121 @@ func _blend_environment(k: float) -> void:
 
 
 # =========================================================================
-# ghosts: a teammate walking through a seam ahead of you does not vanish
+# mirrors: someone walking through a seam ahead of you does not vanish
 # =========================================================================
 
-## Remote players within reach of a seam also show in the other copy of the stub (visual only).
+## Players and monsters within MIRROR_REACH of a seam are also drawn in the other copy of the stub:
+## every visible MeshInstance3D under them gets a RenderingServer instance with the same mesh,
+## materials and skeleton, placed through the seam transform. Visual only; nothing else sees it
+## except Perception (mirror_points), so a watched Night Nurse past a seam still freezes.
+const MIRROR_REACH := 8.0
+var _mirrors := {}   # key -> {src: Node3D, t: Transform3D, parts: [[MeshInstance3D, RID]]}
+
+
 func _update_ghosts() -> void:
-	var viewer: Node = game.viewed_player() if game.has_method("viewed_player") else null
 	var want := {}
-	if viewer != null:
-		for p in game.players.values():
-			if not is_instance_valid(p) or p == viewer or not p.alive or p.body_visual == null or not p.body_visual.visible:
-				continue
-			for s in seams:
-				for from_h in [true, false]:
-					var seam_here: Vector3 = s.seam_h if from_h else s.seam_p
-					if p.global_position.distance_to(seam_here) > 7.0:
-						continue
-					var t: Transform3D = s.t if from_h else s.t_inv
-					var key := "%d|%d|%s" % [p.peer_id, int(s.id), str(from_h)]
-					want[key] = [p, t]
-	for key in _ghosts.keys():
-		if not want.has(key):
-			if is_instance_valid(_ghosts[key]):
-				_ghosts[key].queue_free()
-			_ghosts.erase(key)
+	var viewer: Node = game.viewed_player() if game.has_method("viewed_player") else null
+	var bodies: Array = []
+	for p in game.players.values():
+		if is_instance_valid(p) and p != viewer and p.alive and p.body_visual != null and p.body_visual.visible:
+			bodies.append([p, p.body_visual, "p%d" % int(p.peer_id)])
+	for m in game.monsters.values():
+		if is_instance_valid(m) and m.model != null:
+			bodies.append([m, m.model, "m%d" % int(m.monster_id)])
+	for b in bodies:
+		var pos: Vector3 = (b[0] as Node3D).global_position
+		for s in seams:
+			for from_h in [true, false]:
+				# Only inside the stub (its mirror must land inside the other copy of the stub, never out
+				# in the pocket or the hospital hallway).
+				if not _in_stub(s, pos, from_h):
+					continue
+				want["%s|%d|%s" % [b[2], int(s.id), str(from_h)]] = [b[1], s.t if from_h else s.t_inv]
+	for key in _mirrors.keys():
+		if not want.has(key) or not is_instance_valid(_mirrors[key].src):
+			_free_mirror(_mirrors[key])
+			_mirrors.erase(key)
 	for key in want.keys():
-		var p: Node3D = want[key][0]
-		var t: Transform3D = want[key][1]
-		var g: Node3D = _ghosts.get(key)
-		if g == null or not is_instance_valid(g):
-			g = _make_ghost(p)
-			if g == null:
+		if not _mirrors.has(key):
+			_mirrors[key] = _make_mirror(want[key][0], want[key][1])
+		else:
+			_mirrors[key].t = want[key][1]
+
+
+func _process_mirrors() -> void:
+	for key in _mirrors.keys():
+		var e: Dictionary = _mirrors[key]
+		if not is_instance_valid(e.src):
+			continue
+		var t: Transform3D = e.t
+		for part in e.parts:
+			var mi: MeshInstance3D = part[0]
+			if not is_instance_valid(mi):
 				continue
-			add_child(g)
-			_ghosts[key] = g
-		var src: Node3D = p.body_visual
-		g.global_transform = t * src.global_transform
+			RenderingServer.instance_set_visible(part[1], mi.is_visible_in_tree())
+			RenderingServer.instance_set_transform(part[1], t * mi.global_transform)
 
 
-func _make_ghost(p: Node) -> Node3D:
-	var src: Node3D = p.get("body_visual")
-	if src == null:
-		return null
-	var g := src.duplicate(0) as Node3D
-	g.name = "Ghost_%d" % int(p.peer_id)
-	for n in g.find_children("*", "CollisionObject3D", true, false):
-		n.queue_free()
-	return g
+func _make_mirror(src: Node3D, t: Transform3D) -> Dictionary:
+	var parts: Array = []
+	var scenario := src.get_world_3d().scenario
+	var meshes: Array = src.find_children("*", "MeshInstance3D", true, false)
+	if src is MeshInstance3D:
+		meshes.append(src)
+	for mi: MeshInstance3D in meshes:
+		if mi.mesh == null:
+			continue
+		var rid := RenderingServer.instance_create2(mi.mesh.get_rid(), scenario)
+		var skin := mi.get_skin_reference()
+		if skin != null:
+			RenderingServer.instance_attach_skeleton(rid, skin.get_skeleton())
+		if mi.material_override != null:
+			RenderingServer.instance_geometry_set_material_override(rid, mi.material_override.get_rid())
+		if mi.material_overlay != null:
+			RenderingServer.instance_geometry_set_material_overlay(rid, mi.material_overlay.get_rid())
+		for i in mi.get_surface_override_material_count():
+			var sm := mi.get_surface_override_material(i)
+			if sm != null:
+				RenderingServer.instance_set_surface_override_material(rid, i, sm.get_rid())
+		RenderingServer.instance_set_layer_mask(rid, mi.layers)
+		RenderingServer.instance_geometry_set_cast_shadows_setting(rid, RenderingServer.SHADOW_CASTING_SETTING_ON if mi.cast_shadow != GeometryInstance3D.SHADOW_CASTING_SETTING_OFF else RenderingServer.SHADOW_CASTING_SETTING_OFF)
+		RenderingServer.instance_set_transform(rid, t * mi.global_transform)
+		parts.append([mi, rid])
+	return {"src": src, "t": t, "parts": parts}
+
+
+func _exit_tree() -> void:
+	for e in _mirrors.values():
+		_free_mirror(e)
+	_mirrors.clear()
+
+
+func _free_mirror(e: Dictionary) -> void:
+	for part in e.parts:
+		RenderingServer.free_rid(part[1])
+
+
+## Perception: world points of anything past a seam, as they appear in the other copy (a watcher
+## there sees the mirror, so it counts as seen).
+func mirror_points(points: Array) -> Array:
+	var out: Array = []
+	if seams.is_empty():
+		return out
+	for p: Vector3 in points:
+		for s in seams:
+			if _in_stub(s, p, true):
+				out.append((s.t as Transform3D) * p)
+			elif _in_stub(s, p, false):
+				out.append((s.t_inv as Transform3D) * p)
+	return out
+
+
+## Inside a stub's corridors in one copy (with half a tile of slack past the walls, not past the
+## mouth or the opening).
+func _in_stub(s: Dictionary, p: Vector3, hospital_copy: bool) -> bool:
+	if not (s.bounds_h if hospital_copy else s.bounds_p).has_point(Vector2(p.x, p.z)):
+		return false
+	var l0: Vector3 = (s.xh_inv if hospital_copy else s.xp_inv) * p
+	var sx := l0.x / Stub.T
+	var tz := l0.z / Stub.T
+	return sx > -0.5 and sx < float(s.w) + 0.5 and tz > -0.3 and tz < float(s.d) + 0.5 and l0.y > -2.0 and l0.y < C.WALL_H + 1.0
