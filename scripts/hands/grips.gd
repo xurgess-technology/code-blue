@@ -24,7 +24,8 @@ const DEFAULT := {"pos": Vector3.ZERO, "fwd": Vector3(0, 0, -1), "up": Vector3(0
 const GRIPS := {
 	# Surgical supplies (primitive models in item_models.gd).
 	"anesthetic": {"pos": Vector3(0.0, 0.004, 0.012), "fwd": Vector3(0, 0, -1), "up": Vector3(0, 1, 0), "style": "palm", "bundle": 3},
-	"gauze": {"pos": Vector3(0.0, 0.0, 0.0), "fwd": Vector3(1, 0, 0), "up": Vector3(0, 1, 0), "style": "palm", "bundle": 2},
+	# Rolls lie across the palm (their axis along the model X).
+	"gauze": {"pos": Vector3(0.0, 0.0, 0.0), "fwd": Vector3(0, 0, -1), "up": Vector3(0, 1, 0), "style": "palm", "bundle": 2},
 	# Blade along +X from the handle, teeth toward +Z, flat face +Y: the teeth point down in a fist.
 	"bone_saw": {"pos": Vector3(-0.17, 0.016, 0.0), "fwd": Vector3(1, 0, 0), "up": Vector3(0, -1, 0), "style": "fist"},
 	# Hinge at -X, tips toward +X.
@@ -42,8 +43,14 @@ const GRIPS := {
 }
 
 
-## Where in its model a kind is held. Always every key of DEFAULT.
+static var _cache := {}
+
+
+## Where in its model a kind is held. Always every key of DEFAULT. Cached per kind: do not edit the
+## returned dictionary (duplicate it first).
 static func grip(kind: String) -> Dictionary:
+	if _cache.has(kind):
+		return _cache[kind]
 	var g := DEFAULT.duplicate()
 	if ItemsDB.is_bulky(kind) or (LootTable.has(kind) and bool(LootTable.LOOT[kind].get("bulky", false))):
 		# Bulky loot: both hands on its sides, a little below the middle of the model.
@@ -51,6 +58,7 @@ static func grip(kind: String) -> Dictionary:
 		g["pos"] = Vector3(0.0, fp.y * 0.35, 0.0)
 		g["hands"] = 2
 	g.merge(GRIPS.get(kind, {}), true)
+	_cache[kind] = g
 	return g
 
 

@@ -985,7 +985,7 @@ func _held_model(kind: String, count: int, first_person: bool) -> Node3D:
 	var pivot := Node3D.new()
 	pivot.name = "Held"
 	pivot.add_child(model)
-	var g := Grips.grip(kind)
+	var g := Grips.grip(kind).duplicate()
 	g.pos = (g.pos as Vector3) * k
 	pivot.transform = Grips.transform_of(g)
 	if first_person:

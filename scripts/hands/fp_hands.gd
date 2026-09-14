@@ -18,6 +18,7 @@ const HANDS_LAYER := 1 << 18
 ## First-person stack sizes: bulky / two-handed things fit this longest side, big loot this one.
 const FP_BOTH_SIZE := 0.22
 const FP_LOOT_SIZE := 0.13
+const FP_FIST_SIZE := 0.26
 ## Seconds to lower and raise the hands when the stack changes.
 const RAISE_TIME := 0.38
 ## How far in front of the camera the wall check reaches, and how far the hands pull back.
@@ -92,6 +93,8 @@ static func fp_scale(kind: String) -> float:
 	var g := Grips.grip(kind)
 	if int(g.hands) >= 2:
 		return minf(1.0, FP_BOTH_SIZE / maxf(0.01, biggest))
+	if String(g.style) == "fist":
+		return minf(1.0, FP_FIST_SIZE / maxf(0.01, biggest))   # a handle stays long enough to see past the fist
 	if Items.is_loot(kind) and biggest > FP_LOOT_SIZE:
 		return FP_LOOT_SIZE / biggest
 	return 1.0
