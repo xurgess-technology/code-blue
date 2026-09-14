@@ -46,6 +46,8 @@ var _beat_pos := Vector3.INF   # DOORS: where the bot was at the last heartbeat
 var _target_item := -1
 var _stare_t := 0.0
 var _shove_ready := 0.0
+var _dodge_until := 0.0
+var _dodge_side := 1.0
 var take_extra := false
 var skip_grace := false
 var _was_phase := -1
@@ -353,6 +355,18 @@ func _walk_to(target: Vector3) -> void:
 	bot.bot_yaw = atan2(-to_next.x, -to_next.z)
 	bot.bot_move = Vector2(0, -1)
 	bot.bot_sprint = false
+	# A monster pressed against the bot (a Night Nurse it keeps looking at, in god mode she never
+	# lands a hit and never leaves) can pin it for the rest of the shift: back off and sidestep.
+	if _stuck_timer > 3.0 and elapsed >= _dodge_until:
+		for m in game.monsters.values():
+			var off: Vector3 = m.global_position - bot.global_position
+			off.y = 0.0
+			if off.length() < 1.2:
+				_dodge_until = elapsed + 1.2
+				_dodge_side = -_dodge_side
+				break
+	if elapsed < _dodge_until:
+		bot.bot_move = Vector2(_dodge_side, 0.7)
 
 
 func _flee_if_hunted() -> bool:

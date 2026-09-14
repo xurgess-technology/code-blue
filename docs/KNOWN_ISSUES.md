@@ -578,9 +578,14 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   machine (8 ms against 59 ms for the same rebuild).
 - **`ContainerBase.bake` is a doors hook in the containers worker's file** (the mesh cache above).
   A container whose parts change after `bake` would share its changes with every twin: none do today.
-- **The playtest bot got stuck once per two runs at seed 4242, shift 2** (at (40.7, 70.3), twice,
-  then passed on a third run after the Walk-In shove fix). The cause is not confirmed; the
-  heartbeat now logs what is around a stuck bot.
+- **The playtest bot got pinned by a Night Nurse at seed 4242, shift 2** (3 of 6 runs, at
+  (40.8, 70.3), no door within 4 m): the bot kept looking at her while she stood 0.2 m away, and
+  in god mode she never lands a hit, so neither moved for the rest of the shift. The bot now backs
+  off and sidesteps when it is stuck with a monster within 1.2 m; 4 runs since then all passed.
+- **nettest `full_shift_lag` once hit the runner's 900 s timeout** (after the merge with main,
+  with four other Godot processes running); the rerun passed in 87 s. Not investigated further.
+- **`tools/monster_lab.tscn` prints `Nonexistent function 'action_of' in base 'Node (LabCombat)'`**
+  since main's hands merge (the lab's combat stand-in lacks it); its 102 checks still pass.
 - **`DoorPlan.check` re-samples with the plan's own geometry** (10 degree steps, 0.12 tile points
   along each leaf, obstacles grown by half the leaf's thickness): it proves the plan kept its rules,
   not that a finer sweep would never graze something.
