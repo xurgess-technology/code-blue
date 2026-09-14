@@ -9,9 +9,10 @@ extends RefCounted
 ## forehead: +Y out of the head along the cut plane, X toward the cap, the line along Z) and `brain`
 ## (the centre of the opening: +Y out of the opening, X back toward the table, Z ear to ear).
 ##
-## The look below the neck comes from `make_lying(kind)` (the monsters worker's still lying copy,
-## on Monster or on scripts/monsters/monster_model.gd) when it exists; its head is hidden and this
-## file's own head, which can be opened, sits in its place. Without it the whole body is primitives.
+## The body is `make_lying(kind)` (the walking monster's still lying rig, on Monster or on
+## scripts/monsters/monster_model.gd) fitted to the table by monster_rig_look.gd; its own head is
+## hidden and this file's head, which can be opened, sits on the head bone wearing the rig's skin and
+## the walking look's face. Without the rig the whole body is primitives.
 ##
 ## State read from the body every frame (flags replace, see PatientBody.apply_flags):
 ## `skull_open` (cap lies beside the head, the brain shows), `brain_removed` (empty cavity),
@@ -19,6 +20,9 @@ extends RefCounted
 
 const Kit := preload("res://scripts/patients/patient_kit.gd")
 const Head := preload("res://scripts/dissection/monster_head.gd")
+const RigLook := preload("res://scripts/dissection/monster_rig_look.gd")
+const StrapThrash := preload("res://scripts/dissection/strap_thrash.gd")
+const Shapes := preload("res://scripts/monsters/shapes.gd")
 
 const AWAKE := 0.35
 const STIR := 0.75
@@ -48,20 +52,124 @@ static func look_of(id: String) -> Dictionary:
 
 static func build(b) -> bool:
 	var id: String = b.patient_id
+	var seed_v: int = hash(id) & 0xffff
+	b.breath_amp = 0.0
+	var parts: Dictionary = b.parts
+	parts["kind"] = id
+
+	var lying: Node3D = _make_lying(id)
+	var skel: Skeleton3D = null
+	if lying != null:
+		var found := lying.find_children("*", "Skeleton3D", true, false)
+		if not found.is_empty() and RigLook.has(id) and (found[0] as Skeleton3D).get_node_or_null("body-mesh") != null:
+			skel = found[0]
+		else:
+			lying.free()
+			lying = null
+	if skel != null:
+		_build_rig(b, lying, skel, seed_v)
+	else:
+		_build_primitive(b, seed_v)
+	parts["rng"] = RandomNumberGenerator.new()
+	(parts["rng"] as RandomNumberGenerator).seed = seed_v
+	parts["thrash"] = {"arm_l": 0.0, "arm_l_v": 0.0, "arm_r": 0.0, "arm_r_v": 0.0, "legs": 0.0, "legs_v": 0.0,
+		"head": 0.0, "head_v": 0.0, "next": 0.5, "twitch_next": 1.0, "jaw": 0.0}
+	return true
+
+
+## The walking monster's own body (make_lying), scaled onto the table, with its head swapped for one
+## that opens: the same skin material, the look's face features, ears and neck.
+static func _build_rig(b, lying: Node3D, skel: Skeleton3D, seed_v: int) -> void:
+	var id: String = b.patient_id
+	var fit: Dictionary = RigLook.RIG[id]
+	var rig: Node3D = b.rig
+	var parts: Dictionary = b.parts
+	var k := float(fit.scale)
+	lying.name = "Lying"
+	lying.scale = Vector3.ONE * k
+	lying.position = fit.offset
+	rig.add_child(lying)
+	parts["lying"] = lying
+	parts["lying_home"] = lying.position
+	# Its own head goes (the node named Head rides the head bone); arms in at the sides for the straps.
+	var rig_head := skel.get_node_or_null("Head") as Node3D
+	if rig_head != null:
+		rig_head.visible = false
+	var shaper := skel.get_node_or_null("RigShaper")
+	if shaper != null:
+		(shaper.get("cfg") as Dictionary)["lying_spread"] = float(fit.spread)
+	var thrash := StrapThrash.new()
+	thrash.name = "StrapThrash"
+	skel.add_child(thrash)
+	parts["thrash_mod"] = thrash
+	var body_mi := skel.get_node("body-mesh") as MeshInstance3D
+	var skin: Material = body_mi.material_override
+
+	# --- head: face up, pivoting at the head bone ---------------------------------------------------
+	var hr := RigLook.head_radii(id)
+	var bone := lying.transform * (fit.head_bone as Vector3)
+	var head_c := bone + RigLook.TO_HEAD * (fit.centre as Vector3) * k
+	var neck := Node3D.new()
+	neck.name = "Neck"
+	neck.position = bone
+	rig.add_child(neck)
+	parts["neck_home"] = bone
+	var head := Node3D.new()
+	head.name = "HeadRoot"
+	head.position = head_c - bone
+	neck.add_child(head)
+	var hair_fn := func(p: Vector3) -> bool: return RigLook.has_hair(id, p)
+	var hd: Dictionary = Head.build(head, hr, {"skin_mat": skin, "hair_mat": RigLook.hair_material(id), "hair_fn": hair_fn,
+		"brain_scale": float(fit.brain_scale)}, seed_v)
+	_head_parts(parts, head, neck, hd)
+	# The look's face, in the model head frame turned face up; what lies past the cut rides the cap.
+	var info: Dictionary = hd.info
+	var face_xf := Transform3D(RigLook.TO_HEAD.scaled(Vector3.ONE * k), -(RigLook.TO_HEAD * (fit.centre as Vector3)) * k)
+	var cap: Node3D = hd.cap
+	var face := RigLook.face(id, skin)
+	var on_cap := Node3D.new()
+	on_cap.name = "CapFace"
+	on_cap.transform = Transform3D(face_xf.basis, face_xf.origin - cap.position)
+	for c in face.get_children():
+		var n3 := c as Node3D
+		if n3 == null or n3.has_meta("no_bake"):
+			continue
+		if (face_xf * n3.position).dot(Head.CUT_DIR) > float(info.d):
+			face.remove_child(n3)
+			on_cap.add_child(n3)
+	face.transform = face_xf
+	head.add_child(face)
+	cap.add_child(on_cap)
+	Shapes.bake(face, "dx_%s|face" % id)
+	Shapes.bake(on_cap, "dx_%s|capface" % id)
+	var jaw := face.find_child("Jaw", false, false)
+	parts["jaw"] = jaw
+
+	# --- straps, sites -------------------------------------------------------------------------------
+	var straps: Array = []
+	var pull := PackedFloat32Array()   # per strap: metres from the shoulder (arms), from the hip (legs), height
+	for e in fit.straps:
+		var sx := float(e[0])
+		var hh := float(e[2]) * k + lying.position.y + 0.01
+		straps.append([sx * k + lying.position.x, float(e[1]) * k + 0.02, hh])
+		var arm_d := clampf(sx - float(fit.shoulder_x), 0.0, float(fit.arm_reach)) * k
+		var leg_d := maxf(0.0, sx - float(fit.hip_x)) * k if sx > float(fit.hip_x) + 0.25 else 0.0
+		pull.append_array([arm_d, leg_d, hh])
+	parts["straps"] = _strap_meshes(rig, straps, 0.55)
+	parts["strap_pull"] = pull
+	var inj := lying.transform * (fit.injection as Vector3)
+	_sites(b, head, head_c, hr, hd, Transform3D(Basis(), inj + Vector3(0, 0.01, 0)), 0.24)
+
+
+## Rig-less fallback: the primitive body and head (a painted face).
+static func _build_primitive(b, seed_v: int) -> void:
+	var id: String = b.patient_id
 	var lk := look_of(id)
 	var rig: Node3D = b.rig
 	var L: float = lk.length
 	var hr: Vector3 = lk.head
 	var w: float = lk.width
-	var seed_v: int = hash(id) & 0xffff
-	b.breath_amp = 0.0
-
-	var lying: Node3D = _make_lying(id)
-	var own_body := lying == null
 	var parts: Dictionary = b.parts
-	parts["kind"] = id
-
-	# --- head (always ours: it opens) ------------------------------------------------------------
 	var head_c := Vector3(-L * 0.5 + hr.x + 0.005, hr.y + 0.012, 0.0)
 	var neck := Node3D.new()
 	neck.name = "Neck"
@@ -73,14 +181,7 @@ static func build(b) -> bool:
 	neck.add_child(head)
 	var hd: Dictionary = Head.build(head, hr, {"skin": lk.skin, "scalp": lk.scalp, "hair": lk.hair,
 		"eyeless": lk.eyeless, "brain_scale": lk.brain_scale}, seed_v)
-	parts["neck"] = neck
-	parts["head"] = head
-	parts["cap"] = hd.cap
-	parts["cap_home"] = (hd.cap as Node3D).transform
-	parts["open_skull"] = hd.rim
-	parts["brain"] = hd.brain
-	parts["cut"] = hd.info
-	parts["brain_radii"] = hd.brain_radii
+	_head_parts(parts, head, neck, hd)
 	# The face is laid out for a 0.112 m head and scaled up to this one.
 	var fk := hr.x / 0.112
 	var face_root := Node3D.new()
@@ -89,26 +190,33 @@ static func build(b) -> bool:
 	head.add_child(face_root)
 	var face := _face(face_root, hr / fk, lk, seed_v)
 	parts["jaw"] = face.get("jaw")
-
-	# --- body ---------------------------------------------------------------------------------------
 	var dims := {"L": L, "w": w, "thin": float(lk.thin), "head_c": head_c, "hr": hr, "tx": head_c.x + hr.x + 0.02}
-	if own_body:
-		_primitive_body(b, rig, lk, dims, seed_v)
-	else:
-		lying.name = "Lying"
-		rig.add_child(lying)
-		_hide_lying_head(lying, head_c.x + hr.x * 1.1)
-		parts["lying"] = lying
+	_primitive_body(b, rig, lk, dims, seed_v)
 	_straps(rig, dims)
+	var inj_xf := Transform3D(Basis(), Vector3(-L * 0.5 + 0.52 * L / 1.74, 0.105 * float(lk.thin) + 0.01, -0.25 * w))
+	_sites(b, head, head_c, hr, hd, inj_xf, 0.26 * w + 0.03)
 
-	# --- sites -------------------------------------------------------------------------------------
+
+static func _head_parts(parts: Dictionary, head: Node3D, neck: Node3D, hd: Dictionary) -> void:
+	parts["neck"] = neck
+	parts["head"] = head
+	parts["cap"] = hd.cap
+	parts["cap_home"] = (hd.cap as Node3D).transform
+	parts["open_skull"] = hd.rim
+	parts["brain"] = hd.brain
+	parts["cut"] = hd.info
+	parts["brain_radii"] = hd.brain_radii
+
+
+## Sites, sections, drips and the cap's resting place. `cap_z`: how far beside the head the cap lies.
+static func _sites(b, head: Node3D, head_c: Vector3, hr: Vector3, hd: Dictionary, inj_xf: Transform3D, cap_z: float) -> void:
+	var rig: Node3D = b.rig
+	var parts: Dictionary = b.parts
 	var info: Dictionary = hd.info
 	var m: Vector3 = info.m
 	var u: Vector3 = info.u
 	var skull_xf := Transform3D(Basis(m, u, m.cross(u)), head_c + (info.top as Vector3))
 	var brain_xf := Transform3D(Basis(-u, m, (-u).cross(m)), head_c + (info.centre as Vector3))
-	var arm_z := -0.25 * w
-	var inj_xf := Transform3D(Basis(), Vector3(-L * 0.5 + 0.52 * L / 1.74, 0.105 * float(lk.thin) + 0.01, arm_z))
 	_site(b, "skull", skull_xf, head)
 	_site(b, "brain", brain_xf, head)
 	_site(b, "injection", inj_xf, rig)
@@ -119,7 +227,7 @@ static func build(b) -> bool:
 	b.sections["brain"] = {"half_up": float((hd.brain_radii as Vector3).y), "half_side": float(info.half_z) * (1.0 - Head.BONE_T),
 		"axis_depth": head_c.y + float((info.centre as Vector3).y), "shape": 2.0,
 		"half_u": float(info.half_u) * (1.0 - Head.BONE_T), "brain_radii": hd.brain_radii,
-		"brain_seed": seed_v, "brain_y": -(float((hd.brain_radii as Vector3).y) * 0.55 + 0.004),
+		"brain_seed": hash(String(b.patient_id)) & 0xffff, "brain_y": -(float((hd.brain_radii as Vector3).y) * 0.55 + 0.004),
 		"tray": brain_xf.affine_inverse() * tray_body, "table_up": brain_xf.basis.inverse() * Vector3.UP}
 	b.drips["skull"] = [skull_xf.origin, Vector3(head_c.x - hr.x * 0.9, 0.003, 0.05)]
 	b.drips["brain"] = [brain_xf.origin, Vector3(head_c.x - hr.x * 0.9, 0.003, -0.04)]
@@ -128,12 +236,7 @@ static func build(b) -> bool:
 	# The cap's origin is the centre of its cut face and its dome points along the cut direction
 	# (135 degrees in XY): turning it another 135 degrees about Z points the dome at the table.
 	var flip := Basis(Vector3(0, 0, 1), PI * 0.75) * Basis(Vector3.UP, 0.4)
-	parts["cap_rest"] = Transform3D(flip, Vector3(head_c.x + 0.03, float(info.extent) * (1.0 - Head.CUT_K) + 0.004, 0.26 * w + 0.03) - head_c)
-	parts["rng"] = RandomNumberGenerator.new()
-	(parts["rng"] as RandomNumberGenerator).seed = seed_v
-	parts["thrash"] = {"arm_l": 0.0, "arm_l_v": 0.0, "arm_r": 0.0, "arm_r_v": 0.0, "legs": 0.0, "legs_v": 0.0,
-		"head": 0.0, "head_v": 0.0, "next": 0.5, "twitch_next": 1.0, "jaw": 0.0}
-	return true
+	parts["cap_rest"] = Transform3D(flip, Vector3(head_c.x + 0.03, float(info.extent) * (1.0 - Head.CUT_K) + 0.004, cap_z) - head_c)
 
 
 static func _site(b, nm: String, xf: Transform3D, follow: Node3D) -> void:
@@ -170,18 +273,6 @@ static func _make_lying(id: String) -> Node3D:
 					return n
 				return null
 	return null
-
-
-## Hides every mesh of the lying copy that lies entirely beyond `x_limit` toward -X (its head).
-static func _hide_lying_head(lying: Node3D, x_limit: float) -> void:
-	for mi in lying.find_children("*", "MeshInstance3D", true, false):
-		var g := mi as MeshInstance3D
-		if g.mesh == null:
-			continue
-		var xf := _chain(g, lying.get_parent() as Node3D) if lying.get_parent() != null else g.transform
-		var bb := xf * g.mesh.get_aabb()
-		if bb.end.x < x_limit:
-			g.visible = false
 
 
 static func vc_mat(key: String, rough := 0.85, cull_off := false) -> StandardMaterial3D:
@@ -383,16 +474,22 @@ static func _straps(rig: Node3D, d: Dictionary) -> void:
 	var x0 := -L * 0.5
 	var tx: float = d.tx
 	var th: float = d.thin
-	var root := Node3D.new()
-	root.name = "Straps"
-	rig.add_child(root)
 	# x, half width over the body, height over the body
-	var list := [
+	_strap_meshes(rig, [
 		[tx + 0.18 * s, 0.3 * w, 0.215 * th * 0.85 + 0.03],   # chest, over the upper arms
 		[tx + 0.58 * s, 0.3 * w, 0.18 * th * 0.85 + 0.025],     # wrists and hips
 		[tx + 0.92 * s, 0.2 * w, 0.14 * th + 0.015],     # thighs
 		[tx + 1.24 * s, 0.17 * w, 0.1 * th + 0.015],      # shins
-	]
+	])
+
+
+## Straps across the table: `list` of [x, half width of the hump, height of the hump] (body frame).
+## `boxy` < 1 squares the hump's shoulders (a torso with the arms beside it).
+static func _strap_meshes(rig: Node3D, list: Array, boxy := 1.0) -> Array:
+	var root := Node3D.new()
+	root.name = "Straps"
+	rig.add_child(root)
+	var groups: Array = []
 	var leather := Kit.mat("mb_strap", Color(0.2, 0.13, 0.08), 0.7)
 	leather.cull_mode = BaseMaterial3D.CULL_DISABLED
 	var metal := Kit.mat("mb_buckle", Color(0.62, 0.62, 0.6), 0.35, 0.8)
@@ -400,14 +497,21 @@ static func _straps(rig: Node3D, d: Dictionary) -> void:
 		var x: float = e[0]
 		var hw: float = e[1]
 		var hh: float = e[2]
-		Kit.add_mesh(root, _band(hw, hh, 0.37, 0.065, 0.007), leather, Transform3D(Basis(), Vector3(x, 0, 0)), "Strap")
-		Kit.add_mesh(root, Kit.box(Vector3(0.05, 0.012, 0.045)), metal, Transform3D(Basis(), Vector3(x, hh * 0.72, hw * 0.78)), "Buckle")
-		Kit.add_mesh(root, Kit.box(Vector3(0.03, 0.014, 0.03)), Kit.mat("mb_buckle_in", Color(0.2, 0.13, 0.08), 0.7), Transform3D(Basis(), Vector3(x, hh * 0.72 + 0.002, hw * 0.78)), "BuckleIn")
+		# One node per strap, at the table top: a thrashing rig body pulls it taut upward (scale Y).
+		var g := Node3D.new()
+		g.name = "StrapAt%d" % groups.size()
+		g.position = Vector3(x, 0, 0)
+		root.add_child(g)
+		groups.append(g)
+		Kit.add_mesh(g, _band(hw, hh, 0.37, 0.065, 0.007, boxy), leather, Transform3D(), "Strap")
+		Kit.add_mesh(g, Kit.box(Vector3(0.05, 0.012, 0.045)), metal, Transform3D(Basis(), Vector3(0, hh * 0.72, hw * 0.78)), "Buckle")
+		Kit.add_mesh(g, Kit.box(Vector3(0.03, 0.014, 0.03)), Kit.mat("mb_buckle_in", Color(0.2, 0.13, 0.08), 0.7), Transform3D(Basis(), Vector3(0, hh * 0.72 + 0.002, hw * 0.78)), "BuckleIn")
+	return groups
 
 
 ## A strap over an elliptic hump (half width hw, height hh), flat on the table out to `table_hw`
 ## and down its sides, `width` along X and `t` thick. Profile in YZ, extruded along X.
-static func _band(hw: float, hh: float, table_hw: float, width: float, t: float) -> ArrayMesh:
+static func _band(hw: float, hh: float, table_hw: float, width: float, t: float, boxy := 1.0) -> ArrayMesh:
 	var prof := PackedVector2Array()   # (z, y)
 	prof.append(Vector2(-table_hw, -0.12))
 	prof.append(Vector2(-table_hw, 0.004))
@@ -415,7 +519,8 @@ static func _band(hw: float, hh: float, table_hw: float, width: float, t: float)
 	var n := 16
 	for i in n + 1:
 		var a := PI - PI * float(i) / float(n)
-		prof.append(Vector2(cos(a) * hw, 0.004 + sin(a) * hh))
+		var ca := cos(a)
+		prof.append(Vector2(signf(ca) * pow(absf(ca), boxy) * hw, 0.004 + pow(sin(a), boxy) * hh))
 	prof.append(Vector2(hw + 0.03, 0.004))
 	prof.append(Vector2(table_hw, 0.004))
 	prof.append(Vector2(table_hw, -0.12))
@@ -536,6 +641,26 @@ static func animate(b, jolt: float, env: float, _fidget: float, _twitch: float, 
 		for k3 in ["arm_l", "arm_r", "legs", "head"]:
 			st[k3] = move_toward(float(st[k3]), 0.0, dt)
 		st.jaw = move_toward(float(st.jaw), 0.35, dt * 0.5)
+	# The rig body: the limbs lift off the table from shoulder and hip (StrapThrash, after the
+	# shaper's lying pose), and every yank heaves the whole body up against the straps a little.
+	var tm := parts.get("thrash_mod") as StrapThrash
+	if tm != null:
+		var al := maxf(0.0, float(st.arm_l))
+		var ar := maxf(0.0, float(st.arm_r))
+		var lg := maxf(0.0, float(st.legs))
+		tm.arm_l = al * 1.1
+		tm.arm_r = ar * 1.1
+		tm.legs = lg * 0.8
+		var heave := minf(0.025, (al + ar + lg) * 0.1)
+		(parts["lying"] as Node3D).position = (parts["lying_home"] as Vector3) + Vector3(0, heave, 0)
+		# The straps over the lifting limbs pull taut: each rises as far as the limb under it.
+		var groups: Array = parts["straps"]
+		var pull: PackedFloat32Array = parts["strap_pull"]
+		var arm_a := maxf(tm.arm_l, tm.arm_r)
+		for i in groups.size():
+			var lift := sin(arm_a) * pull[i * 3] + sin(tm.legs) * pull[i * 3 + 1] + heave
+			(groups[i] as Node3D).scale = Vector3(1.0, 1.0 + lift / pull[i * 3 + 2], 1.0)
+		(parts["neck"] as Node3D).position = (parts["neck_home"] as Vector3) + Vector3(0, heave * 0.6, 0)
 	var arm_l: Node3D = parts.get("arm_l")
 	if arm_l != null:
 		arm_l.rotation = Vector3(float(st.arm_l) * 0.8 + env * 0.2, 0, float(st.arm_l) * 0.5 + jolt * 0.05)
@@ -555,7 +680,8 @@ static func animate(b, jolt: float, env: float, _fidget: float, _twitch: float, 
 		neck.rotation = Vector3(float(st.head) * 0.4, 0, jolt * 0.01)
 	var jaw: Node3D = parts.get("jaw")
 	if jaw != null:
-		jaw.scale = Vector3(1.0, 1.0 + float(st.jaw) * 2.5, 1.0 - float(st.jaw) * 0.15)
+		var gape := 2.5 if tm == null else 1.1   # the rig faces' mouths are already open slits
+		jaw.scale = Vector3(1.0, 1.0 + float(st.jaw) * gape, 1.0 - float(st.jaw) * 0.15)
 	# Breathing: the chest rises with the phase the body runs (none when flat).
 	var torso: Node3D = parts.get("torso")
 	if torso != null:

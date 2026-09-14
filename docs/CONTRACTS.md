@@ -349,7 +349,8 @@ func eye_transform() -> Transform3D                         # every machine: eye
   along X, head toward -X, face up (+Y), origin at the middle of its back (the PatientBody
   convention). Lengths: Walk-In about 1.7 m, Discharged about 2.1 m. No IV pole. Rig-less
   fallback: primitives. Its node named `Head` follows the head bone. It keeps an AnimationPlayer
-  frozen on the idle pose; do not free the skeleton.
+  frozen on the idle pose; do not free the skeleton. The shaper's optional cfg `lying_spread`
+  (degrees, default 11) sets how far the arms lie out from the sides.
 - **The Walk-In**: sight only (110 degree cone, 12 m, rays to the player's head then chest, walls
   block, light does not matter; 5 Hz, staggered; the ray count is in `brain.rays`). Wanders 0.8 m/s
   within 7 m of where it spawned, chases at 1.8 m/s straight at whoever it sees, keeps walking to
@@ -996,10 +997,17 @@ SEDATION_SECONDS 120, SAW_MULT 2.5, THRASH_BOTCH 1.5, THRASH_EVERY 3.0, SHRIEK_N
   `site_section("skull")` = `{half_up, half_side, axis_depth, shape}`; `site_section("brain")` also
   carries `half_u`, `brain_radii`, `brain_seed`, `brain_y`, `tray` (site-local Vector3) and `table_up`.
   Body meta `dx_brain_hidden` (set by the brain step while it draws the moving brain). The head is
-  always this file's own (it opens); below the neck it uses `make_lying(kind)` from `Monster` or
-  `scripts/monsters/monster_model.gd` when either exists (meshes entirely past the head are hidden),
-  else primitives: the Walk-In a greenish patient in a teal gown with a wristband, the Discharged
-  taller and thinner, grey, eyeless (scarred-over sockets), large clear ears, an IV line taped on.
+  always this file's own (it opens); the body is `make_lying(kind)` from `Monster` or
+  `scripts/monsters/monster_model.gd` when the copy has its rig: scaled to the 2 m table (the
+  Discharged 0.9), arms in at the sides (RigShaper cfg `lying_spread`), the rig's `Head` node hidden.
+  The openable head sits at the rig's head bone, face up, wearing the body's own skin material and
+  the walking look's face (`scripts/dissection/monster_rig_look.gd`: the Discharged's sealed, stitched
+  sockets, brow and large ears; the Walk-In's filmed eyes, jowls, open mouth and fringe of hair);
+  face pieces past the cut ride the cap. Fit constants (scale, head bone, straps) live in
+  `RigLook.RIG`; `tools/dissectiontest` checks the head bone against them. Thrashing turns the rig's
+  arm and leg bones (`strap_thrash.gd`, a SkeletonModifier3D after the shaper), heaves the body and
+  pulls the straps over the lifting limbs taut. Without the rig: primitives (the Walk-In a greenish
+  patient in a teal gown, the Discharged taller, grey, eyeless, large ears, an IV line taped on).
 - **Minigames:** `saw.gd` variant `skull` (layers Scalp/Bone/Dura, no tourniquet, steady scalp bleed,
   finishes `{skull_open: true, cut_quality}`; the saw model is hidden until someone saws). `forceps.gd`
   variant `brain` hands every call to `scripts/dissection/brain_forceps.gd`: clamp each nerve at its

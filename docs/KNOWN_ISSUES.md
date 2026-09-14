@@ -433,22 +433,34 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 
 ## Dissection (sweep 3)
 
-- **`make_lying` is untested.** The monsters worker's still lying copy did not exist on this branch,
-  so every screenshot is the primitive fallback body. With `make_lying` present the builder hides the
-  copy's meshes that lie entirely past the head (by X extent, a heuristic) and puts its own, openable
-  head in their place: expect a size or style mismatch against the Kenney-rig bodies (the own head is
-  a smooth ellipsoid, 0.14 m half length) and possibly a missed or wrongly hidden part. Check it on
-  the merged build (`tools/dissectiontest.tscn -- --shots`).
-- **The primitive bodies are plainer than Bob and the seal**: smooth lofts, a painted face with
-  sphere eyes, no hands to speak of. They read as a patient in a gown / a grey eyeless patient with
-  big ears at table distance (`tools/dissection_shots/01*`, `02*`), less so up close.
+- **The strapped rig bodies are fitted by measured constants** (`monster_rig_look.gd` `RIG`: scale,
+  offset, head bone, strap positions and heights, injection point, limb pivots). If the monsters
+  worker changes a look's proportions or `make_lying`, the head can drift off the neck and the straps
+  off the body: `tools/dissectiontest` fails its head-bone check (2 cm) and the table-fit check, but
+  the straps have no check, so look at `tools/dissection_shots/01*`, `02*` after such a change.
+- **The openable head is one ellipsoid**, not the walking look's two skull pieces, so the skull is a
+  little rounder, and the face pieces are copied from `discharged_look.gd` / `walk_in_look.gd` (edits
+  there do not reach the table). The Discharged's brow sits 6 mm further out so it does not sink into
+  the ellipsoid; it keeps the walking head's bright, fine-noise band look, which under the OR lamp
+  (plus the saw's guide glow on the forehead) reads a bit like a bandage. From beside the table the
+  Discharged's ear bowl (pink with a dark canal dot) can read as an eye at a glance, exactly as it
+  does on the walking monster in profile.
+- **The rig body's back sinks about 4 cm into the table top** (the lying copy's gown back is lower
+  than its legs; raised so the legs rest on the table). Hidden by the table from most angles.
+- **Thrashing on the rig body moves whole limbs** from shoulder and hip (single-bone arms and legs, no
+  elbows or knees); the straps over them stretch upward with the lift instead of holding them down,
+  and the fingers do not curl. The chest does not breathe (the primitive body's torso breathing has
+  no rig equivalent). The head only rocks a little (the operator works on it).
+- **The primitive bodies (no rig) are plainer than Bob and the seal**: smooth lofts, a painted face
+  with sphere eyes, no hands to speak of. Only used when the Kenney rig asset is missing.
 - **The saw's calm guide glow shows on the forehead before anyone saws** (the same idle glow limbs
   have); the saw model itself is hidden until someone saws the skull.
 - **The brain step's camera looks from past the end of the table**, so the body appears upside down
   above the opening (`05_brain_nerves.png`). Readable, but a surgeon standing at the head end would
   be the natural view.
 - **The nerves are short**: the gap between the brain and the bone is 1-1.5 cm, so the cords are
-  small; the rings carry the read. A larger cavity (smaller brain) would show them better.
+  small; the rings carry the read. The rig heads are smaller than the old primitive heads (about
+  0.11 m half length), so their brains are scaled to 0.92 of what the opening would fit to keep the gap.
 - **Awake thrashing only adds botches, shrieks and body motion.** The operator's hand shake stays
   the surgery system's stir (strongest at sedation 0, roughly every 2.5 s); there is no separate,
   stronger jolt for an awake monster. The head barely moves so the work planes stay on it.
@@ -581,8 +593,6 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   (`hud.gd _draw_prompt`, no outline) all but vanishes over the white patient table, so "Strap the
   Discharged to the table" is barely visible (`tools/combat_shots/06_drag_fp.png`). Not combat's
   code; an outline or a dark backing would fix every prompt.
-- **The strapped monster lies on the table as Bob.** `PatientBody.create("discharged")` warns and
-  builds Bob until the `dissection` worker's monster bodies land.
 - **Friendly fire respects invulnerability.** A teammate hit in the last 3 s (the normal
   post-hit invulnerability) takes no saw damage, but the swing still counts as a hit (noise, break
   roll). Deliberate, so a saw cannot chain-down a teammate.

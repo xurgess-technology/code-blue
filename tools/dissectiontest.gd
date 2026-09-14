@@ -18,6 +18,7 @@ extends Node
 const DevRoomScript := preload("res://scripts/dev/dev_room.gd")
 const DissectionScript := preload("res://scripts/dissection/dissection.gd")
 const OrModel := preload("res://scripts/orscreen/or_screen_model.gd")
+const RigLookScript := preload("res://scripts/dissection/monster_rig_look.gd")
 const SHOT_DIR := "res://tools/dissection_shots"
 
 var main: Node3D
@@ -105,6 +106,7 @@ func _dev_room() -> void:
 		and not body.has_site("gunshot"), "the monster body is a PatientBody with sites injection, skull and brain")
 	_check(body != null and body.find_child("Straps", true, false) != null and body.find_child("Strap", true, false) != null, "the body has straps")
 	_check(body != null and not body.site_section("skull").is_empty() and body.site_section("brain").has("tray"), "site sections for the skull and the brain")
+	await _check_rig_body(body, "walk_in")
 	_check(dx.owns_case(c) and dx.owns_table(table), "dissection owns the case and its table")
 	_check(game.loop.pay_for(c, 1) == 0, "a monster case pays nothing")
 
@@ -197,6 +199,7 @@ func _dev_room() -> void:
 	await _seconds(4.0)
 	_check(float(d.vitals) == v0, "no thrash botches while nobody operates (%.1f)" % float(d.vitals))
 	var tb = game.body_for_table(table)
+	await _check_rig_body(tb, "discharged")
 	_check(tb != null and float(tb.get("_sedation")) < 0.35, "the body gets the awake sedation (%.2f)" % (float(tb.get("_sedation")) if tb != null else -1.0))
 	# Operate while awake: about 1.5 every 3 s from thrashing.
 	game.surgery_bot_skill = -1.0   # hands off: only the thrashing botches
@@ -243,6 +246,39 @@ func _dev_room() -> void:
 	var gone2 := await _until(func(): return game.case_by_id(did).is_empty(), 9.0)
 	_check(gone2, "the ruined case clears too")
 	game.surgery_bot_skill = -1.0
+
+
+## The strapped body wears the walking monster's rig (make_lying) with exactly one head, the one that
+## opens, sitting where the rig's head bone is (RigLook's measured constant), and fits the table.
+func _check_rig_body(body, kind: String) -> void:
+	if body == null:
+		_check(false, "%s: no body" % kind)
+		return
+	var lying := (body as Node).find_child("Lying", true, false) as Node3D
+	_check(lying != null, "%s: the body is the walking monster's lying rig" % kind)
+	if lying == null:
+		return
+	await _frames(3)
+	var skel := lying.find_children("*", "Skeleton3D", true, false)[0] as Skeleton3D
+	var rig_head := skel.get_node_or_null("Head") as Node3D
+	var heads: Array = (body as Node).find_children("HeadRoot", "", true, false)
+	_check(rig_head != null and not rig_head.visible and heads.size() == 1 and (heads[0] as Node3D).is_visible_in_tree(),
+		"%s: one head (the rig's own is hidden, the openable one shows)" % kind)
+	var want: Vector3 = RigLookScript.RIG[kind].head_bone
+	var got := lying.global_transform.affine_inverse() * rig_head.global_position if rig_head != null else Vector3.INF
+	_check(got.distance_to(want) < 0.02, "%s: the rig's head bone is where RigLook expects it (%s vs %s)" % [kind, str(got), str(want)])
+	var box := AABB()
+	var first := true
+	for mi in (body as Node).find_children("*", "MeshInstance3D", true, false):
+		var g := mi as MeshInstance3D
+		if g.mesh == null or not g.is_visible_in_tree() or g.skin != null or g.get_parent().name == "Straps" or String(g.get_parent().name).begins_with("StrapAt"):
+			continue
+		var a: AABB = (body as Node3D).global_transform.affine_inverse() * g.global_transform * g.mesh.get_aabb()
+		box = a if first else box.merge(a)
+		first = false
+	# Loose (rotated mesh boxes): the table top is 2.0 x 0.7 m.
+	_check(box.position.x > -1.02 and box.end.x < 1.02 and box.position.z > -0.4 and box.end.z < 0.4,
+		"%s: the body lies on the table (%s .. %s)" % [kind, str(box.position), str(box.end)])
 
 
 func _monster_case(kind: String) -> Dictionary:
