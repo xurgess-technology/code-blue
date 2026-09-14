@@ -200,31 +200,34 @@ static func _block(g: Dictionary, r: Rect2i) -> void:
 # build
 # =========================================================================
 
+## Data only (a worker thread): the grid's surfaces as mesh arrays and the navigation faces.
+static func prepare(lay: Dictionary, origin: Vector2i) -> Dictionary:
+	var geo := Common.Geo.new()
+	var nav := PackedVector3Array()
+	Common.build_surfaces(lay.grid, origin, geo, nav)
+	_catwalk_nav(origin, nav)
+	geo.bake()
+	return {"geo": geo, "nav_faces": nav}
+
+
+## Everything at once (warmup, tools): the interior's root node.
 static func build(lay: Dictionary, origin: Vector2i, out: Dictionary) -> Node3D:
 	var root := Node3D.new()
 	root.name = "Factory"
-	var g: Dictionary = lay.grid
+	var prep := prepare(lay, origin)
+	out.nav_faces.append_array(prep.nav_faces)
+	Common.run_steps(build_steps(lay, origin, out, root, prep))
+	return root
+
+
+## The interior's nodes as small steps under `root` (see Common.run_steps).
+static func build_steps(lay: Dictionary, origin: Vector2i, out: Dictionary, root: Node3D, prep: Dictionary) -> Array:
 	var ow := Vector3(origin.x * T, 0.0, origin.y * T)
 	var world := func(t: Vector2, y := 0.0) -> Vector3:
 		return ow + Vector3(t.x * T, y, t.y * T)
-
-	var geo := Common.Geo.new()
-	geo.mats["floor"] = Common.tri_mat("fac_floor", "mat/concrete", Color(0.62, 0.61, 0.57), 0.22, 0.92)
-	geo.mats["roof"] = _plain("fac_roof", Color(0.05, 0.055, 0.06), 0.95)
-	geo.mats["wall_low"] = Common.tri_mat("fac_wall_low", "mat/concrete", Color(0.52, 0.58, 0.53), 0.35, 0.9)
-	geo.mats["wall_up"] = _corrugated()
-	geo.mats["office_floor"] = Common.tri_mat("fac_office_floor", "mat/floor", Color(0.55, 0.52, 0.47), 0.6, 0.85)
-	geo.mats["office_ceiling"] = Common.HB.surface_mat("mat/ceiling", Color(0.30, 0.31, 0.31), 0.95)
-	geo.mats["office_wall"] = Common.tri_mat("fac_office_wall", "mat/wall", Color(0.62, 0.6, 0.52), 0.5, 0.85)
-	geo.mats["office_wall_low"] = Common.tri_mat("fac_office_wall_low", "mat/wall", Color(0.42, 0.44, 0.40), 0.5, 0.85)
-	var nav: PackedVector3Array = out.nav_faces
-	Common.build_surfaces(g, origin, geo, nav)
-	var body := geo.commit(root)
-	# The floor and the roof as boxes, so nothing falls through between faces.
-	var hall_w := Rect2(Vector2(HALL.position) * T + Vector2(ow.x, ow.z), Vector2(HALL.size) * T)
-	Common.collider(body, Transform3D(Basis(), Vector3(hall_w.get_center().x, -0.2, hall_w.get_center().y)), Vector3(hall_w.size.x, 0.4, hall_w.size.y))
-	Common.collider(body, Transform3D(Basis(), Vector3(hall_w.get_center().x, CEIL + 0.2, hall_w.get_center().y)), Vector3(hall_w.size.x, 0.4, hall_w.size.y))
-
+	var ctx := {}
+	var steps: Array = []
+	var geo: Common.Geo = prep.geo
 	var props := Common.Props.new()
 	var concrete := Common.tri_mat("fac_column", "mat/concrete", Color(0.66, 0.66, 0.63), 0.35, 0.9)
 	var steel := Common.tri_mat("fac_steel", "mat/metal", Color(0.30, 0.31, 0.32), 0.6, 0.55, 0.6)
@@ -234,129 +237,190 @@ static func build(lay: Dictionary, origin: Vector2i, out: Dictionary) -> Node3D:
 	var dark := _plain("fac_dark", Color(0.07, 0.07, 0.075), 0.6)
 	var rubber := _plain("fac_rubber", Color(0.05, 0.05, 0.05), 0.95)
 
-	# Columns: concrete shafts with a steel base plate and a haunch where the roof beams sit.
-	var column_mesh := Common.cached_mesh("fac_column", func():
-		var mb := Common.MeshBuilder.new()
-		mb.box("c", concrete, Transform3D(Basis(), Vector3(0, CEIL * 0.5, 0)), Vector3(0.9, CEIL, 0.9))
-		mb.box("s", steel, Transform3D(Basis(), Vector3(0, 0.08, 0)), Vector3(1.2, 0.16, 1.2))
-		mb.box("c", concrete, Transform3D(Basis(), Vector3(0, CEIL - 2.8, 0)), Vector3(1.3, 1.2, 1.3))
-		mb.box("y", paint_y, Transform3D(Basis(), Vector3(0, 0.9, 0)), Vector3(0.94, 1.4, 0.94))
-		return mb.commit())
-	for c: Vector2i in lay.columns:
-		var p: Vector3 = world.call(Vector2(c) + Vector2(0.5, 0.5))
-		props.add(column_mesh, Transform3D(Basis(), p), 70.0)
-		Common.collider(body, Transform3D(Basis(), p + Vector3(0, 1.5, 0)), Vector3(0.95, 3.0, 0.95))
-	# Roof beams over every column line, so the ceiling reads as far away.
-	var beam_mesh := Common.cached_mesh("fac_beam", func():
-		var mb := Common.MeshBuilder.new()
-		mb.box("s", steel, Transform3D(), Vector3(0.5, 1.4, 1.0))
-		return mb.commit())
-	var xs := {}
-	var ys := {}
-	for c: Vector2i in lay.columns:
-		xs[c.x] = true
-		ys[c.y] = true
-	for x in xs.keys():
-		var a: Vector3 = world.call(Vector2(x + 0.5, HALL.position.y))
-		var len_z := HALL.size.y * T
-		props.add(beam_mesh, Transform3D(Basis().scaled(Vector3(1, 1, len_z)), a + Vector3(0, CEIL - 2.2, len_z * 0.5)), 0.0, false)
-	for y in ys.keys():
-		var a: Vector3 = world.call(Vector2(HALL.position.x, y + 0.5))
-		var len_x := HALL.size.x * T
-		props.add(beam_mesh, Transform3D(Basis(Vector3.UP, PI * 0.5).scaled(Vector3(1, 1, len_x)), a + Vector3(len_x * 0.5, CEIL - 3.4, 0)), 0.0, false)
+	steps.append(func():
+		geo.mats["floor"] = Common.tri_mat("fac_floor", "mat/concrete", Color(0.62, 0.61, 0.57), 0.22, 0.92)
+		geo.mats["roof"] = _plain("fac_roof", Color(0.05, 0.055, 0.06), 0.95)
+		geo.mats["wall_low"] = Common.tri_mat("fac_wall_low", "mat/concrete", Color(0.52, 0.58, 0.53), 0.35, 0.9)
+		geo.mats["wall_up"] = _corrugated()
+		geo.mats["office_floor"] = Common.tri_mat("fac_office_floor", "mat/floor", Color(0.55, 0.52, 0.47), 0.6, 0.85)
+		geo.mats["office_ceiling"] = Common.HB.surface_mat("mat/ceiling", Color(0.30, 0.31, 0.31), 0.95)
+		geo.mats["office_wall"] = Common.tri_mat("fac_office_wall", "mat/wall", Color(0.62, 0.6, 0.52), 0.5, 0.85)
+		geo.mats["office_wall_low"] = Common.tri_mat("fac_office_wall_low", "mat/wall", Color(0.42, 0.44, 0.40), 0.5, 0.85)
+		return geo.commit_steps(root, ctx))
+
+	# The floor and the roof as boxes, so nothing falls through between faces; the columns and beams.
+	steps.append(func():
+		var body: StaticBody3D = ctx.body
+		var hall_w := Rect2(Vector2(HALL.position) * T + Vector2(ow.x, ow.z), Vector2(HALL.size) * T)
+		Common.collider(body, Transform3D(Basis(), Vector3(hall_w.get_center().x, -0.2, hall_w.get_center().y)), Vector3(hall_w.size.x, 0.4, hall_w.size.y))
+		Common.collider(body, Transform3D(Basis(), Vector3(hall_w.get_center().x, CEIL + 0.2, hall_w.get_center().y)), Vector3(hall_w.size.x, 0.4, hall_w.size.y))
+		# Columns: concrete shafts with a steel base plate and a haunch where the roof beams sit.
+		var column_mesh := Common.cached_mesh("fac_column", func():
+			var mb := Common.MeshBuilder.new()
+			mb.box("c", concrete, Transform3D(Basis(), Vector3(0, CEIL * 0.5, 0)), Vector3(0.9, CEIL, 0.9))
+			mb.box("s", steel, Transform3D(Basis(), Vector3(0, 0.08, 0)), Vector3(1.2, 0.16, 1.2))
+			mb.box("c", concrete, Transform3D(Basis(), Vector3(0, CEIL - 2.8, 0)), Vector3(1.3, 1.2, 1.3))
+			mb.box("y", paint_y, Transform3D(Basis(), Vector3(0, 0.9, 0)), Vector3(0.94, 1.4, 0.94))
+			return mb.commit())
+		for c: Vector2i in lay.columns:
+			var p: Vector3 = world.call(Vector2(c) + Vector2(0.5, 0.5))
+			props.add(column_mesh, Transform3D(Basis(), p), 70.0)
+			Common.collider(body, Transform3D(Basis(), p + Vector3(0, 1.5, 0)), Vector3(0.95, 3.0, 0.95))
+		# Roof beams over every column line, so the ceiling reads as far away.
+		var beam_mesh := Common.cached_mesh("fac_beam", func():
+			var mb := Common.MeshBuilder.new()
+			mb.box("s", steel, Transform3D(), Vector3(0.5, 1.4, 1.0))
+			return mb.commit())
+		var xs := {}
+		var ys := {}
+		for c: Vector2i in lay.columns:
+			xs[c.x] = true
+			ys[c.y] = true
+		for x in xs.keys():
+			var a: Vector3 = world.call(Vector2(x + 0.5, HALL.position.y))
+			var len_z := HALL.size.y * T
+			props.add(beam_mesh, Transform3D(Basis().scaled(Vector3(1, 1, len_z)), a + Vector3(0, CEIL - 2.2, len_z * 0.5)), 0.0, false)
+		for y in ys.keys():
+			var a: Vector3 = world.call(Vector2(HALL.position.x, y + 0.5))
+			var len_x := HALL.size.x * T
+			props.add(beam_mesh, Transform3D(Basis(Vector3.UP, PI * 0.5).scaled(Vector3(1, 1, len_x)), a + Vector3(len_x * 0.5, CEIL - 3.4, 0)), 0.0, false))
 
 	# Conveyors: a frame on legs, a dead belt, rollers at the ends.
-	var belt_mesh := Common.cached_mesh("fac_belt", func():
-		var mb := Common.MeshBuilder.new()
-		mb.box("s", steel, Transform3D(Basis(), Vector3(0, 0.82, 0)), Vector3(T, 0.16, 1.1))
-		mb.box("r", rubber, Transform3D(Basis(), Vector3(0, 0.91, 0)), Vector3(T, 0.03, 0.9))
-		for sx in [-0.55, 0.55]:
-			mb.box("y", paint_y, Transform3D(Basis(), Vector3(0, 0.95, sx)), Vector3(T, 0.12, 0.06))
-		for lx in [-0.6, 0.6]:
-			for lz in [-0.45, 0.45]:
-				mb.box("s", steel, Transform3D(Basis(), Vector3(lx, 0.38, lz)), Vector3(0.08, 0.76, 0.08))
-		return mb.commit())
-	for ln: Rect2i in lay.lines:
-		for x in range(ln.position.x, ln.end.x):
-			var p: Vector3 = world.call(Vector2(x + 0.5, ln.position.y + 0.5))
-			props.add(belt_mesh, Transform3D(Basis(), p), 52.0)
-		var a: Vector3 = world.call(Vector2(ln.position.x, ln.position.y + 0.5))
-		var b: Vector3 = world.call(Vector2(ln.end.x, ln.position.y + 0.5))
-		Common.collider(body, Transform3D(Basis(), (a + b) * 0.5 + Vector3(0, 0.5, 0)), Vector3(b.x - a.x, 1.0, 1.15))
-		# Boxes left on the belt, as if it stopped mid-shift.
-		for x in range(ln.position.x + 1, ln.end.x - 1, 3):
-			if (x * 7 + ln.position.y) % 5 < 2:
-				var bp: Vector3 = world.call(Vector2(x + 0.5, ln.position.y + 0.5), 0.93)
-				props.add(_crate_mesh(), Transform3D(Basis(Vector3.UP, float(x % 3) * 0.2).scaled(Vector3(0.9, 0.7, 0.8)), bp), 40.0)
+	steps.append(func():
+		var body: StaticBody3D = ctx.body
+		var belt_mesh := Common.cached_mesh("fac_belt", func():
+			var mb := Common.MeshBuilder.new()
+			mb.box("s", steel, Transform3D(Basis(), Vector3(0, 0.82, 0)), Vector3(T, 0.16, 1.1))
+			mb.box("r", rubber, Transform3D(Basis(), Vector3(0, 0.91, 0)), Vector3(T, 0.03, 0.9))
+			for sx in [-0.55, 0.55]:
+				mb.box("y", paint_y, Transform3D(Basis(), Vector3(0, 0.95, sx)), Vector3(T, 0.12, 0.06))
+			for lx in [-0.6, 0.6]:
+				for lz in [-0.45, 0.45]:
+					mb.box("s", steel, Transform3D(Basis(), Vector3(lx, 0.38, lz)), Vector3(0.08, 0.76, 0.08))
+			return mb.commit())
+		for ln: Rect2i in lay.lines:
+			for x in range(ln.position.x, ln.end.x):
+				var p: Vector3 = world.call(Vector2(x + 0.5, ln.position.y + 0.5))
+				props.add(belt_mesh, Transform3D(Basis(), p), 52.0)
+			var a: Vector3 = world.call(Vector2(ln.position.x, ln.position.y + 0.5))
+			var b: Vector3 = world.call(Vector2(ln.end.x, ln.position.y + 0.5))
+			Common.collider(body, Transform3D(Basis(), (a + b) * 0.5 + Vector3(0, 0.5, 0)), Vector3(b.x - a.x, 1.0, 1.15))
+			# Boxes left on the belt, as if it stopped mid-shift.
+			for x in range(ln.position.x + 1, ln.end.x - 1, 3):
+				if (x * 7 + ln.position.y) % 5 < 2:
+					var bp: Vector3 = world.call(Vector2(x + 0.5, ln.position.y + 0.5), 0.93)
+					props.add(_crate_mesh(), Transform3D(Basis(Vector3.UP, float(x % 3) * 0.2).scaled(Vector3(0.9, 0.7, 0.8)), bp), 40.0))
 
 	# Machines.
-	for mc in lay.machines:
-		var r: Rect2i = mc.rect
-		var centre: Vector3 = world.call(Vector2(r.position) + Vector2(r.size) * 0.5)
-		var mesh := _machine_mesh(String(mc.kind), steel, paint_g, paint_y, dark, rust)
-		props.add(mesh, Transform3D(Basis(Vector3.UP, float(mc.yaw)), centre), 52.0)
-		var size := Vector3(r.size.x * T - 0.3, _machine_height(String(mc.kind)), r.size.y * T - 0.3)
-		Common.collider(body, Transform3D(Basis(), centre + Vector3(0, size.y * 0.5, 0)), size)
-		if String(mc.kind) == "lathe":
-			Common.anchor(out, centre + Vector3(0, _machine_height(String(mc.kind)), 0), 0.0, "counter", "factory_floor")
+	steps.append(func():
+		var body: StaticBody3D = ctx.body
+		for mc in lay.machines:
+			var r: Rect2i = mc.rect
+			var centre: Vector3 = world.call(Vector2(r.position) + Vector2(r.size) * 0.5)
+			var mesh := _machine_mesh(String(mc.kind), steel, paint_g, paint_y, dark, rust)
+			props.add(mesh, Transform3D(Basis(Vector3.UP, float(mc.yaw)), centre), 52.0)
+			var size := Vector3(r.size.x * T - 0.3, _machine_height(String(mc.kind)), r.size.y * T - 0.3)
+			Common.collider(body, Transform3D(Basis(), centre + Vector3(0, size.y * 0.5, 0)), size)
+			if String(mc.kind) == "lathe":
+				Common.anchor(out, centre + Vector3(0, _machine_height(String(mc.kind)), 0), 0.0, "counter", "factory_floor"))
 
-	# Pallet racking.
-	var upright := Common.cached_mesh("fac_upright", func():
-		var mb := Common.MeshBuilder.new()
-		mb.box("b", Common.tri_mat("fac_rack_blue", "mat/metal", Color(0.16, 0.25, 0.42), 0.8, 0.6, 0.4), Transform3D(Basis(), Vector3(0, 3.0, 0)), Vector3(0.12, 6.0, 0.12))
-		return mb.commit())
-	var shelf_beam := Common.cached_mesh("fac_rack_beam", func():
-		var mb := Common.MeshBuilder.new()
-		mb.box("o", Common.tri_mat("fac_rack_orange", "mat/metal", Color(0.62, 0.30, 0.08), 0.8, 0.6, 0.4), Transform3D(), Vector3(1.0, 0.12, 0.1))
-		mb.box("w", Common.tri_mat("fac_pallet", "mat/floor", Color(0.42, 0.33, 0.22), 0.8, 0.9), Transform3D(Basis(), Vector3(0, 0.1, 0.5)), Vector3(1.0, 0.1, 1.0))
-		return mb.commit())
-	for r: Rect2i in lay.racks:
-		var along_x := r.size.x > r.size.y
-		var n := r.size.x if along_x else r.size.y
-		var a: Vector3 = world.call(Vector2(r.position))
-		for k in n + 1:
-			for side in [0.15, 2.85]:
-				var p := a + (Vector3(k * T, 0, side) if along_x else Vector3(side, 0, k * T))
-				props.add(upright, Transform3D(Basis(), p), 60.0)
-		for level in [0.2, 2.1, 4.0]:
-			for k in n:
-				var p := a + (Vector3((k + 0.5) * T, level, 0.15) if along_x else Vector3(0.15, level, (k + 0.5) * T))
-				var basis := Basis().scaled(Vector3(T, 1, 1)) if along_x else Basis(Vector3.UP, PI * 0.5).scaled(Vector3(T, 1, 1))
-				props.add(shelf_beam, Transform3D(basis.rotated(Vector3.UP, 0.0), p), 48.0)
-				var q := a + (Vector3((k + 0.5) * T, level, 2.85) if along_x else Vector3(2.85, level, (k + 0.5) * T))
-				props.add(shelf_beam, Transform3D((Basis().scaled(Vector3(T, 1, 1)) if along_x else Basis(Vector3.UP, PI * 0.5).scaled(Vector3(T, 1, 1))).rotated(Vector3.UP, PI), q), 48.0)
-				if ((k + int(level * 10.0)) * 13 + r.position.x) % 4 != 0:
-					var cp := a + (Vector3((k + 0.5) * T, level + 0.15, 1.5) if along_x else Vector3(1.5, level + 0.15, (k + 0.5) * T))
-					props.add(_crate_mesh(), Transform3D(Basis(Vector3.UP, float(k % 2) * 0.1).scaled(Vector3(1.1, 1.0, 1.1)), cp), 40.0)
-		var rw := Vector3(r.size.x * T, 5.8, r.size.y * T)
-		Common.collider(body, Transform3D(Basis(), a + Vector3(rw.x * 0.5, 2.9, rw.z * 0.5)), rw - Vector3(0.2, 0, 0.2))
+	# Pallet racking and crates.
+	steps.append(func():
+		var body: StaticBody3D = ctx.body
+		var upright := Common.cached_mesh("fac_upright", func():
+			var mb := Common.MeshBuilder.new()
+			mb.box("b", Common.tri_mat("fac_rack_blue", "mat/metal", Color(0.16, 0.25, 0.42), 0.8, 0.6, 0.4), Transform3D(Basis(), Vector3(0, 3.0, 0)), Vector3(0.12, 6.0, 0.12))
+			return mb.commit())
+		var shelf_beam := Common.cached_mesh("fac_rack_beam", func():
+			var mb := Common.MeshBuilder.new()
+			mb.box("o", Common.tri_mat("fac_rack_orange", "mat/metal", Color(0.62, 0.30, 0.08), 0.8, 0.6, 0.4), Transform3D(), Vector3(1.0, 0.12, 0.1))
+			mb.box("w", Common.tri_mat("fac_pallet", "mat/floor", Color(0.42, 0.33, 0.22), 0.8, 0.9), Transform3D(Basis(), Vector3(0, 0.1, 0.5)), Vector3(1.0, 0.1, 1.0))
+			return mb.commit())
+		for r: Rect2i in lay.racks:
+			var along_x := r.size.x > r.size.y
+			var n := r.size.x if along_x else r.size.y
+			var a: Vector3 = world.call(Vector2(r.position))
+			for k in n + 1:
+				for side in [0.15, 2.85]:
+					var p := a + (Vector3(k * T, 0, side) if along_x else Vector3(side, 0, k * T))
+					props.add(upright, Transform3D(Basis(), p), 60.0)
+			for level in [0.2, 2.1, 4.0]:
+				for k in n:
+					var p := a + (Vector3((k + 0.5) * T, level, 0.15) if along_x else Vector3(0.15, level, (k + 0.5) * T))
+					var basis := Basis().scaled(Vector3(T, 1, 1)) if along_x else Basis(Vector3.UP, PI * 0.5).scaled(Vector3(T, 1, 1))
+					props.add(shelf_beam, Transform3D(basis.rotated(Vector3.UP, 0.0), p), 48.0)
+					var q := a + (Vector3((k + 0.5) * T, level, 2.85) if along_x else Vector3(2.85, level, (k + 0.5) * T))
+					props.add(shelf_beam, Transform3D((Basis().scaled(Vector3(T, 1, 1)) if along_x else Basis(Vector3.UP, PI * 0.5).scaled(Vector3(T, 1, 1))).rotated(Vector3.UP, PI), q), 48.0)
+					if ((k + int(level * 10.0)) * 13 + r.position.x) % 4 != 0:
+						var cp := a + (Vector3((k + 0.5) * T, level + 0.15, 1.5) if along_x else Vector3(1.5, level + 0.15, (k + 0.5) * T))
+						props.add(_crate_mesh(), Transform3D(Basis(Vector3.UP, float(k % 2) * 0.1).scaled(Vector3(1.1, 1.0, 1.1)), cp), 40.0)
+			var rw := Vector3(r.size.x * T, 5.8, r.size.y * T)
+			Common.collider(body, Transform3D(Basis(), a + Vector3(rw.x * 0.5, 2.9, rw.z * 0.5)), rw - Vector3(0.2, 0, 0.2))
+		for cr in lay.crates:
+			var t: Vector2i = cr.tile
+			var p: Vector3 = world.call(Vector2(t) + Vector2(0.5, 0.5))
+			for k in int(cr.stack):
+				props.add(_crate_mesh(), Transform3D(Basis(Vector3.UP, float(cr.yaw) + k * 0.15).scaled(Vector3(1.15, 0.9, 1.15)), p + Vector3(0, k * 0.72, 0)), 44.0)
+			Common.collider(body, Transform3D(Basis(), p + Vector3(0, 0.36 * int(cr.stack), 0)), Vector3(1.1, 0.72 * int(cr.stack), 1.1))
+			if int(cr.stack) == 1:
+				Common.anchor(out, p + Vector3(0, 0.72, 0), float(cr.yaw), "counter", "factory_floor"))
 
-	for cr in lay.crates:
-		var t: Vector2i = cr.tile
-		var p: Vector3 = world.call(Vector2(t) + Vector2(0.5, 0.5))
-		for k in int(cr.stack):
-			props.add(_crate_mesh(), Transform3D(Basis(Vector3.UP, float(cr.yaw) + k * 0.15).scaled(Vector3(1.15, 0.9, 1.15)), p + Vector3(0, k * 0.72, 0)), 44.0)
-		Common.collider(body, Transform3D(Basis(), p + Vector3(0, 0.36 * int(cr.stack), 0)), Vector3(1.1, 0.72 * int(cr.stack), 1.1))
-		if int(cr.stack) == 1:
-			Common.anchor(out, p + Vector3(0, 0.72, 0), float(cr.yaw), "counter", "factory_floor")
+	steps.append(func(): _build_catwalk(root, ctx.body, props, world, steel, paint_y, out))
+	steps.append(func(): _build_offices(root, ctx.body, props, lay, world, out))
+	steps.append(func(): _build_floor_marks(props, lay, world))
+	steps.append(func(): _build_lamps(root, props, lay, world, out))
 
-	_build_catwalk(root, body, props, world, steel, paint_y, out)
-	_build_offices(root, body, props, lay, world, out)
-	_build_floor_marks(props, lay, world)
-	_build_lamps(root, props, lay, world, out)
-
-	# Containers.
+	# Containers, one a step.
 	var cts := Node3D.new()
 	cts.name = "Containers"
-	root.add_child(cts)
+	steps.append(func(): root.add_child(cts))
 	for c in lay.containers:
-		var room := "factory_office" if OFFICE_BLOCK.has_point(c.tile) else "factory_floor"
-		Common.container(cts, out, origin, c.tile, c.wall, c.type, room)
-	for s: Vector2i in lay.spawns:
-		out.monster_spawns.append(world.call(Vector2(s) + Vector2(0.5, 0.5)))
-	out["spawn"] = world.call(Vector2(lay.spawn) + Vector2(0.5, 0.5))
-	props.commit(root)
-	return root
+		steps.append(func():
+			var room := "factory_office" if OFFICE_BLOCK.has_point(c.tile) else "factory_floor"
+			Common.container(cts, out, origin, c.tile, c.wall, c.type, room))
+	steps.append(func():
+		for s: Vector2i in lay.spawns:
+			out.monster_spawns.append(world.call(Vector2(s) + Vector2(0.5, 0.5)))
+		out["spawn"] = world.call(Vector2(lay.spawn) + Vector2(0.5, 0.5))
+		return props.commit_steps(root))
+	return steps
+
+
+## The site offices' doorways, as door plan entries in world tiles (hinged, hung at the hall face).
+static func door_entries(lay: Dictionary, origin: Vector2i) -> Array:
+	var out: Array = []
+	for t: Vector2i in lay.doors:
+		out.append(Common.door_entry(origin, [t], Vector2i(0, -1), "hinged", 90.0))
+	return out
+
+
+## Navigation faces of the catwalk, its landings and both stairs (data only).
+static func _catwalk_nav(origin: Vector2i, nav: PackedVector3Array) -> void:
+	var ow := Vector3(origin.x * T, 0.0, origin.y * T)
+	var cy := CATWALK_Y
+	for r: Rect2i in [CATWALK, LANDING_W, LANDING_E]:
+		var a := ow + Vector3(r.position.x * T, cy, r.position.y * T)
+		var b := ow + Vector3(r.end.x * T, cy, r.end.y * T)
+		nav.append_array([Vector3(a.x, cy, a.z), Vector3(b.x, cy, a.z), Vector3(b.x, cy, b.z),
+				Vector3(a.x, cy, a.z), Vector3(b.x, cy, b.z), Vector3(a.x, cy, b.z)])
+	for pair in [[STAIR_W, -1], [STAIR_E, 1]]:
+		var r: Rect2i = pair[0]
+		var up: int = pair[1]
+		var x_low := float(r.position.x) if up > 0 else float(r.end.x)
+		var x_high := float(r.end.x) if up > 0 else float(r.position.x)
+		var z0 := float(r.position.y)
+		var width := (float(r.end.y) - z0) * T
+		var lo := ow + Vector3(x_low * T, 0.0, z0 * T)
+		var hi := ow + Vector3(x_high * T, cy, z0 * T)
+		var la := Vector3(lo.x, 0.0, lo.z)
+		var lb := Vector3(lo.x, 0.0, lo.z + width)
+		var ha := Vector3(hi.x, cy, lo.z)
+		var hb := Vector3(hi.x, cy, lo.z + width)
+		if up > 0:
+			nav.append_array([la, ha, hb, la, hb, lb])
+		else:
+			nav.append_array([ha, la, lb, ha, lb, hb])
+
 
 
 static func _plain(key: String, col: Color, rough: float, metal := 0.0) -> Material:
@@ -453,7 +517,6 @@ static func _machine_mesh(kind: String, steel: Material, green: Material, yellow
 static func _build_catwalk(root: Node3D, body: StaticBody3D, props: Common.Props, world: Callable, steel: Material, yellow: Material, out: Dictionary) -> void:
 	var grate := Common.tri_mat("fac_grate", "mat/metal", Color(0.26, 0.27, 0.27), 1.5, 0.6, 0.7)
 	var mb := Common.MeshBuilder.new()
-	var nav: PackedVector3Array = out.nav_faces
 	var cy := CATWALK_Y
 	# Deck, landings and the stairs (a ramp collider under visual treads).
 	var deck_rects := [CATWALK, LANDING_W, LANDING_E]
@@ -464,8 +527,6 @@ static func _build_catwalk(root: Node3D, body: StaticBody3D, props: Common.Props
 		var size := Vector3(b.x - a.x, 0.12, b.z - a.z)
 		mb.box("g", grate, Transform3D(Basis(), c - Vector3(0, 0.06, 0)), size)
 		Common.collider(body, Transform3D(Basis(), c - Vector3(0, 0.08, 0)), Vector3(size.x, 0.16, size.z))
-		nav.append_array([Vector3(a.x, cy, a.z), Vector3(b.x, cy, a.z), Vector3(b.x, cy, b.z),
-				Vector3(a.x, cy, a.z), Vector3(b.x, cy, b.z), Vector3(a.x, cy, b.z)])
 	for pair in [[STAIR_W, -1], [STAIR_E, 1]]:
 		var r: Rect2i = pair[0]
 		var up: int = pair[1]   # +1: rises toward +x
@@ -494,15 +555,6 @@ static func _build_catwalk(root: Node3D, body: StaticBody3D, props: Common.Props
 				mb.box("y", yellow, Transform3D(rot, Vector3(mid.x, cy * 0.5 + 1.0, zz)), Vector3(length, 0.06, 0.06))
 		var outer_z := lo.z + width - 0.05
 		Common.collider(body, Transform3D(rot, Vector3(mid.x, cy * 0.5 + 0.55, outer_z)), Vector3(length, 1.1, 0.08))
-		# Nav: the ramp surface.
-		var la := Vector3(lo.x, 0.0, lo.z)
-		var lb := Vector3(lo.x, 0.0, lo.z + width)
-		var ha := Vector3(hi.x, cy, lo.z)
-		var hb := Vector3(hi.x, cy, lo.z + width)
-		if up > 0:
-			nav.append_array([la, ha, hb, la, hb, lb])
-		else:
-			nav.append_array([ha, la, lb, ha, lb, hb])
 		# Supports under the high end.
 		for k in 3:
 			var f := 0.45 + 0.27 * k

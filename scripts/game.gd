@@ -240,6 +240,7 @@ func _ready() -> void:
 	wing_loader.name = "WingLoader"
 	add_child(wing_loader)
 	wing_loader.setup(self)
+	wing_loader.extra_builders.append(pockets)   # POCKETS HOOK: the pocket is built and torn down with the wings
 	Net.roster_changed.connect(_on_roster_changed)
 	Net.joined_ok.connect(_net_client_forget)  # net: a new connection starts a new replica
 	Net.host_left.connect(func(): end_session("The host left the game."))
@@ -347,7 +348,7 @@ func clock_in() -> void:
 		return
 	# DOORS HOOK: the wings behind the gates are still being rebuilt: clock in once they are ready
 	# (the gates' lamps blink amber meanwhile).
-	if not wing_loader.wings_ready:
+	if not wing_loader.wings_ready or pockets.busy:   # POCKETS HOOK: and the pocket built with them
 		if not clock_in_pending:
 			clock_in_pending = true
 			say("Clocked in. The wing doors are unlocking...", 3.0)
@@ -368,6 +369,7 @@ func begin_shift() -> void:
 	if not is_host():
 		return
 	wing_loader.finish_now()   # DOORS HOOK: tools cannot wait for the wings
+	pockets.finish_now()   # POCKETS HOOK: nor for the pocket
 	clock_in_pending = false
 	if phase == Phase.LOBBY:
 		_populate_shift_world()
@@ -573,6 +575,7 @@ func _build_level(for_seed: int) -> void:
 	doors.clear()
 	doors.register(level_info.get("door_nodes", []))
 	wing_loader.on_level_built(level_info)
+	pockets.finish_now()   # POCKETS HOOK: a whole level (a loading screen) does not wait frames for its pocket
 
 
 func _level_info_usable() -> bool:
@@ -1856,7 +1859,7 @@ func _simulate(delta: float) -> void:
 
 
 func _sim_lobby(delta: float) -> void:
-	if clock_in_pending and wing_loader.wings_ready:
+	if clock_in_pending and wing_loader.wings_ready and not pockets.busy:   # POCKETS HOOK
 		clock_in()   # DOORS HOOK: the wings finished while the team waited at the clock
 		return
 	if _holding_aim("clock"):

@@ -238,42 +238,72 @@ class Geo extends RefCounted:
 		for i in [0, 1, 2, 0, 2, 3, 0, 2, 1, 0, 3, 2]:
 			occ_i.append(base + i)
 
-	func commit(parent: Node3D, layers := 1, vis_range := 0.0) -> StaticBody3D:
-		var holder := Node3D.new()
-		holder.name = "Surfaces"
-		parent.add_child(holder)
+	## Surface arrays with tangents (key -> mesh arrays). Data only: safe on a worker thread.
+	var arrays := {}
+
+	func bake() -> void:
 		var keys := sts.keys()
 		keys.sort()
 		for k in keys:
 			var st: SurfaceTool = sts[k]
 			st.generate_tangents()
-			var mi := MeshInstance3D.new()
-			mi.name = String(k).replace(",", "_").replace("|", "_")
-			mi.mesh = st.commit()
-			mi.material_override = mats.get(String(k).get_slice("|", 1))
-			mi.layers = layers
-			if vis_range > 0.0:
-				mi.visibility_range_end = vis_range
-			holder.add_child(mi)
-		var body := StaticBody3D.new()
-		body.name = "Collision"
-		body.collision_layer = C.L_WORLD
-		body.collision_mask = 0
-		parent.add_child(body)
-		if not faces.is_empty():
-			var cs := CollisionShape3D.new()
-			var concave := ConcavePolygonShape3D.new()
-			concave.set_faces(faces)
-			cs.shape = concave
-			body.add_child(cs)
-		if not occ_v.is_empty():
-			var occ := ArrayOccluder3D.new()
-			occ.set_arrays(occ_v, occ_i)
-			var oi := OccluderInstance3D.new()
-			oi.name = "Occluders"
-			oi.occluder = occ
-			parent.add_child(oi)
-		return body
+			arrays[k] = st.commit_to_arrays()
+		sts.clear()
+
+	func commit(parent: Node3D, layers := 1, vis_range := 0.0) -> StaticBody3D:
+		var ctx := {}
+		for s in commit_steps(parent, ctx, layers, vis_range):
+			s.call()
+		return ctx.body
+
+	## The nodes a few at a time (the per-shift build): the collision body, the occluders, then
+	## the surfaces. ctx.body is the StaticBody3D once the first step ran.
+	func commit_steps(parent: Node3D, ctx: Dictionary, layers := 1, vis_range := 0.0, per_step := 8) -> Array:
+		if not sts.is_empty():
+			bake()
+		var steps: Array = []
+		steps.append(func():
+			var body := StaticBody3D.new()
+			body.name = "Collision"
+			body.collision_layer = C.L_WORLD
+			body.collision_mask = 0
+			if not faces.is_empty():
+				var cs := CollisionShape3D.new()
+				var concave := ConcavePolygonShape3D.new()
+				concave.set_faces(faces)
+				cs.shape = concave
+				body.add_child(cs)
+			parent.add_child(body)
+			ctx["body"] = body
+			if not occ_v.is_empty():
+				var occ := ArrayOccluder3D.new()
+				occ.set_arrays(occ_v, occ_i)
+				var oi := OccluderInstance3D.new()
+				oi.name = "Occluders"
+				oi.occluder = occ
+				parent.add_child(oi)
+			var holder := Node3D.new()
+			holder.name = "Surfaces"
+			parent.add_child(holder)
+			ctx["surfaces"] = holder)
+		var keys := arrays.keys()
+		keys.sort()
+		for i in range(0, keys.size(), per_step):
+			var group := keys.slice(i, i + per_step)
+			steps.append(func():
+				var holder: Node3D = ctx.surfaces
+				for k in group:
+					var mesh := ArrayMesh.new()
+					mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays[k])
+					var mi := MeshInstance3D.new()
+					mi.name = String(k).replace(",", "_").replace("|", "_")
+					mi.mesh = mesh
+					mi.material_override = mats.get(String(k).get_slice("|", 1))
+					mi.layers = layers
+					if vis_range > 0.0:
+						mi.visibility_range_end = vis_range
+					holder.add_child(mi))
+		return steps
 
 
 ## Floors, ceilings and walls of every open, non-stub tile of the grid, in world metres.
@@ -517,33 +547,40 @@ class Props extends RefCounted:
 		shadows[mesh] = cast_shadow
 
 	func commit(parent: Node3D) -> void:
+		for s in commit_steps(parent):
+			s.call()
+
+	## One step per chunk (the per-shift build). Call after every add().
+	func commit_steps(parent: Node3D) -> Array:
 		var holder := Node3D.new()
 		holder.name = "Props"
-		parent.add_child(holder)
+		var steps: Array = [func(): parent.add_child(holder)]
 		var keys := batches.keys()
 		keys.sort()
-		var n := 0
+		var counter := [0]
 		for ck in keys:
 			var b: Dictionary = batches[ck]
-			for mesh in b.keys():
-				var xfs: Array = b[mesh]
-				var mm := MultiMesh.new()
-				mm.transform_format = MultiMesh.TRANSFORM_3D
-				mm.mesh = mesh
-				mm.instance_count = xfs.size()
-				for k in xfs.size():
-					mm.set_instance_transform(k, xfs[k])
-				var mmi := MultiMeshInstance3D.new()
-				mmi.name = "MM_%d" % n
-				mmi.multimesh = mm
-				var vr := float(ranges.get(mesh, 0.0))
-				if vr > 0.0:
-					mmi.visibility_range_end = vr
-					mmi.visibility_range_end_margin = 4.0
-				if not bool(shadows.get(mesh, true)):
-					mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-				holder.add_child(mmi)
-				n += 1
+			steps.append(func():
+				for mesh in b.keys():
+					var xfs: Array = b[mesh]
+					var mm := MultiMesh.new()
+					mm.transform_format = MultiMesh.TRANSFORM_3D
+					mm.mesh = mesh
+					mm.instance_count = xfs.size()
+					for k in xfs.size():
+						mm.set_instance_transform(k, xfs[k])
+					var mmi := MultiMeshInstance3D.new()
+					mmi.name = "MM_%d" % counter[0]
+					mmi.multimesh = mm
+					var vr := float(ranges.get(mesh, 0.0))
+					if vr > 0.0:
+						mmi.visibility_range_end = vr
+						mmi.visibility_range_end_margin = 4.0
+					if not bool(shadows.get(mesh, true)):
+						mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+					holder.add_child(mmi)
+					counter[0] += 1)
+		return steps
 
 
 ## A static collision box (world transform).
@@ -657,3 +694,41 @@ static func bake_nav(faces: PackedVector3Array) -> NavigationMesh:
 ## A text label texture (signs, menus).
 static func text_texture(text: String, fg: Color, bg: Color, iw := 256, ih := 64) -> Texture2D:
 	return HB.Legacy._text_texture(text, fg, bg, iw, ih)
+
+
+# =========================================================================
+# steps
+# =========================================================================
+
+## Run build steps now. A step that returns an Array of Callables has them run right after it
+## (steps whose work is only known once the steps before them ran: the surfaces, the props).
+static func run_steps(steps: Array) -> void:
+	var queue := steps.duplicate()
+	var i := 0
+	while i < queue.size():
+		var more = (queue[i] as Callable).call()
+		i += 1
+		if more is Array and not (more as Array).is_empty():
+			queue = queue.slice(0, i) + more + queue.slice(i)
+
+
+# =========================================================================
+# doors
+# =========================================================================
+
+## A door plan entry (docs/CONTRACTS.md "Doors") for a doorway of the pocket: `tiles` local, `n`
+## out of the face the door hangs at. Never `base`, so the wings' teardown drops it.
+static func door_entry(origin: Vector2i, tiles: Array, n: Vector2i, kind: String, max_out: float) -> Dictionary:
+	var inset: float = load("res://scripts/level/door_plan.gd").PLANE_INSET
+	var world_tiles: Array = []
+	var centre := Vector2.ZERO
+	for t: Vector2i in tiles:
+		world_tiles.append(origin + t)
+		centre += Vector2(origin + t) + Vector2(0.5, 0.5)
+	centre /= float(tiles.size())
+	var t0: Vector2i = world_tiles[0]
+	return {"id": "dr_%d_%d" % [t0.x, t0.y], "kind": kind, "tiles": world_tiles, "n": n,
+			"s": Vector2i(1, 0) if n.x == 0 else Vector2i(0, 1),
+			"plane": centre + Vector2(n) * (0.5 - inset), "width": float(tiles.size()),
+			"hinge": -1, "max_in": 90.0, "max_out": max_out, "room": -1, "zone": 0, "wing": "", "depth": 0,
+			"base": false, "pocket": true}

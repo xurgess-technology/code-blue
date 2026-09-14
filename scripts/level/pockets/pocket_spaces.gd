@@ -1,13 +1,17 @@
 extends Node
 ## POCKETS: the runtime side of pocket spaces. `game.pockets` (child "Pockets" of Game, every machine).
 ##
-##   build(gen, info, parent)   after the hospital (with doors: after each shift's wings) is built:
-##                              builds the rolled pocket far from the hospital, the pocket copy of
-##                              every entrance stub, the navigation region and the seam links, and
-##                              adds the pocket's lights, containers, anchors and monster spawns to
-##                              `info` (see docs/CONTRACTS.md "Hospital", pockets).
+##   build_wings(info, wing_seed, generation)   (game.wing_loader.extra_builders) after a level's or
+##                              a new shift's wings are built: builds the pocket MapGen planned into
+##                              them (info.pocket_plan) under info.wings_root, far from the hospital:
+##                              the interior with its doors, the pocket copy of every entrance stub,
+##                              the navigation region and the seam links, and adds the pocket's
+##                              lights, containers, anchors and monster spawns to `info` (see
+##                              docs/CONTRACTS.md "Hospital", pockets). Data on a worker thread, the
+##                              nodes within FRAME_BUDGET_MS a frame; `busy` meanwhile, finish_now().
+##   teardown_wings()           the wings are going: evict, forget, free the nodes a few at a time.
 ##   build_kind(kind, info, parent, seed)   a pocket with no hospital entrances (the dev room).
-##   teardown()                 forget everything (the nodes live under `parent` and go with it).
+##   teardown()                 forget everything (the level is going, the nodes with it).
 ##
 ## Every physics frame, on every machine, anything a machine owns that stands past a seam is moved
 ## to the other copy of its stub (the move keeps its offset from the seam, its velocity and its
@@ -31,6 +35,9 @@ const NOISE_REACH := 26.0
 const LINK_OFFSET := 0.6
 const T2 := 1.5
 
+## Main-thread work per frame while building for a new shift, milliseconds (the wing loader's).
+const FRAME_BUDGET_MS := 5.0
+
 var game: Node = null
 ## {kind, origin: Vector2i, rect: Rect2 (world XZ), root: Node3D, spawn: Vector3, wing, depth} or {}
 var pocket: Dictionary = {}
@@ -40,6 +47,18 @@ var seams: Array = []
 var crossings: Array = []
 ## Tools (screenshots of both copies): false stops moving anything across seams.
 var crossing_enabled := true
+## A pocket is being built for this shift's wings (clock-in and the gates wait for it).
+var busy := false
+## The last per-shift build: {kind, generation, frames, steps, max_frame_ms, slowest_step_ms,
+## thread_ms, wall_ms}.
+var stats := {}
+
+var _task := -1
+var _job := {}
+var _steps: Array = []
+var _step_i := 0
+## Detached nodes of the last pocket, freed a few at a time (post-order: leaves first).
+var _trash: Array = []
 
 
 func setup(g: Node) -> void:
@@ -51,23 +70,242 @@ func active() -> bool:
 
 
 # =========================================================================
-# build / teardown
+# per-shift build (scripts/level/wing_loader.gd extra_builders)
 # =========================================================================
 
-## Build the pocket planned into `gen` (MapGen, gen.spots.pocket). Does nothing without a plan.
-func build(gen: Dictionary, info: Dictionary, parent: Node3D) -> void:
-	teardown()
-	var plan := Plan.of(gen)
-	if plan.is_empty():
-		info["pockets"] = {}
+## The wings were built (a whole level, or a new shift's wings): build the pocket MapGen planned
+## into them. The layout, the surface arrays and the navigation bake run on a worker thread, the
+## nodes a few at a time within FRAME_BUDGET_MS per frame under info.wings_root.
+func build_wings(info: Dictionary, _wing_seed: int, generation: int) -> void:
+	_cancel_build()
+	_forget()
+	info["pockets"] = {}
+	var plan: Dictionary = info.get("pocket_plan", {})
+	var parent = info.get("wings_root")
+	if plan.is_empty() or parent == null or not is_instance_valid(parent) or (game != null and bool(game.get("dev_mode"))):
 		return
-	pocket = build_into(String(plan.kind), plan.stubs, int(plan.seed), int(gen.get("seed", 0)), gen.get("lights", []), info, parent, seams)
-	# The pocket's depth and wing for spawning rules: the deepest wing it connects to.
+	busy = true
+	stats = {"kind": String(plan.kind), "generation": generation, "frames": 0, "steps": 0, "max_frame_ms": 0.0,
+			"slowest_step_ms": 0.0, "started_ms": Time.get_ticks_msec()}
+	var job := {"kind": String(plan.kind), "stubs": plan.stubs, "seed": int(plan.seed), "map_seed": int(info.get("map_seed", 0)),
+			"lights": info.get("map_lights", []), "info": info, "parent": parent, "generation": generation}
+	_job = job
+	_task = WorkerThreadPool.add_task(func(): _thread_prepare(job), false, "pocket")
+
+
+static func _thread_prepare(job: Dictionary) -> void:
+	var t0 := Time.get_ticks_msec()
+	job["prep"] = prepare(String(job.kind), job.stubs, int(job.seed))
+	job["thread_ms"] = Time.get_ticks_msec() - t0
+
+
+## The wings are going (a new shift): nobody may stay in the pocket or its entrance stubs, what was
+## left in there is gone, and the pocket's nodes are freed over the next frames.
+func teardown_wings() -> void:
+	_evict()
+	_cancel_build()
+	_forget()
+
+
+## Finish a build in progress right now (a whole level being built, begin_shift, tools).
+func finish_now() -> void:
+	if not busy:
+		return
+	if _task >= 0:
+		WorkerThreadPool.wait_for_task_completion(_task)
+		_task = -1
+		_start_steps()
+	while _step_i < _steps.size():
+		_run_step()
+	_finish_build()
+
+
+func _process(_delta: float) -> void:
+	var t0 := Time.get_ticks_usec()
+	var budget := int(FRAME_BUDGET_MS * 1000.0)
+	while not _trash.is_empty() and Time.get_ticks_usec() - t0 < budget:
+		var n = _trash.pop_back()
+		if is_instance_valid(n):
+			(n as Node).free()
+	if busy:
+		_build_tick(t0, budget)
+	if pocket.is_empty():
+		return
+	_process_mirrors()
+	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
+	if cam == null:
+		return
+	_blend_environment(air_factor(cam.global_position))
+
+
+func _build_tick(t0: int, budget: int) -> void:
+	stats.frames = int(stats.frames) + 1
+	if _task >= 0:
+		if not WorkerThreadPool.is_task_completed(_task):
+			return
+		WorkerThreadPool.wait_for_task_completion(_task)
+		_task = -1
+		stats["thread_ms"] = int(_job.get("thread_ms", 0))
+		_start_steps()
+	while _step_i < _steps.size() and Time.get_ticks_usec() - t0 < budget:
+		_run_step()
+	stats.max_frame_ms = maxf(float(stats.max_frame_ms), float(Time.get_ticks_usec() - t0) / 1000.0)
+	if _step_i >= _steps.size():
+		_finish_build()
+
+
+func _start_steps() -> void:
+	var j := _job
+	j["seams"] = []
+	j["result"] = {}
+	_steps = build_steps(j.prep, j.stubs, int(j.map_seed), j.lights, j.info, j.parent, j.seams, true, j.result)
+	_step_i = 0
+
+
+func _run_step() -> void:
+	var s0 := Time.get_ticks_usec()
+	var more = (_steps[_step_i] as Callable).call()
+	_step_i += 1
+	if more is Array and not (more as Array).is_empty():
+		_steps = _steps.slice(0, _step_i) + more + _steps.slice(_step_i)
+	stats.steps = int(stats.steps) + 1
+	stats.slowest_step_ms = maxf(float(stats.slowest_step_ms), float(Time.get_ticks_usec() - s0) / 1000.0)
+
+
+func _finish_build() -> void:
+	var j := _job
+	var result: Dictionary = j.result
+	pocket = result
+	seams = j.seams
 	for s in seams:
 		if int(s.depth) > int(pocket.get("depth", -1)):
 			pocket["depth"] = int(s.depth)
 			pocket["wing"] = String(s.wing)
+	if game != null:
+		_attach_flicker(pocket.root)
+		if game.get("doors") != null:
+			game.doors.register(result.get("doors", []))
+	busy = false
+	_job = {}
+	_steps = []
+	_step_i = 0
+	stats["wall_ms"] = Time.get_ticks_msec() - int(stats.get("started_ms", 0))
+	print("[pockets] %s built for wings generation %d: %d frames, %d steps, %d ms wall, %d ms on the thread, longest frame of work %.1f ms, slowest step %.1f ms" % [
+		String(pocket.kind), int(stats.generation), int(stats.frames), int(stats.steps), int(stats.wall_ms),
+		int(stats.get("thread_ms", 0)), float(stats.max_frame_ms), float(stats.slowest_step_ms)])
 
+
+func _cancel_build() -> void:
+	if _task >= 0:
+		WorkerThreadPool.wait_for_task_completion(_task)
+		_task = -1
+	if not _job.is_empty():
+		var result: Dictionary = _job.get("result", {})
+		if is_instance_valid(result.get("root")):
+			_trash_node(result.root)
+	_job = {}
+	_steps = []
+	_step_i = 0
+	busy = false
+
+
+## Forget the pocket (its nodes go to the trash, unless the whole level is going anyway).
+func _forget(free_nodes := true) -> void:
+	_blend_environment(0.0)
+	for e in _mirrors.values():
+		_free_mirror(e)
+	_mirrors.clear()
+	if free_nodes and not pocket.is_empty() and is_instance_valid(pocket.get("root")):
+		_trash_node(pocket.root)
+	pocket = {}
+	seams = []
+
+
+func _trash_node(root: Node) -> void:
+	if root.get_parent() != null:
+		root.get_parent().remove_child(root)
+	# Post-order, so each free has no children left and costs next to nothing.
+	var stack: Array = [root]
+	var order: Array = []
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		order.append(n)
+		for c in n.get_children():
+			stack.append(c)
+	# `order` is parents before children; the trash pops from the back, so children go first.
+	_trash.append_array(order)
+
+
+## Host: players (and bots) in the pocket or in an entrance stub go out in front of that wing's gate;
+## monsters and loose items in there are gone. A client steps its own player out.
+func _evict() -> void:
+	if game == null or (pocket.is_empty() and seams.is_empty()):
+		return
+	var wl = game.get("wing_loader")
+	var slot := 3
+	for p in game.players.values():
+		if p == null or not is_instance_valid(p):
+			continue
+		var wing := _wing_inside(p.global_position)
+		if wing == "":
+			continue
+		if not game.is_host() and not p.is_local:
+			continue
+		var to: Vector3 = wl.gate_front(wing, slot) if wl != null else Vector3.ZERO
+		slot += 1
+		if p.is_local or bool(p.get("is_bot")) or not Net.active:
+			p.teleport(to)
+		else:
+			game._event.rpc_id(p.peer_id, "dr_evict", {"pos": to})
+	if not game.is_host():
+		return
+	for id in game.monsters.keys():
+		var m = game.monsters[id]
+		if m == null or not is_instance_valid(m) or _wing_inside(m.global_position) == "":
+			continue
+		game.monsters.erase(id)
+		if game.combat != null and game.combat.has_method("on_monster_removed"):
+			game.combat.on_monster_removed(m)
+		m.queue_free()
+	for id in game.world_items.keys():
+		var it = game.world_items[id]
+		if it == null or not is_instance_valid(it) or _wing_inside(it.global_position) == "":
+			continue
+		it.queue_free()
+		game.world_items.erase(id)
+		game._shift_item_ids.erase(id)
+
+
+## The wing whose gate someone at `p` leaves by: the pocket's (its deepest), or the stub's.
+func _wing_inside(p: Vector3) -> String:
+	if in_pocket(p):
+		return String(pocket.get("wing", ""))
+	for s in seams:
+		if _in_stub(s, p, true):
+			return String(s.wing)
+	return ""
+
+
+## The stub copies' ceiling fixtures flicker like the hospital's (game._attach_light_flicker ran
+## before the pocket existed).
+func _attach_flicker(root: Node) -> void:
+	var stubs := root.get_node_or_null("Stubs")
+	if stubs == null:
+		return
+	for light in stubs.find_children("*", "Light3D", true, false):
+		if not light.is_in_group("fixture"):
+			continue
+		if not light.has_meta("seed"):
+			light.set_meta("seed", hash(str(game.seed_value) + str(light.name)))
+		light.distance_fade_enabled = true
+		light.distance_fade_begin = 16.0
+		light.distance_fade_length = 6.0
+		light.add_child(LightFlicker.new())
+
+
+# =========================================================================
+# build
+# =========================================================================
 
 ## A pocket with no hospital (the dev room): two stand-in stubs, both sealed on the far side.
 func build_kind(kind: String, info: Dictionary, parent: Node3D, pocket_seed: int) -> void:
@@ -81,17 +319,35 @@ func build_kind(kind: String, info: Dictionary, parent: Node3D, pocket_seed: int
 	pocket = build_into(kind, stubs, pocket_seed, pocket_seed, [], info, parent, unused, false)
 	pocket["depth"] = 2
 	pocket["wing"] = "dev"
+	if game != null and game.get("doors") != null:
+		game.doors.register(pocket.get("doors", []))
 
 
-## Shared by build() and tools/mapcheck.gd (which builds without a Game). Fills `out_seams`.
-static func build_into(kind: String, stubs: Array, pocket_seed: int, map_seed: int, hospital_lights: Array,
-		info: Dictionary, parent: Node3D, out_seams: Array, links := true) -> Dictionary:
+## Data only (a worker thread): the layout, the surface arrays, the navigation mesh.
+static func prepare(kind: String, stubs: Array, pocket_seed: int) -> Dictionary:
 	var layout_script: GDScript = Factory if kind == "factory" else Restaurant
 	var origin: Vector2i = ORIGINS.get(kind, Vector2i(800, 0))
 	var lay: Dictionary = layout_script.layout(stubs, pocket_seed)
-	var root := Node3D.new()
-	root.name = "Pocket_" + kind
-	parent.add_child(root)
+	var interior: Dictionary = layout_script.prepare(lay, origin)
+	return {"kind": kind, "origin": origin, "lay": lay, "interior": interior, "nav": Common.bake_nav(interior.nav_faces)}
+
+
+## Everything at once (tools/mapcheck.gd builds without a Game, the dev room). Fills `out_seams`.
+static func build_into(kind: String, stubs: Array, pocket_seed: int, map_seed: int, hospital_lights: Array,
+		info: Dictionary, parent: Node3D, out_seams: Array, links := true) -> Dictionary:
+	var result := {}
+	Common.run_steps(build_steps(prepare(kind, stubs, pocket_seed), stubs, map_seed, hospital_lights, info, parent, out_seams, links, result))
+	return result
+
+
+## The nodes of a prepared pocket as small steps (see Common.run_steps). When the last one ran,
+## `result` is the pocket record, `out_seams` the seams and `info` has the pocket's contract keys.
+static func build_steps(prep: Dictionary, stubs: Array, map_seed: int, hospital_lights: Array,
+		info: Dictionary, parent: Node3D, out_seams: Array, links: bool, result: Dictionary) -> Array:
+	var kind: String = prep.kind
+	var layout_script: GDScript = Factory if kind == "factory" else Restaurant
+	var origin: Vector2i = prep.origin
+	var lay: Dictionary = prep.lay
 	var out := {"lights": [], "containers": [], "loose_anchors": [], "monster_spawns": [], "nav_faces": PackedVector3Array()}
 	var depth := 1
 	var wing := ""
@@ -101,60 +357,80 @@ static func build_into(kind: String, stubs: Array, pocket_seed: int, map_seed: i
 			wing = String(s.wing)
 	out["wing"] = wing
 	out["depth"] = depth
-	var interior: Node3D = layout_script.build(lay, origin, out)
-	for gi in interior.find_children("*", "GeometryInstance3D", true, false):
-		(gi as GeometryInstance3D).layers = 1 << Stub.POCKET_LAYER_BIT
-	root.add_child(interior)
-	# Entrance copies, seams and links.
+	var root := Node3D.new()
+	root.name = "Pocket_" + kind
+	result["root"] = root
+	var interior := Node3D.new()
+	interior.name = kind.capitalize()
 	var copies := Node3D.new()
 	copies.name = "Stubs"
-	root.add_child(copies)
+	var steps: Array = []
+	steps.append(func():
+		root.add_child(interior)
+		root.add_child(copies)
+		parent.add_child(root)
+		return layout_script.build_steps(lay, origin, out, interior, prep.interior))
+	# Doors in the pocket's own doorways (scripts/doors), under the interior so they share its layer.
+	var doors: Array = []
+	steps.append(func():
+		for d in layout_script.door_entries(lay, origin):
+			d["wing"] = wing
+			d["depth"] = depth
+			var node: Node3D = Common.HB.DoorsScript.create(d)
+			interior.add_child(node)
+			doors.append(node))
+	# Entrance copies, seams and links: a step each.
 	for i in stubs.size():
-		var s: Dictionary = stubs[i]
-		var port: Dictionary = lay.ports[i]
-		var seam := _make_seam(s, port, origin)
-		var holder := Node3D.new()
-		holder.name = "Seam_%d" % i
-		holder.transform = seam.t
-		copies.add_child(holder)
-		var copy := Stub.build_copy(s, map_seed, hospital_lights)
-		holder.add_child(copy.node)
-		for l in copy.lights:
-			out.lights.append({"tile": l.tile, "position": seam.t * (l.position as Vector3), "mode": l.mode, "node": l.node, "pocket": kind})
-		if links:
-			var link := NavigationLink3D.new()
-			link.name = "Link_%d" % i
-			link.bidirectional = true
-			link.start_position = seam.link_h
-			link.end_position = seam.link_p
-			# Far apart in the world, one step apart on foot: cost the distance actually walked.
-			link.travel_cost = 1.0 / maxf(1.0, seam.link_h.distance_to(seam.link_p))
-			link.enter_cost = 0.0
-			root.add_child(link)
-			seam["link"] = link
-		out_seams.append(seam)
+		steps.append(func():
+			var s: Dictionary = stubs[i]
+			var port: Dictionary = lay.ports[i]
+			var seam := _make_seam(s, port, origin)
+			var holder := Node3D.new()
+			holder.name = "Seam_%d" % i
+			holder.transform = seam.t
+			copies.add_child(holder)
+			var copy := Stub.build_copy(s, map_seed, hospital_lights)
+			holder.add_child(copy.node)
+			for l in copy.lights:
+				out.lights.append({"tile": l.tile, "position": seam.t * (l.position as Vector3), "mode": l.mode, "node": l.node, "pocket": kind})
+			if links:
+				var link := NavigationLink3D.new()
+				link.name = "Link_%d" % i
+				link.bidirectional = true
+				link.start_position = seam.link_h
+				link.end_position = seam.link_p
+				# Far apart in the world, one step apart on foot: cost the distance actually walked.
+				link.travel_cost = 1.0 / maxf(1.0, seam.link_h.distance_to(seam.link_p))
+				link.enter_cost = 0.0
+				root.add_child(link)
+				seam["link"] = link
+			out_seams.append(seam))
+	steps.append(func():
+		for gi in interior.find_children("*", "GeometryInstance3D", true, false):
+			(gi as GeometryInstance3D).layers = 1 << Stub.POCKET_LAYER_BIT)
 	# Navigation over the pocket's own grid (stub copies included, the halves never walked left out).
-	var nav := NavigationRegion3D.new()
-	nav.name = "Nav"
-	nav.navigation_mesh = Common.bake_nav(out.nav_faces)
-	root.add_child(nav)
-	var world_rect := Rect2(Vector2(origin) * C.TILE, Vector2(lay.size) * C.TILE)
-	var p := {"kind": kind, "origin": origin, "rect": world_rect, "root": root, "nav_region": nav,
-			"spawn": out.get("spawn", Vector3(world_rect.get_center().x, 0.0, world_rect.get_center().y)),
-			"rows": lay.rows, "size": lay.size, "wing": wing, "depth": depth, "layout": lay}
-	# The contract keys the rest of the game reads.
-	for key in ["lights", "containers", "loose_anchors", "monster_spawns"]:
-		if not info.has(key):
-			info[key] = []
-		(info[key] as Array).append_array(out[key])
-	var seam_info: Array = []
-	for s in out_seams:
-		seam_info.append({"id": s.id, "wing": s.wing, "depth": s.depth, "w": s.w, "d": s.d,
-				"hospital": s.xh, "pocket": s.xp, "transform": s.t,
-				"mouth": s.mouth, "opening": s.opening, "link": [s.link_h, s.link_p]})
-	info["pockets"] = {"kind": kind, "rect": world_rect, "origin": origin, "spawn": p.spawn, "wing": wing,
-			"depth": depth, "seams": seam_info, "nav_region": nav}
-	return p
+	steps.append(func():
+		var nav := NavigationRegion3D.new()
+		nav.name = "Nav"
+		nav.navigation_mesh = prep.nav
+		root.add_child(nav)
+		var world_rect := Rect2(Vector2(origin) * C.TILE, Vector2(lay.size) * C.TILE)
+		result.merge({"kind": kind, "origin": origin, "rect": world_rect, "nav_region": nav,
+				"spawn": out.get("spawn", Vector3(world_rect.get_center().x, 0.0, world_rect.get_center().y)),
+				"rows": lay.rows, "size": lay.size, "wing": wing, "depth": depth, "layout": lay, "doors": doors}, true)
+		# The contract keys the rest of the game reads.
+		for key in ["lights", "containers", "loose_anchors", "monster_spawns"]:
+			if not info.has(key):
+				info[key] = []
+			(info[key] as Array).append_array(out[key])
+		var seam_info: Array = []
+		for s in out_seams:
+			seam_info.append({"id": s.id, "wing": s.wing, "depth": s.depth, "w": s.w, "d": s.d,
+					"hospital": s.xh, "pocket": s.xp, "transform": s.t,
+					"mouth": s.mouth, "opening": s.opening, "link": [s.link_h, s.link_p]})
+		info["pockets"] = {"kind": kind, "rect": world_rect, "origin": origin, "spawn": result.spawn, "wing": wing,
+				"depth": depth, "seams": seam_info, "nav_region": nav})
+	return steps
 
 
 ## Warmup (scripts/warmup.gd): both spaces' meshes and materials, shrunk in front of the camera for
@@ -219,15 +495,11 @@ static func _make_seam(s: Dictionary, port: Dictionary, origin: Vector2i) -> Dic
 			"opening": Stub.local_point(xp, float(w) - Stub.CORRIDOR * 0.5, -1.5)}
 
 
+## The whole level is going (game._clear_level): stop, forget; the nodes go with the level.
 func teardown() -> void:
-	_blend_environment(0.0)
-	for e in _mirrors.values():
-		_free_mirror(e)
-	_mirrors.clear()
-	if not pocket.is_empty() and is_instance_valid(pocket.get("root")):
-		(pocket.root as Node).queue_free()
-	pocket = {}
-	seams = []
+	_cancel_build()
+	_forget(false)
+
 
 
 # =========================================================================
@@ -420,16 +692,6 @@ var _air_env: Environment = null
 var _air_k := 0.0
 
 
-func _process(_delta: float) -> void:
-	if pocket.is_empty():
-		return
-	_process_mirrors()
-	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
-	if cam == null:
-		return
-	_blend_environment(air_factor(cam.global_position))
-
-
 ## 0 in the hospital, in an entrance stub and near its opening; 1 well inside the space.
 func air_factor(p: Vector3) -> float:
 	if pocket.is_empty() or not in_pocket(p):
@@ -577,9 +839,19 @@ func _make_mirror(src: Node3D, t: Transform3D) -> Dictionary:
 
 
 func _exit_tree() -> void:
+	if _task >= 0:
+		WorkerThreadPool.wait_for_task_completion(_task)
+		_task = -1
+	_job = {}
+	_steps = []
 	for e in _mirrors.values():
 		_free_mirror(e)
 	_mirrors.clear()
+	# Detached nodes are nobody else's to free.
+	while not _trash.is_empty():
+		var n = _trash.pop_back()
+		if is_instance_valid(n):
+			(n as Node).free()
 
 
 func _free_mirror(e: Dictionary) -> void:

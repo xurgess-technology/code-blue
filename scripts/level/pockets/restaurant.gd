@@ -163,59 +163,94 @@ static func _block(g: Dictionary, r: Rect2i) -> void:
 # build
 # =========================================================================
 
+## Data only (a worker thread): the grid's surfaces as mesh arrays and the navigation faces.
+static func prepare(lay: Dictionary, origin: Vector2i) -> Dictionary:
+	var geo := Common.Geo.new()
+	var nav := PackedVector3Array()
+	Common.build_surfaces(lay.grid, origin, geo, nav)
+	geo.bake()
+	return {"geo": geo, "nav_faces": nav}
+
+
+## Everything at once (warmup, tools): the interior's root node.
 static func build(lay: Dictionary, origin: Vector2i, out: Dictionary) -> Node3D:
 	var root := Node3D.new()
 	root.name = "Restaurant"
-	var g: Dictionary = lay.grid
+	var prep := prepare(lay, origin)
+	out.nav_faces.append_array(prep.nav_faces)
+	Common.run_steps(build_steps(lay, origin, out, root, prep))
+	return root
+
+
+## The interior's nodes as small steps under `root` (see Common.run_steps).
+static func build_steps(lay: Dictionary, origin: Vector2i, out: Dictionary, root: Node3D, prep: Dictionary) -> Array:
 	var ow := Vector3(origin.x * T, 0.0, origin.y * T)
 	var world := func(t: Vector2, y := 0.0) -> Vector3:
 		return ow + Vector3(t.x * T, y, t.y * T)
-
-	var geo := Common.Geo.new()
-	geo.mats["saltillo"] = _tex_mat("saltillo", _saltillo_tex(), 0.8, Vector3(0.5, 0.5, 1))
-	geo.mats["planks"] = _tex_mat("planks", _planks_tex(), 0.9, Vector3(0.35, 0.35, 1))
-	geo.mats["stucco"] = Common.tri_mat("rest_stucco", "mat/wall", Color(1.0, 0.74, 0.52), 0.35, 0.95)
-	geo.mats["talavera"] = _tex_mat("talavera", _talavera_tex(), 0.35, Vector3(0.85, 0.85, 1))
-	geo.mats["wood_low"] = _tex_mat("wood_low", _planks_tex(), 0.85, Vector3(0.6, 0.3, 1))
-	geo.mats["kitchen_floor"] = Common.tri_mat("rest_kfloor", "mat/tile_floor", Color(0.62, 0.60, 0.56), 0.6, 0.6)
-	geo.mats["kitchen_ceiling"] = Common.HB.surface_mat("mat/ceiling", Color(0.30, 0.31, 0.31), 0.95)
-	geo.mats["kitchen_wall"] = Common.tri_mat("rest_kwall", "mat/wall_tile", Color(0.86, 0.88, 0.86), 0.5, 0.45)
-	geo.mats["restroom_floor"] = Common.tri_mat("rest_rfloor", "mat/tile_floor", Color(0.55, 0.62, 0.66), 0.6, 0.55)
-	geo.mats["restroom_wall"] = Common.tri_mat("rest_rwall", "mat/wall_tile", Color(0.50, 0.70, 0.74), 0.5, 0.4)
-	Common.build_surfaces(g, origin, geo, out.nav_faces)
-	var body := geo.commit(root)
-	var inter := Rect2(Vector2(INTERIOR.position) * T + Vector2(ow.x, ow.z), Vector2(INTERIOR.size) * T)
-	Common.collider(body, Transform3D(Basis(), Vector3(inter.get_center().x, -0.2, inter.get_center().y)), Vector3(inter.size.x, 0.4, inter.size.y))
-	Common.collider(body, Transform3D(Basis(), Vector3(inter.get_center().x, DINING_CEIL + 0.2, inter.get_center().y)), Vector3(inter.size.x, 0.4, inter.size.y))
-
+	var ctx := {}
+	var steps: Array = []
+	var geo: Common.Geo = prep.geo
 	var props := Common.Props.new()
 	var wood := Common.mat("rest_wood", Color(0.60, 0.40, 0.23), 0.55)
 	var dark_wood := Common.mat("rest_dark_wood", Color(0.20, 0.12, 0.07), 0.6)
 	var iron := Common.mat("rest_iron", Color(0.06, 0.06, 0.06), 0.5, 0.7)
 	var steel := Common.tri_mat("rest_steel", "mat/metal", Color(0.62, 0.64, 0.66), 1.2, 0.35, 0.9)
 
-	_beams(props, world, dark_wood)
-	_tables(props, body, lay, world, wood, out)
-	_booths(props, body, lay, world, wood, out)
-	_bar(root, props, body, lay, world, wood, dark_wood, out)
-	_front(root, props, body, lay, world, dark_wood, iron, out)
-	_kitchen(root, props, body, lay, world, steel, iron, out)
-	_restrooms(root, props, body, lay, world, out)
-	_decor(root, props, lay, world, dark_wood)
-	_lights(root, lay, world, out)
+	steps.append(func():
+		geo.mats["saltillo"] = _tex_mat("saltillo", _saltillo_tex(), 0.8, Vector3(0.5, 0.5, 1))
+		geo.mats["planks"] = _tex_mat("planks", _planks_tex(), 0.9, Vector3(0.35, 0.35, 1))
+		geo.mats["stucco"] = Common.tri_mat("rest_stucco", "mat/wall", Color(1.0, 0.74, 0.52), 0.35, 0.95)
+		geo.mats["talavera"] = _tex_mat("talavera", _talavera_tex(), 0.35, Vector3(0.85, 0.85, 1))
+		geo.mats["wood_low"] = _tex_mat("wood_low", _planks_tex(), 0.85, Vector3(0.6, 0.3, 1))
+		geo.mats["kitchen_floor"] = Common.tri_mat("rest_kfloor", "mat/tile_floor", Color(0.62, 0.60, 0.56), 0.6, 0.6)
+		geo.mats["kitchen_ceiling"] = Common.HB.surface_mat("mat/ceiling", Color(0.30, 0.31, 0.31), 0.95)
+		geo.mats["kitchen_wall"] = Common.tri_mat("rest_kwall", "mat/wall_tile", Color(0.86, 0.88, 0.86), 0.5, 0.45)
+		geo.mats["restroom_floor"] = Common.tri_mat("rest_rfloor", "mat/tile_floor", Color(0.55, 0.62, 0.66), 0.6, 0.55)
+		geo.mats["restroom_wall"] = Common.tri_mat("rest_rwall", "mat/wall_tile", Color(0.50, 0.70, 0.74), 0.5, 0.4)
+		return geo.commit_steps(root, ctx))
+	steps.append(func():
+		var body: StaticBody3D = ctx.body
+		var inter := Rect2(Vector2(INTERIOR.position) * T + Vector2(ow.x, ow.z), Vector2(INTERIOR.size) * T)
+		Common.collider(body, Transform3D(Basis(), Vector3(inter.get_center().x, -0.2, inter.get_center().y)), Vector3(inter.size.x, 0.4, inter.size.y))
+		Common.collider(body, Transform3D(Basis(), Vector3(inter.get_center().x, DINING_CEIL + 0.2, inter.get_center().y)), Vector3(inter.size.x, 0.4, inter.size.y))
+		_beams(props, world, dark_wood))
+	steps.append(func(): _tables(props, ctx.body, lay, world, wood, out))
+	steps.append(func(): _booths(props, ctx.body, lay, world, wood, out))
+	steps.append(func(): _bar(root, props, ctx.body, lay, world, wood, dark_wood, out))
+	steps.append(func(): _front(root, props, ctx.body, lay, world, dark_wood, iron, out))
+	steps.append(func(): _kitchen(root, props, ctx.body, lay, world, steel, iron, out))
+	steps.append(func(): _restrooms(root, props, ctx.body, lay, world, out))
+	steps.append(func(): _decor(root, props, lay, world, dark_wood))
+	steps.append(func(): _lights(root, lay, world, out))
 
 	var cts := Node3D.new()
 	cts.name = "Containers"
-	root.add_child(cts)
+	steps.append(func(): root.add_child(cts))
 	for c in lay.containers:
-		var t: Vector2i = c.tile
-		var room := "restaurant_kitchen" if KITCHEN.has_point(t) else "restaurant"
-		Common.container(cts, out, origin, t, c.wall, c.type, room)
-	for s: Vector2i in lay.spawns:
-		out.monster_spawns.append(world.call(Vector2(s) + Vector2(0.5, 0.5)))
-	out["spawn"] = world.call(Vector2(lay.spawn) + Vector2(0.5, 0.5))
-	props.commit(root)
-	return root
+		steps.append(func():
+			var t: Vector2i = c.tile
+			var room := "restaurant_kitchen" if KITCHEN.has_point(t) else "restaurant"
+			Common.container(cts, out, origin, t, c.wall, c.type, room))
+	steps.append(func():
+		for s: Vector2i in lay.spawns:
+			out.monster_spawns.append(world.call(Vector2(s) + Vector2(0.5, 0.5)))
+		out["spawn"] = world.call(Vector2(lay.spawn) + Vector2(0.5, 0.5))
+		return props.commit_steps(root))
+	return steps
+
+
+## The doorways as door plan entries in world tiles: the swing doors into the kitchen (a pair), the
+## door to the back corridor, and the two restrooms'. All hang at the side you come from.
+static func door_entries(lay: Dictionary, origin: Vector2i) -> Array:
+	var d: Dictionary = lay.doors
+	return [
+		Common.door_entry(origin, d.kitchen, Vector2i(0, -1), "double", 90.0),
+		Common.door_entry(origin, [d.corridor], Vector2i(0, -1), "hinged", 90.0),
+		Common.door_entry(origin, [d.men], Vector2i(0, -1), "hinged", 90.0),
+		Common.door_entry(origin, [d.women], Vector2i(0, -1), "hinged", 90.0),
+	]
+
+
 
 
 # ---- materials and textures -----------------------------------------------
@@ -634,19 +669,6 @@ static func _kitchen(root: Node3D, props: Common.Props, body: StaticBody3D, lay:
 	for t in [lay.fridge, lay.sink]:
 		var p: Vector3 = world.call(Vector2(t) + Vector2(0.5, 0.5))
 		Common.collider(body, Transform3D(Basis(), p + Vector3(0, 0.9, 0.15)), Vector3(1.0, 1.8, 0.8))
-	# The swing door: two leaves resting a little ajar (a placeholder until doors can swing here).
-	var leaf := Common.mat("rest_door", Color(0.28, 0.17, 0.09), 0.7)
-	var dm := Common.MeshBuilder.new()
-	var dc: Vector3 = world.call(Vector2(door0.x + 1, door0.y + 0.5))
-	for sx in [-1.0, 1.0]:
-		var hinge := dc + Vector3(sx * T, 0, 0)
-		var b := Basis(Vector3.UP, -sx * 0.18)
-		dm.box("l", leaf, Transform3D(b, hinge + b * Vector3(-sx * 0.72, 1.05, 0)), Vector3(1.4, 1.5, 0.05))
-		dm.box("w", Common.mat("rest_porthole", Color(0.05, 0.06, 0.06), 0.1, 0.3), Transform3D(b, hinge + b * Vector3(-sx * 0.72, 1.35, 0.03)), Vector3(0.3, 0.3, 0.01))
-	var dmi := MeshInstance3D.new()
-	dmi.name = "SwingDoor"
-	dmi.mesh = dm.commit()
-	root.add_child(dmi)
 
 
 static func _restrooms(root: Node3D, props: Common.Props, body: StaticBody3D, lay: Dictionary, world: Callable, out: Dictionary) -> void:
