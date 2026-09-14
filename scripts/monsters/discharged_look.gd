@@ -33,7 +33,7 @@ static func build(model: Node3D) -> void:
 		"edge_dark": 0.55, "rough": 0.58, "sss": 0.12, "seed": 3.0,
 	})
 	var gown := Shapes.mat(Color("73827d"), {
-		"double": true, "mottle": 0.1, "weave": 0.25, "stain_col": Color("6d6348"), "stain_amt": 0.22,
+		"double": true, "mottle": 0.1, "weave": 0.25, "stain_col": Color("5f5b4a"), "stain_amt": 0.22,
 		"stain_low": 1.2, "stain2_col": Color("4a1c16"), "stain2_amt": 0.12, "stain_scale": 9.0,
 		"edge_dark": 0.25, "rough": 0.95, "seed": 11.0,
 	})
@@ -104,51 +104,55 @@ static func build(model: Node3D) -> void:
 	# Hollow cheeks: a narrow jaw set in under wide cheekbones.
 	head.add_child(Shapes.ellipsoid(Vector3(0.05, 0.048, 0.064), skin, Vector3(0, 0.035, 0.042)))
 	for sx in [-1.0, 1.0]:
-		head.add_child(Shapes.ellipsoid(Vector3(0.022, 0.016, 0.03), skin, Vector3(sx * 0.058, 0.085, 0.06), 8))
+		head.add_child(Shapes.ellipsoid(Vector3(0.02, 0.014, 0.026), skin, Vector3(sx * 0.056, 0.088, 0.058), 8))
 	# A heavy brow over nothing. Below it the sockets are shallow dents of tight, shiny skin.
-	var brow := Shapes.ellipsoid(Vector3(0.07, 0.017, 0.03), skin, Vector3(0, 0.162, 0.078), 12)
+	var brow := Shapes.ellipsoid(Vector3(0.072, 0.024, 0.02), skin, Vector3(0, 0.158, 0.08), 14)
 	head.add_child(brow)
 	for sx in [-1.0, 1.0]:
-		var dent := Shapes.ellipsoid(Vector3(0.026, 0.017, 0.012), scar, Vector3(sx * 0.034, 0.133, 0.087), 12)
-		dent.rotation = Vector3(0.15, sx * 0.35, sx * -0.12)
+		# Flush with the face: a darker, shinier patch, the skin pulled into where an eye was.
+		var dent := Shapes.ellipsoid(Vector3(0.023, 0.013, 0.006), scar, Vector3(sx * 0.032, 0.134, 0.0878), 12)
+		dent.rotation = Vector3(0.1, sx * 0.3, sx * -0.1)
 		head.add_child(dent)
 	# The seam that closed them: one line straight across, with cross-stitches.
-	var seam := Shapes.box(Vector3(0.1, 0.0035, 0.004), stitch, Vector3(0, 0.134, 0.097))
-	head.add_child(seam)
-	for i in 7:
-		var x := -0.045 + i * 0.015
-		var st := Shapes.box(Vector3(0.0025, 0.016, 0.003), stitch, Vector3(x, 0.134, 0.098 - absf(x) * 0.28))
-		st.rotation = Vector3(0.0, x * -3.2, 0.25 if i % 2 == 0 else -0.25)
-		head.add_child(st)
-	# A small nose, collapsed; the jaw hangs slack.
-	head.add_child(Shapes.ellipsoid(Vector3(0.012, 0.02, 0.014), skin, Vector3(0, 0.1, 0.101), 8))
-	head.add_child(Shapes.ellipsoid(Vector3(0.024, 0.02, 0.012), dark, Vector3(0.003, 0.03, 0.101), 10))
+	for sx in [-1.0, 1.0]:
+		var seam := Shapes.box(Vector3(0.042, 0.003, 0.003), stitch, Vector3(sx * 0.03, 0.134, 0.0955))
+		seam.rotation.y = sx * 0.42
+		head.add_child(seam)
+		for i in 3:
+			var x: float = sx * (0.016 + i * 0.012)
+			var st := Shapes.box(Vector3(0.002, 0.013, 0.0025), stitch, Vector3(x, 0.134, 0.1 - absf(x) * 0.42))
+			st.rotation = Vector3(0.0, sx * 0.42, 0.3 if i % 2 == 0 else -0.3)
+			head.add_child(st)
+	# A small nose, collapsed; the jaw hangs slack in a thin dark slit.
+	head.add_child(Shapes.ellipsoid(Vector3(0.011, 0.018, 0.012), skin, Vector3(0, 0.1, 0.097), 8))
+	head.add_child(Shapes.ellipsoid(Vector3(0.021, 0.007, 0.006), dark, Vector3(0.002, 0.036, 0.101), 10))
 
-	# Ears: on the large side of normal (8.5 cm, a surgeon's are about 6.5), set a little high,
-	# standing out from the skull. Each hangs from a pivot at its front edge so it can swivel.
+	# Ears: on the large side of normal (about 8 cm; a surgeon's are about 6.5), standing a little
+	# out from the skull. Each hangs from a pivot at its front edge so it can swivel.
 	for sx in [-1.0, 1.0]:
 		var pivot := Node3D.new()
 		pivot.name = "EarL" if sx > 0.0 else "EarR"
-		pivot.position = Vector3(sx * 0.08, 0.125, -0.012)
+		pivot.set_meta("no_bake", true)   # it moves; baked separately below
+
+		pivot.position = Vector3(sx * 0.08, 0.122, 0.004)
 		head.add_child(pivot)
 		var ear := Node3D.new()
-		ear.position = Vector3(sx * 0.004, 0.0, -0.026)
+		ear.position = Vector3(sx * 0.003, 0.0, -0.024)
 		pivot.add_child(ear)
 		# The pinna: a thin shell, taller than it is deep, wider at the top.
-		var shell := Shapes.ellipsoid(Vector3(0.011, 0.043, 0.027), skin, Vector3(0, 0.004, 0), 14)
-		ear.add_child(shell)
-		var upper := Shapes.ellipsoid(Vector3(0.01, 0.022, 0.024), skin, Vector3(0, 0.024, -0.004), 12)
-		ear.add_child(upper)
+		ear.add_child(Shapes.ellipsoid(Vector3(0.0085, 0.039, 0.024), skin, Vector3(0, 0.002, 0), 14))
+		ear.add_child(Shapes.ellipsoid(Vector3(0.008, 0.021, 0.022), skin, Vector3(0, 0.021, -0.003), 12))
 		# The rim curls around the back edge.
-		var rim := Shapes.ellipsoid(Vector3(0.008, 0.042, 0.007), skin, Vector3(sx * 0.004, 0.006, -0.022), 10)
+		var rim := Shapes.ellipsoid(Vector3(0.007, 0.038, 0.0065), skin, Vector3(sx * 0.003, 0.004, -0.02), 10)
 		rim.rotation.x = -0.12
 		ear.add_child(rim)
 		# The bowl, darker and redder, open to the side it faces.
-		ear.add_child(Shapes.ellipsoid(Vector3(0.006, 0.026, 0.016), ear_in, Vector3(sx * 0.0075, -0.002, 0.001), 12))
-		ear.add_child(Shapes.ellipsoid(Vector3(0.004, 0.009, 0.007), dark, Vector3(sx * 0.009, -0.012, 0.01), 8))
+		ear.add_child(Shapes.ellipsoid(Vector3(0.0045, 0.023, 0.014), ear_in, Vector3(sx * 0.006, -0.002, 0.001), 12))
+		ear.add_child(Shapes.ellipsoid(Vector3(0.003, 0.008, 0.0065), dark, Vector3(sx * 0.0072, -0.011, 0.009), 8))
 		# The lobe.
-		ear.add_child(Shapes.ellipsoid(Vector3(0.008, 0.013, 0.011), skin, Vector3(0, -0.037, 0.004), 10))
-		model.ears.append({"node": pivot, "side": sx, "rest": 0.32})
+		ear.add_child(Shapes.ellipsoid(Vector3(0.007, 0.012, 0.01), skin, Vector3(0, -0.034, 0.003), 10))
+		Shapes.bake(ear, "discharged|ear%d" % int(sx))
+		model.ears.append({"node": pivot, "side": sx, "rest": 0.26})
 	model.add_part(head, "head")
 
 	# ---- the taped wrist and the IV pole it drags

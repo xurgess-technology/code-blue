@@ -310,9 +310,37 @@ func sedate(seconds: float) -> bool:
 	moving = false
 	speed = 0.0
 	velocity = Vector3.ZERO
+	if is_inside_tree():
+		rotation.y = _lying_yaw()
 	if brain.has_method("sedated"):
 		brain.sedated()
 	return true
+
+
+## The facing closest to the current one that leaves room to lie down (the body runs half its
+## height each way along the facing axis), so it never falls into a wall.
+func _lying_yaw() -> float:
+	var space := get_world_3d().direct_space_state
+	var half := height * 0.5 + 0.15
+	var from := global_position + Vector3.UP * 0.35
+	var best := rotation.y
+	var best_room := -1.0
+	for i in 12:
+		var step := (i + 1) / 2 * (1 if i % 2 == 0 else -1)   # 0, +1, -1, +2, -2 ...
+		var yaw := rotation.y + step * TAU / 12.0
+		var axis := Vector3(-sin(yaw), 0.0, -cos(yaw))
+		var room := INF
+		for sgn in [1.0, -1.0]:
+			var q := PhysicsRayQueryParameters3D.create(from, from + axis * sgn * half)
+			q.collision_mask = C.L_WORLD
+			var hit := space.intersect_ray(q)
+			room = minf(room, half if hit.is_empty() else from.distance_to(hit.position))
+		if room >= half - 0.001:
+			return yaw
+		if room > best_room:
+			best_room = room
+			best = yaw
+	return best
 
 
 func is_sedated() -> bool:
@@ -636,10 +664,11 @@ func _update_visual(delta: float) -> void:
 
 	if model == null:
 		return
-	# Lying down: the whole model tips over backwards around its feet, face up.
+	# Lying down: the whole model tips over backwards, face up, and settles centred on the
+	# monster's origin (head toward local +Z) so it is no longer than it needs to be either way.
 	var e := _lie * _lie * (3.0 - 2.0 * _lie)
 	model.rotation.x = e * PI * 0.5
-	model.position.y = e * 0.13
+	model.position = Vector3(0.0, e * 0.13, -e * height * 0.47)
 	if model.shaper == null:
 		return
 	var sh = model.shaper
@@ -672,7 +701,9 @@ func _update_visual(delta: float) -> void:
 		if _twitch_timer <= 0.0:
 			_twitch_timer = _rng.randf_range(1.0, 2.2) if mode == Mode.SEARCH else _rng.randf_range(2.5, 5.0)
 			_twitch = Vector3(_rng.randf_range(-0.15, 0.2), _rng.randf_range(-0.7, 0.7) if mode == Mode.SEARCH else _rng.randf_range(-0.25, 0.25), _rng.randf_range(-0.2, 0.2))
-		sh.twitch = sh.twitch.lerp(_twitch, clampf(delta * 2.5, 0.0, 1.0))
+		# When it has seen someone the head comes up and stays on them.
+		var want := _twitch + (Vector3(-0.3, -_twitch.y * 0.8, -_twitch.z * 0.5) if mode == Mode.RUSH else Vector3.ZERO)
+		sh.twitch = sh.twitch.lerp(want, clampf(delta * 2.5, 0.0, 1.0))
 		if lunge_t > 0.0:
 			model.play("attack", 0.8, 0.1)
 		elif moving:

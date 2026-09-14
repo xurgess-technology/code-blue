@@ -7,17 +7,17 @@ extends RefCounted
 const Shapes := preload("res://scripts/monsters/shapes.gd")
 const Limbs := preload("res://scripts/monsters/limbs.gd")
 
-const ARM_LEN := 0.74
-const LEG_LEN := 0.82
+const ARM_LEN := 0.78
+const LEG_LEN := 0.92
 
 
 static func build(model: Node3D) -> void:
 	var sh = model.shaper
 	sh.cfg = {
 		"leg_len": LEG_LEN, "leg_thick": 0.02, "hip_half": 0.11, "stride": 0.55, "bob": 0.8,
-		"shoulder": Vector3(0.2, 0.5, 0.0), "neck": Vector3(0.0, 0.58, 0.1),
+		"shoulder": Vector3(0.2, 0.5, 0.0), "neck": Vector3(0.0, 0.6, 0.09),
 		"arm_len": ARM_LEN, "arm_thick": 0.02, "arm_swing": 0.35, "arm_idle": 0.3,
-		"hunch": 0.32, "head_pitch": 0.5, "head_roll": -0.32, "torso_sway": 0.9, "head_sway": 0.9,
+		"hunch": 0.24, "head_pitch": 0.26, "head_roll": -0.3, "torso_sway": 0.9, "head_sway": 0.9,
 		"limp": 0.85, "lean": 0.07,
 		# Arms dangle a little forward of the body, loose, the left more than the right.
 		"arm_l": {"back": -16.0, "spread": 9.0, "swing": 0.4, "idle": 0.35, "lunge": 0.8},
@@ -30,7 +30,7 @@ static func build(model: Node3D) -> void:
 		"edge_dark": 0.45, "rough": 0.5, "sss": 0.18, "seed": 41.0,
 	})
 	var gown := Shapes.mat(Color("7f97a8"), {
-		"double": true, "mottle": 0.12, "weave": 0.35, "stain_col": Color("8a7d55"), "stain_amt": 0.28,
+		"double": true, "mottle": 0.12, "weave": 0.35, "stain_col": Color("6a6553"), "stain_amt": 0.28,
 		"stain_low": 1.6, "stain2_col": Color("3f2a22"), "stain2_amt": 0.1, "stain_scale": 11.0,
 		"edge_dark": 0.2, "rough": 0.95, "seed": 43.0,
 	})
@@ -40,7 +40,7 @@ static func build(model: Node3D) -> void:
 	var band := Shapes.flat(Color("d8d4c6"), 0.4)
 	var hair := Shapes.mat(Color("3a3530"), {"mottle": 0.4, "stain_scale": 60.0, "rough": 0.9, "weave": 0.4})
 	var dark := Shapes.flat(Color("120908"), 0.9)
-	var lid := Shapes.mat(Color("8a7a70"), {"mottle": 0.2, "vein": 0.6, "stain_col": Color("5a4046"), "stain_amt": 0.4, "stain_scale": 40.0, "rough": 0.5})
+	var lid := Shapes.mat(Color("7f7766"), {"mottle": 0.2, "vein": 0.5, "stain_col": Color("574a48"), "stain_amt": 0.35, "stain_scale": 40.0, "rough": 0.5})
 	# Filmed-over eyes with a faint shine, so a pair of them catches your flashlight.
 	var eye := StandardMaterial3D.new()
 	eye.albedo_color = Color("c9c7b2")
@@ -59,7 +59,7 @@ static func build(model: Node3D) -> void:
 		[0.38, 0.175, 0.115], [0.49, 0.16, 0.1], [0.56, 0.06, 0.055, 0.03],
 	], 16, 0.0, 0.0, 0.03, 45, true, true), skin))
 	for sx in [-1.0, 1.0]:
-		torso.add_child(Shapes.ellipsoid(Vector3(0.06, 0.05, 0.055), skin, Vector3(sx * 0.17, 0.5, 0.0), 10))
+		torso.add_child(Shapes.ellipsoid(Vector3(0.05, 0.042, 0.05), skin, Vector3(sx * 0.15, 0.5, 0.0), 10))
 	torso.add_child(Shapes.mesh_node(Shapes.lathe([
 		[-0.3, 0.215, 0.2, 0.04], [-0.12, 0.205, 0.19, 0.035], [0.06, 0.19, 0.18, 0.035],
 		[0.24, 0.182, 0.15, 0.02], [0.42, 0.195, 0.13, 0.0], [0.52, 0.17, 0.11, 0.0], [0.57, 0.09, 0.07, 0.03],
@@ -107,16 +107,22 @@ static func build(model: Node3D) -> void:
 	# Jowls and a double chin.
 	head.add_child(Shapes.ellipsoid(Vector3(0.075, 0.05, 0.07), skin, Vector3(0, 0.035, 0.03)))
 	head.add_child(Shapes.ellipsoid(Vector3(0.05, 0.035, 0.05), skin, Vector3(0, 0.0, 0.035)))
-	head.add_child(Shapes.ellipsoid(Vector3(0.086, 0.07, 0.09), hair, Vector3(0, 0.17, -0.03)))
+	# Thin hair left only round the back and sides; the crown is bare.
+	head.add_child(Shapes.ellipsoid(Vector3(0.093, 0.075, 0.075), hair, Vector3(0, 0.125, -0.042)))
 	for sx in [-1.0, 1.0]:
 		# Ears: plain and small; this one does not listen.
 		head.add_child(Shapes.ellipsoid(Vector3(0.01, 0.026, 0.017), skin, Vector3(sx * 0.094, 0.11, -0.01), 8))
 		# Sockets, lids heavy and dark, the eye bulging in them.
-		head.add_child(Shapes.ellipsoid(Vector3(0.026, 0.02, 0.012), lid, Vector3(sx * 0.037, 0.13, 0.086), 10))
-		head.add_child(Shapes.ellipsoid(Vector3(0.017, 0.016, 0.012), eye, Vector3(sx * 0.037, 0.128, 0.093), 10))
-		head.add_child(Shapes.ellipsoid(Vector3(0.007, 0.007, 0.004), pupil, Vector3(sx * 0.035, 0.127, 0.104), 8))
-		# Bags under them.
-		head.add_child(Shapes.ellipsoid(Vector3(0.022, 0.009, 0.01), lid, Vector3(sx * 0.037, 0.108, 0.09), 8))
-	head.add_child(Shapes.ellipsoid(Vector3(0.016, 0.024, 0.02), skin, Vector3(0, 0.1, 0.1), 8))
-	head.add_child(Shapes.ellipsoid(Vector3(0.03, 0.022, 0.012), dark, Vector3(0, 0.05, 0.094), 10))
+		head.add_child(Shapes.ellipsoid(Vector3(0.022, 0.016, 0.01), lid, Vector3(sx * 0.035, 0.13, 0.088), 10))
+		head.add_child(Shapes.ellipsoid(Vector3(0.012, 0.01, 0.008), eye, Vector3(sx * 0.035, 0.128, 0.094), 10))
+		head.add_child(Shapes.ellipsoid(Vector3(0.0045, 0.0045, 0.003), pupil, Vector3(sx * 0.034, 0.128, 0.1015), 8))
+		# A heavy upper lid half over each, and bags under them.
+		var upper := Shapes.ellipsoid(Vector3(0.016, 0.006, 0.009), lid, Vector3(sx * 0.035, 0.137, 0.095), 8)
+		upper.rotation.x = 0.3
+		head.add_child(upper)
+		head.add_child(Shapes.ellipsoid(Vector3(0.02, 0.008, 0.009), lid, Vector3(sx * 0.036, 0.113, 0.092), 8))
+	head.add_child(Shapes.ellipsoid(Vector3(0.015, 0.022, 0.018), skin, Vector3(0, 0.1, 0.1), 8))
+	# The mouth hangs open: a slack dark gap, lower lip sagging.
+	head.add_child(Shapes.ellipsoid(Vector3(0.022, 0.012, 0.008), dark, Vector3(0, 0.052, 0.098), 10))
+	head.add_child(Shapes.ellipsoid(Vector3(0.024, 0.007, 0.01), lid, Vector3(0, 0.039, 0.098), 8))
 	model.add_part(head, "head")

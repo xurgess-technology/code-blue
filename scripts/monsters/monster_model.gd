@@ -23,6 +23,7 @@ var _ear_listen := 0.0
 var _ear_yaw := 0.0
 var _ear_twitch := 0.0
 var _ear_twitch_t := 0.0
+var _parts := 0
 var _logical := ""
 var _fallback: Node3D = null
 
@@ -146,6 +147,9 @@ func attack_length() -> float:
 
 func add_part(node: Node3D, bone: String, offset := Transform3D.IDENTITY, tip := 0.0) -> void:
 	if shaper != null:
+		# One draw call per material per part instead of one per primitive (a Walk-In was ~90).
+		_parts += 1
+		Shapes.bake(node, "%s|%d" % [kind, _parts])
 		shaper.attach(node, bone, offset, tip)
 
 

@@ -227,6 +227,115 @@ static func cylinder(radius: float, height: float, material: Material, pos := Ve
 	return mesh_node(cm, material, pos)
 
 
+## Merge every MeshInstance3D under `root` into one MeshInstance3D child with one surface per
+## material, so a hand-built part costs a draw call per material instead of one per primitive.
+## Subtrees under a node with meta "no_bake" (moving pieces such as ears) are left alone.
+## Materials are keyed by instance, so parts must share material objects to share a surface.
+## The shared shader's noise reads object-space positions: baked primitives get their stain and
+## mottle pattern in the part's metres instead of their own unit space (finer on small bits).
+static var _baked := {}
+
+static func bake(root: Node3D, key := "") -> Node3D:
+	var found: Array = []
+	_collect(root, Transform3D.IDENTITY, found)
+	if found.size() < 2:
+		return root
+	# Every monster of a kind is built identically: bake each part once per session.
+	if key != "" and _baked.has(key):
+		for e in found:
+			if (e.node as MeshInstance3D).material_override != null:
+				(e.node as MeshInstance3D).mesh = null
+		_prune(root)
+		var cached := MeshInstance3D.new()
+		cached.name = "Baked"
+		cached.mesh = _baked[key]
+		root.add_child(cached)
+		return root
+	# Positions, normals and indices only (the shared shader needs nothing else); formats of
+	# lathed ArrayMeshes and primitive meshes differ, so the arrays are merged by hand.
+	var groups := {}     # material -> [verts, normals, indices]
+	var order: Array = []
+	var shadow := GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	for e in found:
+		var mi: MeshInstance3D = e.node
+		var mat: Material = mi.material_override
+		if mat == null or mi.mesh == null:
+			continue
+		if not groups.has(mat):
+			groups[mat] = [PackedVector3Array(), PackedVector3Array(), PackedInt32Array()]
+			order.append(mat)
+		var g: Array = groups[mat]
+		var xf: Transform3D = e.xform
+		var nb := xf.basis.inverse().transposed()
+		for s in mi.mesh.get_surface_count():
+			var arr: Array = mi.mesh.surface_get_arrays(s)
+			var v: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+			var n: PackedVector3Array = arr[Mesh.ARRAY_NORMAL] if arr[Mesh.ARRAY_NORMAL] != null else PackedVector3Array()
+			var idx = arr[Mesh.ARRAY_INDEX]
+			var base: int = (g[0] as PackedVector3Array).size()
+			var gv: PackedVector3Array = g[0]
+			var gn: PackedVector3Array = g[1]
+			var gi: PackedInt32Array = g[2]
+			for i in v.size():
+				gv.append(xf * v[i])
+				gn.append((nb * n[i]).normalized() if i < n.size() else Vector3.UP)
+			if idx != null and (idx as PackedInt32Array).size() > 0:
+				for k in idx:
+					gi.append(base + k)
+			else:
+				for i in v.size():
+					gi.append(base + i)
+			g[0] = gv
+			g[1] = gn
+			g[2] = gi
+	var mesh := ArrayMesh.new()
+	for mat in order:
+		var g: Array = groups[mat]
+		var arrays := []
+		arrays.resize(Mesh.ARRAY_MAX)
+		arrays[Mesh.ARRAY_VERTEX] = g[0]
+		arrays[Mesh.ARRAY_NORMAL] = g[1]
+		arrays[Mesh.ARRAY_INDEX] = g[2]
+		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+		mesh.surface_set_material(mesh.get_surface_count() - 1, mat)
+	if key != "":
+		_baked[key] = mesh
+	for e in found:
+		var n: MeshInstance3D = e.node
+		if n.material_override != null:
+			n.mesh = null
+	_prune(root)
+	var baked := MeshInstance3D.new()
+	baked.name = "Baked"
+	baked.mesh = mesh
+	baked.cast_shadow = shadow
+	root.add_child(baked)
+	return root
+
+
+static func _collect(n: Node, xf: Transform3D, out: Array) -> void:
+	for c in n.get_children():
+		if c.has_meta("no_bake"):
+			continue
+		if c is Node3D:
+			var cx: Transform3D = xf * (c as Node3D).transform
+			if c is MeshInstance3D and (c as MeshInstance3D).visible:
+				out.append({"node": c, "xform": cx})
+			_collect(c, cx, out)
+
+
+## Drop plain Node3Ds left with no children after baking.
+static func _prune(n: Node) -> void:
+	for c in n.get_children():
+		if c.has_meta("no_bake"):
+			continue
+		_prune(c)
+		var empty_mesh: bool = c is MeshInstance3D and (c as MeshInstance3D).mesh == null
+		if (c.get_class() == "Node3D" or empty_mesh) and c.get_child_count() == 0 and c.get_script() == null:
+			n.remove_child(c)
+			c.free()
+
+
 ## Point a unit-height cylinder node from a to b (world or local, whatever its parent uses).
 static func stretch_between(node: Node3D, a: Vector3, b: Vector3) -> void:
 	var d := b - a

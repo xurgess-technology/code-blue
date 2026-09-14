@@ -5,6 +5,7 @@ extends Node3D
 ##   godot --headless --fixed-fps 60 --path . tools/monster_lab.tscn            # scenarios
 ##   godot --path . tools/monster_lab.tscn -- --shots                             # screenshots
 ##   godot --path . tools/monster_lab.tscn -- --shots --only=nurse_door           # one shot
+##   godot --path . --resolution 1600x900 tools/monster_lab.tscn -- --perf              # Walk-In frame cost
 ##   options: --dist=<m> overrides the camera distance, --nopost drops the post layer
 ##
 ## Exit code 0 only when every scenario passed.
@@ -89,6 +90,9 @@ var dist_override := 0.0
 func _ready() -> void:
 	if OS.get_cmdline_user_args().has("--real"):
 		await _run_real()
+		return
+	if OS.get_cmdline_user_args().has("--perf"):
+		await _run_perf()
 		return
 	for a in OS.get_cmdline_user_args():
 		if a == "--shots":
@@ -639,6 +643,13 @@ func _scenario_walk_in() -> void:
 	await wait(0.4)
 	check("then it recovers (can_sedate false again)", w.mode != Modes.Mode.STUNNED and not w.can_sedate(), "mode=%d" % w.mode)
 
+	# Cost of building one (the parts are baked once per session, then reused).
+	var tb := Time.get_ticks_usec()
+	var built: Node = MonsterScript.new_monster(990, "walk_in", cor(40.0))
+	var build_ms := float(Time.get_ticks_usec() - tb) / 1000.0
+	built.free()
+	check("building another Walk-In takes %.1f ms (parts baked once and cached)" % build_ms, build_ms < 15.0)
+
 	# Cost: several Walk-Ins in sight of the player, rays per second.
 	await clear_monsters()
 	place_player(cor(20.0), cor(0.0) + Vector3.UP * 1.5, false)
@@ -889,16 +900,18 @@ func _run_shots() -> void:
 		["nurse_door", _shot_nurse_door],
 		["walk_in_4m", _shot_walk_in.bind(4.0, false)],
 		["walk_in_1_5m", _shot_walk_in.bind(1.5, false)],
-		["walk_in_face", _shot_walk_in.bind(0.8, false)],
+		["walk_in_face", _shot_head.bind("walk_in", false, 0.75, 0.45)],
+		["walk_in_sees_you", _shot_walk_in_rush],
 		["walk_in_group", _shot_walk_in_group],
-		["discharged_head", _shot_discharged_head.bind(false)],
-		["discharged_ears_listen", _shot_discharged_head.bind(true)],
+		["discharged_head", _shot_head.bind("discharged", false, 0.8, 0.2)],
+		["discharged_side", _shot_head.bind("discharged", false, 0.7, 1.35)],
+		["discharged_ears_listen", _shot_head.bind("discharged", true, 0.8, 0.5)],
 		["discharged_height", _shot_height],
 		["sedated", _shot_sedated],
 		["lying_copies", _shot_lying],
 	]
 	for s in list:
-		if only != "" and s[0] != only:
+		if only != "" and not only.split(",").has(s[0]):
 			continue
 		await clear_monsters()
 		set_all_lights(false)
@@ -977,6 +990,18 @@ func _shot_walk_in(dist: float, _unused: bool) -> void:
 	w.model.anim.speed_scale = 0.0
 
 
+func _shot_walk_in_rush() -> void:
+	# It has seen the camera and comes: head up, 2 m away, a fixture behind it.
+	var pos := cor(21.0, -0.2)
+	var w: Node = spawn("walk_in", pos, -PI * 0.5)
+	set_light(1, true)
+	for f in 90:
+		await get_tree().physics_frame
+		w.apply_remote({"pos": pos, "y": -PI * 0.5 + 0.15, "md": Modes.Mode.RUSH, "mv": true, "sp": 1.8})
+	w.model.anim.speed_scale = 0.0
+	place_player(pos + Vector3(2.0, 0, 0.25), pos + Vector3.UP * 1.45, true)
+
+
 func _shot_walk_in_group() -> void:
 	var yaws := [-PI * 0.5 + 0.4, -PI * 0.5 - 0.2, -PI * 0.5 + 0.1]
 	var spots := [cor(18.0, -0.7), cor(16.5, 0.6), cor(14.5, -0.2)]
@@ -991,41 +1016,51 @@ func _shot_walk_in_group() -> void:
 			ws[i].apply_remote({"pos": spots[i], "y": yaws[i], "md": Modes.Mode.RUSH if i == 0 else Modes.Mode.WANDER, "mv": true, "sp": 1.8 if i == 0 else 0.8})
 
 
-func _shot_discharged_head(listen: bool) -> void:
-	var pos := cor(20.0, -0.3)
-	var d: Node = spawn("discharged", pos, -PI * 0.5)
-	# Three-quarter view of the face and the near ear; listening to a sound on its left (our right).
-	var yaw := -PI * 0.5 + (0.9 if listen else 0.55)
+## A head close-up: the camera `dist` metres from the face, `view` radians around from straight
+## in front (positive: toward the monster's left), eye level with the head. `listen`: the
+## Discharged listens to a sound on its left.
+func _shot_head(kind: String, listen: bool, dist: float, view: float) -> void:
+	var pos := cor(21.0, -0.3)
+	var m: Node = spawn(kind, pos, -PI * 0.5)
+	var yaw := -PI * 0.5
 	var ly := 0.9 if listen else 0.0
 	var md: int = Modes.Mode.LISTEN if listen else Modes.Mode.IDLE
-	_pose(d, pos, yaw, md, false, 0.0, {"ly": ly})
+	_pose(m, pos, yaw, md, false, 0.0, {"ly": ly})
+	set_light(1, true)
 	for i in 60:
 		await get_tree().physics_frame
-		d.apply_remote({"pos": pos, "y": yaw, "md": md, "mv": false, "sp": 0.0, "ly": ly})
-	var head: Node3D = d.model.find_child("Head", true, false)
-	var hp: Vector3 = head.global_position + Vector3.UP * 0.12
-	place_player(Vector3(hp.x + 0.95, 0.0, hp.z + 0.15), hp, true)
-	# Put the eye at head height (the lab player's eye is at 1.7 m; this head is higher).
-	p1.teleport(Vector3(hp.x + 0.95, hp.y - C.EYE_H, hp.z + 0.15))
-	var dvec: Vector3 = hp - (p1.global_position + Vector3.UP * C.EYE_H)
+		m.apply_remote({"pos": pos, "y": yaw, "md": md, "mv": false, "sp": 0.0, "ly": ly})
+	m.model.anim.speed_scale = 0.0
+	var head: Node3D = m.model.find_child("Head", true, false)
+	var hp: Vector3 = head.global_position + head.global_transform.basis.y.normalized() * 0.11
+	var fwd := Vector3(-sin(yaw), 0.0, -cos(yaw))
+	var dir := fwd.rotated(Vector3.UP, view)
+	var eye := hp + dir * dist + Vector3.UP * 0.05
+	place_player(Vector3(eye.x, 0.0, eye.z), hp, true)
+	p1.teleport(Vector3(eye.x, eye.y - C.EYE_H, eye.z))
+	var dvec: Vector3 = hp - eye
+	var cam_yaw := atan2(-dvec.x, -dvec.z)
+	p1.rotation.y = cam_yaw
+	p1._target_yaw = cam_yaw
 	p1._pitch = atan2(dvec.y, Vector2(dvec.x, dvec.z).length())
 	p1.head.rotation.x = p1._pitch
 	await wait(0.2)
 
 
 func _shot_height() -> void:
-	var pos := cor(20.0, -0.6)
-	var d: Node = spawn("discharged", pos, -PI * 0.5)
-	_pose(d, pos, -PI * 0.5, Modes.Mode.IDLE, false, 0.0)
+	# Left to right: the Discharged, a surgeon, a Walk-In, side by side across the corridor.
+	var d: Node = spawn("discharged", cor(21.0, -1.0), -PI * 0.5)
+	_pose(d, cor(21.0, -1.0), -PI * 0.5, Modes.Mode.IDLE, false, 0.0)
 	var surgeon: Node = PlayerScript.new_player(2, "Surgeon", false)
 	game.add_child(surgeon)
-	surgeon.teleport(cor(20.0, 0.6))
+	surgeon.teleport(cor(21.0, 0.05))
 	surgeon.rotation.y = -PI * 0.5
+	surgeon._target_yaw = -PI * 0.5
 	surgeon.add_to_group("monster")   # cleared with the monsters after the shot
-	var w: Node = spawn("walk_in", cor(20.0, 1.7), -PI * 0.5)
-	_pose(w, cor(20.0, 1.7), -PI * 0.5, Modes.Mode.IDLE, false, 0.0)
-	set_light(2, true)
-	place_player(cor(26.5, 0.5), cor(20.0, 0.5) + Vector3.UP * 1.2, true)
+	var w: Node = spawn("walk_in", cor(21.0, 1.0), -PI * 0.5)
+	_pose(w, cor(21.0, 1.0), -PI * 0.5, Modes.Mode.IDLE, false, 0.0)
+	set_light(1, true)
+	place_player(cor(27.5, 0.0), cor(21.0, 0.0) + Vector3.UP * 1.1, true)
 	await wait(1.0)
 	var head: Node3D = d.model.find_child("Head", true, false)
 	print("[monster_lab] Discharged head bone at %.2f m (top of skull about %.2f)" % [head.global_position.y, head.global_position.y + 0.25])
@@ -1034,29 +1069,30 @@ func _shot_height() -> void:
 
 
 func _shot_sedated() -> void:
-	var pos := cor(20.0, 0.0)
-	var w: Node = spawn("walk_in", pos, 0.2)
-	var d: Node = spawn("discharged", cor(17.0, 0.2), -0.3)
+	var pos := cor(21.0, -0.5)
+	var w: Node = spawn("walk_in", pos, PI * 0.5 + 0.3)
+	var d: Node = spawn("discharged", cor(18.0, 0.6), -PI * 0.5 - 0.2)
 	for f in 120:
 		await get_tree().physics_frame
-		w.apply_remote({"pos": pos, "y": 0.2, "md": Modes.Mode.SEDATED, "sd": true, "mv": false, "sp": 0.0})
-		d.apply_remote({"pos": cor(17.0, 0.2), "y": -0.3, "md": Modes.Mode.SEDATED, "sd": true, "mv": false, "sp": 0.0})
-	set_light(2, true)
-	place_player(cor(22.5, 1.0), cor(18.5) + Vector3.UP * 0.2, true)
+		w.apply_remote({"pos": pos, "y": PI * 0.5 + 0.3, "md": Modes.Mode.SEDATED, "sd": true, "mv": false, "sp": 0.0})
+		d.apply_remote({"pos": cor(18.0, 0.6), "y": -PI * 0.5 - 0.2, "md": Modes.Mode.SEDATED, "sd": true, "mv": false, "sp": 0.0})
+	set_light(1, true)
+	place_player(cor(24.5, 0.8), cor(19.8, 0.0) + Vector3.UP * 0.1, true)
 
 
 func _shot_lying() -> void:
 	var a: Node3D = MonsterScript.make_lying("walk_in")
-	a.position = cor(20.0, -0.6) + Vector3.UP * 0.9
+	a.position = cor(21.0, -0.7) + Vector3.UP * 0.9
 	add_child(a)
 	a.add_to_group("monster")
 	var b: Node3D = MonsterScript.make_lying("discharged")
-	b.position = cor(20.0, 0.7) + Vector3.UP * 0.9
+	b.position = cor(21.0, 0.7) + Vector3.UP * 0.9
 	add_child(b)
 	b.add_to_group("monster")
-	set_light(2, true)
-	place_player(cor(20.0, 3.5), cor(20.0, 0.0) + Vector3.UP * 0.8, true)
+	set_light(1, true)
+	place_player(cor(21.3, 1.4) + Vector3(0, 0.9, 0), cor(21.0, 0.0) + Vector3.UP * 0.9, true)
 	await wait(0.4)
+
 
 # =========================================================================
 # the real game: boot main.tscn, walk a bot around a generated hospital, log the monsters
@@ -1214,3 +1250,124 @@ func _run_real() -> void:
 		usec += Time.get_ticks_usec() - t0
 	print("[real] monster tick: %.3f ms per physics frame for %d monsters" % [usec / 300.0 / 1000.0, g.monsters.size()])
 	get_tree().quit(0)
+
+
+# =========================================================================
+# frame time with Walk-Ins (windowed, vsync off)
+#   godot --path . --resolution 1600x900 tools/monster_lab.tscn -- --perf [--seed=4242] [--frames=300]
+# Same session, same view, alternating: no Walk-Ins, the shift's roster, 8 Walk-Ins in view.
+# =========================================================================
+
+var _perf_rows: Array = []
+
+func _run_perf() -> void:
+	var seed := 4242
+	var frames := 300
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--seed="):
+			seed = int(a.split("=")[1])
+		elif a.begins_with("--frames="):
+			frames = int(a.split("=")[1])
+	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
+	Engine.max_fps = 0
+	var main: Node = load("res://scenes/main.tscn").instantiate()
+	add_child(main)
+	await get_tree().process_frame
+	var g: Node = main.game
+	main.menu.hide_menu()
+	Net.start_solo("Probe")
+	g.start_session(seed)
+	await get_tree().process_frame
+	while g.get_parent().has_node("WarmupCover"):
+		await get_tree().process_frame
+	main.set_quality(1, false)
+	g.begin_shift()
+	for i in 30:
+		await get_tree().process_frame
+	var bot: Node = g.local_player()
+	bot.bot_active = true
+	bot.bot_invulnerable = true
+	print("[perf] gpu=%s window=%s monsters=%s" % [RenderingServer.get_video_adapter_name(), str(get_viewport().get_visible_rect().size), str(g.monsters.values().map(func(m): return m.kind))])
+
+	# The view: from 9 m down the most open line from the first Walk-In, looking back at it.
+	var first: Vector3 = Vector3.ZERO
+	for m in g.monsters.values():
+		if m.kind == "walk_in":
+			first = m.global_position
+			break
+	var space: PhysicsDirectSpaceState3D = bot.get_world_3d().direct_space_state
+	var best_dir := Vector3.FORWARD
+	var best_len := -1.0
+	for i in 16:
+		var dir := Vector3(cos(TAU * i / 16.0), 0, sin(TAU * i / 16.0))
+		var q := PhysicsRayQueryParameters3D.create(first + Vector3.UP * 1.5, first + Vector3.UP * 1.5 + dir * 12.0)
+		q.collision_mask = C.L_WORLD
+		var hit := space.intersect_ray(q)
+		var reach: float = 12.0 if hit.is_empty() else first.distance_to(hit.position)
+		if reach > best_len:
+			best_len = reach
+			best_dir = dir
+	var cam := first + best_dir * minf(9.0, best_len - 0.8)
+	var look := func():
+		bot.teleport(cam)
+		var d: Vector3 = first - cam
+		bot.bot_yaw = atan2(-d.x, -d.z)
+		bot.bot_pitch = -0.08
+		bot.bot_move = Vector2.ZERO
+		bot.flashlight_on = true
+
+	for pass_i in 2:
+		# A: no Walk-Ins at all (what the game had before).
+		g._spawn_monsters()
+		for m in g.monsters.values().duplicate():
+			if m.kind == "walk_in":
+				g.monsters.erase(m.monster_id)
+				m.queue_free()
+		look.call()
+		await _perf_measure("no Walk-Ins (%d monsters) #%d" % [g.monsters.size(), pass_i + 1], frames, bot)
+		# B: the shift's roster.
+		g._spawn_monsters()
+		look.call()
+		await _perf_measure("shift 1 roster (%d monsters) #%d" % [g.monsters.size(), pass_i + 1], frames, bot)
+		# C: 8 Walk-Ins right in view, chasing the camera.
+		for m in g.monsters.values().duplicate():
+			if m.kind == "walk_in":
+				g.monsters.erase(m.monster_id)
+				m.queue_free()
+		for i in 8:
+			var p: Vector3 = first + best_dir * (1.0 + i * 0.7) + best_dir.cross(Vector3.UP) * (0.6 if i % 2 == 0 else -0.6)
+			g._add_monster("walk_in", p)
+		look.call()
+		await _perf_measure("8 Walk-Ins in view (%d monsters) #%d" % [g.monsters.size(), pass_i + 1], frames, bot)
+	print("[perf] ============================================================================")
+	print("[perf] %-40s avg fps  1%%low  worst ms  phys ms  proc ms  draws" % "scenario")
+	for r in _perf_rows:
+		print("[perf] %-40s %7.0f  %5.0f  %8.1f  %7.2f  %7.2f  %5d" % [r.name, r.fps, r.low, r.worst, r.phys, r.proc, r.draws])
+	get_tree().quit(0)
+
+
+func _perf_measure(label: String, frames: int, bot: Node) -> void:
+	for i in 60:
+		await get_tree().process_frame
+	var times: Array[float] = []
+	var phys := 0.0
+	var proc := 0.0
+	var draws := 0
+	var cam_pos: Vector3 = bot.global_position
+	for i in frames:
+		await get_tree().process_frame
+		if bot.global_position.distance_to(cam_pos) > 0.3:
+			bot.teleport(cam_pos)
+		times.append(get_process_delta_time() * 1000.0)
+		phys += Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0
+		proc += Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0
+		draws = maxi(draws, int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)))
+	var total := 0.0
+	for t in times:
+		total += t
+	var sorted := times.duplicate()
+	sorted.sort()
+	var row := {"name": label, "fps": 1000.0 * times.size() / total, "low": 1000.0 / sorted[int(sorted.size() * 0.99) - 1],
+		"worst": sorted[-1], "phys": phys / frames, "proc": proc / frames, "draws": draws}
+	_perf_rows.append(row)
+	print("[perf] %-40s avg %.0f fps, 1%% low %.0f, phys %.2f ms, draws %d" % [label, row.fps, row.low, row.phys, draws])
