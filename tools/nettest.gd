@@ -29,6 +29,9 @@ extends Node
 ##                    on different tables at the same time and each watches the other
 ##   downed           client 1 goes down and crawls; client 2 carries them to the player table and
 ##                    stitches them up; the host and both clients see each stage
+##   combat           sweep 3: client 1 kills a monster with the bone saw, shoves and jabs another,
+##                    drags it and straps it to a free patient table; the host checks the case and
+##                    client 2 watches the swings, the drag and the strapped case
 ##
 ## Shifts start the way the loop does (sweep 2): the host clocks in, skips the grace period,
 ## answers the phone, and the paramedics wheel the patient onto a table.
@@ -40,6 +43,7 @@ extends Node
 
 const NAMES := ["Host", "Álvaro", "Bea O'Neil", "Surgeon Chris"]
 const EconomyScript := preload("res://scripts/economy/economy.gd")
+const MonsterScript := preload("res://scripts/monster.gd")
 
 var role := "host"
 var scenario := "deliver"
@@ -123,6 +127,7 @@ func _run() -> void:
 		"economy": await _sc_economy()
 		"two_patients": await _sc_two_patients()
 		"downed": await _sc_downed()
+		"combat": await _sc_combat()
 		_: _end(false, "unknown scenario " + scenario)
 
 
@@ -789,6 +794,181 @@ func _sc_downed():
 	if not await _until(func(): return not target.downed and target.alive, 90.0, "the stitches to finish"):
 		return
 	await _finish_together("carried a downed teammate to the table and stitched them up")
+
+
+## Combat (sweep 3): client 1 saws monster A to death, shoves and jabs monster B, drags B and straps
+## it to the free patient table; the host checks the result, client 2 watches it happen.
+func _sc_combat():
+	if role == "host":
+		if not await _start_shift_when_full():
+			return
+		game._clear_monsters()
+		game.combat.break_chance = 0.0
+		var ti: int = game.free_patient_table()
+		if ti < 0:
+			return _end(false, "no free patient table")
+		var tp: Vector3 = game.table_position(ti)
+		var ids := []
+		for off in [Vector3(0.0, 0.0, 2.4), Vector3(0.0, 0.0, -2.4)]:
+			var m = game._add_monster("discharged", _nav_point(tp + off))
+			ids.append(m.monster_id)
+		await _frames(3)
+		for id in ids:
+			var m = game.monsters[id]
+			m.mode = MonsterScript.Mode.IDLE
+			m.brain.timer = 999.0
+			m.calm = 999.0
+		var c1: int = _peer_of(1)
+		var p1 = game.players[c1]
+		p1.slots = [{"kind": "bone_saw", "count": 1}, {"kind": "anesthetic", "count": 3}, {"kind": "", "count": 0}, {"kind": "", "count": 0}]
+		_send("combat_go", {"a": ids[0], "b": ids[1], "table": ti})
+		var seen := {"hit": false, "sedated": false, "drag": false}
+		var watch := func():
+			if game.combat.last_result.get("what", "") == "monster":
+				seen.hit = true
+			if game.monsters.has(ids[1]) and game.combat.is_sedated(game.monsters[ids[1]]):
+				seen.sedated = true
+			if game.combat.dragging(p1) == ids[1]:
+				seen.drag = true
+		if not await _do_until(watch, func(): return bool(game.case_on_table(ti).get("monster", false)), 150.0, "client 1 to strap the monster"):
+			return
+		var c: Dictionary = game.case_on_table(ti)
+		var sed := float(c.get("flags", {}).get("sedation", -1.0))
+		if String(c.patient_id) != "discharged" or String(c.ailment_id) != "dissection" or String(c.state) != "on_table" or sed < 0.35 or sed > 1.0:
+			return _end(false, "the strapped case is wrong: %s" % str(c))
+		if game.monsters.has(ids[0]) or game.monsters.has(ids[1]):
+			return _end(false, "monsters left: %s" % str(game.monsters.keys()))
+		if not (seen.hit and seen.sedated and seen.drag):
+			return _end(false, "host saw hit=%s sedated=%s drag=%s" % [str(seen.hit), str(seen.sedated), str(seen.drag)])
+		if int(game.combat.swings_seen.get(c1, 0)) < 3:
+			return _end(false, "host animated only %d uses by client 1" % int(game.combat.swings_seen.get(c1, 0)))
+		if not await _until(func(): return _count_msgs("combat_done") > 0, 30.0, "the report from client 1"):
+			return
+		var r: Dictionary = _msgs("combat_done")[0].data
+		if int(r.vials) != 2 or not bool(r.saw):
+			return _end(false, "client 1 ended with %d vials, saw %s (expected 2 and the saw)" % [int(r.vials), str(r.saw)])
+		_say("client 1 killed A, sedated, dragged and strapped B: case %s" % str(c))
+		await _finish_together("a client swung, jabbed, dragged and strapped; the case is right")
+		return
+	if not await _wait_shift_as_client():
+		return
+	if not await _until(func(): return _count_msgs("combat_go") > 0, 60.0, "the combat order"):
+		return
+	var go: Dictionary = _msgs("combat_go")[0].data
+	var a_id := int(go.a)
+	var b_id := int(go.b)
+	var ti := int(go.table)
+	var me := _me()
+	if index == 2:
+		var c1: int = _peer_of(1)
+		var st := {"swing": false, "drag": false, "follow": false}
+		var watch2 := func():
+			if int(game.combat.swings_seen.get(c1, 0)) > 0:
+				st.swing = true
+			var p1 = game.players.get(c1)
+			if p1 != null and int(p1.dragging_monster) == b_id:
+				st.drag = true
+				var bm = game.monsters.get(b_id)
+				if bm != null and is_instance_valid(bm) and bm.global_position.distance_to(p1.global_position) < 2.5:
+					st.follow = true
+		if not await _do_until(watch2, func(): return bool(game.case_on_table(ti).get("monster", false)) and not game.monsters.has(b_id), 150.0, "the strapped monster"):
+			return
+		if not (st.swing and st.drag and st.follow):
+			return _end(false, "watcher saw swing=%s drag=%s follow=%s" % [str(st.swing), str(st.drag), str(st.follow)])
+		await _finish_together("watched client 1 swing, drag the monster behind them and strap it down")
+		return
+	# Client 1: armed by the host.
+	if not await _until(func(): return me.holding("bone_saw") and me.holding("anesthetic") and game.monsters.has(a_id) and game.monsters.has(b_id), 30.0, "the saw, the vials and the monsters"):
+		return
+	var wall_next := {"t": 0.0}
+	var swing := func():
+		var m = game.monsters.get(a_id)
+		if m == null or not is_instance_valid(m) or _wall() < float(wall_next.t):
+			return
+		me.selected = _slot_of("bone_saw")
+		_face_at(m, 1.2)
+		wall_next.t = _wall() + 0.5
+		me.bot_use += 1
+	if not await _do_until(swing, func(): return not game.monsters.has(a_id), 60.0, "the saw to kill monster A"):
+		return
+	_say("monster A is dead")
+	# Shove, then jab a moment later in game time (the stun lasts 2 game seconds, and these processes
+	# run faster than real time).
+	var sed_st := {"next": 0.0, "shoved": false}
+	var sedate := func():
+		var m = game.monsters.get(b_id)
+		if m == null or not is_instance_valid(m) or game.world_time < float(sed_st.next):
+			return
+		me.selected = _slot_of("anesthetic")
+		_face_at(m, 1.2)
+		if not sed_st.shoved:
+			me.shove_count += 1
+			sed_st.next = game.world_time + 0.3
+		else:
+			me.bot_use += 1
+			sed_st.next = game.world_time + 1.5
+		sed_st.shoved = not sed_st.shoved
+	if not await _do_until(sedate, func(): return game.monsters.has(b_id) and game.combat.is_sedated(game.monsters[b_id]), 60.0, "monster B sedated"):
+		return
+	var vials := 0
+	for sl in me.slots:
+		if sl.kind == "anesthetic":
+			vials += int(sl.count)
+	_send("combat_done", {"vials": vials, "saw": me.holding("bone_saw")})
+	_say("monster B sedated, %d vials left" % vials)
+	# Empty hands, then drag.
+	var drop := func():
+		if _wall() < float(wall_next.t):
+			return
+		for i in me.slots.size():
+			if me.slots[i].kind != "":
+				me.selected = i
+				me.drop_count += 1
+				wall_next.t = _wall() + 0.4
+				return
+	if not await _do_until(drop, func(): return me.hands_empty(), 30.0, "empty hands"):
+		return
+	var bm = game.monsters[b_id]
+	var grab := func(): _press_at(bm.global_position, "mo_%d" % b_id, true)
+	if not await _do_until(grab, func(): return int(me.dragging_monster) == b_id, 40.0, "dragging monster B"):
+		return
+	me.bot_interact = false
+	me.bot_aim_id = ""
+	me.bot_move = Vector2(0, -1)
+	await _wall_wait(1.0)
+	me.bot_move = Vector2.ZERO
+	await _frames(3)
+	if not is_instance_valid(bm) or bm.global_position.distance_to(me.global_position) > 2.0:
+		return _end(false, "the dragged monster is not behind me")
+	var strap := func(): _press_at(game.table_position(ti), game.table_interact_id(ti))
+	if not await _do_until(strap, func(): return bool(game.case_on_table(ti).get("monster", false)) and not game.monsters.has(b_id), 40.0, "strapping monster B to table %d" % ti):
+		return
+	if int(me.dragging_monster) != -1:
+		return _end(false, "still dragging after strapping")
+	await _finish_together("killed A with the saw, sedated B, dragged and strapped it to table %d" % ti)
+
+
+## Stand `dist` metres from a monster (on my side of it) and look at its chest.
+func _face_at(m: Node, dist: float) -> void:
+	var me := _me()
+	var tp: Vector3 = m.global_position
+	var from := me.global_position - tp
+	from.y = 0.0
+	from = from.normalized() if from.length() > 0.2 else Vector3.BACK
+	me.teleport(_nav_point(tp + from * dist))
+	var eye := me.global_position + Vector3.UP * C.EYE_H
+	var d := tp + Vector3.UP * 1.1 - eye
+	me.bot_yaw = atan2(-d.x, -d.z)
+	me.bot_pitch = clampf(atan2(d.y, Vector2(d.x, d.z).length()), -1.2, 1.2)
+	me.bot_move = Vector2.ZERO
+	me.bot_aim_id = ""
+
+
+func _nav_point(pos: Vector3) -> Vector3:
+	var map := get_viewport().world_3d.navigation_map
+	if NavigationServer3D.map_get_iteration_id(map) > 0:
+		return NavigationServer3D.map_get_closest_point(map, pos)
+	return game._floor_at(pos)
 
 
 ## One frame of a simple co-op bot through the loop: clock in, answer the phone, bring what the
