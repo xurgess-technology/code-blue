@@ -1330,7 +1330,8 @@ wing_loader.regenerate(generation)   # host: game._to_next_shift (and the dev pa
 wing_loader.finish_now()             # tools, begin_shift
 wing_loader.generation_for_build(shift) / next_generation / on_level_built(info) / cancel()
 wing_loader.has_wings() / gate_front(wing_id, slot) / evict_players()
-wing_loader.stats            # frames, max_frame_ms, slowest_step(_ms), thread_ms, wall_ms, finish_ms
+wing_loader.stats            # frames, max_frame_ms, slowest_step(_ms), thread_ms, wall_ms, finish_ms,
+                             # steps {label: [count, total ms, worst ms]}
 signal wings_torn_down                              # POCKETS HOOK: tear down extra wing content here
 signal wings_built(info, wing_seed, generation)     # POCKETS HOOK: build extra wing content here
 wing_loader.extra_builders   # objects with build_wings(info, wing_seed, generation) / teardown_wings()
@@ -1354,6 +1355,11 @@ game.clock_in_pending        # host: clock-in waits for the wings
 - Extra per-shift wing content (the `pockets` worker's pocket spaces) builds in `wings_built` and
   tears down in `wings_torn_down` (or via `extra_builders`). `wings_built` also fires after a full
   level build. Hallway stubs that are not `+` doorway tiles never get a door.
+- Containers are the costly step (primitive meshes merged by `ContainerBase.bake`, 10-30 ms each
+  in a window). `bake` now caches the merged mesh by its parts (primitive kind and size, transform,
+  material), so a container built the same way again shares it: a rebuild's container steps went
+  from 57 steps / 1330 ms (worst 35-43 ms) to 163 ms (worst 8 ms). Children that are not primitive
+  meshes skip the cache. Keep container materials shared (`ContainerMats`), or every build misses.
 
 ### Dev room
 
@@ -1366,7 +1372,7 @@ game.clock_in_pending        # host: clock-in waits for the wings
 
 ### Tests
 
-`tools/doortest.tscn` (headless: 70 checks; `-- --shots` windowed into `tools/door_shots/`;
+`tools/doortest.tscn` (headless: 75 checks; `-- --shots` windowed into `tools/door_shots/`;
 `-- --frames` windowed frame times while the wings rebuild), `tools/mapcheck.gd` (door checks through
 `validate`, door nodes in builds, later shifts keep the entrance), `tools/looptest.tscn` (new wings at
 shift 2), nettest scenario `doors`, devtest door checks, `tools/perfprobe.tscn -- --doors`.

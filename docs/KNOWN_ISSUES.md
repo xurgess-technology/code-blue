@@ -526,10 +526,9 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   `C.L_WORLD`): nothing sees through it. Monsters never wander into the entrance building anyway.
 - **A leaf folded open past 90% stops colliding** so bodies cutting a doorway corner do not catch on
   its end; a player hugging the jamb can clip a few centimetres into the open leaf.
-- **About 3% of room doors cannot swing out past 80 degrees** (furniture next to the doorway on the
-  hallway side's far end or a bin by the door inside): they always fold into their tunnel, toward
-  someone coming from the room, and the one who pushed is not in their way (the leaf shoves a bot
-  back a little). `DoorPlan.check` guarantees every door still opens wide enough to pass.
+- **About 3% of room doors have under 80 degrees of room on the hallway side** (furniture or a
+  container near the doorway): they always fold into their tunnel, even toward someone coming out
+  of the room, who has to step back while it swings (a bot gets shoved back a little). `DoorPlan.check` guarantees every door still opens wide enough to pass.
 - **Doors respond on the host**: a client sees an automatic door start to open 100-200 ms after it
   walks into the sensor (3.4 m, which covers a sprint) and a hinged door after its E reaches the
   host. Nothing is predicted locally.
@@ -543,13 +542,29 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   depend on it.
 - **The dev panel's door tools in a hospital run** need a visit to the dev room first in that process
   (`DevRoom.tools_unlocked`); a friend's client that never entered the dev room has no panel.
-- **Headless frame-time checks are noisy on a busy machine** (other workers' Blender and Godot runs):
-  the same rebuild measured 8 ms and 59 ms for its longest frame of work in two runs (container
-  creation and `doors.register` spiking to 30-40 ms under contention). `doortest -- --frames`
-  (windowed) is the real check.
+- **A rebuild still shows as one or two 30-35 ms frames in a window** (1280x720, 890M,
+  `doortest -- --frames`: 124 frames at 16.5 ms average, worst 33.8 ms, one over 33 ms; a quiet
+  shift's worst was 20-31 ms). The first build of a run makes every container variant from
+  scratch (a fridge 118 ms, the others 15-33 ms each) behind the loading screen; later rebuilds
+  reuse the cached meshes. A container variant a run has not built yet (a new size or a new
+  container type) costs its full 15-33 ms in the rebuild. Headless timings are noisy on a busy
+  machine (8 ms against 59 ms for the same rebuild).
+- **`ContainerBase.bake` is a doors hook in the containers worker's file** (the mesh cache above).
+  A container whose parts change after `bake` would share its changes with every twin: none do today.
+- **The playtest bot got stuck once per two runs at seed 4242, shift 2** (at (40.7, 70.3), twice,
+  then passed on a third run after the Walk-In shove fix). The cause is not confirmed; the
+  heartbeat now logs what is around a stuck bot.
 - **`DoorPlan.check` re-samples with the plan's own geometry** (10 degree steps, 0.12 tile points
   along each leaf, obstacles grown by half the leaf's thickness): it proves the plan kept its rules,
   not that a finer sweep would never graze something.
+- **Perf with doors (2026-09-14, medium, 1600x900, seed 4242, merge base and doors branch
+  alternated twice, other workers' Godot runs going, so +/-25% noise)**: before / after average fps
+  (1% low): lobby 128, 101 / 136, 93 (120, 80 / 110, 35); corridor 79, 60 / 103, 88 (62, 49 / 60, 72);
+  OR 85, 72 / 97, 72 (60, 60 / 89, 45); pharmacy 149, 96 / 169, 120; neutral area 107, 77 / 124, 84.
+  Draw calls: lobby 434 -> 402, pharmacy 142 -> 126, neutral 666-687 -> 550 (closed doors occlude),
+  corridor 325-335 -> 333; nodes +730 (the door nodes). No scene got slower beyond the noise; the
+  lone 35 fps 1% lows were single-run spikes. `perfprobe -- --doors` in one process: hallway draws
+  254 without doors, 262 shut, 291 shut without their occluders, 284 open.
 - **Quitting while the wings rebuild** waits for the thread and frees the detached old wings
   (`WingLoader._exit_tree`); before that a host quitting right after a clock-out crashed on exit.
 
