@@ -107,6 +107,22 @@ const CARRY_SPEED_K := 0.6
 var dragging_monster: int = -1
 const CombatScript := preload("res://scripts/combat/combat.gd")
 
+## HANDS HOOK (docs/HANDS_AND_FEEDBACK.md): the first-person hands (`hands`, scripts/hands/fp_hands.gd),
+## the body's clips, poses and hand sockets (`body_hands`, scripts/hands/body_hands.gd), the wind-ups
+## (game.combat.windup) and the over-the-shoulder carry camera (`carry_cam`, local player only).
+const HandsFP := preload("res://scripts/hands/fp_hands.gd")
+const BodyHandsScript := preload("res://scripts/hands/body_hands.gd")
+const CarryCameraScript := preload("res://scripts/camera/carry_camera.gd")
+const Grips := preload("res://scripts/hands/grips.gd")
+var body_hands: RefCounted = null
+var carry_cam: RefCounted = null
+## Test seam: true holds the shove button (charging), false lets go (the shove fires).
+var bot_charge: bool = false
+var _bot_charging := false
+var _charging_with := ""      # "shove" (Q) or "use" (left mouse): the button charging a shove here
+var _jab_prompt := ""
+var _jab_prompt_t := 0.0
+
 var _shove_seen: int = 0
 var _drop_seen: int = 0
 var _interact_seen: int = 0
@@ -227,6 +243,8 @@ func _build() -> void:
 	flashlight.shadow_normal_bias = 1.0
 	# Without this the beam is a bright spot painted on a wall instead of a shaft through the haze.
 	flashlight.light_volumetric_fog_energy = 2.8
+	# HANDS HOOK: the torch sits a hand's width from the hands; it does not light them (or the held stack).
+	flashlight.light_cull_mask = flashlight.light_cull_mask & ~HandsFP.HANDS_LAYER
 	camera.add_child(flashlight)
 
 	# A soft bubble so you are never blind at your own feet. Deliberately weak:
@@ -240,20 +258,23 @@ func _build() -> void:
 	glow.shadow_enabled = false
 	head.add_child(glow)
 
-	hands = _make_hands()
+	# HANDS HOOK: forearms and hands (the torch in the right, the stack in the left).
+	hands = HandsFP.new()
+	hands.setup(self)
 	camera.add_child(hands)
 
-	# Whatever is in the selected hand: in front of the camera for you, in front of the
-	# body for everyone else.
+	# Whatever is in the selected hand: on your left palm (the hands place it every frame), and in
+	# the right hand of your body for everyone else (body_hands places it on the rig's hand).
 	_held_fp = Node3D.new()
 	_held_fp.name = "HeldFirstPerson"
-	_held_fp.position = Vector3(-0.26, -0.3, -0.48)
-	_held_fp.rotation_degrees = Vector3(18, 20, 0)
 	camera.add_child(_held_fp)
 	_held_tp = Node3D.new()
 	_held_tp.name = "HeldThirdPerson"
-	_held_tp.position = Vector3(-0.25, 1.05, -0.35)
+	_held_tp.position = BodyHandsScript.FIXED_ATTACH
 	body_visual.add_child(_held_tp)
+	body_hands = BodyHandsScript.new(self, body_visual)   # HANDS HOOK
+	if is_local:
+		carry_cam = CarryCameraScript.new(self)   # HANDS HOOK
 
 	# Downed: lying along -Z from the feet (see _update_down_pose), aimable from above.
 	downed_aim = DownedAim.new()
@@ -303,6 +324,7 @@ func _ready() -> void:
 	_target_pos = global_position
 	if is_local:
 		body_visual.visible = false
+		body_hands.set_active(false)   # HANDS HOOK: nobody sees it (until the carry camera shows it)
 		name_tag.visible = false
 		hands.visible = true
 		# Settings hook: the local camera follows the field of view setting, live.
@@ -328,14 +350,9 @@ func apply_fov(fov_deg: float) -> void:
 	if fx != null and "_base_fov" in fx:
 		fx.set("_base_fov", fov_deg)
 	var k := tan(deg_to_rad(fov_deg) * 0.5) / tan(deg_to_rad(BASE_FOV) * 0.5)
-	var placed: Array = hands.get_children() if hands != null else []
-	if _held_fp != null:
-		placed.append(_held_fp)
-	for n in placed:
-		if not n.has_meta("fov_base_pos"):
-			n.set_meta("fov_base_pos", n.position)
-		var b: Vector3 = n.get_meta("fov_base_pos")
-		n.position = Vector3(b.x * k, b.y * k, b.z)
+	# HANDS HOOK: the hands (and the stack on the palm) are placed every frame with this scale.
+	if hands != null and "fov_k" in hands:
+		hands.fov_k = k
 
 
 func _make_body() -> Node3D:
@@ -374,36 +391,6 @@ func _make_body() -> Node3D:
 	cap.material_override = mat
 	cap.position.y = 1.82
 	root.add_child(cap)
-	return root
-
-
-func _make_hands() -> Node3D:
-	var root := Node3D.new()
-	root.name = "Hands"
-	var metal := StandardMaterial3D.new()
-	metal.albedo_color = Color("2a2c30")
-	metal.metallic = 0.6
-	metal.roughness = 0.4
-	var torch := MeshInstance3D.new()
-	var cyl := CylinderMesh.new()
-	cyl.top_radius = 0.032
-	cyl.bottom_radius = 0.038
-	cyl.height = 0.26
-	torch.mesh = cyl
-	torch.material_override = metal
-	torch.rotation_degrees.x = 90
-	torch.position = Vector3(0.32, -0.28, -0.45)
-	root.add_child(torch)
-	var skin := StandardMaterial3D.new()
-	skin.albedo_color = Color("e2b998")
-	var hand := MeshInstance3D.new()
-	var hsphere := SphereMesh.new()
-	hsphere.radius = 0.06
-	hsphere.height = 0.12
-	hand.mesh = hsphere
-	hand.material_override = skin
-	hand.position = Vector3(0.32, -0.33, -0.38)
-	root.add_child(hand)
 	return root
 
 
@@ -466,10 +453,18 @@ func _local_step(delta: float) -> void:
 		if bot_press != _bot_press_seen:
 			_bot_press_seen = bot_press
 			interact_count += 1
-		# SWEEP 3 HOOK: scripted item use and brain ability.
+		# SWEEP 3 HOOK: scripted item use and brain ability. HANDS HOOK: a use winds up first.
 		if bot_use != _bot_use_seen:
 			_bot_use_seen = bot_use
-			use_count += 1
+			if g != null and g.combat != null and g.combat.is_usable(selected_stack().kind):
+				g.combat.local_try_use(self)
+		# HANDS HOOK: bot_charge true holds the shove, false lets it go.
+		if bot_charge != _bot_charging and g != null and g.combat != null:
+			_bot_charging = bot_charge
+			if bot_charge:
+				g.combat.local_shove_begin(self)
+			else:
+				g.combat.local_shove_release(self)
 		if bot_ability != _bot_ability_seen:
 			_bot_ability_seen = bot_ability
 			ability_count += 1
@@ -513,7 +508,9 @@ func _local_step(delta: float) -> void:
 		return
 
 	moving = input_dir.length() > 0.1 and not operating
-	sprinting = moving and can_move and want_sprint and stamina > 0.0 and not downed and carrying == 0 and dragging_monster < 0
+	# HANDS HOOK: winding up or charging walks (no sprint) and keeps the slot.
+	var winding: bool = g != null and g.combat != null and g.combat.is_winding(self)
+	sprinting = moving and can_move and want_sprint and stamina > 0.0 and not downed and carrying == 0 and dragging_monster < 0 and not winding
 	stamina = clampf(stamina + (-delta / 4.5 if sprinting else delta / 5.0), 0.0, 1.0)
 
 	var speed: float = 0.0 if operating else (C.SPRINT_SPEED if sprinting else C.WALK_SPEED)
@@ -545,30 +542,30 @@ func _local_step(delta: float) -> void:
 		if Input.is_action_just_pressed("flashlight"):
 			set_flashlight(not flashlight_on)
 			Audio.play("click")
-		_shove_cd = maxf(0.0, _shove_cd - delta)
-		if downed or carrying != 0 or dragging_monster >= 0:
-			_shove_cd = maxf(_shove_cd, 0.2)   # downed hook: no shoving, dropping or slot changes
 		# DEV HOOK: with the dev gun out, the left mouse button fires instead of shoving.
 		var gun_out: bool = g != null and g.dev_mode and g.dev.has_gun(peer_id) and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
-		if Input.is_action_just_pressed("shove") and _shove_cd <= 0.0 and not gun_out:
-			_shove_cd = C.SHOVE_COOLDOWN
-			shove_count += 1
-		# SWEEP 3 HOOK: left mouse uses the held item when it has a use (saw, anesthetic), else it
-		# shoves like Q. R triggers the brain ability unless R would open the guide.
-		if Input.is_action_just_pressed("use") and not gun_out and not downed and carrying == 0 and dragging_monster < 0:
-			if g != null and g.combat != null and g.combat.is_usable(selected_stack().kind):
-				# SWEEP 3 HOOK (combat): the swing / jab animates here at once; a click during the
-				# cooldown does nothing.
-				if g.combat.local_try_use(self):
-					use_count += 1
-			elif _shove_cd <= 0.0:
-				_shove_cd = C.SHOVE_COOLDOWN
-				shove_count += 1
+		# HANDS HOOK: the shove charges while Q (or left mouse with nothing usable) is held and fires on
+		# release; left mouse with the saw or the needle winds that up (scripts/combat/windup.gd). The
+		# combat system refuses while downed, carrying, dragging, busy or cooling down.
+		if g != null and g.combat != null:
+			if Input.is_action_just_pressed("shove") and not gun_out and _charging_with == "":
+				if g.combat.local_shove_begin(self):
+					_charging_with = "shove"
+			# SWEEP 3 HOOK: left mouse uses the held item when it has a use (saw, anesthetic), else it
+			# shoves like Q. R triggers the brain ability unless R would open the guide.
+			if Input.is_action_just_pressed("use") and not gun_out and not downed and carrying == 0 and dragging_monster < 0:
+				if g.combat.is_usable(selected_stack().kind):
+					g.combat.local_try_use(self)
+				elif _charging_with == "" and g.combat.local_shove_begin(self):
+					_charging_with = "use"
+			if _charging_with != "" and not Input.is_action_pressed(_charging_with):
+				_charging_with = ""
+				g.combat.local_shove_release(self)
 		if Input.is_action_just_pressed("read") and not downed and not _would_read_guide():
 			ability_count += 1
-		if Input.is_action_just_pressed("drop") and selected_stack().kind != "" and dragging_monster < 0:
+		if Input.is_action_just_pressed("drop") and selected_stack().kind != "" and dragging_monster < 0 and not winding:
 			drop_count += 1
-		if dragging_monster < 0:   # SWEEP 3 HOOK (combat): no slot changes while dragging
+		if dragging_monster < 0 and not winding:   # SWEEP 3 HOOK (combat): no slot changes while dragging (HANDS: or winding up)
 			for i in C.CARRY_CAP:
 				if Input.is_action_just_pressed("slot_%d" % (i + 1)):
 					selected = i
@@ -576,6 +573,11 @@ func _local_step(delta: float) -> void:
 				select_step(1)
 			if Input.is_action_just_pressed("slot_prev"):
 				select_step(-1)
+
+	# HANDS HOOK: the mouse was freed (a menu, the guide) mid-charge: the shove goes off.
+	if _charging_with != "" and not (can_move and not hive_view) and g != null and g.combat != null:
+		_charging_with = ""
+		g.combat.local_shove_release(self)
 
 	# Footsteps (a crawl makes none)
 	if moving and is_on_floor() and not downed:
@@ -696,6 +698,21 @@ func _consume_actions() -> void:
 
 ## Find what the camera points at and what it would let this player do.
 func _update_aim() -> void:
+	_update_aim_core()
+	# HANDS HOOK: holding the needle and aiming at a monster in its stun window: "Jab it" (a few Hz).
+	if aim_prompt == "" and alive and not downed and game != null and game.combat != null and game.combat.has_method("jab_prompt") \
+			and String(selected_stack().kind) == "anesthetic":
+		_jab_prompt_t -= get_physics_process_delta_time()
+		if _jab_prompt_t <= 0.0:
+			_jab_prompt_t = 0.1
+			_jab_prompt = game.combat.jab_prompt(self)
+		aim_prompt = _jab_prompt
+	else:
+		_jab_prompt = ""
+		_jab_prompt_t = 0.0
+
+
+func _update_aim_core() -> void:
 	aim_id = ""
 	aim_prompt = ""
 	aim_hold = 0.0
@@ -711,6 +728,12 @@ func _update_aim() -> void:
 	else:
 		var from := camera.global_position
 		var to := from - camera.global_transform.basis.z * C.INTERACT_RANGE
+		if carry_cam != null and carry_cam.active:
+			# HANDS HOOK: over the shoulder, the ray runs along the camera's line from beside the head
+			# (nothing between the camera and the head counts) and reaches INTERACT_RANGE from the head.
+			var seg: Array = carry_cam.aim_segment()
+			from = seg[0]
+			to = seg[1]
 		var q := PhysicsRayQueryParameters3D.create(from, to)
 		q.collision_mask = C.L_WORLD | C.L_INTERACT | C.L_PICKUP
 		q.collide_with_areas = true
@@ -924,46 +947,57 @@ func holding(kind: String) -> bool:
 
 func _process(_delta: float) -> void:
 	_update_down_pose(_delta)  # DEV HOOK
-	if game != null and game.combat != null:
-		game.combat.animate_held(self, _delta, _held_fp, _held_tp)   # SWEEP 3 HOOK (combat): swing / jab
 	var s: Dictionary = selected_stack()
 	var key := "%s:%d" % [s.kind, s.count]
-	if key == _held_key:
-		return
-	_held_key = key
-	for holder in [_held_fp, _held_tp]:
-		for c in holder.get_children():
-			c.queue_free()
-		if s.kind != "":
-			holder.add_child(_held_model(String(s.kind), int(s.count), holder == _held_fp))
-	# The flashlight hand hides nothing; the held stack sits in the other hand.
-	_held_fp.visible = is_local
-	_held_tp.visible = not is_local
+	if key != _held_key:
+		_held_key = key
+		for holder in [_held_fp, _held_tp]:
+			for c in holder.get_children():
+				c.queue_free()
+			if s.kind != "":
+				holder.add_child(_held_model(String(s.kind), int(s.count), holder == _held_fp))
+		# The flashlight hand hides nothing; the held stack sits in the other hand.
+		_held_fp.visible = is_local
+		_held_tp.visible = not is_local
+		if is_local:
+			hands.held_changed(String(s.kind), int(s.count))   # HANDS HOOK: lower and raise
+	# HANDS HOOK: the carry camera, then both hands posed from what is held and the wind-up state.
+	if carry_cam != null:
+		carry_cam.update(_delta)
+		var cm := camera.cull_mask
+		var want_mask: int = (cm & ~HandsFP.HANDS_LAYER) if carry_cam.hides_hands() else (cm | HandsFP.HANDS_LAYER)
+		if want_mask != cm:
+			camera.cull_mask = want_mask
+	if is_local and hands.visible:
+		hands.update(_delta)
+	if body_hands != null:
+		body_hands.update(_delta)
 
 
-## A held stack, tinted, sized for the hands: bulky loot is carried low in front with both hands
-## and scaled down in first person so it does not fill the screen.
+## A held stack, tinted, placed by the kind's grip (scripts/hands/grips.gd) so its grip point sits
+## in the palm of the holder (HeldFirstPerson / HeldThirdPerson are the palm sockets, placed every
+## frame by the hands). Batches show as a small bundle; bulky loot and big loot are scaled down in
+## first person so they do not fill the screen. HANDS HOOK.
 func _held_model(kind: String, count: int, first_person: bool) -> Node3D:
-	var model := ItemModels.make_tinted(kind, count, first_person)
-	var fp := ItemModels.footprint(kind)
-	var biggest := maxf(fp.x, maxf(fp.y, fp.z))
+	var model := ItemModels.make_tinted(kind, Grips.shown_count(kind, count), first_person)
+	var k: float = HandsFP.fp_scale(kind) if first_person else _tp_scale(kind)
+	model.scale = Vector3.ONE * k
 	var pivot := Node3D.new()
 	pivot.name = "Held"
 	pivot.add_child(model)
-	if Items.is_bulky(kind):
-		var k := minf(1.0, (0.24 if first_person else 0.55) / maxf(0.01, biggest))
-		model.scale = Vector3.ONE * k
-		if first_person:
-			# Low in the middle of the view, held with both hands: placed in camera space, so
-			# undo HeldFirstPerson's one-handed offset and tilt.
-			var want := Transform3D(Basis.from_euler(Vector3(deg_to_rad(-6.0), deg_to_rad(18.0), 0.0)), Vector3(-0.04, -0.33, -0.58))
-			pivot.transform = _held_fp.transform.affine_inverse() * want
-		else:
-			pivot.position = Vector3(0.25, -0.12, -0.12)
-	elif first_person and Items.is_loot(kind) and biggest > 0.13:
-		# Big-but-not-bulky loot (a laptop, a wheel) would fill the screen at arm's length.
-		model.scale = Vector3.ONE * (0.13 / biggest)
+	var g := Grips.grip(kind)
+	g.pos = (g.pos as Vector3) * k
+	pivot.transform = Grips.transform_of(g)
+	if first_person:
+		HandsFP.dress(pivot)
 	return pivot
+
+
+static func _tp_scale(kind: String) -> float:
+	if int(Grips.grip(kind).hands) < 2:
+		return 1.0
+	var fp := ItemModels.footprint(kind)
+	return minf(1.0, BodyHandsScript.TP_BOTH_SIZE / maxf(0.01, maxf(fp.x, maxf(fp.y, fp.z))))
 
 
 func set_flashlight(on: bool) -> void:

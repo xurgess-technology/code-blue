@@ -12,6 +12,7 @@ extends Node
 ##   sensitivity    mouse look multiplier, 1.0 is the old fixed sensitivity
 ##   fov            player camera vertical field of view in degrees
 ##   quality        0 low, 1 medium, 2 high (main.gd's presets)
+##   carry_camera   "shoulder" or "first_person" while carrying or dragging (scripts/camera/carry_camera.gd)
 ##
 ## This node applies what is global itself (audio buses, window mode). Scene-specific
 ## settings are applied by whoever owns the thing: main.gd (quality, brightness) and
@@ -25,6 +26,8 @@ const SECTION := "settings"
 const LEGACY_PREFS := "user://prefs.cfg"
 
 const WINDOW_MODES: PackedStringArray = ["fullscreen", "borderless", "windowed"]
+## HANDS HOOK: the over-the-shoulder camera while carrying a body or dragging a monster.
+const CARRY_CAMERA_MODES: PackedStringArray = ["shoulder", "first_person"]
 
 const DEFAULTS := {
 	"master_volume": 1.0,
@@ -35,6 +38,7 @@ const DEFAULTS := {
 	"sensitivity": 1.0,
 	"fov": 78.0,
 	"quality": 1,
+	"carry_camera": "shoulder",   # HANDS HOOK: "shoulder" | "first_person"
 }
 
 ## Numeric keys: [min, max]. Values are clamped into these on set and on load.
@@ -175,6 +179,9 @@ func _load() -> void:
 
 func _sanitize(key: String, v):
 	var def = DEFAULTS[key]
+	if key == "carry_camera":   # HANDS HOOK
+		var c := str(v)
+		return c if CARRY_CAMERA_MODES.has(c) else def
 	if key == "window_mode":
 		var s := str(v)
 		return s if WINDOW_MODES.has(s) else def
