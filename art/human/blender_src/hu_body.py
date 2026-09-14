@@ -70,7 +70,7 @@ class Body:
         dirA = Vector((math.sin(a), 0.03, -math.cos(a))).normalized()
         self.ua_len = lerp(0.292, 0.272, f) * s
         self.fa_len = lerp(0.255, 0.236, f) * s
-        self.palm_len = lerp(0.094, 0.086, f) * s
+        self.palm_len = lerp(0.098, 0.090, f) * s
         J['elbow'] = J['shoulder'] + dirA * self.ua_len
         dirF = (Matrix.Rotation(math.radians(-14.0), 3, Vector((0, 0, 1)).cross(dirA).normalized()) @ dirA)
         # bend the forearm forward (towards -Y) a little: rotate about the arm's side axis
@@ -319,7 +319,7 @@ class Body:
                 disp -= 0.0045 * gn
                 tags['nostril'] = max(tags.get('nostril', 0.0), gn)
             # philtrum and the lips
-            lp = lerp(0.8, 1.6, P['lips'])
+            lp = lerp(0.6, 1.25, P['lips'])
             mw = 0.0245 * lerp(0.92, 1.08, P['lips'])
             zm = -0.0690
             cx = clamp(abs(q.x) / mw, 0.0, 1.4)
@@ -685,7 +685,7 @@ class Body:
                         er.append({'lid': 1.0 - smooth01(v / 0.30), 'socket': 0.25 * smooth01((0.5 - v) / 0.4)})
                     P_rows.append(row)
                     exs.append(er)
-                flip = (sx < 0) != upper
+                flip = upper          # the shells are not mirrored per eye (side points the same way for both)
                 lids.grid(P_rows, exs, flip=flip)
         return part, lids
 
@@ -835,25 +835,27 @@ class Body:
         # wrist bones, palm widening, closing at the knuckles
         if u > sW - 0.03 * s:
             w = smooth01((u - sW + 0.006 * s) / (0.040 * s))
-            pw = lerp(0.034, 0.041, smooth01((u - sW) / (0.05 * s)))
+            pw = lerp(0.032, 0.039, smooth01((u - sW) / (0.05 * s)))
             ra = lerp(ra, pw * lerp(1.0, 0.9, f), w)
-            rb = lerp(rb, lerp(0.0165, 0.0140, smooth01((u - sW) / (0.07 * s))) * lerp(1.0, 0.9, f), w)
+            rb = lerp(rb, lerp(0.0175, 0.0150, smooth01((u - sW) / (0.07 * s))) * lerp(1.0, 0.9, f), w)
             # hypothenar and thenar pads on the palm side
             bump += 0.0035 * s * math.exp(-((u - sW - 0.030 * s) / (0.03 * s)) ** 2) * max(0.0, sn) * max(0.0, -c) ** 0.8
             bump += 0.0022 * s * math.exp(-((u - sW) / (0.010 * s)) ** 2) * abs(c)
             # thenar pad: the palm side of the thumb base
-            bump += 0.005 * s * math.exp(-((u - sW - 0.028 * s) / (0.022 * s)) ** 2) * max(0.0, sn) * max(0.0, c) ** 0.6
+            bump += 0.010 * s * math.exp(-((u - sW - 0.038 * s) / (0.026 * s)) ** 2) * max(0.0, sn * 0.7 + c * 0.7) ** 1.2
             # knuckles on the back of the hand
             for k in (0.026, 0.009, -0.008, -0.024):
                 bump += 0.0028 * s * math.exp(-((u - sK + 0.004 * s) / (0.009 * s)) ** 2) * math.exp(-((ra * c - k * s) / (0.008 * s)) ** 2) * max(0.0, -sn)
-        end = smooth01((u - (st['end'] - 0.024 * s)) / (0.024 * s))
-        ra *= lerp(1.0, 0.84, end)
-        rb *= lerp(1.0, 0.55, end)
+        end = (u - (st['end'] - 0.030 * s)) / (0.030 * s)
+        if end > 0:
+            k = math.sqrt(max(0.0, 1.0 - min(1.0, end) ** 2 * 0.80))
+            ra *= lerp(1.0, 0.80, min(1.0, end)) * k ** 0.4
+            rb *= k
         if u < 0:
             k = 1.0 - 0.15 * smooth01(-u / (0.07 * s))
             ra *= k
             rb *= k
-        a, b = sell(th, ra * gm, rb * gm, lerp(2.0, 2.25, smooth01((u - sW) / (0.03 * s))))
+        a, b = sell(th, ra * gm, rb * gm, lerp(2.0, 2.12, smooth01((u - sW) / (0.03 * s))))
         return a + c * bump, b + sn * bump
 
     def arm_weights_at(self, sv, st, side='L'):
@@ -944,26 +946,26 @@ class Body:
         K = self.J['knuckle']
         st = self.arm_stations()
         part = Part('fingers.L', 'skin')
-        lens = [0.094, 0.103, 0.097, 0.077]
-        offs = [0.0265, 0.0092, -0.0080, -0.0240]
+        lens = [0.074, 0.082, 0.077, 0.061]
+        offs = [0.0270, 0.0095, -0.0085, -0.0255]
         curls = [(0.10, 0.16, 0.10), (0.14, 0.20, 0.12), (0.18, 0.24, 0.14), (0.24, 0.28, 0.16)]
-        splay = [0.10, 0.03, -0.04, -0.12]
-        radii = [0.0100, 0.0103, 0.0097, 0.0085]
+        splay = [0.20, 0.06, -0.08, -0.22]
+        radii = [0.0108, 0.0112, 0.0106, 0.0093]
         fk = lerp(1.0, 0.9, f) * s
         for i, name in enumerate(FINGERS):
-            base = K + N * offs[i] * fk - T * 0.022 * s + B * 0.002 * s
+            base = K + N * offs[i] * fk - T * 0.016 * s - B * 0.001 * s
             d = (T + N * splay[i] * 0.5).normalized()
             L = lens[i] * fk
             seg = []
             for k2, frac in enumerate((0.45, 0.30, 0.25)):
                 d = rotate_towards(d, B, curls[i][k2])
-                seg.append((d, L * frac + (0.022 * s if k2 == 0 else 0.0)))
+                seg.append((d, L * frac + (0.016 * s if k2 == 0 else 0.0)))
             self._finger(part, base, seg, radii[i] * fk / s * s, name, st)
         # thumb from the heel of the palm
-        base = self.J['wrist'] + T * 0.026 * s + N * 0.026 * fk + B * 0.005 * s
-        d = (T * 0.82 + N * 0.40 + B * 0.40).normalized()
+        base = self.J['wrist'] + T * 0.036 * s + N * 0.020 * fk + B * 0.009 * s
+        d = (T * 0.86 + N * 0.34 + B * 0.38).normalized()
         seg = []
-        for k2, (l, c) in enumerate(((0.050, 0.10), (0.036, 0.16), (0.030, 0.14))):
+        for k2, (l, c) in enumerate(((0.044, 0.10), (0.032, 0.16), (0.027, 0.14))):
             d = rotate_towards(d, B, c)
             seg.append((d, l * fk))
         self._finger(part, base, seg, 0.0140 * fk, 'thumb', st, thumb=True)

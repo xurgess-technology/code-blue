@@ -19,7 +19,7 @@ class TrunkGarment:
     """A garment tube around the trunk: rows by v (0 hem .. 1 top), columns by azimuth."""
 
     def __init__(self, body, name, z_bot, z_top, offset, segs, rows, piece=None, attrs=None, feat_k=0.6,
-                 folds=0.004, fold_scale=18.0, below_hip_flare=0.0):
+                 folds=0.004, fold_scale=18.0, below_hip_flare=0.0, split=None):
         self.b = body
         self.name = name
         self.z_bot = z_bot          # f(th) -> z of the lowest row
@@ -29,6 +29,7 @@ class TrunkGarment:
         self.attrs = attrs or (lambda p, z, th, v: {})
         self.feat_k, self.folds, self.fold_scale = max(feat_k, 0.85), folds, fold_scale
         self.flare = below_hip_flare
+        self.split = split          # (z, v): row v lies exactly on the horizontal ring at z
 
     def point(self, z, th, extra_off=0.0):
         b = self.b
@@ -55,7 +56,11 @@ class TrunkGarment:
                 th = TAU * j / self.segs
                 if th > math.pi:
                     th -= TAU
-                z = lerp(self.z_bot(th), self.z_top(th), v)
+                if self.split:
+                    zs_, vs_ = self.split
+                    z = lerp(self.z_bot(th), zs_, v / vs_) if v <= vs_ else lerp(zs_, self.z_top(th), (v - vs_) / (1 - vs_))
+                else:
+                    z = lerp(self.z_bot(th), self.z_top(th), v)
                 p = self.point(z, th)
                 ring.append(p)
                 e = self.attrs(p, z, th, v)
@@ -179,7 +184,7 @@ def build_hair(body, P, res):
     HC = body.HC
     part = Part('hair', 'skin', rigid='head', uv_boost=1.4)
     part.const = {'hair': 1.0}
-    if style in ('none', 'buzz'):
+    if style in ('none', 'buzz', 'balding'):
         return []          # a buzz cut is texture on the scalp only (a shell z-fights)
     segs = 40 * res
     rows = 9 * res
@@ -621,7 +626,8 @@ def build_character(P, res=1):
             pocket = 1.0 if (0.045 * s < p.x < 0.135 * s and 1.215 * s < z < 1.335 * s and math.cos(th) > 0.3) else 0.0
             return {'pocket': pocket, 'crease': 0.3 + 0.7 * smooth01((1.15 * s - z) / (0.2 * s)),
                     'band': 1.0 if v > 0.965 or v < 0.03 else 0.0, 'blood': 0.6 * smooth01((1.25 * s - z) / (0.2 * s))}
-        g = TrunkGarment(body, 'scrub_top', z_hem, z_neck, off_top, 40 * res, 18 * res, attrs=top_attrs, feat_k=0.35, folds=0.0035)
+        g = TrunkGarment(body, 'scrub_top', z_hem, z_neck, off_top, 40 * res, 18 * res, attrs=top_attrs, feat_k=0.35, folds=0.0035,
+                         split=(1.262 * s, 6 / 18) if P['gash'] else None)
         ids, rings = g.build(top, lambda p, ex: body.trunk_weights(p))
         hem_ring(top, ids[0], 0.008 * s, -0.004 * s, {'band': 1.0})
         hem_ring(top, ids[-1], 0.006 * s, 0.004 * s, {'band': 1.0})
@@ -667,7 +673,7 @@ def build_character(P, res=1):
             # split the top at a ring above the belly: TopLower hides to bare it, TopRolled shows the roll
             z_roll = 1.262 * s
             top.smooth_normals()
-            lower = top.extract(lambda fi, pts: sum(q.z for q in pts) / len(pts) < z_roll and all(q.z < z_roll + 0.004 * s for q in pts), 'scrub_top_lower')
+            lower = top.extract(lambda fi, pts: all(q.z < z_roll + 0.0005 for q in pts), 'scrub_top_lower')
             lower.meta['piece'] = 'TopLower'
             garments.append(lower)
             roll = Part('scrub_roll', 'cloth')
@@ -719,7 +725,7 @@ def build_character(P, res=1):
             o = 0.016 + 0.010 * smooth01((1.30 * s - z) / (0.4 * s))
             front = max(0.0, math.cos(th))
             # hug the belly over the wound so the gown never stands proud of it
-            o -= 0.012 * front * math.exp(-((z - 1.03 * s) / (0.12 * s)) ** 2)
+            o -= 0.004 * front * math.exp(-((z - 1.03 * s) / (0.12 * s)) ** 2)
             return o * s
 
         def skirt_w(p, ex):
@@ -749,7 +755,7 @@ def build_character(P, res=1):
         slg = Part('gown_sleeve.L', 'cloth')
         slg.const = {'gown': 1.0}
         gs_end = 0.125 * s
-        ids_s, rings_s, sv_s, fr_s = limb_tube(slg, body, 'arm', -0.012 * s, gs_end, lambda sv, th: (0.006 + 0.020 * smooth01((sv + 0.012 * s) / (gs_end + 0.012 * s))) * s,
+        ids_s, rings_s, sv_s, fr_s = limb_tube(slg, body, 'arm', -0.045 * s, gs_end, lambda sv, th: (0.008 + 0.018 * smooth01((sv + 0.02 * s) / (gs_end + 0.02 * s))) * s,
                                                 16 * res, lambda sv, th: {'band': 1.0 if sv > gs_end - 0.012 * s else 0.0}, 0.02 * s / res)
         tuck_end(slg, ids_s[-1], fr_s[0][-1], 0.012 * s, 0.93, {'band': 1.0})
         garments += [gown, slg, slg.mirrored('gown_sleeve.R')]
@@ -792,7 +798,7 @@ def build_character(P, res=1):
 
         def cov_trunk_g(p, sv=None):
             th = math.atan2(p.x, -(p.y - body.axis_y(p.z)))
-            if W_TH[0] - 0.12 < th < W_TH[1] + 0.12 and W_Z[0] - win_margin < p.z < W_Z[1] + win_margin:
+            if W_TH[0] - 0.04 < th < W_TH[1] + 0.04 and W_Z[0] - win_margin * 0.5 < p.z < W_Z[1] + win_margin * 0.5:
                 return False
             return p.z < neck(th) - 0.02 * s
         cover['trunk'].append(cov_trunk_g)

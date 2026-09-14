@@ -168,7 +168,11 @@ class NB:
         out = self.n('ShaderNodeOutputMaterial')
         out.name = 'Out'
         self.link(bsdf.outputs[0], out.inputs['Surface'])
-        for nm, sock in (('SIG_color', color), ('SIG_rough', rough), ('SIG_mask', mask)):
+        ao = self.n('ShaderNodeAmbientOcclusion')
+        ao.only_local = True
+        ao.samples = 16
+        ao.inputs['Distance'].default_value = 0.18
+        for nm, sock in (('SIG_color', color), ('SIG_rough', rough), ('SIG_mask', mask), ('SIG_ao', ao.outputs['AO'])):
             r = self.n('NodeReroute')
             r.name = nm
             self.link(sock, r.inputs[0])
@@ -180,7 +184,7 @@ def set_bake_signal(mat, which):
     out, emit, bsdf = nt.nodes['Out'], nt.nodes['BakeEmit'], nt.nodes['BSDF']
     for l in list(out.inputs['Surface'].links):
         nt.links.remove(l)
-    if which in ('color', 'rough', 'mask'):
+    if which in ('color', 'rough', 'mask', 'ao'):
         for l in list(emit.inputs['Color'].links):
             nt.links.remove(l)
         nt.links.new(nt.nodes['SIG_' + which].outputs[0], emit.inputs['Color'])
@@ -344,7 +348,7 @@ def skin_material(P):
     col = b.mix(b.mul(A['beard'], P['beard'] * 0.25), col, tuple(c * 0.75 for c in base))
     # scalp showing through short hair
     col = b.mix(b.mul(A['scalp'], 0.35 if P['hair'] != 'balding' else 0.10), col, tuple(c * 0.7 for c in base))
-    if P['hair'] == 'buzz':
+    if P['hair'] in ('buzz', 'balding'):
         buzz = b.mul(A['scalp'], b.mr(b.noise(co, 1400.0, 1), 0.30, 0.60))
         col = b.mix(b.mul(A['scalp'], 0.75), col, lin(P['hair_col']))
         col = b.mix(buzz, col, scale_col(lin(P['hair_col']), 0.5))
@@ -353,7 +357,7 @@ def skin_material(P):
     col = b.mix(b.mul(A['brow'], brow_n, 0.95), col, lin(P['brows_col']))
     # lips
     lipc = tuple(min(1.0, c * k) for c, k in zip(base, (0.80, 0.42, 0.44)))
-    col = b.mix(b.mul(b.mr(A['lip'], 0.30, 0.85), 0.8), col, lipc)
+    col = b.mix(b.mul(b.mr(A['lip'], 0.35, 0.95), 0.6), col, lipc)
     col = b.mix(b.mul(A['nostril'], 0.9), col, tuple(c * 0.25 for c in base))
     col = b.mix(b.mul(A['nipple'], 0.6), col, tuple(c * w for c, w in zip(base, (0.75, 0.55, 0.55))))
     col = b.mix(b.mul(A['navel'], 0.7), col, tuple(c * 0.45 for c in base))

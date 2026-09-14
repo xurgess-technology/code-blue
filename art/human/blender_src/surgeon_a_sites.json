@@ -134,8 +134,8 @@
   "s0": -0.0506,
   "E": 0.294,
   "W": 0.552,
-  "K": 0.648,
-  "end": 0.6531,
+  "K": 0.652,
+  "end": 0.6572,
   "cut": 0.3648,
   "tq": 0.2182,
   "inf0": 0.3951,
@@ -143,14 +143,14 @@
   "vein": 0.2991
  },
  "tris": {
-  "Human": 16080,
-  "TopLower": 924,
+  "Human": 16440,
+  "TopLower": 560,
   "TopRolled": 704,
   "GashSkin": 536,
   "Cap": 760,
   "Mask": 876
  },
- "tris_total": 19880,
+ "tris_total": 19876,
  "clips": {
   "Idle": {
    "frames": 120,

@@ -95,7 +95,7 @@ def build_objects(parts, mats, prefix):
 
 def new_image(name, colorspace, size=None):
     size = size or TEX
-    img = bpy.data.images.new(name, size, size, alpha=False, float_buffer=False)
+    img = bpy.data.images.new(name, size, size, alpha=True, float_buffer=False)
     img.colorspace_settings.name = colorspace
     return img
 
@@ -115,12 +115,36 @@ def bake(lows, high, kind, samples, targets):
         low.select_set(True)
         bpy.context.view_layer.objects.active = low
         t = time.time()
-        kw = dict(use_selected_to_active=True, cage_extrusion=0.006, max_ray_distance=0.02, margin=12, use_clear=False, target='IMAGE_TEXTURES')
+        kw = dict(use_selected_to_active=True, cage_extrusion=0.006, max_ray_distance=0.02, margin=0, use_clear=False, target='IMAGE_TEXTURES')
         if kind == 'NORMAL':
             bpy.ops.object.bake(type='NORMAL', normal_space='TANGENT', **kw)
         else:
             bpy.ops.object.bake(type=kind, **kw)
         log('baked', kind, low.name, 'in %.1fs' % (time.time() - t))
+
+
+def dilate(img, steps):
+    """Grow baked texels (alpha > 0) into the empty space around their islands, then make it opaque."""
+    w, h = img.size
+    px = np.empty(w * h * 4, np.float32)
+    img.pixels.foreach_get(px)
+    px = px.reshape(h, w, 4)
+    filled = px[:, :, 3] > 0.5
+    col = px[:, :, :3] * filled[:, :, None]
+    for _ in range(steps):
+        acc = np.zeros_like(col)
+        cnt = np.zeros((h, w), np.float32)
+        for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)):
+            m = np.roll(np.roll(filled, dy, 0), dx, 1)
+            acc += np.roll(np.roll(col, dy, 0), dx, 1) * m[:, :, None]
+            cnt += m
+        grow = (~filled) & (cnt > 0)
+        col[grow] = acc[grow] / cnt[grow][:, None]
+        filled = filled | grow
+    px[:, :, :3] = col
+    px[:, :, 3] = 1.0
+    img.pixels.foreach_set(px.ravel())
+    img.update()
 
 
 def place_sites(arm, info):
@@ -221,15 +245,18 @@ def main():
     if not NOBAKE and hu_materials:
         log('generating bake source mesh (res %d)' % BAKE_RES)
         hparts, _ = hu_outfit.build_character(P, BAKE_RES)
-        hobjs = [hu_blender.part_object(p, [cloth_p, skin_p], with_weights=False) for p in hparts]
-        high = join(hobjs, 'HU_BakeSource')
-        for sk in list(high.data.shape_keys.key_blocks) if high.data.shape_keys else []:
-            pass
-        if high.data.shape_keys:
-            high.shape_key_clear()
-        mod = high.modifiers.new('sub', 'SUBSURF')
-        mod.levels = mod.render_levels = 1
-        log('high tris', sum(len(pg.vertices) - 2 for pg in high.data.polygons) * 4)
+        highs = {}
+        for key, matkey in (('Cloth', 'cloth'), ('Skin', 'skin')):
+            hobjs = [hu_blender.part_object(p, [cloth_p, skin_p], with_weights=False) for p in hparts if p.mat == matkey]
+            for ho in hobjs:
+                if ho.data.shape_keys:
+                    ho.shape_key_clear()
+            high = join(hobjs, 'HU_BakeSource_' + key)
+            mod = high.modifiers.new('sub', 'SUBSURF')
+            mod.levels = mod.render_levels = 1
+            highs[key] = high
+            log('high tris', key, sum(len(pg.vertices) - 2 for pg in high.data.polygons) * 4)
+        scratch = bpy.data.images.new('HU_scratch', 16, 16, alpha=False)
 
         imgs, baked = {}, {}
         for key, proc in (('Cloth', cloth_p), ('Skin', skin_p)):
@@ -243,6 +270,9 @@ def main():
             aonode.image = iao
             mknode = mat.node_tree.nodes.new('ShaderNodeTexImage')
             mknode.image = imk
+            scnode = mat.node_tree.nodes.new('ShaderNodeTexImage')
+            scnode.image = scratch
+            scnode.name = 'HU_scratch'
             imgs[key] = (ic, ir, inn, iao, imk)
             baked[key] = (mat, nodes, aonode, mknode, proc)
         for ob in pieces.values():
@@ -255,6 +285,10 @@ def main():
             scn.world = bpy.data.worlds.new('BakeWorld')
         scn.world.light_settings.distance = 0.20
         lows = list(pieces.values())
+        for ob in lows:
+            # the low pieces are not occluders for each other's AO: only the high source is
+            for attr in ('visible_camera', 'visible_diffuse', 'visible_glossy', 'visible_transmission', 'visible_volume_scatter', 'visible_shadow'):
+                setattr(ob, attr, False)
         # the bake source is in rest pose; so are the pieces (no action assigned)
         arm.animation_data.action = None
         for pb in arm.pose.bones:
@@ -263,19 +297,25 @@ def main():
         for img_tuple in imgs.values():
             for img in img_tuple:
                 px = np.zeros(img.size[0] * img.size[1] * 4, np.float32)
-                px[3::4] = 1.0
                 img.pixels.foreach_set(px)
         for sig, idx, kind, samples in (('color', 0, 'EMIT', 4), ('rough', 1, 'EMIT', 4), ('mask', 'mask', 'EMIT', 2),
-                                         ('normal', 2, 'NORMAL', 4), ('ao', 'ao', 'AO', AO_SAMPLES)):
+                                         ('normal', 2, 'NORMAL', 4), ('ao', 'ao', 'EMIT', AO_SAMPLES)):
             for key in ('Cloth', 'Skin'):
                 hu_materials.set_bake_signal(baked[key][4], sig)
-            targets = {}
             for key in ('Cloth', 'Skin'):
+                other = 'Skin' if key == 'Cloth' else 'Cloth'
+                targets = {}
                 mat, nodes, aonode, mknode, proc = baked[key]
                 targets[mat.name] = aonode if sig == 'ao' else (mknode if sig == 'mask' else nodes[idx])
-            bake(lows, high, kind, samples, targets)
+                omat = baked[other][0]
+                targets[omat.name] = omat.node_tree.nodes['HU_scratch']
+                use = [o for o in lows if any(m == mat for m in o.data.materials) and any(pg.material_index == list(o.data.materials).index(mat) for pg in o.data.polygons)]
+                bake(use, highs[key], kind, samples, targets)
         for key in ('Cloth', 'Skin'):
             hu_materials.set_bake_signal(baked[key][4], 'normal')
+        for key in ('Cloth', 'Skin'):
+            for img in imgs[key]:
+                dilate(img, 12)
         for key in ('Cloth', 'Skin'):
             ic, ir, inn, iao, imk = imgs[key]
             c = np.empty(TEX * TEX * 4, np.float32)
@@ -303,7 +343,12 @@ def main():
             mat, nodes, aonode, mknode, proc = baked[key]
             mat.node_tree.nodes.remove(aonode)
             mat.node_tree.nodes.remove(mknode)
-        bpy.data.objects.remove(high, do_unlink=True)
+            mat.node_tree.nodes.remove(mat.node_tree.nodes['HU_scratch'])
+        for high in highs.values():
+            bpy.data.objects.remove(high, do_unlink=True)
+        for ob in lows:
+            for attr in ('visible_camera', 'visible_diffuse', 'visible_glossy', 'visible_transmission', 'visible_volume_scatter', 'visible_shadow'):
+                setattr(ob, attr, True)
         log('textures saved')
 
     scn.frame_set(0)
