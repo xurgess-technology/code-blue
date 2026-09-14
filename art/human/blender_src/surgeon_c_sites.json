@@ -143,14 +143,14 @@
   "vein": 0.2909
  },
  "tris": {
-  "Human": 16610,
+  "Human": 16606,
   "TopLower": 560,
   "TopRolled": 704,
   "GashSkin": 538,
   "Cap": 760,
   "Mask": 876
  },
- "tris_total": 20048,
+ "tris_total": 20044,
  "clips": {
   "Idle": {
    "frames": 120,

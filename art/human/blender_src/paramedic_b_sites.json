@@ -123,9 +123,9 @@
   "vein": 0.2648
  },
  "tris": {
-  "Human": 16736
+  "Human": 16740
  },
- "tris_total": 16736,
+ "tris_total": 16740,
  "clips": {
   "Idle": {
    "frames": 120,

@@ -127,9 +127,9 @@ def studio(target_z=1.0, key=1.0):
     me.from_pydata([(-20, -20, 0), (20, -20, 0), (20, 20, 0), (-20, 20, 0)], [], [(0, 1, 2, 3)])
     me.materials.append(m)
     temp(bpy.data.objects.new('floor', me))
-    light('AREA', (-2.5, -3.5, 3.2), (0, 0, target_z), 90 * key, (1.0, 0.95, 0.9), 2.0, 'key')
-    light('AREA', (3.0, -2.5, 1.6), (0, 0, target_z), 18 * key, (0.8, 0.88, 1.0), 3.0, 'fill')
-    light('AREA', (1.5, 3.5, 3.0), (0, 0, target_z), 120 * key, (0.75, 0.85, 1.0), 1.5, 'rim')
+    light('AREA', (-2.5, -3.5, 3.2), (0, 0, target_z), 260 * key, (1.0, 0.95, 0.9), 2.5, 'key')
+    light('AREA', (3.0, -2.5, 1.6), (0, 0, target_z), 60 * key, (0.8, 0.88, 1.0), 3.0, 'fill')
+    light('AREA', (1.5, 3.5, 3.0), (0, 0, target_z), 220 * key, (0.75, 0.85, 1.0), 1.5, 'rim')
 
 
 def bone_head(name):
@@ -186,7 +186,7 @@ def mask_unmix(state):
 H = SITES['height']
 
 
-def shot_turn(loc, target=None, lens=55):
+def shot_turn(loc, target=None, lens=85):
     studio()
     camera(loc, target or (0, 0, H * 0.53), lens)
 

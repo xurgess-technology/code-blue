@@ -154,11 +154,11 @@ class Body:
         cr = sd_ellipsoid(x, y, z, (0.0, 0.006, 0.036), (lerp(0.079, 0.076, f), 0.097, 0.094))
         fh = sd_ellipsoid(x, y, z, (0.0, -0.030, 0.045), (0.061, 0.066, 0.062))
         mid = sd_ellipsoid(x, y, z, (0.0, -0.040, -0.024), (lerp(0.051, 0.048, f), 0.058, 0.050))
-        mouth = sd_ellipsoid(x, y, z, (0.0, -0.063, -0.066), (0.026, 0.036, 0.028))
+        mouth = sd_ellipsoid(x, y, z, (0.0, -0.063, -0.061), (0.025, 0.036, 0.026))
         jw = lerp(0.043, 0.055, P['jaw']) - 0.004 * f
-        jaw = sd_ellipsoid(x, y, z, (0.0, -0.024, -0.086), (jw, 0.062, 0.026))
+        jaw = sd_ellipsoid(x, y, z, (0.0, -0.024, -0.082), (jw, 0.062, 0.026))
         cz = lerp(0.0, 0.009, P['chin'])
-        chin = sd_ellipsoid(x, y, z, (0.0, -0.084 - cz, -0.103), (0.018 + 0.007 * P['jaw'] - 0.003 * f, 0.017, 0.016))
+        chin = sd_ellipsoid(x, y, z, (0.0, -0.084 - cz, -0.098), (0.018 + 0.007 * P['jaw'] - 0.003 * f, 0.017, 0.016))
         ang = sd_ellipsoid(abs(x), y, z, (jw + 0.002, -0.006, -0.080), (0.011, 0.020, 0.013))
         zyg = sd_ellipsoid(abs(x), y, z, (0.056, -0.040, -0.002), (0.016, 0.034, 0.013))
         h = smin(cr, fh, 0.030)
@@ -242,12 +242,12 @@ class Body:
         add((0.012, -0.090, 0.008), (0.006, 0.03, 0.010), -0.003)                          # inner corner hollow
         add((0.052, -0.066, -0.006), (0.016, 0.03, 0.011), lerp(0.003, 0.009, P['cheek']), tag='cheekbone')
         add((0.036, -0.085, -0.020), (0.014, 0.03, 0.014), 0.0035, tag='cheekbone')                          # malar fat pad
-        add((0.047, -0.070, -0.045), (0.016, 0.03, 0.018), -(0.003 + 0.005 * max(0.0, 1.15 - P['girth']) * 2.2) * (1 - 0.5 * f))   # hollow cheek
+        add((0.047, -0.070, -0.045), (0.016, 0.03, 0.018), -(0.005 * max(0.0, 1.10 - P['girth']) * 2.2) * (1 - 0.5 * f))   # hollow cheek
         add((0.064, -0.040, 0.045), (0.012, 0.02, 0.020), -0.004)                          # temple
-        add((0.0, -0.098, -0.084), (0.015, 0.03, 0.0045), -0.0028)                         # mentolabial fold
+        add((0.0, -0.098, -0.078), (0.014, 0.03, 0.0045), -0.0022)                         # mentolabial fold
         add((0.0, -0.098, -0.098), (0.013, 0.03, 0.010), 0.002 + 0.002 * P['chin'])       # chin pad
-        add((0.026, -0.094, -0.052), (0.005, 0.03, 0.018), -0.0020 * (0.4 + age), tag='nasolabial')
-        add((0.029, -0.093, -0.070), (0.006, 0.03, 0.008), -0.0015 * (0.3 + age))          # mouth corner
+        add((0.026, -0.094, -0.048), (0.006, 0.03, 0.016), -0.0010 * (0.4 + age), tag='nasolabial')
+        add((0.027, -0.093, -0.064), (0.005, 0.03, 0.007), -0.0012 * (0.3 + age))          # mouth corner
         add((0.046, -0.050, -0.092), (0.016, 0.03, 0.013), 0.004 * age * P['girth'])       # jowl
         add((0.030, -0.086, 0.001), (0.012, 0.03, 0.004), 0.0015 * (0.5 + age))            # under-eye bag
         self.head_feats = F
@@ -321,11 +321,11 @@ class Body:
             # philtrum and the lips
             lp = lerp(0.6, 1.25, P['lips'])
             mw = 0.0245 * lerp(0.92, 1.08, P['lips'])
-            zm = -0.0690
+            zm = -0.0625
             cx = clamp(abs(q.x) / mw, 0.0, 1.4)
             zc = zm - 0.0025 * cx * cx
             if abs(q.x) < mw * 1.5 and zm - 0.03 < q.z < zm + 0.03:
-                corner = smooth01((1.15 - cx) / 0.35)
+                corner = smooth01((1.05 - cx) / 0.45) * (1.0 - 0.35 * cx * cx)
                 gu = math.exp(-((q.z - zc - 0.0042) / 0.0050) ** 2) * corner
                 gl = math.exp(-((q.z - zc + 0.0062) / (0.0056 if q.z > zc - 0.006 else 0.0046)) ** 2) * corner
                 disp += 0.0042 * lp * gu + 0.0052 * lp * gl
@@ -675,7 +675,7 @@ class Body:
                         dh, _ = self.head_disp(sp, carve=False)
                         t_skin = t_sdf + dh * 0.9
                         # radius: touching the ball at the edge, a rounded margin, then down into the skin
-                        margin = R * 1.035 + R * (0.16 if upper else 0.10) * smooth01(v * 6.0)
+                        margin = R * 1.03 + R * (0.10 if upper else 0.065) * smooth01(v * 6.0)
                         if upper:
                             margin += R * 0.06 * math.exp(-((v - 0.40) / 0.14) ** 2)
                         blend = smooth01((v - 0.30) / 0.70)

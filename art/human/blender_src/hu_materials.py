@@ -357,7 +357,7 @@ def skin_material(P):
     col = b.mix(b.mul(A['brow'], brow_n, 0.95), col, lin(P['brows_col']))
     # lips
     lipc = tuple(min(1.0, c * k) for c, k in zip(base, (0.80, 0.42, 0.44)))
-    col = b.mix(b.mul(b.mr(A['lip'], 0.35, 0.95), 0.6), col, lipc)
+    col = b.mix(b.mul(b.mr(A['lip'], 0.45, 1.0), 0.55), col, lipc)
     col = b.mix(b.mul(A['nostril'], 0.9), col, tuple(c * 0.25 for c in base))
     col = b.mix(b.mul(A['nipple'], 0.6), col, tuple(c * w for c, w in zip(base, (0.75, 0.55, 0.55))))
     col = b.mix(b.mul(A['navel'], 0.7), col, tuple(c * 0.45 for c in base))
