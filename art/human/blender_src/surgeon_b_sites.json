@@ -1,0 +1,223 @@
+{
+ "variant": "surgeon_b",
+ "height": 1.68,
+ "sites": {
+  "limb": {
+   "bone": "upperarm.R",
+   "half_up": 0.0341,
+   "half_side": 0.0339,
+   "axis_depth": 0.0341,
+   "shape": 2.2,
+   "infection_start": 0.1652,
+   "s": 0.1872,
+   "origin_gltf": [
+    -0.2839,
+    1.2381,
+    0.0109
+   ],
+   "x_gltf": [
+    -0.731,
+    -0.682,
+    0.017
+   ],
+   "y_gltf": [
+    0.012,
+    0.011,
+    1.0
+   ]
+  },
+  "limb_cut": {
+   "bone": "forearm.R",
+   "half_up": 0.0313,
+   "half_side": 0.0292,
+   "axis_depth": 0.0313,
+   "shape": 2.2,
+   "infection_start": 0.0283,
+   "s": 0.3241,
+   "origin_gltf": [
+    -0.3811,
+    1.1474,
+    0.0175
+   ],
+   "x_gltf": [
+    -0.725,
+    -0.676,
+    0.13
+   ],
+   "y_gltf": [
+    0.095,
+    0.089,
+    0.991
+   ]
+  },
+  "injection": {
+   "bone": "forearm.L",
+   "half_up": 0.0332,
+   "half_side": 0.0324,
+   "axis_depth": 0.0332,
+   "shape": 2.2,
+   "s": 0.2627,
+   "origin_gltf": [
+    0.3266,
+    1.1753,
+    0.0086
+   ],
+   "x_gltf": [
+    0.73,
+    -0.68,
+    0.067
+   ],
+   "y_gltf": [
+    -0.398,
+    -0.343,
+    0.851
+   ]
+  },
+  "gunshot": {
+   "bone": "hips",
+   "origin_gltf": [
+    -0.0546,
+    0.9769,
+    0.0719
+   ],
+   "x_gltf": [
+    0.0,
+    -1.0,
+    -0.0
+   ],
+   "y_gltf": [
+    -0.226,
+    0.177,
+    0.958
+   ]
+  },
+  "gash": {
+   "bone": "spine",
+   "half_len": 0.0897,
+   "half_gap": 0.0151,
+   "origin_gltf": [
+    -0.0265,
+    1.0476,
+    0.0743
+   ],
+   "x_gltf": [
+    0.0,
+    -1.0,
+    -0.0
+   ],
+   "y_gltf": [
+    -0.106,
+    -0.088,
+    0.99
+   ]
+  },
+  "eyes": {
+   "bone": "head",
+   "origin_gltf": [
+    0.0,
+    1.5772,
+    0.0721
+   ],
+   "x_gltf": [
+    1.0,
+    0.0,
+    -0.0
+   ],
+   "y_gltf": [
+    0.0,
+    1.0,
+    -0.0
+   ]
+  }
+ },
+ "arm_stations": {
+  "s0": -0.0472,
+  "E": 0.258,
+  "W": 0.48,
+  "K": 0.56,
+  "end": 0.5662,
+  "cut": 0.3241,
+  "tq": 0.1872,
+  "inf0": 0.3524,
+  "inf1": 0.3996,
+  "vein": 0.2627
+ },
+ "tris": {
+  "Human": 16312,
+  "TopLower": 924,
+  "TopRolled": 704,
+  "GashSkin": 556,
+  "Cap": 672,
+  "Mask": 876
+ },
+ "tris_total": 20044,
+ "clips": {
+  "Idle": {
+   "frames": 120,
+   "loop": true,
+   "speed": 0.0,
+   "about": "standing, breathing, weight shifts, looks around"
+  },
+  "Walk": {
+   "frames": 32,
+   "loop": true,
+   "speed": 1.4,
+   "about": "walk, planted feet keep pace at 1.40 m/s"
+  },
+  "Jog": {
+   "frames": 22,
+   "loop": true,
+   "speed": 3.4,
+   "about": "the players' walk speed (C.WALK_SPEED 3.4)"
+  },
+  "Sprint": {
+   "frames": 18,
+   "loop": true,
+   "speed": 5.6,
+   "about": "C.SPRINT_SPEED 5.6"
+  },
+  "Push": {
+   "frames": 34,
+   "loop": true,
+   "speed": 1.25,
+   "about": "pushing a gurney: hands on a bar 0.98 m up, 0.50 m ahead; crew speed 1.25"
+  },
+  "Interact": {
+   "frames": 30,
+   "loop": false,
+   "speed": null,
+   "about": "reach forward and press/grab at chest height, one-shot"
+  },
+  "PickUp": {
+   "frames": 42,
+   "loop": false,
+   "speed": null,
+   "about": "squat, grab from the floor 0.40 m ahead, stand up holding it, one-shot"
+  },
+  "Crawl": {
+   "frames": 48,
+   "loop": true,
+   "speed": 0.75,
+   "about": "downed: prone crawl, planted hands keep pace at CRAWL_SPEED 0.75"
+  },
+  "Carried": {
+   "frames": 60,
+   "loop": true,
+   "speed": null,
+   "about": "slung over a carrier's right shoulder; origin = the belly contact point"
+  },
+  "Carrying": {
+   "frames": 60,
+   "loop": true,
+   "speed": null,
+   "about": "carrier holding a body on the right shoulder (arms and upper body only)"
+  },
+  "Lying": {
+   "frames": 90,
+   "loop": true,
+   "speed": null,
+   "about": "on the back on a table, breathing; origin = middle of the back on the table top"
+  }
+ },
+ "fps": 30
+}

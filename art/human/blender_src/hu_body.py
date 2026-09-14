@@ -158,15 +158,15 @@ class Body:
         jw = lerp(0.043, 0.055, P['jaw']) - 0.004 * f
         jaw = sd_ellipsoid(x, y, z, (0.0, -0.024, -0.086), (jw, 0.062, 0.026))
         cz = lerp(0.0, 0.009, P['chin'])
-        chin = sd_ellipsoid(x, y, z, (0.0, -0.078 - cz, -0.100), (0.018 + 0.007 * P['jaw'] - 0.003 * f, 0.017, 0.016))
-        ang = sd_ellipsoid(abs(x), y, z, (jw - 0.002, -0.004, -0.076), (0.012, 0.020, 0.016))
+        chin = sd_ellipsoid(x, y, z, (0.0, -0.084 - cz, -0.103), (0.018 + 0.007 * P['jaw'] - 0.003 * f, 0.017, 0.016))
+        ang = sd_ellipsoid(abs(x), y, z, (jw + 0.002, -0.006, -0.080), (0.011, 0.020, 0.013))
         zyg = sd_ellipsoid(abs(x), y, z, (0.056, -0.040, -0.002), (0.016, 0.034, 0.013))
         h = smin(cr, fh, 0.030)
         h = smin(h, mid, 0.030)
         h = smin(h, mouth, 0.020)
         h = smin(h, jaw, 0.026)
         h = smin(h, chin, 0.030)
-        h = smin(h, ang, 0.016)
+        h = smin(h, ang, 0.012)
         h = smin(h, zyg, 0.018)
         return h * hs
 
@@ -240,7 +240,8 @@ class Body:
         add((ew + 0.004, -0.094, 0.034), (0.022, 0.03, 0.0065), lerp(0.001, 0.0055, P['brow']) * lerp(1.0, 0.45, f), tag='brow')
         add((0.0, -0.100, 0.034), (0.011, 0.03, 0.010), 0.002 * (1 - f))                  # glabella
         add((0.012, -0.090, 0.008), (0.006, 0.03, 0.010), -0.003)                          # inner corner hollow
-        add((0.051, -0.068, -0.004), (0.015, 0.03, 0.010), lerp(0.0015, 0.0065, P['cheek']), tag='cheekbone')
+        add((0.052, -0.066, -0.006), (0.016, 0.03, 0.011), lerp(0.003, 0.009, P['cheek']), tag='cheekbone')
+        add((0.036, -0.085, -0.020), (0.014, 0.03, 0.014), 0.0035, tag='cheekbone')                          # malar fat pad
         add((0.047, -0.070, -0.045), (0.016, 0.03, 0.018), -(0.003 + 0.005 * max(0.0, 1.15 - P['girth']) * 2.2) * (1 - 0.5 * f))   # hollow cheek
         add((0.064, -0.040, 0.045), (0.012, 0.02, 0.020), -0.004)                          # temple
         add((0.0, -0.098, -0.084), (0.015, 0.03, 0.0045), -0.0028)                         # mentolabial fold
@@ -318,7 +319,7 @@ class Body:
                 disp -= 0.0045 * gn
                 tags['nostril'] = max(tags.get('nostril', 0.0), gn)
             # philtrum and the lips
-            lp = lerp(0.6, 1.45, P['lips'])
+            lp = lerp(0.8, 1.6, P['lips'])
             mw = 0.0245 * lerp(0.92, 1.08, P['lips'])
             zm = -0.0690
             cx = clamp(abs(q.x) / mw, 0.0, 1.4)
@@ -342,8 +343,8 @@ class Body:
             # eye sockets: a compact carve under the lid shells, zero where the lids end
             for sx in (1, -1):
                 ec = self.eye_c
-                dx = (q.x - sx * ec.x) / 0.0118
-                dz = (q.z - ec.z) / (0.0100 if q.z > ec.z else 0.0088)
+                dx = (q.x - sx * ec.x) / 0.0112
+                dz = (q.z - ec.z) / (0.0092 if q.z > ec.z else 0.0075)
                 r = math.sqrt(dx * dx + dz * dz)
                 if r < 1.0 and q.y < -0.05:
                     k = smooth01((1.0 - r) / 0.55)
@@ -610,8 +611,8 @@ class Body:
         hl = self.hairline(th)
         m = smooth01((q.z - hl) / 0.008)
         if self.P['hair'] == 'balding':
-            top = smooth01((q.z - 0.050) / 0.02) * smooth01((0.5 - (-math.cos(th))) / 0.6 + 0.6)
-            m *= 1 - top * 0.92
+            ztop = lerp(0.065, 0.090, smooth01((-math.cos(th) + 0.2) / 1.0))
+            m *= 1 - smooth01((q.z - ztop) / 0.015) * 0.92
         return m
 
     # ================================================================ eyes and lids
@@ -646,9 +647,9 @@ class Body:
                 ex.append(er)
             part.tube(rings, ex, cap_start=c + fwd * R * 1.06, cap_end=c - fwd * R)
             # lids: two shells over the eyeball, the opening an almond
-            U = math.radians(lerp(60, 68, P['eye_w']))
-            hu = math.radians(lerp(19, 29, P['eye_open']))
-            hl = math.radians(lerp(15, 20, P['eye_open']))
+            U = math.radians(lerp(62, 70, P['eye_w']))
+            hu = math.radians(lerp(22, 32, P['eye_open']))
+            hl = math.radians(lerp(17, 22, P['eye_open']))
             tilt = math.radians(4.0 + 3 * self.fem)
             cols = 14 * res + 1
             for upper in (True, False):
@@ -665,7 +666,7 @@ class Body:
                         shape = math.sqrt(max(0.0, 1 - k ** 2.4))
                         wc = tilt * (lat / U) * 0.8 - math.radians(2.0)
                         w_edge = wc + (hu * shape if upper else -hl * shape)
-                        w_far = math.radians(62) if upper else -math.radians(52)
+                        w_far = math.radians(70) if upper else -math.radians(66)
                         w = lerp(w_edge, w_far, v ** 1.2)
                         dirv = fwd * (math.cos(u) * math.cos(w)) + side * (math.sin(u) * math.cos(w)) + up * math.sin(w)
                         # the skin surface along this direction: the lid blends into it
@@ -681,7 +682,7 @@ class Body:
                         rad = lerp(margin, t_skin - 0.0006 * hs, blend)
                         rad = max(rad, R * 1.03)
                         row.append(c + dirv * rad)
-                        er.append({'lid': 1.0 - smooth01((v - 0.6) / 0.3), 'socket': 0.35 * smooth01((0.25 - v) / 0.2)})
+                        er.append({'lid': 1.0 - smooth01(v / 0.30), 'socket': 0.25 * smooth01((0.5 - v) / 0.4)})
                     P_rows.append(row)
                     exs.append(er)
                 flip = (sx < 0) != upper

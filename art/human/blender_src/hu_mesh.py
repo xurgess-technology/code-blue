@@ -252,6 +252,21 @@ class Part:
         m.meta = dict(self.meta)
         return m
 
+    def fill_weights(self):
+        """Vertices without weights (fan centres added after a generator restored its weight_fn) take
+        the weights of the nearest weighted vertex of the same part."""
+        empty = [i for i, w in enumerate(self.w) if not w]
+        if not empty:
+            return 0
+        have = [i for i, w in enumerate(self.w) if w]
+        if not have:
+            return 0
+        for i in empty:
+            p = self.v[i]
+            j = min(have, key=lambda k: (self.v[k] - p).length_squared)
+            self.w[i] = dict(self.w[j])
+        return len(empty)
+
     def tris(self):
         return sum(len(f) - 2 for f in self.f)
 

@@ -179,8 +179,8 @@ def build_hair(body, P, res):
     HC = body.HC
     part = Part('hair', 'skin', rigid='head', uv_boost=1.4)
     part.const = {'hair': 1.0}
-    if style == 'none':
-        return []
+    if style in ('none', 'buzz'):
+        return []          # a buzz cut is texture on the scalp only (a shell z-fights)
     segs = 40 * res
     rows = 9 * res
     ln = P['hair_len']
@@ -207,11 +207,12 @@ def build_hair(body, P, res):
             z0 = body.hairline(thw)
             e0 = elev_of_local_z(z0)
             e = lerp(e0, math.radians(88.5), v ** 0.85)
-            lift = -0.0012 * hs if r < 0 else lift_at(v, thw) * hs
+            lift = -0.0012 * hs if r < 0 else lift_at(v, thw) * hs * smooth01(r / 2.5)
             if style == 'balding':
-                # a horseshoe: nothing over the crown, thinning at the temples
-                top = smooth01((math.degrees(e) - 30) / 18) * smooth01((math.cos(thw) + 0.25) / 0.6)
-                lift *= 1 - top
+                # a horseshoe round the back and over the ears; the lift fades to nothing at its top edge
+                qz = math.sin(e) * 0.125
+                ztop = lerp(0.065, 0.090, smooth01((-math.cos(thw) + 0.2) / 1.0))
+                lift *= smooth01((ztop - qz) / 0.018)
             p, _ = body.surf_dome(e, thw, True, lift)
             # hair over the ears is swept back: keep the shell off the ear tops
             ring.append(p)
@@ -229,7 +230,8 @@ def build_hair(body, P, res):
             q = (c - HC) / hs
             th = math.atan2(q.x, -q.y)
             e = math.degrees(math.asin(clamp(q.z / max(q.length, 1e-6), -1, 1)))
-            return smooth01((e - 30) / 18) * smooth01((math.cos(th) + 0.25) / 0.6) > 0.55
+            ztop = lerp(0.065, 0.090, smooth01((-math.cos(th) + 0.2) / 1.0))
+            return q.z > ztop + 0.004 or (math.cos(th) > 0.55 and q.z > -0.01)
         part.extract(bald, 'bald_discard')
     if style == 'bun':
         bun = Part('hair_bun', 'skin', rigid='head', uv_boost=1.4)
@@ -267,7 +269,7 @@ def build_hair(body, P, res):
         ex2 = [[{'hair': 1.0, 'band': 1.0 if 0.10 < S[i] / S[-1] < 0.17 else 0.0} for _ in range(segs2)] for i in range(len(rings2))]
         pt.tube(rings2, ex2, cap_start=path[0] - fr[0][0] * 0.005, cap_end=path[-1] + fr[0][-1] * 0.004)
         parts.append(pt)
-    if P['moustache']:
+    if False and P['moustache']:
         mo = Part('moustache', 'skin', rigid='head', uv_boost=2.0)
         mo.const = {'hair': 1.0, 'moust': 1.0}
         rows_m, cols_m = 3 * res + 1, 12 * res + 1
@@ -1026,6 +1028,7 @@ def build_character(P, res=1):
         parts.append(p)
     parts += hair + garments + headwear
     for p in parts:
+        p.fill_weights()
         if p.nrm is None:
             p.smooth_normals()
     info['sites'] = sites(body, P, info)
@@ -1104,5 +1107,5 @@ def sites(body, P, info):
                        'half_len': body.GASH_HALF, 'half_gap': 0.016 * s}
     # eyes and the head top, handy for cameras and the dissection head
     out['eyes'] = {'bone': 'head', 'matrix': godot_frame(Vector((1, 0, 0)), Vector((0, 0, 1)), body.HC + Vector((0, body.eye_c.y - 0.012, body.eye_c.z)) * body.hs),
-                   'origin': body.HC + Vector((0, body.eye_c.y, body.eye_c.z)) * body.hs}
+                   'origin': body.HC + Vector((0, body.eye_c.y, body.eye_c.z)) * body.hs, 'x': Vector((1, 0, 0)), 'y': Vector((0, 0, 1))}
     return out
