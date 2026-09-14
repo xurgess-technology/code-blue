@@ -1939,6 +1939,8 @@ func damage_player(p: Node, amount: int, source: String, knock: Vector3 = Vector
 	if not is_host() or p == null or not is_instance_valid(p) or not p.alive or p.downed or amount <= 0:
 		return
 	p.take_hit(amount, knock)
+	if combat != null and combat.has_method("cancel_windup"):
+		combat.cancel_windup(p, "hit")   # HANDS HOOK: a hit cancels a wind-up with no strike
 	_broadcast("hit", {"id": p.peer_id, "hp": p.hp, "knock": knock})
 	Audio.play("hurt", p.global_position)
 	_end_operations(p)
@@ -2391,24 +2393,30 @@ func surgery_local_exit() -> void:
 		player_surgery.surgery.local_operator_exit()
 
 
-## Host only. Someone pressed Q.
-func player_shoved(p: Node) -> void:
+## Host only. A shove lands. HANDS HOOK: `charge` 0..1 from the wind-up (scripts/combat/windup.gd:
+## a tap is 0, a full charge 1: longer stun, more knockback); -1 is the instant shove of the old
+## `shove_count` seam (tests and the playtest bot).
+func player_shoved(p: Node, charge: float = -1.0) -> void:
 	if not is_host():
 		return
 	_sound("shove", p.global_position)
-	emit_noise(p.global_position, 0.6, "shove")
+	emit_noise(p.global_position, 0.6 + 0.25 * maxf(charge, 0.0), "shove")
 	var forward: Vector3 = -p.global_transform.basis.z
 	for m in monsters.values():
 		if not _in_shove_cone(p, m.global_position, forward):
 			continue
-		m.shoved(forward)
+		m.shoved(forward, charge)
 		_sound("thud", m.global_position)
+		if combat != null and combat.has_method("monster_shoved"):
+			combat.monster_shoved(m, charge)   # HANDS HOOK: the stun window every machine shows
 	for q in players.values():
 		if q == p or not q.alive or q.downed or not _in_shove_cone(p, q.global_position, forward):
 			continue
-		var knock := forward * 11.0 + Vector3.UP * 2.0
+		var knock := forward * lerpf(11.0, 16.0, maxf(charge, 0.0)) + Vector3.UP * 2.0
 		q.apply_knock(knock)
 		_broadcast("shoved", {"id": q.peer_id, "knock": knock})
+		if combat != null and combat.has_method("cancel_windup"):
+			combat.cancel_windup(q, "shoved")   # HANDS HOOK
 		_end_operations(q)
 		if combat.dragging(q) >= 0:
 			combat.drop_dragged(q)   # SWEEP 3 HOOK (combat): a shoved dragger lets go

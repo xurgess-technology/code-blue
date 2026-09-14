@@ -55,6 +55,7 @@ extends Node
 const NAMES := ["Host", "Álvaro", "Bea O'Neil", "Surgeon Chris"]
 const EconomyScript := preload("res://scripts/economy/economy.gd")
 const MonsterScript := preload("res://scripts/monster.gd")
+const WindupScript := preload("res://scripts/combat/windup.gd")
 
 var role := "host"
 var scenario := "deliver"
@@ -1074,8 +1075,12 @@ func _sc_combat():
 		var p1 = game.players[c1]
 		p1.slots = [{"kind": "bone_saw", "count": 1}, {"kind": "anesthetic", "count": 3}, {"kind": "", "count": 0}, {"kind": "", "count": 0}]
 		_send("combat_go", {"a": ids[0], "b": ids[1], "table": ti})
-		var seen := {"hit": false, "sedated": false, "drag": false}
+		var seen := {"hit": false, "sedated": false, "drag": false, "capped": {}}
 		var watch := func():
+			# HANDS: the over-long charge client 1 claims (5 s after a short hold) is capped here.
+			var ls: Dictionary = game.combat.windup.last_strike
+			if int(ls.get("id", 0)) == c1 and float(ls.get("claim", 0.0)) > 4.0 and seen.capped.is_empty():
+				seen.capped = ls.duplicate()
 			if game.combat.last_result.get("what", "") == "monster":
 				seen.hit = true
 			if game.monsters.has(ids[1]) and game.combat.is_sedated(game.monsters[ids[1]]):
@@ -1094,6 +1099,14 @@ func _sc_combat():
 			return _end(false, "host saw hit=%s sedated=%s drag=%s" % [str(seen.hit), str(seen.sedated), str(seen.drag)])
 		if int(game.combat.swings_seen.get(c1, 0)) < 3:
 			return _end(false, "host animated only %d uses by client 1" % int(game.combat.swings_seen.get(c1, 0)))
+		if not await _do_until(watch, func(): return not seen.capped.is_empty(), 40.0, "client 1's over-long charge"):
+			return
+		var cap: Dictionary = seen.capped
+		# Retransmits under loss can stretch the measured gap, so the check is the rule itself.
+		var limit := minf(minf(float(cap.claim), float(cap.measured) + WindupScript.HOST_CHARGE_SLACK), WindupScript.SHOVE_MAX)
+		if float(cap.held) > limit + 0.001 or float(cap.held) >= float(cap.claim):
+			return _end(false, "the host did not cap the over-long charge: %s" % str(cap))
+		_say("client 1 claimed a %.1f s charge after a short hold; the host measured %.2f s and capped it to %.2f s (charge %.2f)" % [float(cap.claim), float(cap.measured), float(cap.held), float(cap.c)])
 		if not await _until(func(): return _count_msgs("combat_done") > 0, 30.0, "the report from client 1"):
 			return
 		var r: Dictionary = _msgs("combat_done")[0].data
@@ -1113,10 +1126,30 @@ func _sc_combat():
 	var me := _me()
 	if index == 2:
 		var c1: int = _peer_of(1)
-		var st := {"swing": false, "drag": false, "follow": false}
+		var st := {"swing": false, "drag": false, "follow": false, "early": 0, "late": 0, "pose": 0, "winding": false, "strikes": 0, "lead_ms": []}
 		var watch2 := func():
 			if int(game.combat.swings_seen.get(c1, 0)) > 0:
 				st.swing = true
+			# HANDS: every strike of client 1 must follow a wind-up this machine already showed.
+			var p1w = game.players.get(c1)
+			if p1w != null:
+				var act: Dictionary = game.combat.action_of(p1w)
+				var winding := not act.is_empty() and int(act.ph) == 0
+				if winding and not st.winding:
+					st.w_ms = Time.get_ticks_msec()
+				if winding and p1w.body_hands != null and p1w.body_hands.poser != null and (p1w.body_hands.poser.arm_r_w > 0.3 or p1w.body_hands.poser.torso_w > 0.3):
+					st.pose += 1
+				st.winding = winding
+				var n := int(game.combat.swings_seen.get(c1, 0))
+				if n > int(st.strikes):
+					st.strikes = n
+					var w_ms := int(st.get("w_ms", -1))
+					if w_ms >= 0 and Time.get_ticks_msec() - w_ms >= 0:
+						st.early += 1
+						(st.lead_ms as Array).append(Time.get_ticks_msec() - w_ms)
+						st.w_ms = -1
+					elif int(st.early) > 0:   # the first strike may come before this watcher got the order
+						st.late += 1
 			var p1 = game.players.get(c1)
 			if p1 != null and int(p1.dragging_monster) == b_id:
 				st.drag = true
@@ -1127,6 +1160,9 @@ func _sc_combat():
 			return
 		if not (st.swing and st.drag and st.follow):
 			return _end(false, "watcher saw swing=%s drag=%s follow=%s" % [str(st.swing), str(st.drag), str(st.follow)])
+		if int(st.early) < 3 or int(st.late) > 0 or int(st.pose) == 0:
+			return _end(false, "watcher: %d strikes after a visible wind-up, %d without one, pose frames %d" % [int(st.early), int(st.late), int(st.pose)])
+		_say("watched %d wind-ups before their strikes (leads %s wall ms), the pose on %d frames" % [int(st.early), str(st.lead_ms), int(st.pose)])
 		await _finish_together("watched client 1 swing, drag the monster behind them and strap it down")
 		return
 	# Client 1: armed by the host.
@@ -1146,22 +1182,47 @@ func _sc_combat():
 	_say("monster A is dead")
 	# Shove, then jab a moment later in game time (the stun lasts 2 game seconds, and these processes
 	# run faster than real time).
-	var sed_st := {"next": 0.0, "shoved": false}
+	# HANDS: a charged shove (hold bot_charge, let go), then the jab inside the stun it opens.
+	var sed_st := {"next": 0.0, "step": 0}
 	var sedate := func():
 		var m = game.monsters.get(b_id)
 		if m == null or not is_instance_valid(m) or game.world_time < float(sed_st.next):
 			return
 		me.selected = _slot_of("anesthetic")
 		_face_at(m, 1.2)
-		if not sed_st.shoved:
-			me.shove_count += 1
-			sed_st.next = game.world_time + 0.3
-		else:
-			me.bot_use += 1
-			sed_st.next = game.world_time + 1.5
-		sed_st.shoved = not sed_st.shoved
+		match int(sed_st.step):
+			0:
+				me.bot_charge = true
+				sed_st.next = game.world_time + 0.45
+			1:
+				me.bot_charge = false
+				sed_st.next = game.world_time + 0.5
+			_:
+				me.bot_use += 1
+				sed_st.next = game.world_time + 2.0
+		sed_st.step = (int(sed_st.step) + 1) % 3
 	if not await _do_until(sedate, func(): return game.monsters.has(b_id) and game.combat.is_sedated(game.monsters[b_id]), 60.0, "monster B sedated"):
 		return
+	me.bot_charge = false
+	# HANDS: an over-long charge: a short hold that claims 5 s; the host must cap it.
+	await _wall_wait(0.2)
+	game.combat.windup.claim_override = 5.0
+	var cap_st := {"next": game.world_time + C.SHOVE_COOLDOWN + 0.2, "step": 0}
+	var n0 := int(game.combat.swings_seen.get(me.peer_id, 0))
+	var claim := func():
+		if game.world_time < float(cap_st.next):
+			return
+		if int(cap_st.step) == 0:
+			me.bot_charge = true
+			cap_st.next = game.world_time + 0.25
+			cap_st.step = 1
+		elif int(cap_st.step) == 1:
+			me.bot_charge = false
+			cap_st.next = game.world_time + C.SHOVE_COOLDOWN + 0.5
+			cap_st.step = 0
+	if not await _do_until(claim, func(): return int(game.combat.swings_seen.get(me.peer_id, 0)) > n0 and not me.bot_charge, 30.0, "the over-long charge to strike"):
+		return
+	game.combat.windup.claim_override = -1.0
 	var vials := 0
 	for sl in me.slots:
 		if sl.kind == "anesthetic":

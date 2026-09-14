@@ -373,10 +373,14 @@ func _shove_close_walk_in() -> bool:
 		bot.bot_yaw = atan2(-to.x, -to.z)
 		bot.bot_move = Vector2.ZERO
 		bot.bot_interact = false
-		if elapsed >= _shove_ready:
-			_shove_ready = elapsed + C.SHOVE_COOLDOWN
-			bot.shove_count += 1
+		# HANDS HOOK: a tap on the shove: hold it a moment, let go (the wind-up fires on release).
+		if bot.bot_charge:
+			bot.bot_charge = false
+		elif elapsed >= _shove_ready:
+			_shove_ready = elapsed + C.SHOVE_COOLDOWN + 0.3
+			bot.bot_charge = true
 		return true
+	bot.bot_charge = false
 	return false
 
 

@@ -717,6 +717,10 @@ func _update_visual(delta: float) -> void:
 	sh.listen_yaw = listen_yaw
 	sh.lunge = _lunge_amt * (1.0 - e)
 	sh.stagger = maxf(_stagger * (0.6 + 0.4 * sin(Time.get_ticks_msec() * 0.02)), _flinch) * (1.0 - e)
+	# HANDS HOOK (scripts/combat/stun_window.gd): the shove's stun window, down hard then a twitching rise.
+	var cbt = game.get("combat") if game != null else null
+	if cbt != null and cbt.has_method("stun_pose"):
+		cbt.stun_pose(self, sh, e)
 	if model.has_method("set_ears"):
 		model.set_ears(_listen_amt, listen_yaw, delta)
 
@@ -891,8 +895,13 @@ func alert_to(pos: Vector3) -> void:
 		brain.alert_to(pos)
 
 
-func shoved(dir: Vector3) -> void:
+## HANDS HOOK: `charge` 0..1 is how long the shove was charged (scripts/combat/windup.gd); a charged
+## shove stuns a capturable monster longer (Windup.stun_for) and pushes it further. -1: the plain shove.
+func shoved(dir: Vector3, charge := -1.0) -> void:
 	if is_sedated():
+		return
+	if charge > 0.0 and is_capturable(kind) and brain.has_method("stun"):
+		brain.stun(dir, lerpf(2.0, 3.5, clampf(charge, 0.0, 1.0)), lerpf(1.05, 1.9, clampf(charge, 0.0, 1.0)))
 		return
 	brain.shoved(dir)
 

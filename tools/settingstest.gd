@@ -83,6 +83,8 @@ func _run() -> void:
 	_check(_near(Settings.get_value("fov"), 100.0), "fov clamps to 100")
 	Settings.set_value("window_mode", "banana")
 	_check(Settings.get_value("window_mode") == "windowed", "bad window mode falls back to windowed")
+	Settings.set_value("carry_camera", "banana")   # HANDS HOOK
+	_check(Settings.get_value("carry_camera") == "shoulder", "bad carry camera mode falls back to shoulder")
 	Settings.set_value("quality", 7)
 	_check(Settings.get_value("quality") == 2, "quality clamps to 2")
 
@@ -99,6 +101,7 @@ func _run() -> void:
 	Settings.set_value("sensitivity", 2.0)
 	Settings.set_value("fov", 95.0)
 	Settings.set_value("quality", 0)
+	Settings.set_value("carry_camera", "first_person")   # HANDS HOOK
 	await _frames(3)
 	for key in Settings.DEFAULTS.keys():
 		_check(seen.has(key), "changed emitted for %s" % key)
@@ -124,9 +127,12 @@ func _run() -> void:
 	_check(_near(bent.gradient.sample(0.0).r, 0.0, 0.001) and _near(bent.gradient.sample(1.0).r, 1.0, 0.001), "bent ramp keeps black and white")
 
 	_check(_near(me.camera.fov, 95.0, 0.05), "player camera fov follows (%.2f)" % me.camera.fov)
-	var torch: Node3D = me.hands.get_child(0)
+	# HANDS HOOK: the first-person hands are posed every frame; their x/y scale follows the setting.
 	var k := tan(deg_to_rad(95.0) * 0.5) / tan(deg_to_rad(78.0) * 0.5)
-	_check(_near(torch.position.x, 0.32 * k, 0.001) and _near(torch.position.z, -0.45, 0.001), "hands keep their screen place at fov 95")
+	await get_tree().process_frame
+	var pr: Dictionary = me.hands.pose_r
+	_check(_near(me.hands.fov_k, k, 0.001) and not pr.is_empty() and absf(me.hands.arm_r.position.z - float((pr.p as Vector3).z)) < 0.06
+		and absf(me.hands.arm_r.position.x - float((pr.p as Vector3).x) * k) < 0.06, "hands keep their screen place at fov 95 (k %.3f)" % me.hands.fov_k)
 	# Sprinting still kicks on top of the setting.
 	me.bot_active = true
 	me.bot_invulnerable = true
@@ -173,6 +179,11 @@ func _run() -> void:
 	_check(env.tonemap_exposure < 1.0, "brightness 0.3 lowers exposure")
 	(ui._choices["window_mode"]["windowed"] as Button).button_pressed = true
 	_check(Settings.get_value("window_mode") == "windowed", "window mode buttons write the setting")
+	# HANDS HOOK: the carry camera toggle.
+	(ui._choices["carry_camera"]["first_person"] as Button).button_pressed = true
+	_check(Settings.get_value("carry_camera") == "first_person", "carry camera buttons write the setting")
+	Settings.set_value("carry_camera", "shoulder")
+	_check((ui._choices["carry_camera"]["shoulder"] as Button).button_pressed, "the screen follows the carry camera setting")
 	var f11 := InputEventAction.new()
 	f11.action = "fullscreen"
 	f11.pressed = true
