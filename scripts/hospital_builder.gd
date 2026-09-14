@@ -136,6 +136,10 @@ static func prepare(gen: Dictionary, part: int) -> Dictionary:
 			p.containers.append(s)
 	if part == PART_WINGS:
 		p["floor_anchors"] = _floor_anchors(gen)
+		var data := {}
+		_fill_landmarks(gen, data)
+		_fill_contract(gen, data)
+		p["info_data"] = data
 	for l in gen.lights:
 		var zl := int(l.zone)
 		var is_base := zl == S.ZONE_ENTRANCE or zl == S.ZONE_OUTDOOR
@@ -205,6 +209,12 @@ static func commit_steps(p: Dictionary, parent: Node3D) -> Array:
 				mi.mesh = mesh
 				mi.material_override = _geo_material(String(k).get_slice("|", 1))
 				holder.add_child(mi))
+	var labels: Array = []
+	p["step_labels"] = labels
+	var mark := func(label: String) -> void:
+		while labels.size() < steps.size():
+			labels.append(label)
+	mark.call("geometry")
 	# Wall collision, one trimesh per chunk.
 	var fkeys: Array = (p.faces as Dictionary).keys()
 	fkeys.sort()
@@ -218,6 +228,7 @@ static func commit_steps(p: Dictionary, parent: Node3D) -> Array:
 				cs.shape = concave
 				cs.name = "Walls_" + String(k).replace(",", "_")
 				body.add_child(cs))
+	mark.call("wall collision")
 	# Furniture, one chunk per step.
 	var ck_keys: Array = (p.furn as Dictionary).keys()
 	for k in (p.colliders as Dictionary).keys():
@@ -226,21 +237,25 @@ static func commit_steps(p: Dictionary, parent: Node3D) -> Array:
 	ck_keys.sort()
 	for ck in ck_keys:
 		steps.append(func(): _commit_furniture_chunk(p, String(ck), furn))
+	mark.call("furniture")
 	# Containers, a few per step.
 	var clist: Array = p.containers
-	for i in range(0, clist.size(), 4):
-		var slice := clist.slice(i, i + 4)
+	for i in range(0, clist.size(), 1):
+		var slice := clist.slice(i, i + 1)
 		steps.append(func(): _commit_containers(p, slice, cts))
+	mark.call("containers")
 	if part == PART_WINGS:
 		steps.append(func():
 			(p.out.anchors as Array).append_array(p.floor_anchors))
 	if part == PART_BASE:
 		steps.append(func(): _commit_lectern(p, parent))
+	mark.call("anchors")
 	# Lights.
 	var llist: Array = p.lights
 	for i in range(0, llist.size(), 8):
 		var slice := llist.slice(i, i + 8)
 		steps.append(func(): _commit_lights(p, slice, lights))
+	mark.call("lights")
 	# Signs.
 	var slist: Array = p.signs
 	for i in range(0, slist.size(), 10):
@@ -248,6 +263,7 @@ static func commit_steps(p: Dictionary, parent: Node3D) -> Array:
 		steps.append(func():
 			for sp in slice:
 				signs.add_child(_sign_node(sp[0], sp[1], sp[2], _SIGN_CACHE, sp[3])))
+	mark.call("signs")
 	# Doors.
 	var dlist: Array = p.doors
 	for i in range(0, dlist.size(), 4):
@@ -257,6 +273,7 @@ static func commit_steps(p: Dictionary, parent: Node3D) -> Array:
 				var node: Node3D = DoorsScript.create(d)
 				doors.add_child(node)
 				(p.out.doors as Array).append(node))
+	mark.call("doors")
 	# Wall occluders.
 	steps.append(func():
 		var arr: Array = p.occluder
@@ -268,6 +285,7 @@ static func commit_steps(p: Dictionary, parent: Node3D) -> Array:
 		node.name = "WallOccluders"
 		node.occluder = occ
 		parent.add_child(node))
+	mark.call("occluder")
 	return steps
 
 
@@ -292,10 +310,16 @@ static func finish_info(gen: Dictionary, info: Dictionary, base: Dictionary, win
 	lights.append_array(wings.out.lights)
 	info["lights"] = lights
 	info["furniture_count"] = int(base.get("furniture_count", 0)) + int(wings.get("furniture_count", 0))
-	_fill_landmarks(gen, info)
+	# The spawns, landmarks and contract keys are data: prepare() already worked them out on the
+	# thread for the wings part.
+	var data: Dictionary = wings.get("info_data", {})
+	if data.is_empty():
+		_fill_landmarks(gen, info)
+		_fill_contract(gen, info)
+	else:
+		info.merge(data, true)
 	if base.out.lectern_node != null:
 		info["lectern_node"] = base.out.lectern_node
-	_fill_contract(gen, info)
 	info["doors"] = gen.get("doors", [])
 	info["door_nodes"] = (base.out.doors as Array) + (wings.out.doors as Array)
 	info["wing_seed"] = int(gen.get("wing_seed", gen.get("seed", 0)))
@@ -1271,7 +1295,7 @@ static func _sign_node(text: String, pos: Vector3, yaw: float, cache: Dictionary
 			"wing":
 				bg = Color(0.04, 0.16, 0.18)
 				glow = Color(0.5, 0.9, 0.85)
-		var tex := Legacy._text_texture(text, fg, bg, int(wide * 190.0) if style != "emergency" else 384, 56 if style != "emergency" else 82)
+		var tex := Legacy._text_texture(text, fg, bg, int(wide * 240.0) if style != "emergency" else 384, 56 if style != "emergency" else 82)
 		mat = StandardMaterial3D.new()
 		mat.albedo_texture = tex
 		mat.emission_enabled = true

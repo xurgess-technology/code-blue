@@ -9,7 +9,7 @@ extends RefCounted
 ##   sliding  automatic sliding glass doors, four panels                 the main entrance
 ##
 ## Every doorway is a tunnel one tile deep (the walls are a tile thick). The door hangs in the
-## plane just inside one face of that tunnel, the "face" side: a room door at the room's face, a
+## plane just inside one face of that tunnel, the "face" side: a room door at the hallway face, a
 ## gate or the OR's doors at the side you come from out of the entrance building, the main doors
 ## at the outside face. `n` points out of that face. A leaf swinging toward -n ("in") folds into the
 ## tunnel, which is always clear and deep enough for it; swinging toward +n ("out") needs the floor
@@ -117,10 +117,12 @@ static func _describe(st: S, er: Rect2i, g: Dictionary) -> Dictionary:
 	var p_minus := t0 - n
 	match kind:
 		"hinged", "double":
+			# Room doors hang at the hallway face, where people see them; between two rooms (the
+			# OR's scrub room door) at the face of the room that does not own the doorway.
 			if room >= 0:
-				face = 1 if st.room_index(p_plus.x, p_plus.y) == room else -1
+				face = -1 if st.room_index(p_plus.x, p_plus.y) == room else 1
 			else:
-				face = 1 if st.room_index(p_plus.x, p_plus.y) >= 0 else -1
+				face = -1 if st.room_index(p_plus.x, p_plus.y) >= 0 else 1
 		"gate":
 			face = 1 if er.has_point(p_plus) else -1
 		"auto":

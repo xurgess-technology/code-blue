@@ -249,6 +249,7 @@ func _auto_tick(d: Node, agents: Array, delta: float) -> void:
 	if hold > 0.0:
 		_hold_open[d.door_id] = hold - delta
 		sensed = true
+		d.set_meta("jam_rolled", true)   # the gates never stick on the way open at clock-in
 	d.jam_cooldown = maxf(0.0, d.jam_cooldown - delta)
 	var open_speed := SPEED_SLIDE_OPEN if d.kind == "sliding" else SPEED_AUTO_OPEN
 	var close_speed := SPEED_SLIDE_CLOSE if d.kind == "sliding" else SPEED_AUTO_CLOSE
@@ -276,7 +277,7 @@ func _auto_tick(d: Node, agents: Array, delta: float) -> void:
 				if d.kind != "sliding":
 					game.emit_noise(d.centre, NOISE_GATE, "door")
 			_drive(d, 1.0, open_speed)
-		if d.kind == "gate" and _jam_roll(d) and d.amount > 0.18 and d.amount < JAM_AMOUNT - 0.05:
+		if d.kind == "gate" and d.amount > 0.18 and d.amount < JAM_AMOUNT - 0.05 and _jam_roll(d):
 			d.jam_t = _rng.randf_range(JAM_SECONDS.x, JAM_SECONDS.y)
 			d.last_sound_t = _t
 			_count("jam")

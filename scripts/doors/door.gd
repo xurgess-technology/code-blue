@@ -101,7 +101,7 @@ func setup(d: Dictionary) -> void:
 			var pw := width * 0.25 + 0.04
 			for i in 4:
 				var x := -width * 0.5 + width * 0.125 + width * 0.25 * i
-				_add_panel(Models.sliding_panel(pw), x, 0.05 if i == 0 or i == 3 else -0.05)
+				_add_panel(Models.sliding_panel(pw), x, -0.13 if i == 0 or i == 3 else -0.05)
 	_add_frame()
 	if kind != "sliding":
 		occluder = OccluderInstance3D.new()
@@ -125,10 +125,25 @@ func _add_leaf(mesh: Mesh, hinge_x: float, dir: float, length: float) -> void:
 	body.add_child(mi)
 	var cs := CollisionShape3D.new()
 	var bs := BoxShape3D.new()
-	bs.size = Vector3(length, Models.LEAF_H, Models.LEAF_T + 0.02)
+	# A pair's leaves collide a little past their meeting edge so no ray slips through the crack.
+	var reach := length + (0.03 if kind != "hinged" else 0.0)
+	bs.size = Vector3(reach, Models.LEAF_H, Models.LEAF_T + 0.02)
 	cs.shape = bs
-	cs.position = Vector3(length * 0.5, Models.LEAF_H * 0.5 + 0.01, 0.0)
+	cs.position = Vector3(reach * 0.5, Models.LEAF_H * 0.5 + 0.01, 0.0)
 	body.add_child(cs)
+	# The aim target stays when the leaf stops colliding (folded open against its jamb), so an open
+	# door can still be aimed at and closed.
+	var aim := Area3D.new()
+	aim.name = "Aim"
+	aim.collision_layer = C.L_INTERACT
+	aim.collision_mask = 0
+	aim.monitoring = false
+	aim.monitorable = false
+	var acs := CollisionShape3D.new()
+	acs.shape = bs
+	acs.position = cs.position
+	aim.add_child(acs)
+	body.add_child(aim)
 	add_child(body)
 	leaf_bodies.append(body)
 	leaf_hinge.append(hinge_x)
@@ -229,7 +244,7 @@ func leaf_xform(i: int, a: float) -> Transform3D:
 		if inner:
 			travel = width * 0.5 + 0.05
 		var dx: float = float(leaf_dir[i]) * travel * clampf(a, 0.0, 1.0)
-		var z := 0.05 if (i == 0 or i == 3) else -0.05
+		var z := -0.13 if (i == 0 or i == 3) else -0.05
 		return Transform3D(Basis.IDENTITY, Vector3(x0 + dx, 0.0, z))
 	var th := deg_to_rad(angle_for(a))
 	var d := float(leaf_dir[i])

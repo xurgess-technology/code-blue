@@ -181,7 +181,7 @@ func finish_now() -> void:
 	if _task >= 0:
 		WorkerThreadPool.wait_for_task_completion(_task)
 		_task = -1
-		_steps = HB.commit_steps(_job.prep, _wings_root)
+		_steps = _all_steps()
 		_step_i = 0
 	for n in _teardown:
 		if is_instance_valid(n):
@@ -211,17 +211,48 @@ func _process(_delta: float) -> void:
 		WorkerThreadPool.wait_for_task_completion(_task)
 		_task = -1
 		stats["thread_ms"] = int(_job.get("thread_ms", 0))
-		_steps = HB.commit_steps(_job.prep, _wings_root)
+		_steps = _all_steps()
 		_step_i = 0
 	if not _teardown.is_empty():
 		_note_frame(t0)
 		return
 	while _step_i < _steps.size() and Time.get_ticks_usec() - t0 < budget:
+		var s0 := Time.get_ticks_usec()
 		_steps[_step_i].call()
+		var ms := float(Time.get_ticks_usec() - s0) / 1000.0
+		if ms > float(stats.get("slowest_step_ms", 0.0)):
+			stats["slowest_step_ms"] = ms
+			var labels: Array = _job.prep.get("step_labels", []) if not _job.is_empty() else []
+			stats["slowest_step"] = labels[_step_i] if _step_i < labels.size() else "flicker %d" % _step_i
 		_step_i += 1
 	if _step_i >= _steps.size():
 		_finish()
 	_note_frame(t0)
+
+
+## The builder's steps, then the fixtures' flicker controllers a dozen at a time (game.gd's
+## _attach_light_flicker does the same for a whole level at once).
+func _all_steps() -> Array:
+	var steps: Array = HB.commit_steps(_job.prep, _wings_root)
+	var prep: Dictionary = _job.prep
+	var count := (prep.lights as Array).size()
+	for i in range(0, count, 12):
+		var from := i
+		steps.append(func():
+			var Flicker: GDScript = load("res://scripts/light_flicker.gd")
+			var list: Array = prep.out.lights
+			for k in range(from, mini(from + 12, list.size())):
+				var node = list[k].get("node")
+				if node == null or not is_instance_valid(node):
+					continue
+				for light in (node as Node).find_children("*", "Light3D", true, false):
+					if not light.is_in_group("fixture"):
+						continue
+					light.distance_fade_enabled = true
+					light.distance_fade_begin = 16.0
+					light.distance_fade_length = 6.0
+					light.add_child(Flicker.new()))
+	return steps
 
 
 func _note_frame(t0: int) -> void:
@@ -233,15 +264,20 @@ func _finish() -> void:
 	var gen: Dictionary = _job.gen
 	var prep: Dictionary = _job.prep
 	var base: Dictionary = info.get("base_part", {})
+	var f0 := Time.get_ticks_usec()
 	HB.finish_info(gen, info, base, prep)
+	var f1 := Time.get_ticks_usec()
 	var region: NavigationRegion3D = info.get("nav_region")
 	if region != null and is_instance_valid(region):
 		region.navigation_mesh = _job.nav
+	var f2 := Time.get_ticks_usec()
 	_wings_root.name = "Wings"
 	info["wings_root"] = _wings_root
 	info["wing_gen"] = generation
-	game._attach_light_flicker(_wings_root)
+	var f3 := Time.get_ticks_usec()
 	game.doors.register(prep.out.doors)
+	stats["finish_ms"] = [snappedf((f1 - f0) / 1000.0, 0.1), snappedf((f2 - f1) / 1000.0, 0.1),
+			snappedf((f3 - f2) / 1000.0, 0.1), snappedf((Time.get_ticks_usec() - f3) / 1000.0, 0.1)]
 	busy = false
 	wings_ready = true
 	stats["wall_ms"] = Time.get_ticks_msec() - _started_ms
