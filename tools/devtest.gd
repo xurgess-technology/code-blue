@@ -209,6 +209,7 @@ func _run_solo() -> void:
 
 	# ---- the shift loop's patient hooks (loop, sweep 2): phone call, extra patient, two tables
 	await _loop_hooks()
+	await _doors_hooks()   # DOORS HOOK
 
 	_stand(bot.global_position + Vector3(0, 0, 3.0))
 	await _frames(2)
@@ -453,6 +454,43 @@ func _loop_hooks() -> void:
 	await _frames(3)
 	ok = await _until(func(): return game.loop.crews.is_empty(), 60.0)
 	_check(game.cases.is_empty() and ok, "cleared again")
+
+
+## DOORS HOOK: the pen's two doors and the panel's door buttons.
+func _doors_hooks() -> void:
+	var doors: Node = game.doors
+	_check(doors.doors.has("dr_dev_hinged") and doors.doors.has("dr_dev_double"), "the dev room has a hinged door and double doors (%s)" % str(doors.doors.keys()))
+	if not doors.doors.has("dr_dev_hinged"):
+		return
+	var h: Node = doors.doors["dr_dev_hinged"]
+	var dd: Node = doors.doors["dr_dev_double"]
+	dev.request("kill_monsters")   # earlier monsters may have wandered through them
+	game.doors.set_all(false)
+	await _seconds(1.5)
+	_check(h.is_closed() and dd.is_closed(), "both shut")
+	_press_panel("Open all doors")
+	await _seconds(1.2)
+	_check(absf(h.amount) > 0.85 and absf(dd.amount) > 0.85, "the panel's Open all doors opens them (%.2f, %.2f)" % [h.amount, dd.amount])
+	_press_panel("Close all doors")
+	await _seconds(1.2)
+	_check(h.is_closed() and dd.is_closed(), "the panel's Close all doors shuts them")
+	_press_panel("Regenerate wings now")
+	await _frames(3)
+	_check(game.message.contains("No wings"), "Regenerate wings now in the dev room explains there are none (%s)" % game.message)
+	# A monster in one bay reaches the next through the hinged door.
+	var m = dev.spawn_monster("discharged", "pen")
+	m.global_position = Vector3(4.0, 0.0, 3.75)
+	m.brain.target = Vector3(12.0, 0.0, 3.75)
+	m.mode = m.Mode.RUSH
+	var through := await _until(func():
+		if m.mode != m.Mode.RUSH:
+			m.brain.target = Vector3(12.0, 0.0, 3.75)
+			m.mode = m.Mode.RUSH
+		return m.global_position.x > 9.5, 12.0)
+	_check(through and absf(h.amount) > 0.5, "a Discharged rushing across the pen bursts through the hinged door (x %.1f, door %.2f)" % [m.global_position.x, h.amount])
+	dev.request("kill_monsters")
+	_press_panel("Close all doors")
+	await _seconds(1.0)
 
 
 func _press_panel(text: String) -> void:

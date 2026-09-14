@@ -705,6 +705,8 @@ static func validate(gen: Dictionary) -> PackedStringArray:
 	if start.x < 0:
 		problems.append("no neutral spawn to test connectivity from")
 		return problems
+	# Doors: swings clear of everything, and every room reachable through doors that open.
+	problems.append_array(DoorPlan.check(st, gen, start))
 	var reach := st.flood([start])
 	var unreached := 0
 	var example := Vector2i(-1, -1)

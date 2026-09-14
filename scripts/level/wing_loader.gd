@@ -121,6 +121,7 @@ func regenerate(gn: int) -> void:
 	if game.is_host():
 		evict_players()
 		_clear_wing_items()
+		_clear_wing_monsters()
 	else:
 		_evict_local()
 	_tear_down()
@@ -286,6 +287,10 @@ func _finish() -> void:
 	print("[wings] generation %d built: %d frames, %d ms wall, %d ms on the thread, longest frame of work %.1f ms" % [
 		generation, int(stats.frames), int(stats.wall_ms), int(stats.get("thread_ms", 0)), float(stats.max_frame_ms)])
 	_notify_built(info)
+	# A rebuild during a shift (the dev panel): the new wings get their loot and monsters now.
+	if game.is_host() and game.phase == game.Phase.SHIFT:
+		game.spawn_loot()
+		game._spawn_monsters()
 
 
 func _notify_built(info: Dictionary) -> void:
@@ -342,6 +347,19 @@ func _evict_local() -> void:
 	if z == "":
 		return
 	me.teleport(gate_front(z, 0))
+
+
+## Host: monsters still in the wings (only a rebuild during a shift, from the dev panel, has any)
+## leave quietly with them.
+func _clear_wing_monsters() -> void:
+	for id in game.monsters.keys():
+		var m = game.monsters[id]
+		if m == null or not is_instance_valid(m) or _wing_zone(m.global_position) == "":
+			continue
+		game.monsters.erase(id)
+		if game.combat != null and game.combat.has_method("on_monster_removed"):
+			game.combat.on_monster_removed(m)
+		m.queue_free()
 
 
 ## Host: what was left lying in the wings (and in their containers) is gone with them.

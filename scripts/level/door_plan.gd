@@ -283,6 +283,80 @@ static func container_rect(tile: Vector2i, wall: Vector2i) -> Rect2:
 	return Rect2(Vector2(tile.x, tile.y), Vector2(1.0, depth))
 
 
+## Independent check of a generated map's doors (MapGen.validate, tools/mapcheck.gd): every leaf,
+## swept through every angle it may open to on either side, stays off walls, furniture, containers
+## and every other door's swing; and every room is reachable from `start` when each doorway only
+## lets you through if its door can open wide enough.
+static func check(st: S, gen: Dictionary, start: Vector2i) -> PackedStringArray:
+	var problems := PackedStringArray()
+	var doors: Array = gen.get("doors", [])
+	var grid := obstacle_grid(gen.get("furniture", []), gen.get("containers", []))
+	var cells: Array = []
+	var owner := {}
+	for i in doors.size():
+		var d: Dictionary = doors[i]
+		var mine := {}
+		for leaf in leaves(d):
+			for side_max in [[1, float(d.max_out)], [-1, float(d.max_in)]]:
+				var a := 0.0
+				while a <= float(side_max[1]) + 0.001 and float(side_max[1]) > 0.0:
+					for p in leaf_points(d, leaf, a, side_max[0]):
+						mine[_cell(p)] = true
+					a += ANGLE_STEP
+		cells.append(mine)
+		for c in mine.keys():
+			if owner.has(c) and int(owner[c]) != i:
+				var other: Dictionary = doors[int(owner[c])]
+				problems.append("doors %s and %s swing through the same spot" % [d.id, other.id])
+				break
+			owner[c] = i
+	var none := {}
+	for i in doors.size():
+		var d: Dictionary = doors[i]
+		var hit := false
+		for leaf in leaves(d):
+			for side_max in [[1, float(d.max_out)], [-1, float(d.max_in)]]:
+				var a := 0.0
+				while not hit and a <= float(side_max[1]) + 0.001 and float(side_max[1]) > 0.0:
+					for p in leaf_points(d, leaf, a, side_max[0]):
+						if blocked_at(st, p, grid, none, i):
+							problems.append("%s door %s hits a wall, furniture or a container at %d degrees" % [d.kind, d.id, int(a) * side_max[0]])
+							hit = true
+							break
+					a += ANGLE_STEP
+	# Reachability through doors that can open.
+	var shut := {}
+	for d in doors:
+		if not passable(d):
+			for t in d.tiles:
+				shut[t] = true
+	var reach := {}
+	var q: Array[Vector2i] = [start]
+	reach[start] = true
+	var qi := 0
+	while qi < q.size():
+		var p: Vector2i = q[qi]
+		qi += 1
+		for dir in S.DIRS:
+			var n := p + dir
+			if reach.has(n) or not st.open(n.x, n.y) or shut.has(n):
+				continue
+			reach[n] = true
+			q.append(n)
+	for r in gen.get("rooms", []):
+		var any := false
+		for y in range(r.y, r.y + r.h):
+			for x in range(r.x, r.x + r.w):
+				if reach.has(Vector2i(x, y)):
+					any = true
+					break
+			if any:
+				break
+		if not any:
+			problems.append("room %s %d is unreachable through doors that open" % [r.kind, r.id])
+	return problems
+
+
 ## Can a body get through this door when it opens as far as it may? (mapcheck, validate)
 static func passable(d: Dictionary) -> bool:
 	match String(d.kind):

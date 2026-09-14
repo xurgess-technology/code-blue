@@ -469,7 +469,7 @@ func _to_next_shift() -> void:
 	# DOORS HOOK: the wings behind the locked gates are rebuilt for this shift (anyone still inside is
 	# walked out to the entrance hall first). Clock-in waits until they are ready.
 	clock_in_pending = false
-	wing_loader.regenerate(shift)
+	wing_loader.regenerate(maxi(shift, int(wing_loader.generation) + 1))
 	say(loop.lobby_message(), 6.0)
 	if Net.active:
 		_rpc_shift.rpc(seed_value, shift, phase, _net_seq)

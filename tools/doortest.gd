@@ -300,6 +300,25 @@ func _sight_and_noise() -> void:
 	await _frames(4)
 	var seen := Percept.is_observed(game, target)
 	_check(seen, "perception: the lit point is seen through the open door")
+	# The Walk-In's eyes: it stands in the room facing the doorway, the player outside.
+	var wi: Node = game._add_monster("walk_in", inside)
+	await _frames(2)
+	var to_door: Vector3 = outside - wi.global_position
+	wi.rotation.y = atan2(-to_door.x, -to_door.z)
+	wi.brain.sight_timer = 99.0
+	game.doors._drive(d, 0.0, 5.0)
+	await _seconds(0.6)
+	wi.rotation.y = atan2(-to_door.x, -to_door.z)
+	wi.brain._look()
+	var saw_closed: bool = wi.brain.seeing
+	game.doors._drive(d, -1.0, 5.0)
+	await _seconds(0.6)
+	wi.rotation.y = atan2(-to_door.x, -to_door.z)
+	wi.brain._look()
+	var saw_open: bool = wi.brain.seeing
+	_check(not saw_closed and saw_open, "a Walk-In sees the player through the open door, not the closed one (closed %s, open %s)" % [str(saw_closed), str(saw_open)])
+	game.kill_monster(wi)
+	await _frames(2)
 	# Noise: a closed door on the line.
 	game.doors._drive(d, 0.0, 5.0)
 	await _seconds(0.6)
