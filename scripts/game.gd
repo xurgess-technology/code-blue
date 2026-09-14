@@ -1904,6 +1904,7 @@ func damage_player(p: Node, amount: int, source: String, knock: Vector3 = Vector
 	_drop_hands(p, true)
 	if p.carrying != 0:
 		drop_carried(p)   # downed: getting hit drops whoever you carry
+	combat.drop_dragged(p)   # SWEEP 3 HOOK (combat): and the monster you drag
 	if p.hp <= 0:
 		down_player(p, source, knock)
 
@@ -2079,6 +2080,8 @@ func can_pick_up(q: Node, p: Node, check_hands: bool = true) -> bool:
 		return false
 	if not q.alive or q.downed or q.carrying != 0 or q.carried_by != 0:
 		return false
+	if combat != null and combat.dragging(q) >= 0:
+		return false   # SWEEP 3 HOOK (combat): hands full of monster
 	if not p.alive or not p.downed or p.carried_by != 0 or p.on_table:
 		return false
 	return not check_hands or q.hands_empty()
@@ -2366,7 +2369,10 @@ func player_shoved(p: Node) -> void:
 		q.apply_knock(knock)
 		_broadcast("shoved", {"id": q.peer_id, "knock": knock})
 		_end_operations(q)
-		if q.carrying != 0:
+		if combat.dragging(q) >= 0:
+			combat.drop_dragged(q)   # SWEEP 3 HOOK (combat): a shoved dragger lets go
+			say("%s shoved %s off the monster." % [p.player_name, q.player_name], 3.0)
+		elif q.carrying != 0:
 			var carried = players.get(q.carrying)
 			drop_carried(q)
 			say("%s shoved %s, who dropped %s." % [p.player_name, q.player_name, carried.player_name if carried != null else "someone"], 3.0)
