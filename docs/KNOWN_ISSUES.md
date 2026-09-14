@@ -617,10 +617,10 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 - **The dragged monster can clip into walls.** It is pinned `DRAG_BEHIND` (1.15 m) straight behind
   the dragger with no collision; backing into a corner pushes it through the wall until you turn.
   Putting it down there lands it on the dragger's spot instead (`_point_is_clear`).
-- **No arms on the swing, the jab or the drag.** The held saw / syringe moves on its own in front
-  of the camera (and in front of other players' heads); the dragger's hands do not reach back to
-  the monster's ankles (`tools/combat_shots/07_drag_other.png`). Fine for primitives, wants rigged
-  arms later.
+- **Resolved (hands, 2026-09-14): no arms on the swing, the jab or the drag.** First-person forearms
+  and hands hold every item on its grip, the swing and the jab move the hand, other players hold
+  the stack in the rig's right hand and reach back to drag (see "Hands, wind-ups and the carry
+  camera" below).
 - **The HUD hold bar says "LIFTING..." while you start dragging a monster** (combat reuses
   `Player.carry_hold` so the HUD needed no change). One word in `hud.gd` if it matters.
 - **Prompts over a bright surface are hard to read.** The cream prompt text under the crosshair
@@ -633,3 +633,41 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 - **nettest `combat` under `--lag=120 --jitter=40 --loss=0.03`** passed on the second run; the
   first failed before any combat, in the shared `_wait_shift_as_client` check ("saw crew=false
   subtitles=false" on client 2), the same kind of lag flake as `leave_items` above.
+
+## Hands, wind-ups and the carry camera (hands worker, 2026-09-14)
+
+- **Kenney proportions limit the third-person poses.** The surgeon rig has one bone per arm and no
+  hands, shoulders at 0.77 m and a 0.9 m head, so a held item sits near knee-to-hip height in front
+  and the jab's pull-back (the arm straight back, the torso twisted) is hard to read from the front
+  (`tools/game_shots/26_hands_jab_windup_teammate.png`); the saw's raised arm and the shove's lean
+  read well. The shared Blender human replaces the rig through `scripts/hands/rig_map.gd`.
+- **The carry camera over a Kenney carrier shows a lot of head.** Over the left shoulder the
+  carrier's big dark hair fills the lower right third of the view; the carried body shows at the
+  right edge and the crosshair stays clear (`29_hands_carry_cam_player.png`). Pressed against a
+  corridor wall the camera slides in over the head and the wall fills the left of the view
+  (`29_hands_carry_cam_player_corridor.png`). Worth another look with the human model.
+- **The carry camera's crosshair is beside the head.** The aim ray follows the camera's line, so
+  things are aimed at the way they look, but at 1 m to the side a table right in front of the head
+  needs the crosshair on it, not the head pointed at it (bots that aim by yaw from the head, like
+  `tools/downedtest.gd`, use `bot_aim_id` and are unaffected; `tools/carrycamtest.gd` aims the camera).
+- **nettest `combat` under `--lag=120 --jitter=40 --loss=0.03`** failed three times on this machine
+  with every process losing its ENet connection mid-scenario (rtt 240-380 ms, variance up to 186 ms)
+  while three Blender builds and another worker's tests held the CPU at 87%; the one run that got
+  through the combat part showed the watcher a strike with no wind-up before it (a resent packet
+  delivered both together), which `MIN_SHOWN_WINDUP` now covers. Unlagged it passes (10 wind-ups seen
+  before their strikes, the 5 s claim capped to 0.57 s). Re-run the lagged scenario on a quiet machine.
+- **Wind-ups make every use feel 0.2-0.35 s slower** by design; the cooldown values are unchanged
+  and start at the strike, so the saw's full cycle is 1.1 s (was 0.8) and the jab's 1.35 s (was 1.0).
+  Tune `WINDUP_TIME` / cooldowns after playtests.
+- **Predicted strikes on a client** play `WINDUP_TIME` after the click; the host's strike lands a lag
+  later (the hit sound and damage follow), which reads as a slightly late impact at 120 ms.
+- **The first-person hands are not lit by the flashlight** (`HANDS_LAYER` is off its cull mask, as
+  the dev gun's first-person layer already was), only by fixtures and the head glow, so in a dark
+  hallway they are dim silhouettes. Deliberate: in the beam they bleached white.
+- **Hands can still clip a wall at extreme angles.** The pull-in uses three rays every 0.05 s; a thin
+  pillar beside the view can slip between them.
+- **A charged shove on a non-capturable monster** (the Night Nurse) behaves like a tap: she retreats.
+- **perfprobe was run before and after on a busy machine** (see the final report); both sets are
+  noisy (other workers' Blender builds). The probe's local player shows the new first-person hands in
+  every scene (about 14 draw calls: palm, sleeve, finger and thumb pieces, the torch); remote bodies
+  add an AnimationPlayer and a SkeletonModifier3D each (no teammates in the probe).

@@ -35,6 +35,7 @@ var _socket_l := Transform3D.IDENTITY
 var _two := false
 var _shake_t := 0.0
 var _active := true
+var _syringe: Node3D = null
 
 static var _libs := {}
 
@@ -221,6 +222,18 @@ func update(delta: float) -> void:
 			held.transform = Transform3D(Basis(), mid + Vector3(0.0, 0.05, 0.0))
 		else:
 			held.transform = _socket_r
+		# The jab: the syringe drawn from the vials rides the hand; the vials are out of sight meanwhile.
+		var jab: bool = not act.is_empty() and String(act.k) == "jab" and (int(act.ph) != WindupScript.RECOVER or float(act.u) < 0.5)
+		if jab and _syringe == null:
+			_syringe = preload("res://scripts/combat/combat.gd").make_syringe()
+			_syringe.name = "HandsSyringeTP"
+			body.add_child(_syringe)
+		if _syringe != null:
+			_syringe.visible = jab
+			if jab:
+				_syringe.transform = _socket_r * Transform3D(Basis.from_scale(Vector3.ONE * 2.6), Vector3(0.0, 0.05, 0.0))
+		for c in held.get_children():
+			(c as Node3D).visible = not jab
 
 
 ## Blend an accumulated direction toward a pose entry [dir, weight] by w.

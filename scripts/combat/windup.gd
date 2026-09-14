@@ -46,6 +46,9 @@ const NOISE_CHARGE_MAX := 0.65
 const CHARGE_NOISE_EVERY := 0.4
 ## Observers drop a wind-up whose strike never came after this long (a lost host).
 const OBSERVER_TIMEOUT := 4.0
+## Others always see at least this much of a wind-up before its strike, even when both events arrive
+## in the same frame (a lost packet resent under lag); the hit itself already happened on the host.
+const MIN_SHOWN_WINDUP := 0.15
 
 var combat: Node
 var game: Node
@@ -316,6 +319,10 @@ func _tick_windup(p: Node, s: Dictionary, delta: float) -> void:
 	var k := String(s.k)
 	var id := int(p.peer_id)
 	var host: bool = game.is_host()
+	if s.has("pend") and not host:
+		if float(s.t) >= MIN_SHOWN_WINDUP:
+			_to_strike(p, s, float(s.pend))
+		return
 	if host and not can_act(p):
 		cancel(p, "busy")
 		return
@@ -458,6 +465,10 @@ func on_event(kind: String, data: Dictionary) -> void:
 		"cb_swing":
 			if s == null or int(s.s) != seq:
 				s = _start(p, String(data.get("k", "saw")), seq, false)
+			if int(s.ph) == WINDUP and not bool(s.local) and float(s.t) < MIN_SHOWN_WINDUP:
+				# The wind-up and the strike arrived together (a resent packet): show the pull-back first.
+				s["pend"] = float(data.get("c", 0.0))
+				return
 			_to_strike(p, s, float(data.get("c", 0.0)))
 		"cb_cancel":
 			if s == null or int(s.s) != seq:

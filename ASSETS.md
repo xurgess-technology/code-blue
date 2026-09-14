@@ -342,6 +342,19 @@ reads well at the sizes the game shows it.
 
 ---
 
+## Hands, wind-ups and the carry camera (hands worker, 2026-09-14)
+
+Nothing downloaded. The first-person forearms, hands (two-segment fingers, a thumb) and the torch
+are low-poly primitives merged by `scripts/hands/fp_arms.gd` (about 180 triangles per arm, skin plus
+a sleeve in the player's scrub colour); the third-person holding, carrying and wind-up poses are
+bone overrides on the existing Kenney `char/surgeon` rig (`scripts/hands/rig_map.gd`,
+`body_poser.gd`) over its own `idle` / `walk` / `sprint` clips. The sounds `audio/sfx/hands_*.wav`
+(`windup_01/_02`, `charge`, `full`, `dazed_01/_02`, `rise`) are synthesized by
+`tools/gen_audio_hands.mjs` (deterministic, no samples). The shared Blender human, when it lands,
+replaces the arm meshes through `fp_arms.make_arm()` and the rig through `rig_map.gd`.
+
+---
+
 ## The Night Nurse (made in-house, 2026-09-14) — `assets/models/monsters/night_nurse/`
 
 | Key | File | Source | Author | Licence | size (m) | Fix-ups |

@@ -18,11 +18,11 @@ const KENNEY := {
 	"arm_rest": {"arm_r": Vector3(-1, 0, 0), "arm_l": Vector3(1, 0, 0)},
 	# The hand socket in the arm bone's space, in skeleton units (the mitten's palm, near the tip).
 	# Socket axes as in scripts/hands/grips.gd: -Z fingers, +Y out of the palm, +X the hand's right.
-	# With the arm along the bone's -X (right) / +X (left): fingers continue along the arm, the palm
-	# faces up in the rest pose.
+	# The fingers continue along the arm; body_hands.gd turns the palm up for things lying on it and
+	# inward (thumb up) for a handle, whatever twist the bone has.
 	"hand": {
-		"arm_r": {"offset": Vector3(-0.245, 0.0, 0.0), "fingers": Vector3(-1, 0, 0), "palm": Vector3(0, 0, 1)},
-		"arm_l": {"offset": Vector3(0.245, 0.0, 0.0), "fingers": Vector3(1, 0, 0), "palm": Vector3(0, 0, 1)},
+		"arm_r": {"offset": Vector3(-0.245, 0.0, 0.0)},
+		"arm_l": {"offset": Vector3(0.245, 0.0, 0.0)},
 	},
 	# Animation clips the body plays underneath the pose overrides.
 	"clips": {"idle": "idle", "walk": "walk", "run": "sprint"},
@@ -65,7 +65,7 @@ const POSES := {
 	"saw_windup": {"arm_r": [Vector3(-0.42, 0.86, -0.3), 1.0], "arm_l": [Vector3(0.55, -0.2, 0.8), 0.6], "torso": [-0.12, -0.3, 1.0]},
 	"saw_strike": {"arm_r": [Vector3(0.25, -0.55, 0.8), 1.0], "torso": [0.25, 0.25, 1.0]},
 	# Jab: syringe drawn back at the hip, thumb on the plunger, then a straight thrust.
-	"jab_windup": {"arm_r": [Vector3(-0.45, -0.35, -0.82), 1.0], "torso": [-0.05, -0.28, 1.0]},
+	"jab_windup": {"arm_r": [Vector3(-0.62, 0.05, -0.78), 1.0], "arm_l": [Vector3(0.5, -0.1, 0.86), 0.7], "torso": [-0.12, -0.5, 1.0]},
 	"jab_strike": {"arm_r": [Vector3(-0.05, 0.02, 1.0), 1.0], "torso": [0.2, 0.18, 1.0]},
 	# Shove: charging leans back with both arms braced up in front, the strike throws both forward.
 	"shove_charge": {"arm_r": [Vector3(-0.45, 0.25, 0.86), 1.0], "arm_l": [Vector3(0.45, 0.25, 0.86), 1.0], "torso": [-0.32, 0.0, 1.0]},

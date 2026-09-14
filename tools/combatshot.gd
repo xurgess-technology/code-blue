@@ -14,6 +14,7 @@ extends Node
 
 const DevRoomScript := preload("res://scripts/dev/dev_room.gd")
 const MonsterScript := preload("res://scripts/monster.gd")
+const WindupScript := preload("res://scripts/combat/windup.gd")
 const SHOT_DIR := "res://tools/combat_shots"
 
 var main: Node3D
@@ -58,11 +59,11 @@ func _run() -> void:
 	_look_at(m.global_position + Vector3.UP * 1.2)
 	await _seconds(0.6)
 	cb.anim_freeze = true
-	cb._start_anim(me, "saw")
-	cb._anims[me.peer_id].t = 0.13
+	cb.pose_at(me, "saw", WindupScript.WINDUP, WindupScript.WINDUP_TIME.saw)   # HANDS: wind-up peak
+
 	await _frames(3)
 	await _shot("01_swing_windup")
-	cb._anims[me.peer_id].t = 0.28
+	cb.pose_at(me, "saw", WindupScript.STRIKE, 0.1)
 	await _frames(3)
 	await _shot("02_swing_strike")
 	cb.stop_anim(me)
@@ -77,8 +78,8 @@ func _run() -> void:
 	_look_at(m.global_position + Vector3.UP * 1.1)
 	await _seconds(0.5)
 	cb.anim_freeze = true
-	cb._start_anim(me, "jab")
-	cb._anims[me.peer_id].t = 0.21
+	cb.pose_at(me, "jab", WindupScript.STRIKE, 0.12)
+
 	await _frames(3)
 	await _shot("03_jab_thrust")
 	cb.stop_anim(me)
@@ -100,11 +101,11 @@ func _run() -> void:
 	_look_at(bot.global_position + Vector3.UP * 1.3)
 	await _seconds(0.4)
 	cb.anim_freeze = true
-	cb._start_anim(bot, "saw")
-	cb._anims[bid].t = 0.14
+	cb.pose_at(bot, "saw", WindupScript.WINDUP, WindupScript.WINDUP_TIME.saw)
+
 	await _frames(3)
 	await _shot("04_swing_other")
-	cb._anims[bid].t = 0.27
+	cb.pose_at(bot, "saw", WindupScript.STRIKE, 0.1)
 	await _frames(3)
 	await _shot("04b_swing_other_strike")
 	cb.stop_anim(bot)

@@ -415,6 +415,11 @@ func _hands_spot() -> void:
 
 
 func _reset_hands_scene() -> void:
+	if _mate != null and is_instance_valid(_mate):
+		game._release_downed_links(_mate)
+		_mate.revive_full()
+		_mate.refresh_downed_visuals()
+		_mate.teleport(game.table_pos() + Vector3(0, -40, 0))
 	game.combat.anim_freeze = false
 	for p in game.players.values():
 		game.combat.stop_anim(p)
@@ -532,12 +537,15 @@ func _pose_carry(what: String, corridor: bool) -> void:
 		from = c[0]
 		dir = c[1]
 	else:
-		var t := game.table_pos()
-		from = t + Vector3(0.6, 0, 4.2)
-		dir = (Vector3(t.x, 0, t.z) - Vector3(from.x, 0, from.z)).normalized()
+		# Open ground: the neutral area outside the doors, looking at the entrance.
+		var nz: Dictionary = game.level_info.get("neutral", {})
+		var sp: Array = nz.get("spawn_points", [])
+		from = sp[0] if not sp.is_empty() else game.table_pos() + Vector3(0.6, 0, 4.2)
+		var ent: Vector3 = game.level_info.get("entrance", {}).get("position", game.table_pos())
+		dir = Vector3(ent.x - from.x, 0, ent.z - from.z).normalized()
 	_look_from(from, from + dir * 6.0 + Vector3(0, 1.2, 0))
-	bot._pitch = -0.1
-	bot.bot_pitch = -0.1
+	bot._pitch = -0.05
+	bot.bot_pitch = -0.05
 	if what == "player":
 		var mate := _teammate()
 		_give(mate, "")
@@ -567,7 +575,7 @@ func _corridor_wall_spot() -> Array:
 			if reach > best_len and wl + wr < 3.4 and reach > 8.0:
 				best_len = reach
 				# Slide toward the left wall.
-				var shift := wl - 0.55
+				var shift := (wl - wr) * 0.5 + 0.25   # a little left of the middle
 				best = [game._floor_at(spot + left * shift), d]
 	return best
 

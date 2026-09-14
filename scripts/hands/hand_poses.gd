@@ -18,7 +18,7 @@ const LEFT_EMPTY := {"p": Vector3(-0.25, -0.4, -0.33), "f": Vector3(0.35, 0.25, 
 
 ## Both hands on the sides of a big thing, relative to the carried thing's centre (x mirrored for the
 ## right hand, which adds the half width of the thing).
-const BOTH_CENTRE := Vector3(0.0, -0.37, -0.6)
+const BOTH_CENTRE := Vector3(0.0, -0.33, -0.56)
 const BOTH_LEFT := {"p": Vector3(-0.012, -0.03, 0.03), "f": Vector3(0.12, 0.1, -1.0), "n": Vector3(1.0, 0.35, 0.0), "c": 0.65}
 
 
@@ -29,7 +29,7 @@ const JAB := [
 	{"p": Vector3(-0.045, -0.12, -0.58), "f": Vector3(0.1, 0.06, -1.0), "n": Vector3(1.0, 0.1, 0.0), "c": 1.0},
 ]
 const SAW := [
-	{"p": Vector3(0.1, 0.06, -0.38), "f": Vector3(-0.35, 1.0, 0.3), "n": Vector3(0.25, 0.3, -1.0), "c": 1.0},
+	{"p": Vector3(0.24, 0.03, -0.56), "f": Vector3(-0.5, 0.75, 0.45), "n": Vector3(0.3, 0.45, -1.0), "c": 1.0},
 	{"p": Vector3(-0.16, -0.33, -0.5), "f": Vector3(-0.8, -0.6, -0.55), "n": Vector3(-0.2, 0.55, -1.0), "c": 1.0},
 ]
 const SHOVE_LEFT := [

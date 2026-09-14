@@ -13,10 +13,10 @@ extends RefCounted
 
 const EASE_TIME := 0.35
 ## Head-space offsets (x right, y up, z back).
-const CARRY_OFFSET := Vector3(-0.9, 0.45, 1.9)
-const DRAG_OFFSET := Vector3(0.5, 0.95, 3.2)
+const CARRY_OFFSET := Vector3(-1.0, 0.45, 2.0)
+const DRAG_OFFSET := Vector3(0.45, 1.0, 3.6)
 ## Extra downward look while dragging, radians, so the body behind is in frame.
-const DRAG_TILT := 0.36
+const DRAG_TILT := 0.45
 const CAST_RADIUS := 0.16
 ## Below this distance from the head the local body hides (the camera would be inside it).
 const HIDE_BODY_BELOW := 0.55
@@ -36,6 +36,7 @@ var _side_offset := CARRY_OFFSET
 var _tilt := 0.0
 var _last_pos := Vector3.INF
 var _len_k := 1.0
+var _side_k := 1.0
 var _body_shown := false
 
 
@@ -82,32 +83,27 @@ func update(delta: float) -> void:
 		return
 	var want_off: Vector3 = _side_offset * e
 	_tilt = (DRAG_TILT if p.dragging_monster >= 0 else 0.0) * e
-	# Keep the camera out of walls: cast from the shoulder line to the wanted spot.
+	# Keep the camera out of walls, in three legs from the head: up, out to the shoulder, back. A wall
+	# beside the player moves the camera in over the head (it stays behind them); a wall behind pulls
+	# it in toward the head. Shortening is instant, growing back eases.
 	var hx: Transform3D = head.global_transform
-	var pivot: Vector3 = hx * Vector3(want_off.x * 0.35, want_off.y, 0.0)
-	var goal: Vector3 = hx * want_off
-	var k := 1.0
-	if head.is_inside_tree() and pivot.distance_to(goal) > 0.01:
-		var space: PhysicsDirectSpaceState3D = head.get_world_3d().direct_space_state
-		var q := PhysicsShapeQueryParameters3D.new()
-		var sphere := SphereShape3D.new()
-		sphere.radius = CAST_RADIUS
-		q.shape = sphere
-		q.transform = Transform3D(Basis(), pivot)
-		q.motion = goal - pivot
-		q.collision_mask = C.L_WORLD
-		q.exclude = [p.get_rid()]
-		var res := space.cast_motion(q)
-		if res.size() >= 1:
-			k = clampf(res[0], 0.0, 1.0)
+	var hb := hx.basis.orthonormalized()
+	var space: PhysicsDirectSpaceState3D = head.get_world_3d().direct_space_state if head.is_inside_tree() else null
+	var top: Vector3 = _cast(space, hx.origin, hx.origin + hb * Vector3(0.0, want_off.y, 0.0))
+	var side_goal: Vector3 = top + hb * Vector3(want_off.x, 0.0, 0.0)
+	var side_k := _fraction(space, top, side_goal)
+	var back_from_full: Vector3 = top + (side_goal - top) * side_k
+	var back_k := _fraction(space, back_from_full, back_from_full + hb * Vector3(0.0, 0.0, want_off.z))
 	var teleported: bool = _last_pos != Vector3.INF and _last_pos.distance_to(p.global_position) > 2.5
 	_last_pos = p.global_position
-	if k < _len_k or teleported:
-		_len_k = k
+	if teleported:
+		_side_k = side_k
+		_len_k = back_k
 	else:
-		var full := maxf(0.01, pivot.distance_to(goal))
-		_len_k = minf(k, _len_k + EXTEND_SPEED * delta / full)
-	var world_cam: Vector3 = pivot + (goal - pivot) * _len_k
+		_side_k = side_k if side_k < _side_k else minf(side_k, _side_k + EXTEND_SPEED * delta / maxf(0.05, absf(want_off.x)))
+		_len_k = back_k if back_k < _len_k else minf(back_k, _len_k + EXTEND_SPEED * delta / maxf(0.05, want_off.z))
+	var shoulder: Vector3 = top + (side_goal - top) * minf(_side_k, side_k)
+	var world_cam: Vector3 = shoulder + hb * Vector3(0.0, 0.0, want_off.z * minf(_len_k, back_k))
 	offset = hx.affine_inverse() * world_cam
 	arm_length = offset.length()
 	fx.position = offset
@@ -153,3 +149,23 @@ func aim_segment() -> Array:
 	var side := start.distance_to(head)
 	var reach := sqrt(maxf(0.0, C.INTERACT_RANGE * C.INTERACT_RANGE - side * side))
 	return [start, start + dir * reach]
+
+
+## How far (0..1) a CAST_RADIUS sphere gets from `from` to `to` before the world stops it.
+func _fraction(space: PhysicsDirectSpaceState3D, from: Vector3, to: Vector3) -> float:
+	if space == null or from.distance_to(to) < 0.005:
+		return 1.0
+	var q := PhysicsShapeQueryParameters3D.new()
+	var sphere := SphereShape3D.new()
+	sphere.radius = CAST_RADIUS
+	q.shape = sphere
+	q.transform = Transform3D(Basis(), from)
+	q.motion = to - from
+	q.collision_mask = C.L_WORLD
+	q.exclude = [player.get_rid()]
+	var res := space.cast_motion(q)
+	return clampf(res[0], 0.0, 1.0) if res.size() >= 1 else 1.0
+
+
+func _cast(space: PhysicsDirectSpaceState3D, from: Vector3, to: Vector3) -> Vector3:
+	return from + (to - from) * _fraction(space, from, to)
