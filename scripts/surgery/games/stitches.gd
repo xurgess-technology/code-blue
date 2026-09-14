@@ -260,6 +260,8 @@ func _react() -> void:
 	_seen_stitch = quality.size()
 	_seen_bads = bads
 	_seen_half = half
+	if has_body and body.has_method("set_gash_open"):
+		body.set_gash_open(open_fraction())   # HUMAN HOOK: the model's GashOpen blend shape closes with the stitches
 	if has_body and body.has_method("set_bleeding"):
 		body.set_bleeding("gash", clampf(open_fraction() * 0.55 + _bad_flash * 0.8 + 0.08 * _loose_count(), 0.0, 1.0) if stage != Stage.DONE else 0.05 * _loose_count())
 

@@ -7,6 +7,7 @@ extends Node3D
 ## (and along the gash), Z across it.
 
 const Kit := preload("res://scripts/patients/patient_kit.gd")
+const HumanModel := preload("res://scripts/human/human_model.gd")   # HUMAN HOOK
 
 const GASH_POS := Vector3(-0.2, 0.24, 0.04)
 const GASH_HALF_LEN := 0.1
@@ -33,6 +34,15 @@ var _bleed := 0.0
 var _bleed_cur := 0.0
 var _pool_amt := 0.0
 var _gash_shown := true
+# HUMAN HOOK: the Blender surgeon lying on the table (null on the primitive fallback).
+var _human: Node3D = null
+var _skel: Skeleton3D = null
+var _lying: Animation = null
+var _gash_mesh: MeshInstance3D = null
+var _gash_open := 1.0
+var _idle_t := 0.0
+## Tools and A/B: build the primitive body.
+static var primitive_only := false
 
 
 static func create(for_player: int, scrubs: Color) -> Node3D:
@@ -48,6 +58,8 @@ func _build() -> void:
 	rig = Node3D.new()
 	rig.name = "Rig"
 	add_child(rig)
+	if not primitive_only and _build_human():   # HUMAN HOOK
+		return
 	var scrubs := StandardMaterial3D.new()
 	scrubs.albedo_color = colour
 	scrubs.roughness = 0.9
@@ -137,7 +149,7 @@ func site_transform(site: String) -> Transform3D:
 ## For the gash: {half_len: metres along X, half_gap: how far apart the edges start}. {} elsewhere.
 func site_section(site: String) -> Dictionary:
 	if site == "gash":
-		return {"half_len": GASH_HALF_LEN, "half_gap": GASH_HALF_GAP}
+		return {"half_len": half_len(), "half_gap": GASH_HALF_GAP}
 	return {}
 
 
@@ -185,8 +197,21 @@ func show_gash(on: bool) -> void:
 	_apply_visuals()
 
 
+## HUMAN HOOK: how open the gash is, 1 fresh .. 0 closed (the stitches step drives it as it closes).
+func set_gash_open(f: float) -> void:
+	_gash_open = clampf(f, 0.0, 1.0)
+	_apply_visuals()
+
+
 func _apply_visuals() -> void:
 	var stitched := bool(_flags.get("stitched", false))
+	if _human != null:
+		var open := 0.0 if stitched else _gash_open
+		if _gash_mesh != null and _gash_mesh.get_blend_shape_count() > 0:
+			_gash_mesh.set_blend_shape_value(0, open)
+		var sm := HumanModel.skin_of(_human)
+		if sm != null:
+			sm.set_shader_parameter(&"gash", open if _gash_shown or open > 0.0 else 0.0)
 	if _gash != null:
 		_gash.visible = _gash_shown and not stitched
 	if _scar != null:
@@ -202,6 +227,11 @@ func _process(delta: float) -> void:
 	var br := 0.0 if _flat else (0.5 - 0.5 * cos(_t * TAU * rate)) * lerpf(0.4, 1.0, v01)
 	if _torso != null:
 		_torso.scale = Vector3(1.0, 1.0 + br * 0.05, 1.0 + br * 0.02)
+	if _skel != null and _lying != null:
+		# HUMAN HOOK: the Lying clip's breath, faster and shallower as the bleed runs on
+		if not _flat:
+			_idle_t = fposmod(_idle_t + delta * lerpf(1.4, 0.45, v01), 3.0)
+		HumanModel.sample_clip(_skel, _lying, _idle_t)
 	_jolt_v += (-110.0 * _jolt - 9.0 * _jolt_v) * delta
 	_jolt += _jolt_v * delta
 	if rig != null:
@@ -219,3 +249,76 @@ func _process(delta: float) -> void:
 		_pool.visible = _pool_amt > 0.01
 		var ps := lerpf(0.08, 0.5, sqrt(_pool_amt))
 		_pool.size = Vector3(ps, 0.1, ps * 0.8)
+
+
+# -- HUMAN HOOK: the Blender surgeon ------------------------------------------------------------------
+
+func _build_human() -> bool:
+	var variant := HumanModel.surgeon_for(player_id)
+	var root: Node3D = HumanModel.spawn(variant, colour, true)
+	if root == null:
+		return false
+	var skel := HumanModel.skeleton(root)
+	var ap := HumanModel.anim_player(root)
+	var site := root.find_child("Site_gash", true, false) as Node3D
+	var lying: Animation = ap.get_animation("Lying") if ap != null and ap.has_animation("Lying") else null
+	var gash := HumanModel.piece(root, "Human_GashSkin")
+	if skel == null or lying == null or site == null or gash == null:
+		root.free()
+		return false
+	ap.active = false
+	rig.add_child(root)
+	_human = root
+	_skel = skel
+	_lying = lying
+	_gash_mesh = gash
+	HumanModel.show_piece(root, "Human_TopLower", false)
+	HumanModel.show_piece(root, "Human_TopRolled", true)
+	# Lying frame 0: back on the origin, head toward model -Z; yaw 180 then -90 puts the head at -X.
+	root.rotation.y = -PI * 0.5
+	HumanModel.sample_clip(skel, lying, 0.0)
+	var to_rig := HumanModel.chain_to(skel, rig)
+	var crown: Vector3 = to_rig * HumanModel.bone_global(skel, skel.find_bone("head")).origin
+	var toe: Vector3 = to_rig * HumanModel.bone_global(skel, skel.find_bone("toe.L")).origin
+	root.position.x = -((crown.x - 0.20) + toe.x) * 0.5
+	to_rig = HumanModel.chain_to(skel, rig)
+	var att := site.get_parent() as BoneAttachment3D
+	var bone_xf := HumanModel.bone_global(skel, skel.find_bone(att.bone_name))
+	var xf: Transform3D = to_rig * bone_xf * site.transform
+	var x := Vector3(1, 0, 0)
+	var y := Vector3.UP
+	var gxf := Transform3D(Basis(x, y, x.cross(y)), xf.origin)
+	_sites["gash"] = gxf
+	var inj := root.find_child("Site_injection", true, false) as Node3D
+	if inj != null:
+		var ia := inj.get_parent() as BoneAttachment3D
+		var ixf: Transform3D = to_rig * HumanModel.bone_global(skel, skel.find_bone(ia.bone_name)) * inj.transform
+		_sites["injection"] = Transform3D(Basis(x, y, x.cross(y)), ixf.origin)
+	# The gash anchor follows the spine; the scar (stitched) hangs off it.
+	var anchor := Node3D.new()
+	anchor.name = "GashAnchor"
+	att.add_child(anchor)
+	anchor.transform = (to_rig * bone_xf).affine_inverse() * gxf
+	_gash = Node3D.new()
+	_gash.name = "Gash"
+	anchor.add_child(_gash)
+	_scar = Node3D.new()
+	_scar.name = "Scar"
+	_scar.visible = false
+	anchor.add_child(_scar)
+	var scar_mat := Kit.mat("downed_scar", Color(0.45, 0.16, 0.14), 0.6)
+	var thread := Kit.mat("downed_thread", Color(0.08, 0.06, 0.12), 0.7)
+	Kit.add_mesh(_scar, Kit.box(Vector3(half_len() * 2.0, 0.002, 0.004)), scar_mat, Transform3D(Basis(), Vector3(0, 0.001, 0)), "Line")
+	for i in 6:
+		var sx := lerpf(-half_len() * 0.75, half_len() * 0.75, i / 5.0)
+		Kit.add_mesh(_scar, Kit.box(Vector3(0.003, 0.004, 0.022)), thread, Transform3D(Basis(Vector3.UP, 0.35 if i % 2 == 0 else -0.35), Vector3(sx, 0.003, 0)), "Stitch")
+	_skin_blood = Kit.decal(anchor, Kit.blood_tex(), Vector3(0.22, 0.2, 0.2), Transform3D())
+	_skin_blood.visible = false
+	_pool = Kit.decal(self, Kit.blood_tex(), Vector3(0.3, 0.1, 0.25), Transform3D(Basis(Vector3.UP, 0.6), Vector3(gxf.origin.x, 0.0, 0.3)))
+	_pool.visible = false
+	_apply_visuals()
+	return true
+
+
+func half_len() -> float:
+	return 0.096 * HumanModel.HEIGHTS.get(HumanModel.surgeon_for(player_id), 1.78) / 1.78 if _human != null else GASH_HALF_LEN

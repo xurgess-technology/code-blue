@@ -26,6 +26,9 @@ func _process_modification_with_delta(_delta: float) -> void:
 	var sk := get_skeleton()
 	if sk == null or not _bones(sk):
 		return
+	if rig.get("generic", false):   # HUMAN HOOK
+		_generic(sk)
+		return
 	var ti: int = _idx.torso
 	var tq := sk.get_bone_pose_rotation(ti)
 	if torso_w > 0.001:
@@ -49,3 +52,67 @@ func _process_modification_with_delta(_delta: float) -> void:
 		var target := Quaternion(rest.normalized(), dir)
 		var aq := sk.get_bone_pose_rotation(bi)
 		sk.set_bone_pose_rotation(bi, aq.slerp(target, clampf(w, 0.0, 1.0)))
+
+
+# -- HUMAN HOOK: rigs with rest rotations and two-bone arms (the Blender humans) ---------------------
+
+var _gidx := {}
+
+
+func _generic(sk: Skeleton3D) -> void:
+	if _gidx.is_empty():
+		var chain: Array = []
+		for nm in rig.get("torso_chain", [rig.bones.torso]):
+			var bi := sk.find_bone(String(nm))
+			if bi >= 0:
+				chain.append(bi)
+		_gidx["chain"] = chain
+		for side in ["arm_r", "arm_l"]:
+			_gidx[side] = sk.find_bone(String(rig.bones[side]))
+			_gidx[side + "_fore"] = sk.find_bone(String(rig.fore[side]))
+	var chain: Array = _gidx.chain
+	if torso_w > 0.001 and not chain.is_empty():
+		var k := clampf(torso_w, 0.0, 1.0) / float(chain.size())
+		var q := Quaternion(Vector3.UP, torso.y * k) * Quaternion(Vector3.RIGHT, torso.x * k)
+		for bi in chain:
+			_turn(sk, int(bi), q)
+	for side in [["arm_r", arm_r, arm_r_w], ["arm_l", arm_l, arm_l_w]]:
+		var w: float = side[2]
+		var upper := int(_gidx.get(side[0], -1))
+		var fore := int(_gidx.get(side[0] + "_fore", -1))
+		if w <= 0.001 or upper < 0:
+			continue
+		var d: Vector3 = (side[1] as Vector3).normalized()
+		# The elbow bends: the upper arm hangs lower than the forearm unless the arm is raised.
+		var up_dir := (d + Vector3(0.0, -0.65, 0.0) * (1.0 - maxf(0.0, d.y))).normalized()
+		if absf(d.x) > 0.6:
+			# a forearm across the body (the carry): the upper arm goes forward, the elbow bends in
+			up_dir = Vector3(d.x * 0.2, maxf(d.y, 0.0) * 0.5 - 0.15, 0.95).normalized()
+		_aim(sk, upper, up_dir, w)
+		if fore >= 0:
+			_aim(sk, fore, d, w)
+
+
+## Turn a bone (skeleton space) so its +Y points along dir, by weight w.
+func _aim(sk: Skeleton3D, bone: int, dir: Vector3, w: float) -> void:
+	var g := _global(sk, bone)
+	var cur := g.basis.y.normalized()
+	if cur.dot(dir) > 0.9999:
+		return
+	var q := Quaternion(cur, dir)
+	_turn(sk, bone, Quaternion.IDENTITY.slerp(q, clampf(w, 0.0, 1.0)))
+
+
+func _turn(sk: Skeleton3D, bone: int, q: Quaternion) -> void:
+	var parent := sk.get_bone_parent(bone)
+	var pq := _global(sk, parent).basis.get_rotation_quaternion() if parent >= 0 else Quaternion.IDENTITY
+	sk.set_bone_pose_rotation(bone, (pq.inverse() * q * pq * sk.get_bone_pose_rotation(bone)).normalized())
+
+
+func _global(sk: Skeleton3D, bone: int) -> Transform3D:
+	var xf := Transform3D()
+	var i := bone
+	while i >= 0:
+		xf = Transform3D(Basis(sk.get_bone_pose_rotation(i)), sk.get_bone_pose_position(i)) * xf
+		i = sk.get_bone_parent(i)
+	return xf

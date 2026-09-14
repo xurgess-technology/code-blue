@@ -492,6 +492,40 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   156 / 160 procedural. Runs while another worker baked in Blender swung by 2x, so compare numbers
   only from quiet runs.
 
+## The Blender humans in the game (2026-09-14)
+
+Players, Bob, the paramedics and the downed player on the table use the Blender humans
+(`art/human/`, `scripts/human/human_model.gd`); every Kenney path is still the fallback.
+
+- **Bare faces are the weak point** (known from the art pass, not fixed by design): masks cover the
+  players, Bob mostly lies on the table, but the paramedics' faces are stiff up close in a torch.
+- **Cost: four walking teammates plus the paramedic crew in view run at about 65-77 fps against
+  97-120 fps with the Kenney characters** (Radeon 890M, 1600x900, medium, `perfprobe -- --humans`);
+  about 1.5 ms per character on the GPU (18-20k skinned triangles each against about 1k). Shadows are
+  not it (`--noshadow`: 73-75 fps). Bob on the table costs nothing measurable (99-111 fps both).
+  Mesh LODs for the skinned bodies or a cheaper distant body are the next step if it matters.
+- **The first-person arms stay the hands worker's `fp_arms`** (a different look from the third-person
+  surgeon: tinted sleeve and mitten hand).
+- **The carry reads, but loosely**: the carried body hangs on the carrier's right shoulder from a
+  fixed offset (`Player.HUMAN_CARRIED_SHOULDER`, sized for a 1.78 m carrier), so on the 1.68 m
+  surgeon B it sits a few centimetres high; the carrier's arm across the legs does not grip them.
+- **Arms are posed by direction, not IK**: held items sit in the hand bone's palm socket, but the
+  forearm points along the pose direction with a fixed elbow rule, so the saw wind-up and the shove
+  look stiffer than the clips.
+- **Interact / PickUp one-shots only play standing still** (an interact while walking keeps the gait).
+- **Downed players crawl with the Crawl clip frozen when not moving**; a dead bot lies in the same
+  prone pose rather than on its back.
+- **Bob's gown keeps its standing shape on the table** (a few centimetres above the belly and boxy at
+  the shoulders) and its hem stands off the legs; the gunshot's gown window shows a flat rectangle of
+  skin. The entry wound is moved from the model's flank site to 0.25 rad round the belly so the
+  forceps' skin patch is level; the painted mask-B wound is not used (the game's wound overlay is).
+- **The stump cap reads dark** in the OR light (the flesh texture on the model's cap), and the
+  infection tint stops short of the cap. The severed forearm is CPU-skinned once when the saw finishes
+  (`BobModelBuilder._bake_skinned`), because `bake_mesh_from_current_skeleton_pose` refuses a skin that
+  has not been registered (hidden or not yet drawn).
+- **The paramedics push by clip**: `Push` runs at the crew's speed and freezes when the crew stops,
+  so a medic stops mid-stride; the front medic walks beside the gurney's head rather than pulling it.
+
 ## Dissection (sweep 3)
 
 - **The strapped rig bodies are fitted by measured constants** (`monster_rig_look.gd` `RIG`: scale,

@@ -417,6 +417,30 @@ at the origin, running along +X, floor at y 0); nothing else changes.
 
 ---
 
+## The humans: surgeons, Bob, paramedics (made in-house, 2026-09-14) - `assets/models/characters/human/`
+
+| Key | File | Source | Author | Licence | size (m) | Fix-ups |
+| --- | --- | --- | --- | --- | --- | --- |
+| `char/human_surgeon_a` | `surgeon_a.glb` + `textures/surgeon_a_*.png` | Built for Code Blue from Python scripts in Blender 5.2 (`art/human/blender_src/`) | Code Blue (made with Claude) | None needed: original work of this project, no third-party content | 1.80 tall | scale 1.0, yaw 180 |
+| `char/human_surgeon_b` | `surgeon_b.glb` + `textures/surgeon_b_*.png` | same | same | same | 1.68 tall | scale 1.0, yaw 180 |
+| `char/human_surgeon_c` | `surgeon_c.glb` + `textures/surgeon_c_*.png` | same | same | same | 1.75 tall | scale 1.0, yaw 180 |
+| `patient/human_bob` | `bob.glb` + `textures/bob_*.png` | same | same | same | 1.75 tall | scale 1.0, yaw 180 |
+| `crew/human_paramedic_a` | `paramedic_a.glb` + `textures/paramedic_a_*.png` | same | same | same | 1.83 tall | scale 1.0, yaw 180 |
+| `crew/human_paramedic_b` | `paramedic_b.glb` + `textures/paramedic_b_*.png` | same | same | same | 1.70 tall | scale 1.0, yaw 180 |
+
+- **Not downloaded, not made by an AI image or mesh service.** Every vertex, UV, weight, keyframe and
+  texel comes from `hu_body.py`, `hu_outfit.py`, `hu_materials.py`, `hu_rig.py` and `hu_build.py`
+  (variations as data in `hu_params.py`). `art/human/README.md` explains the build and documents the
+  pieces, sites and clips; `art/human/blender_src/` has a `.gdignore`.
+- 16.7k-20.1k triangles each, 2 materials, 53 bones, clips `Idle`, `Walk`, `Jog`, `Sprint`, `Push`,
+  `Interact`, `PickUp`, `Crawl`, `Carried`, `Carrying`, `Lying` (in place). Six 2048 px maps and two 1024 px
+  masks per variation, separate files, VRAM compressed with mipmaps (normal-map mode for the normals).
+  The masks are read by `shaders/human_cloth.gdshader` and `shaders/human_skin.gdshader`, also made here.
+- Used by `scripts/human/human_model.gd` (players, `player_body.gd`, `crew.gd`) and
+  `scripts/patients/bob_model_builder.gd`; the Kenney characters stay as the fallback.
+
+---
+
 ## Keys that do not resolve
 
 The game asks for these; they return `null` and the caller must keep its

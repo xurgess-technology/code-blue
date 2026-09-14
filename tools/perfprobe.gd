@@ -26,6 +26,7 @@ var _models := false
 var _brains := false   # SWEEP 3 HOOK (brains)
 var _doors := false    # DOORS HOOK
 var _hands := false    # HANDS HOOK
+var _humans := false   # HUMAN HOOK
 var _spikes: Array = []
 var _phase_label := ""
 var _phase_stats := {}
@@ -47,6 +48,8 @@ func _ready() -> void:
 			"brains": _brains = true
 			"doors": _doors = true
 			"hands": _hands = true
+			"humans": _humans = true
+			"noshadow": (load("res://scripts/human/human_model.gd") as GDScript).set("cast_shadows", false)
 			# SEAL HOOK: build the procedural seal instead of the Blender model (A/B the patient's cost).
 			"seal-procedural": (load("res://scripts/patients/seal_model_builder.gd") as GDScript).set("procedural_only", true)
 			"quality":
@@ -94,6 +97,9 @@ func _ready() -> void:
 		return
 	if _hands:
 		await _run_hands()
+		return
+	if _humans:
+		await _run_humans()
 		return
 	if _brains:
 		await _run_brains()
@@ -703,6 +709,57 @@ func _run_hands() -> void:
 			await _measure("%s: hands + 3 teammates (%d)" % [scen.name, pass_i + 1], 1)
 			game.combat.stop_anim(mates[2])
 			game.combat.anim_freeze = false
+	print("[perf] ============================================================================")
+	for r in _rows:
+		print("[perf] %-36s avg %4.0f fps  1%%low %4.0f  worst %5.1f ms  proc %5.2f ms  draws %d" % [r.name, r.fps, r.low_fps, r.worst, r.proc, r.draws])
+	get_tree().quit(0)
+
+
+## HUMAN HOOK (--humans): the Blender humans against the Kenney characters at medium. Four teammates
+## walking in view (two holding things) plus the paramedic crew with Bob on the gurney, and the OR
+## with Bob on the table (his model against the reshaped Kenney Bob). Alternating, twice.
+func _run_humans() -> void:
+	main.set_quality(1, false)
+	var HM = load("res://scripts/human/human_model.gd")
+	var BobModel = load("res://scripts/patients/bob_model_builder.gd")
+	for pass_i in 4:
+		var kenney := pass_i % 2 == 1
+		HM.set("disabled", kenney)
+		BobModel.set("kenney_only", kenney)
+		var tag := "%s %d" % ["kenney" if kenney else "human", pass_i / 2 + 1]
+		await _ensure_shift()
+		var t := game.table_pos()
+		var from := t + Vector3(0.6, 0, 3.6)
+		_look(from, from + Vector3(0, 1.0, 4.0))
+		await get_tree().process_frame
+		var eye: Vector3 = bot.global_position
+		var fwd: Vector3 = -Vector3(sin(bot.bot_yaw), 0, cos(bot.bot_yaw))
+		var side := fwd.cross(Vector3.UP)
+		var mates: Array = []
+		for i in 4:
+			var m = game.dev._make_bot_node(-70 - i - pass_i * 10, "Mate %d" % i, "bot")
+			m.slots = Player.empty_slots()
+			if i < 2:
+				m.take_into(["bone_saw", "heart_monitor"][i], 1, 0)
+			m.teleport(game._floor_at(eye + fwd * (2.4 + i * 0.8) + side * (float(i) - 1.5) * 0.9))
+			m.bot_yaw = bot.bot_yaw + PI
+			m.bot_move = Vector2(0, -0.4)
+			mates.append(m)
+		var crew: Node3D = (load("res://scripts/loop/crew.gd") as GDScript).create("bob", "gunshot")
+		game.get_node("Entities").add_child(crew)
+		crew.snap(game._floor_at(eye + fwd * 4.5 - side * 1.6), bot.bot_yaw + PI * 0.5)
+		await _measure("4 teammates + crew (%s)" % tag, 1)
+		for m in mates:
+			m.bot_move = Vector2.ZERO
+			game.players.erase(m.peer_id)
+			m.queue_free()
+		crew.queue_free()
+		game.case = {"patient_id": "bob", "ailment_id": "amputation", "step_index": 0, "flags": {"sedation": 0.3}}
+		game._apply_case_locally()
+		_look(t + Vector3(0.9, 0, 1.6), t + Vector3.UP * 0.95)
+		await _measure("OR, Bob on the table (%s)" % tag, 1)
+	HM.set("disabled", false)
+	BobModel.set("kenney_only", false)
 	print("[perf] ============================================================================")
 	for r in _rows:
 		print("[perf] %-36s avg %4.0f fps  1%%low %4.0f  worst %5.1f ms  proc %5.2f ms  draws %d" % [r.name, r.fps, r.low_fps, r.worst, r.proc, r.draws])
