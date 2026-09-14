@@ -48,6 +48,11 @@ var lunge := 0.0           ## 0..1 reach
 var stagger := 0.0         ## 0..1 knocked back
 var twitch := Vector3.ZERO ## small extra head rotation (radians)
 var lying := 0.0           ## 0..1 flattened out (the model itself is tipped over by the Monster)
+## HANDS HOOK (scripts/combat/stun_window.gd): the shove's stun window. `daze` 0..1 buckles the legs,
+## slumps the torso, hangs the head and lets the arms dangle; `rise` 0..1 is the getting-up warning
+## at its end (the head and shoulders jerk).
+var daze := 0.0
+var rise := 0.0
 
 var _bones := {}
 var _attachments: Array = []
@@ -118,7 +123,9 @@ func _process_modification_with_delta(_delta: float) -> void:
 	var S := model_scale
 	var u := COLLAPSE
 	var leg_k: float = cfg.leg_len / (LEG_REST * S)
+	leg_k *= 1.0 - 0.42 * daze   # HANDS HOOK: buckled knees drop the body
 	var lift := LEG_REST * (leg_k - 1.0)
+	var jolt := sin(Time.get_ticks_msec() * 0.031) * rise * (1.0 - rise) * 2.2   # HANDS HOOK: getting-up jerks
 
 	var root: int = _bones.get("root", -1)
 	if root >= 0:
@@ -141,7 +148,8 @@ func _process_modification_with_delta(_delta: float) -> void:
 		else:
 			swing *= 1.0 - limp * 0.65   # the bad leg barely leaves the floor
 		swing = lerpf(swing, (0.04 if side[1] > 0.0 else -0.03), lying)
-		sk.set_bone_pose_rotation(li, Quaternion(Vector3.RIGHT, swing))
+		swing = lerpf(swing, -0.35 if side[1] > 0.0 else 0.2, daze * 0.8)   # HANDS HOOK: one knee forward
+		sk.set_bone_pose_rotation(li, Quaternion(Vector3.RIGHT, swing) * Quaternion(Vector3.BACK, side[1] * 0.22 * daze))
 		sk.set_bone_pose_scale(li, Vector3(thick, leg_k, thick))
 
 	var ti: int = _bones.get("torso", -1)
@@ -150,6 +158,7 @@ func _process_modification_with_delta(_delta: float) -> void:
 	var te := Basis(sk.get_bone_pose_rotation(ti)).get_euler()
 	var pitch: float = cfg.hunch + te.x * cfg.torso_sway + lunge * 0.45 - stagger * 0.5 - listen * cfg.hunch * 0.35
 	pitch = lerpf(pitch, -0.04, lying)
+	pitch += 0.62 * daze - 0.25 * jolt   # HANDS HOOK: slumped forward, jerking up
 	# A limp rolls the body over the good leg every step; `lean` tips it to one side for good.
 	var body_roll: float = stagger * 0.15 + float(cfg.get("lean", 0.0)) + limp * 0.16 * clampf(step_phase * 2.0, -1.0, 1.0)
 	body_roll *= 1.0 - lying
@@ -174,6 +183,8 @@ func _process_modification_with_delta(_delta: float) -> void:
 		spread = lerpf(spread, deg_to_rad(14.0), lunge * float(o.get("lunge", 1.0)))
 		back = lerpf(back, deg_to_rad(6.0), lying)
 		spread = lerpf(spread, deg_to_rad(float(cfg.get("lying_spread", 11.0))), lying)
+		back = lerpf(back, deg_to_rad(-38.0 + 14.0 * sgn * jolt), daze)   # HANDS HOOK: arms dangle forward
+		spread = lerpf(spread, deg_to_rad(3.0), daze)
 		var twist: float = deg_to_rad(float(o.get("twist", 0.0)))
 		var hang := Quaternion(Vector3.BACK, -sgn * (PI * 0.5 - spread))
 		var q := Quaternion(Vector3.RIGHT, back) * Quaternion(Vector3.UP, twist * sgn) * hang
@@ -191,6 +202,8 @@ func _process_modification_with_delta(_delta: float) -> void:
 		var hp: float = cfg.head_pitch - pitch * 0.8 + he.x * cfg.head_sway - lunge * 0.2 + listen * 0.15
 		hp = lerpf(hp, -0.15, lying)
 		roll = lerpf(roll, 0.35 * signf(cfg.head_roll + 0.001), lying)   # out cold, the head lolls to one side
+		hp += 0.55 * daze - 0.5 * jolt   # HANDS HOOK: the head hangs, then snaps up as it rises
+		roll += 0.32 * daze * signf(cfg.head_roll + 0.001) + 0.2 * jolt
 		var hq := Quaternion(Vector3.UP, listen_yaw * listen + he.y * cfg.head_sway * (1.0 - lying) + twitch.y) \
 			* Quaternion(Vector3.RIGHT, hp + twitch.x) * Quaternion(Vector3.BACK, roll + twitch.z)
 		sk.set_bone_pose_rotation(hi, hq)

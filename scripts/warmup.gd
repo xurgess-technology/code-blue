@@ -68,6 +68,15 @@ static func run(game: Node) -> void:
 	shelf.add_child(syringe)
 	syringe.position = Vector3(x, 0.3, 0.3)
 	BrainsScript.warm(shelf)  # SWEEP 3 HOOK (brains): the blender, Echo's ghosts and veil, Hive Eyes' screen
+	# HANDS HOOK: the first-person forearms, hands and torch (their skin, sleeve and lens materials, on
+	# the hands layer the flashlight skips). The wind-ups build nothing new: they pose these and the
+	# syringe above.
+	var fp_arm: Node3D = preload("res://scripts/hands/fp_arms.gd").make_arm(-1.0, C.PLAYER_COLORS[0])
+	shelf.add_child(fp_arm)
+	fp_arm.position = Vector3(x + 0.2, 0.3, 0.3)
+	var fp_torch: Node3D = preload("res://scripts/hands/fp_arms.gd").make_torch()
+	shelf.add_child(fp_torch)
+	fp_torch.position = Vector3(x + 0.4, 0.3, 0.3)
 
 	# Patients, each showing every visual state a case can reach
 	var bodies := {}

@@ -2,9 +2,10 @@ extends Node
 ## Combat (sweep 3, docs/SWEEP3.md "Combat"): bone saw swings, anesthetic jabs, dragging a sedated
 ## monster and strapping it to a patient table, and the first-person swing / jab animations.
 ##
-## Host authoritative. The player presses left mouse (Player.use_count, game.player_used -> use());
-## the local machine plays the animation at once (local_try_use) and everyone else sees it through
-## the reliable event `cb_swing`. Dragging is Player.dragging_monster (report key `dm`); every machine
+## Host authoritative. Every use winds up first (scripts/combat/windup.gd): the local machine starts
+## the pull-back on the input and tells the host (reliable RPCs), the host resolves the hit when the
+## strike happens and broadcasts cb_windup / cb_swing / cb_cancel so every machine shows the same
+## pose (scripts/hands/**). Dragging is Player.dragging_monster (report key `dm`); every machine
 ## pins the monster behind its dragger with monster_pin(m).
 ##
 ## The monster API (take_hit, can_sedate, sedate, is_sedated, wake, dragged_by, sedation_left) comes
@@ -14,6 +15,9 @@ extends Node
 ## look is this file tipping the monster's model over.
 
 const MonsterScript := preload("res://scripts/monster.gd")
+## Hands sweep: every use winds up first (windup.gd); a shove's stun reads on the monster (stun_window.gd).
+const WindupScript := preload("res://scripts/combat/windup.gd")
+const StunWindowScript := preload("res://scripts/combat/stun_window.gd")
 
 const SAW_BREAK_CHANCE := 0.12
 const SWING_COOLDOWN := 0.8
@@ -42,26 +46,29 @@ const HOST_COOLDOWN_SLACK := 0.8
 ## Strapping maps sedation left (0 .. SEDATE_SECONDS) onto the case's flags.sedation.
 const STRAP_SEDATION_MIN := 0.35
 
-const SWING_TIME := 0.55
-const JAB_TIME := 0.45
-
 var game: Node = null
+## Every machine: the wind-up, strike, recover state of every player (scripts/combat/windup.gd).
+var windup: RefCounted = null
+## Every machine: shove stun windows on monsters (scripts/combat/stun_window.gd).
+var stun_window: RefCounted = null
 ## Host: the break roll. Tests seed it and may change break_chance.
 var rng := RandomNumberGenerator.new()
 var break_chance := SAW_BREAK_CHANCE
 ## Host: what the last use did, for tests: {what: "air"|"monster"|"player"|"refused"|..., result, id}.
 var last_result: Dictionary = {}
-## Every machine: cb_swing animations started per peer id (tests).
+## Every machine: strikes (saw, jab, shove) seen per peer id (tests).
 var swings_seen: Dictionary = {}
-## Tools: hold every animation at its current time (screenshots set _anims[peer].t themselves).
-var anim_freeze := false
+## Tools: hold every action at its current time (screenshots pose it with pose_at()).
+var anim_freeze: bool:
+	get:
+		return windup != null and windup.freeze
+	set(v):
+		if windup != null:
+			windup.freeze = v
 
-var _cd: Dictionary = {}          # host: peer id -> world_time its next use is accepted
-var _local_next := 0.0            # this machine: the local player's own cooldown (msec)
 var _holds: Dictionary = {}       # host: peer id -> seconds held on a sedated monster
 var _fb_hits: Dictionary = {}     # fallback: monster id -> saw hits taken
 var _fb_sedated: Dictionary = {}  # fallback: host monster id -> world_time it wakes; clients id -> 0.0
-var _anims: Dictionary = {}       # every machine: peer id -> {k, t, prop: [nodes]}
 var _aims: Dictionary = {}        # every machine: monster id -> MonsterAim
 var _lying: Dictionary = {}       # fallback look: monster id -> true while its model is tipped over
 
@@ -69,6 +76,8 @@ var _lying: Dictionary = {}       # fallback look: monster id -> true while its 
 func setup(g: Node) -> void:
 	game = g
 	rng.randomize()
+	windup = WindupScript.new(self)
+	stun_window = StunWindowScript.new(g)
 
 
 ## Every machine: does left mouse "use" this held kind instead of shoving?
@@ -80,44 +89,102 @@ func is_usable(kind: String) -> bool:
 # using the saw and the needle
 # =========================================================================
 
-## The local machine, the moment the player clicks: false while its own cooldown runs (the click
-## is ignored); otherwise it starts the animation and the whoosh right away and returns true.
+## The clicking machine, the moment the player clicks: starts the wind-up (and tells the host).
+## False while its own cooldown runs or it is busy (the click is ignored).
 func local_try_use(p: Node) -> bool:
 	var kind := String(p.selected_stack().kind)
 	if not is_usable(kind):
 		return false
-	var now := Time.get_ticks_msec()
-	if now < _local_next:
-		return false
-	_local_next = now + int((SWING_COOLDOWN if kind == "bone_saw" else JAB_COOLDOWN) * 1000.0)
-	_start_anim(p, "saw" if kind == "bone_saw" else "jab")
-	return true
+	return windup.begin_local(p, "saw" if kind == "bone_saw" else "jab")
 
 
-## Host: p pressed left mouse with a usable item selected.
+## The shoving machine: Q (or left mouse with nothing usable) went down / came up.
+func local_shove_begin(p: Node) -> bool:
+	return windup.begin_local(p, "shove")
+
+
+func local_shove_release(p: Node) -> void:
+	windup.release_local(p)
+
+
+## Host: p pressed left mouse with a usable item selected, through the old `use_count` counter
+## (Player.report_state). It winds up like a click; the strike resolves WINDUP_TIME later.
 func use(p: Node) -> void:
 	if game == null or not game.is_host() or p == null or not is_instance_valid(p):
-		return
-	if not p.alive or p.downed or p.stun > 0.0 or p.carrying != 0 or p.carried_by != 0 or dragging(p) >= 0 or p.operating:
-		last_result = {"what": "refused"}
 		return
 	var kind := String(p.selected_stack().kind)
 	if not is_usable(kind):
 		return
-	var now: float = game.world_time
-	if now < float(_cd.get(p.peer_id, -INF)):
-		last_result = {"what": "cooldown"}
+	if not windup.can_act(p):
+		last_result = {"what": "refused"}
 		return
-	var saw := kind == "bone_saw"
-	_cd[p.peer_id] = now + (SWING_COOLDOWN if saw else JAB_COOLDOWN) * HOST_COOLDOWN_SLACK
-	var k := "saw" if saw else "jab"
-	if not p.is_local or not _anim_recent(p):
-		_start_anim(p, k)
-	game._broadcast("cb_swing", {"id": p.peer_id, "k": k})
-	if saw:
-		_swing(p)
-	else:
-		_jab(p)
+	windup.host_begin(p, "saw" if kind == "bone_saw" else "jab", windup.next_seq(p))
+
+
+## Host: the shove strikes with charge c (0..1).
+func strike_shove(p: Node, c: float) -> void:
+	game.player_shoved(p, c)
+
+
+## Host (game.player_shoved): a monster was shoved; a stunned one shows its window everywhere.
+func monster_shoved(m: Node, _charge: float) -> void:
+	if m == null or not is_instance_valid(m) or not _capturable(m) or is_sedated(m):
+		return
+	if "mode" in m and int(m.mode) == MonsterScript.Mode.STUNNED and m.brain != null and "timer" in m.brain:
+		stun_window.host_stunned(m, float(m.brain.timer))
+
+
+## Host: p's wind-up ends without a strike (hit, shoved, knocked out). The cooldown still starts.
+func cancel_windup(p: Node, why := "") -> void:
+	if windup != null:
+		windup.cancel(p, why)
+
+
+## Every machine: what p is doing with its hands: {} or {k, ph, t, u, charge, c} (windup.gd).
+func action_of(p: Node) -> Dictionary:
+	return windup.action_of(p) if windup != null else {}
+
+
+func is_winding(p: Node) -> bool:
+	return windup != null and windup.is_winding(p)
+
+
+## Monster._update_visual hook: the stun window's pose.
+func stun_pose(m: Node, sh: Object, lying: float) -> void:
+	if stun_window != null:
+		stun_window.pose(m, sh, lying)
+
+
+## Every machine (Player._update_aim): the crosshair prompt while holding anesthetic and aiming at a
+## monster that can be jabbed right now. The only UI of the stun window.
+func jab_prompt(p: Node) -> String:
+	if String(p.selected_stack().kind) != "anesthetic":
+		return ""
+	var t := find_target(p, JAB_REACH, JAB_CONE_DEG)
+	if t.is_empty() or t.kind != "monster":
+		return ""
+	var m: Node = t.node
+	if not _capturable(m) or is_sedated(m) or not ("mode" in m) or int(m.mode) != MonsterScript.Mode.STUNNED:
+		return ""
+	return "[Click] Jab it"
+
+
+@rpc("any_peer", "reliable", "call_remote")
+func _rpc_windup(k: String, seq: int) -> void:
+	if not game.is_host() or not (k in ["shove", "saw", "jab"]):
+		return
+	var p = game.players.get(multiplayer.get_remote_sender_id())
+	if p != null:
+		windup.host_begin(p, k, seq)
+
+
+@rpc("any_peer", "reliable", "call_remote")
+func _rpc_release(seq: int, held: float) -> void:
+	if not game.is_host():
+		return
+	var p = game.players.get(multiplayer.get_remote_sender_id())
+	if p != null:
+		windup.host_release(p, seq, held)
 
 
 func _swing(p: Node) -> void:
@@ -250,6 +317,7 @@ func _use_vial(p: Node) -> void:
 func knock_out(q: Node, seconds: float) -> void:
 	if not game.is_host() or q == null or not q.alive or q.downed:
 		return
+	cancel_windup(q, "knocked out")   # hands sweep
 	game.end_operations(q)
 	drop_dragged(q)
 	if q.carrying != 0:
@@ -604,6 +672,8 @@ func physics_tick(delta: float) -> void:
 		return
 	if game.is_host():
 		_host_tick(delta)
+	windup.tick(delta)
+	stun_window.tick(delta)
 	_tick_aims()
 	_pin_fallback()
 
@@ -739,132 +809,26 @@ class MonsterAim extends Area3D:
 
 
 # =========================================================================
-# first-person and third-person swing / jab animation
+# tools: posing an action (the look itself is scripts/hands/**)
 # =========================================================================
 
-func _anim_recent(p: Node) -> bool:
-	var a = _anims.get(p.peer_id)
-	return a != null and float(a.t) < 0.25
+## Tools and screenshots: show p in phase `ph` (Windup.WINDUP / STRIKE / RECOVER) of action k, `t`
+## seconds in, with charge c, frozen there (anim_freeze) until stop_anim(p).
+func pose_at(p: Node, k: String, ph: int, t: float, c := 0.0) -> void:
+	windup.pose_at(p, k, ph, t, c)
+	anim_freeze = true
 
 
-func _start_anim(p: Node, k: String) -> void:
-	if p == null or not is_instance_valid(p):
-		return
-	_clear_props(p.peer_id)
-	_anims[p.peer_id] = {"k": k, "t": 0.0, "props": []}
-	swings_seen[p.peer_id] = int(swings_seen.get(p.peer_id, 0)) + 1
-	var at: Vector3 = p.global_position + Vector3.UP * 1.4
-	if k == "saw":
-		Audio.play("combat_swing", at, -2.0, 0.1)
-	else:
-		Audio.play("combat_jab_swish", at, -6.0, 0.1)
-
-
-## Tools: end p's animation now; the held model goes back to rest next frame.
+## Tools: end p's action now; the hands go back to rest.
 func stop_anim(p: Node) -> void:
-	var a = _anims.get(p.peer_id)
-	if a != null:
-		a.t = 99.0
-		var was := anim_freeze
-		anim_freeze = true
-		animate_held(p, 0.0, p._held_fp, p._held_tp)
-		anim_freeze = was
+	if windup != null and p != null:
+		windup.states.erase(int(p.peer_id))
 
 
-func _clear_props(peer: int) -> void:
-	var a = _anims.get(peer)
-	if a == null:
-		return
-	for n in a.props:
-		if is_instance_valid(n):
-			n.queue_free()
-	a.props = []
-
-
-## Player._process, every machine, every frame: move the held stack's model through the swing or
-## the jab. `fp` / `tp` are HeldFirstPerson (under the camera) / HeldThirdPerson (under the body).
-func animate_held(p: Node, delta: float, fp: Node3D, tp: Node3D) -> void:
-	var a = _anims.get(p.peer_id)
-	if a == null:
-		return
-	if not anim_freeze:
-		a.t = float(a.t) + delta
-	var jab: bool = a.k == "jab"
-	var done := float(a.t) >= (JAB_TIME if jab else SWING_TIME)
-	for holder in [fp, tp]:
-		if holder == null or holder.get_child_count() == 0:
-			continue
-		var pivot := holder.get_child(holder.get_child_count() - 1) as Node3D
-		if pivot == null or pivot.is_queued_for_deletion():
-			continue
-		if done:
-			pivot.transform = Transform3D.IDENTITY
-		else:
-			var pose := anim_pose(String(a.k), float(a.t), holder.transform, holder == tp)
-			pivot.transform = holder.transform.affine_inverse() * pose
-		if jab:
-			# The syringe drawn from the vials does the jab; the vials stay out of sight meanwhile.
-			for c in pivot.get_children():
-				if c.name != "CombatSyringe" and c is Node3D:
-					(c as Node3D).visible = done
-			if not done and not pivot.has_node("CombatSyringe"):
-				var syr := make_syringe()
-				syr.name = "CombatSyringe"
-				pivot.add_child(syr)
-				a.props.append(syr)
-	if done:
-		_clear_props(p.peer_id)
-		_anims.erase(p.peer_id)
-
-
-## Where the held model is `t` seconds into a swing ("saw") or a jab, in the holder's parent space
-## (camera space in first person; body space for others, `third`). `rest` is the holder's own
-## transform: the pose starts and ends there.
-##   Saw model: blade along +X from the grip, teeth toward +Z, flat face +Y.
-##   Syringe: needle along -Z.
-static func anim_pose(k: String, t: float, rest: Transform3D, third := false) -> Transform3D:
-	# Keys: [time, origin, blade (+X) direction, teeth (+Z) direction]; null: the resting pose.
-	var keys: Array
-	if k == "saw":
-		# A diagonal chop from high on the right down across the view to the lower left.
-		keys = [
-			[0.0, null],
-			[0.14, Vector3(0.2, 0.02, -0.5), Vector3(0.3, 1.0, 0.25), Vector3(-0.3, 0.0, -1.0)],
-			[0.26, Vector3(0.05, -0.2, -0.5), Vector3(-1.0, -0.45, -0.55), Vector3(-0.3, -1.0, 0.2)],
-			[0.34, Vector3(-0.08, -0.34, -0.46), Vector3(-1.0, -0.8, -0.35), Vector3(-0.4, -1.0, 0.4)],
-			[SWING_TIME, null],
-		]
-	else:
-		# The syringe comes up from the lower left and stabs forward toward the middle of the view.
-		keys = [
-			[0.0, null],
-			[0.12, Vector3(-0.16, -0.18, -0.34), Vector3(1.0, 0.0, -0.3), Vector3(-0.3, -0.3, 1.0)],
-			[0.2, Vector3(-0.06, -0.1, -0.5), Vector3(1.0, 0.0, -0.3), Vector3(-0.3, -0.22, 1.0)],
-			[0.28, Vector3(-0.06, -0.1, -0.49), Vector3(1.0, 0.0, -0.3), Vector3(-0.3, -0.22, 1.0)],
-			[JAB_TIME, null],
-		]
-	for i in range(1, keys.size()):
-		if t <= float(keys[i][0]) or i == keys.size() - 1:
-			var t0 := float(keys[i - 1][0])
-			var t1 := float(keys[i][0])
-			var u := clampf((t - t0) / maxf(0.001, t1 - t0), 0.0, 1.0)
-			u = u * u * (3.0 - 2.0 * u)
-			var from := _key_pose(keys[i - 1], rest, third)
-			var to := _key_pose(keys[i], rest, third)
-			return from.interpolate_with(to, u)
-	return rest
-
-
-static func _key_pose(key: Array, rest: Transform3D, third: bool) -> Transform3D:
-	if key.size() < 4 or key[1] == null:
-		return rest
-	var x: Vector3 = (key[2] as Vector3).normalized()
-	var z: Vector3 = key[3]
-	z = (z - x * z.dot(x)).normalized()
-	var o: Vector3 = key[1]
-	if third:
-		o = Vector3(o.x * 1.6, 1.4 + o.y * 1.5, o.z * 1.2 - 0.4)   # out in front of the body's (big) head
-	return Transform3D(Basis(x, z.cross(x), z), o)
+## Kept for callers of the sweep 3 API (tools/monster_lab.gd stubs it): the hands now animate
+## themselves from action_of() (scripts/hands/fp_hands.gd, body_hands.gd).
+func animate_held(_p: Node, _delta: float, _fp: Node3D, _tp: Node3D) -> void:
+	pass
 
 
 ## A syringe drawn from the vial for the jab: the needle points along -Z.
@@ -930,13 +894,10 @@ func apply_net_state(s: Dictionary) -> void:
 
 func on_event(kind: String, data: Dictionary) -> void:
 	match kind:
-		"cb_swing":
-			var p = game.players.get(int(data.get("id", 0)))
-			if p == null or not is_instance_valid(p):
-				return
-			if p.is_local and _anim_recent(p):
-				return   # already playing: this machine started it on the click
-			_start_anim(p, String(data.get("k", "saw")))
+		"cb_windup", "cb_swing", "cb_cancel":
+			windup.on_event(kind, data)
+		"cb_stun":
+			stun_window.on_event(data)
 
 
 ## Host: every monster is about to be freed (clock-out, new level).
@@ -950,6 +911,8 @@ func on_monsters_cleared() -> void:
 	_fb_sedated.clear()
 	_aims.clear()
 	_lying.clear()
+	if stun_window != null:
+		stun_window.stuns.clear()
 
 
 ## Host: one monster is leaving the game (killed, or strapped onto a table).
