@@ -108,6 +108,14 @@ static func run(game: Node) -> void:
 				b.set_bleeding("gunshot", 0.8)
 			bodies["%s|%s" % [pid, ail]] = b
 			bx += 0.4
+			# SEAL HOOK: the seal's Blender model (patient/seal) builds here; its stump cap is shown by
+			# the amputated flags above. The severed paddle the saw drops is a static (unskinned) mesh
+			# with the same materials, a different shader variant, so draw one copy too.
+			if pid == "seal" and ail == "amputation" and b.has_method("make_severed_limb"):
+				var sev: Node3D = b.make_severed_limb(shelf)
+				if sev != null:
+					sev.position = Vector3(bx, -0.3, -0.8)
+					sev.scale = Vector3.ONE * 0.5
 	# DOWNED HOOK: the lying player on the player table (bleeding and stitched) and the table itself.
 	for stitched in [false, true]:
 		var pb: Node3D = PlayerBodyScript.create(1, Color("3d8f80"))

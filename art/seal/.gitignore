@@ -1,0 +1,7 @@
+__pycache__/
+*.log
+*.err
+*.blend1
+renders/_cell.png
+# seal_build.py exports this, then seal_glb_extern.py writes the game copy under assets/models/patients/seal/
+seal_embedded.glb

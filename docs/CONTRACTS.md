@@ -182,6 +182,28 @@ limb (site Z), `axis_depth` how far below the site origin the axis runs, `shape`
 exponent (2 round, 6 boxy). Minigames read limb geometry only through `site_section`,
 `infection_start` and `make_severed_limb`, never through `PatientBody.parts`.
 
+**The seal's Blender model (2026-09-14).** `PatientBody.create("seal")` builds the seal from the
+`patient/seal` asset (`assets/models/patients/seal/seal.glb`, made in `art/seal/`) through
+`scripts/patients/seal_model_builder.gd`, and falls back to the lofted `seal_builder.gd` when the
+asset or its shader is missing (`SealModelBuilder.procedural_only = true` forces the fallback, for
+tools). Same frame and API; what differs underneath:
+
+- `site_transform` returns the rest pose (the Idle clip's first frame). The `site_*` anchor nodes sit
+  on the neck, spine and `flipper_fore.L` bones, so every overlay on them (tourniquet, wound,
+  dressings, bleeding decals) follows the clips. Sections come from the mesh: `limb` half_up 0.0335,
+  half_side 0.0659; `limb_cut` 0.0270 / 0.0626 (both also carry `half_down`, the flatter underside);
+  `infection_start` 0.0972 and 0.0216.
+- Motion: no AnimationPlayer runs. The builder samples the Idle, Fidget, Twitch, Stir and Flatline
+  clips every frame and blends them from the body state: Idle's rate follows the breathing rate and
+  its ribs the breathing depth, `stir()` restarts Stir weighted by its strength, fidget and low-vitals
+  twitching blend their clips in, `flatline()` fades into Flatline. `breath_amp` is 0 (the ribs bone
+  breathes); `rig.position`'s jolt offset still applies.
+- `skin_mats` holds the model's two ShaderMaterials (`seal_skin.gdshader`): `pallor`, `grey`,
+  `infect` and `breath` as before, plus `infect_front`, `highlight_injection`, `highlight_gunshot`.
+- The amputation swaps the model's `Seal_Paddle_L` for its `Seal_StumpCap_L`; the fishing line shows
+  for the amputation ailment until the paddle comes off. `make_severed_limb` duplicates the static
+  `Seal_PaddleSevered_L` (paddle, cut face, line) at the paddle's current place.
+
 ## Surgery (surgery worker)
 
 ```gdscript

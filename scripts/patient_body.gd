@@ -8,12 +8,14 @@ extends Node3D
 ## +Y out of the skin toward a camera above, X along the limb (distal) for limb / limb_cut,
 ## X along the body toward the feet / tail for gunshot and along the arm for Bob's injection.
 ##
-## Per-patient geometry lives in scripts/patients/<id>_builder.gd; this file owns the state:
+## Per-patient geometry lives in scripts/patients/<id>_builder.gd (the seal: seal_model_builder.gd on its
+## Blender model, seal_builder.gd as the fallback); this file owns the state:
 ## ailment, vitals (breathing, pallor, twitching), sedation (fidgeting), stirs, bleeding, flags.
 
 const Kit := preload("res://scripts/patients/patient_kit.gd")
 const BobBuilder := preload("res://scripts/patients/bob_builder.gd")
 const SealBuilder := preload("res://scripts/patients/seal_builder.gd")
+const SealModelBuilder := preload("res://scripts/patients/seal_model_builder.gd")
 const DummyBuilder := preload("res://scripts/patients/dummy_builder.gd")
 const MonsterBuilder := preload("res://scripts/dissection/monster_builder.gd")
 
@@ -77,8 +79,12 @@ static func create(id: String) -> Node3D:
 		ok = MonsterBuilder.build(b)
 		b._builder = MonsterBuilder
 	elif body_kind == "seal":
-		ok = SealBuilder.build(b)
-		b._builder = SealBuilder
+		# The Blender model (patient/seal) when it is there, else the lofted procedural seal.
+		ok = SealModelBuilder.build(b)
+		b._builder = SealModelBuilder
+		if not ok:
+			ok = SealBuilder.build(b)
+			b._builder = SealBuilder
 	else:
 		if not Procedures.PATIENTS.has(id):
 			push_warning("PatientBody: unknown patient '%s', using Bob" % id)

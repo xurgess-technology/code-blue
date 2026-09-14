@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://csealviewer01"]
+
+[ext_resource type="Script" path="res://tools/seal_viewer.gd" id="1_sview"]
+
+[node name="SealViewer" type="Node3D"]
+script = ExtResource("1_sview")
