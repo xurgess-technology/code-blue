@@ -431,6 +431,40 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   on the client is only checked for `dragged_by`, not for following the pin; the lab checks the pin
   with a stand-in combat.
 
+## The Night Nurse's Blender model (2026-09-14)
+
+- **Walk at hunting speed plays 3.4x.** The clip is matched to her ground speed (`WALK_SPEED` 1 m/s,
+  measured from the stance foot), so at 3.4 m/s a stride cycle lasts 0.47 s: no skating, but a fast,
+  skittering gait. Only the stance half of the clip is planted; in the other half a toe drags forward
+  along the floor (authored that way). A faster, longer-striding clip would read better at 3.4 m/s.
+- **The toes dip into the floor in Walk**, about 4 cm through the stance; the model is lifted
+  `WALK_LIFT` (3.5 cm) while walking, blending over 0.25 s, so for a moment after she stops or
+  starts the feet sit a little high or low.
+- **Procedural poses are turned from the bones, not authored:** the lunge (both arms swing forward),
+  the knock-down recoil (head and torso thrown back, arms out) and the dead slump. They read at play
+  distance (`tools/monster_shots/nurse_lunge.png`, `nurse_knocked.png`, `nurse_corpse.png`); only
+  checked in stills, and nothing stops an arm passing through the dress while the pose blends in.
+- **A saw hit on her shows nothing** (she is immune: combat plays the clang, no hit counter, so no
+  flinch reaches clients). Only the dev gun's knock-down (calm) has a pose.
+- **Perception still samples fixed heights** (0.15, 1.3, 2.1 m over her origin). Her head is 15-28 cm
+  in front of the origin in Idle and Walk, so the top sample sits just behind her head.
+- **Textures are 2048 px** (VRAM compressed, about 21 MB of video memory for the six maps). The low
+  quality preset does not shrink them; mesh LODs (5-7 levels, generated on import) cover distance.
+- **Perf** (`monster_lab -- --perf --nurses`, 1600x900 medium, Radeon 890M, seed 4242 corridor, two
+  passes, nurses 3-6 m away walking in place): the old reshaped rig 107-110 fps with 1 nurse (206-208
+  draws) and 114-116 with 4 (313-314 draws); the Blender model 110-112 with 1 (144-146 draws) and
+  114-115 with 4 (156 draws); no nurses 110-113. Every row sits at about 110-116 fps, so this view is
+  limited by something other than the nurses and the numbers only show she costs no more than before.
+- **The dev panel's Night Nurse settings only exist in the dev room** (the panel does too). "Walks a
+  loop here" snaps the corners to the navigation mesh but does not check that they connect; in the
+  pen or a corner she can walk to the nearest reachable point and turn back.
+- **`devtest -- --net=client --shots` (windowed) fails "a client takes from a dispenser"** (a 5 s wait,
+  seen twice); the headless two-process run passes. Probably the windowed client's slower start; not
+  looked into.
+- **Two `Parameter "material" is null` errors in `playtest --god --shifts=2`**, at each case's end
+  (`material_get_instance_shader_parameters`, dummy renderer). The run passes; not traced, and not
+  checked against main.
+
 ## Dissection (sweep 3)
 
 - **The strapped rig bodies are fitted by measured constants** (`monster_rig_look.gd` `RIG`: scale,

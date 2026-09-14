@@ -922,7 +922,6 @@ func _run_shots() -> void:
 		["nurse_1_5m", _shot_nurse.bind(1.5)],
 		["nurse_door", _shot_nurse_door],
 		["nurse_walk_flashlight", _shot_nurse_walk.bind(4.5, 1.6)],
-		["nurse_walk_hunt", _shot_nurse_walk.bind(6.0, 3.4)],
 		["nurse_frozen_watched", _shot_nurse_frozen],
 		["nurse_idle", _shot_nurse_idle],
 		["nurse_knocked", _shot_nurse_knocked],
@@ -1485,9 +1484,15 @@ func _perf_nurses(g: Node, bot: Node, first: Vector3, best_dir: Vector3, look: C
 				for m in list:
 					if is_instance_valid(m):
 						var to: Vector3 = bot.global_position - m.global_position
-						m.apply_remote({"pos": m.global_position, "y": atan2(-to.x, -to.z), "md": Modes.Mode.WANDER, "mv": true, "sp": 1.6, "ob": false})
+						m.rotation.y = atan2(-to.x, -to.z)
+						m.apply_remote({"pos": m.global_position, "y": m.rotation.y, "md": Modes.Mode.WANDER, "mv": true, "sp": 1.6, "ob": false})
 						m._update_visual(get_process_delta_time())
 			await _perf_measure("%d Night Nurse%s in view #%d" % [count, "" if count == 1 else "s", pass_i + 1], frames, bot)
+			if pass_i == 0 and count > 0:
+				# What was measured, to check the nurses really were in view.
+				await RenderingServer.frame_post_draw
+				DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(SHOT_DIR))
+				get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("%s/perf_%d_nurses.png" % [SHOT_DIR, count]))
 			_perf_tick = Callable()
 	print("[perf] ============================================================================")
 	print("[perf] %-40s avg fps  1%%low  worst ms  phys ms  proc ms  draws" % "scenario")

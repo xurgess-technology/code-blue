@@ -594,6 +594,13 @@ func _run_client() -> void:
 		_check(ok, "client: the host's Night Nurse settings replicate back (ignore %s, walk '%s', pace %d)" % [str(dev.nurse_ignore_watch), dev.nurse_walk, dev.nurse_pace])
 		await _watch_client(nurse, 1.0)
 		var f1: Dictionary = await _watch_client(nurse, 4.0)
+		if shots:
+			# Windowed client (`-- --net=client --shots`): what the client sees while she walks.
+			DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(SHOT_DIR))
+			dev.request("lights", {"on": false})
+			await _watch_client(nurse, 2.0)
+			await _shot("12_client_nurse_walking_watched")
+			dev.request("lights", {"on": true})
 		_check(f1.moved > 2.0 and not f1.observed_ever and f1.anim_moving > f1.frames * 0.8 and f1.walk > f1.frames * 0.5,
 			"client: with the toggle on she keeps walking while it watches (%.1f m in 4 s, animating %d / walk %d of %d frames)" % [f1.moved, f1.anim_moving, f1.walk, f1.frames])
 		dev.request("nurse_ignore_watch", {"on": false})
@@ -687,6 +694,35 @@ func _take_shots() -> void:
 	await _until(func(): return game.players[bid].operating, 60.0)
 	await _seconds(3.0)
 	await _shot("09_bot_operating")
+	# NURSE HOOK: the Night Nurse section. Lights off, flashlight on her, "ignores being watched" on,
+	# walking a loop round you at the stalk pace.
+	dev.remove_bot(bid)
+	dev.request("clear_patient")
+	dev.request("kill_monsters")
+	dev.request("lights", {"on": false})
+	_stand(Vector3(20.0, 0, 12.5), PI / 2.0)
+	await _seconds(0.3)
+	dev.request("spawn_monster", {"kind": "night_nurse", "where": "front"})
+	dev.request("nurse_ignore_watch", {"on": true})
+	dev.request("nurse_pace", {"i": 1})
+	dev.request("nurse_walk", {"mode": "loop"})
+	me.set_flashlight(true)
+	var nurse = _first_nurse()
+	var end := t + 3.3
+	while t < end:
+		_look_at(nurse.global_position + Vector3.UP * 1.3)
+		await get_tree().physics_frame
+	await _shot("10_nurse_walks_in_the_flashlight")
+	main.dev_panel.toggle(true)
+	await _seconds(0.4)
+	await _shot("11_panel_night_nurse")
+	main.dev_panel.toggle(false)
+	dev.request("nurse_ignore_watch", {"on": false})
+	end = t + 1.5
+	while t < end:
+		_look_at(nurse.global_position + Vector3.UP * 1.3)
+		await get_tree().physics_frame
+	await _shot("12_nurse_frozen_toggle_off")
 
 
 func _shot(name: String) -> void:
