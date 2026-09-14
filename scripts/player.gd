@@ -112,6 +112,7 @@ const CombatScript := preload("res://scripts/combat/combat.gd")
 ## (game.combat.windup) and the over-the-shoulder carry camera (`carry_cam`, local player only).
 const HandsFP := preload("res://scripts/hands/fp_hands.gd")
 const BodyHandsScript := preload("res://scripts/hands/body_hands.gd")
+const HumanModel := preload("res://scripts/human/human_model.gd")   # HUMAN HOOK
 const CarryCameraScript := preload("res://scripts/camera/carry_camera.gd")
 const Grips := preload("res://scripts/hands/grips.gd")
 var body_hands: RefCounted = null
@@ -148,6 +149,9 @@ var fx: Node3D
 var camera: Camera3D
 var flashlight: SpotLight3D
 var body_visual: Node3D
+## HUMAN HOOK: where a carried human's Carried clip origin (the belly) sits, in the carrier's frame: the
+## human carrier's right shoulder.
+const HUMAN_CARRIED_SHOULDER := Vector3(0.15, 1.535, 0.03)
 var name_tag: Label3D
 var hands: Node3D
 var game: Node = null
@@ -358,6 +362,11 @@ func apply_fov(fov_deg: float) -> void:
 func _make_body() -> Node3D:
 	var root := Node3D.new()
 	root.name = "Body"
+	# HUMAN HOOK: a Blender surgeon (variation by peer id, scrubs tinted to the player's colour); Kenney below.
+	var human: Node3D = HumanModel.spawn(HumanModel.surgeon_for(peer_id), colour)
+	if human != null:
+		root.add_child(human)
+		return root
 	var real: Node3D = Assets.spawn("char/surgeon") if Assets.has("char/surgeon") else null
 	if real != null:
 		root.add_child(real)
@@ -1143,6 +1152,17 @@ func _update_down_pose(delta: float) -> void:
 		var back := 1.0 if carried_by != 0 else 0.0
 		if not is_equal_approx(head.position.z, back):
 			head.position.z = back
+		return
+	if body_hands != null and body_hands.lies_by_clip():
+		# HUMAN HOOK: the human lies, crawls and hangs over the shoulder by its own clips; the Carried
+		# clip's origin (the belly on the shoulder) goes onto the carrier's right shoulder.
+		body_visual.rotation = Vector3(-0.2 if hive_view else 0.0, 0.0, 0.0)
+		body_visual.position = Vector3.ZERO
+		var carrier = game.players.get(carried_by) if carried_by != 0 and game != null else null
+		if carrier != null and is_instance_valid(carrier):
+			# on the carrier's right shoulder, facing where the carrier faces, whatever this body's own yaw
+			var cb := Basis(Vector3.UP, carrier.rotation.y)
+			body_visual.global_transform = Transform3D(cb, carrier.global_position + cb * HUMAN_CARRIED_SHOULDER)
 		return
 	if carried_by != 0:
 		# A fireman's carry over the right shoulder (game.pinned_pose puts the root there): legs

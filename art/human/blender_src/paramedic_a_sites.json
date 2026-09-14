@@ -1,0 +1,198 @@
+{
+ "variant": "paramedic_a",
+ "height": 1.83,
+ "sites": {
+  "limb": {
+   "bone": "upperarm.R",
+   "half_up": 0.0427,
+   "half_side": 0.0428,
+   "axis_depth": 0.0427,
+   "shape": 2.2,
+   "infection_start": 0.1799,
+   "s": 0.2229,
+   "origin_gltf": [
+    -0.3568,
+    1.3351,
+    0.0171
+   ],
+   "x_gltf": [
+    -0.731,
+    -0.682,
+    0.017
+   ],
+   "y_gltf": [
+    0.012,
+    0.012,
+    1.0
+   ]
+  },
+  "limb_cut": {
+   "bone": "forearm.R",
+   "half_up": 0.0393,
+   "half_side": 0.0366,
+   "axis_depth": 0.0393,
+   "shape": 2.2,
+   "infection_start": 0.0308,
+   "s": 0.372,
+   "origin_gltf": [
+    -0.4626,
+    1.2365,
+    0.0239
+   ],
+   "x_gltf": [
+    -0.726,
+    -0.677,
+    0.121
+   ],
+   "y_gltf": [
+    0.089,
+    0.083,
+    0.993
+   ]
+  },
+  "injection": {
+   "bone": "forearm.L",
+   "half_up": 0.041,
+   "half_side": 0.0401,
+   "axis_depth": 0.041,
+   "shape": 2.2,
+   "s": 0.3051,
+   "origin_gltf": [
+    0.4016,
+    1.2651,
+    0.0134
+   ],
+   "x_gltf": [
+    0.73,
+    -0.68,
+    0.068
+   ],
+   "y_gltf": [
+    -0.399,
+    -0.343,
+    0.851
+   ]
+  },
+  "gunshot": {
+   "bone": "hips",
+   "origin_gltf": [
+    -0.0635,
+    1.0641,
+    0.084
+   ],
+   "x_gltf": [
+    0.0,
+    -1.0,
+    -0.0
+   ],
+   "y_gltf": [
+    -0.224,
+    0.081,
+    0.971
+   ]
+  },
+  "eyes": {
+   "bone": "head",
+   "origin_gltf": [
+    0.0,
+    1.7128,
+    0.0822
+   ],
+   "x_gltf": [
+    1.0,
+    0.0,
+    -0.0
+   ],
+   "y_gltf": [
+    0.0,
+    1.0,
+    -0.0
+   ]
+  }
+ },
+ "arm_stations": {
+  "s0": -0.0514,
+  "E": 0.3,
+  "W": 0.562,
+  "K": 0.662,
+  "end": 0.6681,
+  "cut": 0.372,
+  "tq": 0.2229,
+  "inf0": 0.4028,
+  "inf1": 0.4542,
+  "vein": 0.3051
+ },
+ "tris": {
+  "Human": 16880
+ },
+ "tris_total": 16880,
+ "clips": {
+  "Idle": {
+   "frames": 120,
+   "loop": true,
+   "speed": 0.0,
+   "about": "standing, breathing, weight shifts, looks around"
+  },
+  "Walk": {
+   "frames": 32,
+   "loop": true,
+   "speed": 1.4,
+   "about": "walk, planted feet keep pace at 1.40 m/s"
+  },
+  "Jog": {
+   "frames": 22,
+   "loop": true,
+   "speed": 3.4,
+   "about": "the players' walk speed (C.WALK_SPEED 3.4)"
+  },
+  "Sprint": {
+   "frames": 18,
+   "loop": true,
+   "speed": 5.6,
+   "about": "C.SPRINT_SPEED 5.6"
+  },
+  "Push": {
+   "frames": 34,
+   "loop": true,
+   "speed": 1.25,
+   "about": "pushing a gurney: hands on a bar 0.98 m up, 0.50 m ahead; crew speed 1.25"
+  },
+  "Interact": {
+   "frames": 30,
+   "loop": false,
+   "speed": null,
+   "about": "reach forward and press/grab at chest height, one-shot"
+  },
+  "PickUp": {
+   "frames": 42,
+   "loop": false,
+   "speed": null,
+   "about": "squat, grab from the floor 0.40 m ahead, stand up holding it, one-shot"
+  },
+  "Crawl": {
+   "frames": 48,
+   "loop": true,
+   "speed": 0.75,
+   "about": "downed: prone crawl, planted hands keep pace at CRAWL_SPEED 0.75"
+  },
+  "Carried": {
+   "frames": 60,
+   "loop": true,
+   "speed": null,
+   "about": "slung over a carrier's right shoulder; origin = the belly contact point"
+  },
+  "Carrying": {
+   "frames": 60,
+   "loop": true,
+   "speed": null,
+   "about": "carrier holding a body on the right shoulder (arms and upper body only)"
+  },
+  "Lying": {
+   "frames": 90,
+   "loop": true,
+   "speed": null,
+   "about": "on the back on a table, breathing; origin = middle of the back on the table top"
+  }
+ },
+ "fps": 30
+}

@@ -50,8 +50,12 @@ func _build() -> void:
 			_body.set_ailment(ailment_id)
 		if _body.has_method("set_vitals"):
 			_body.set_vitals(70.0)
-	_make_medic(Vector3(0, 0, -1.55), 0.0, Color("2f4f3f"), "crew/paramedic_a", false)   # pulling at the front
-	_make_medic(Vector3(0, 0, 1.3), 0.0, Color("2f4f3f"), "crew/paramedic_b", true)      # pushing at the back
+	# HUMAN HOOK: the Blender paramedics (Walk at the front, Push at the back, hands on the handle); the
+	# Kenney medics and then the capsules are the fallbacks.
+	if _make_human_medic(Vector3(0, 0, -1.55), "paramedic_a", false) == null:
+		_make_medic(Vector3(0, 0, -1.55), 0.0, Color("2f4f3f"), "crew/paramedic_a", false)   # pulling at the front
+	if _make_human_medic(Vector3(0, 0, HUMAN_PUSH_Z), "paramedic_b", true) == null:
+		_make_medic(Vector3(0, 0, 1.3), 0.0, Color("2f4f3f"), "crew/paramedic_b", true)      # pushing at the back
 	_make_blockers()
 
 
@@ -86,6 +90,9 @@ func _process(delta: float) -> void:
 	var swing := sin(_walk) * 0.55 * clampf(_speed / 1.2, 0.0, 1.0)
 	for i in _medics.size():
 		var m: Dictionary = _medics[i]
+		if m.has("human"):
+			_animate_human_medic(m, delta)   # HUMAN HOOK
+			continue
 		if m.has("tree"):
 			# models sweep 2: the rigged paramedic blends idle -> walk by speed; the walk's own
 			# stride speed follows how fast the crew rolls.
@@ -190,6 +197,49 @@ static func _part(parts: Array, size: Vector3, pos: Vector3, mat: Material, basi
 	var bm := BoxMesh.new()
 	bm.size = size
 	parts.append([bm, 0, Transform3D(basis, pos), mat])
+
+
+# -- HUMAN HOOK: the Blender paramedics ---------------------------------------------------------------
+
+const HumanModel := preload("res://scripts/human/human_model.gd")
+## The Push clip's hands are 0.50 x (height / 1.78) m ahead of the feet at 0.98 x that height; the
+## handle is at z 1.02, y 0.98: paramedic_b (1.70 m) stands this far back.
+const HUMAN_PUSH_Z := 1.49
+const HUMAN_WALK_SPEED := 1.40
+const HUMAN_PUSH_SPEED := 1.25
+
+
+func _make_human_medic(at: Vector3, variant: String, pushing: bool) -> Node3D:
+	if shapes_only:
+		return null
+	var rig: Node3D = HumanModel.spawn(variant)
+	var ap: AnimationPlayer = HumanModel.anim_player(rig) if rig != null else null
+	if rig == null or ap == null:
+		if rig != null:
+			rig.free()
+		return null
+	var root := Node3D.new()
+	root.name = "Medic"
+	root.position = at
+	add_child(root)
+	root.add_child(rig)
+	HumanModel.loop_clips(rig)
+	ap.play("Push" if pushing else "Idle")
+	_medics.append({"root": root, "human": true, "ap": ap, "pushing": pushing, "clip": "Push" if pushing else "Idle"})
+	return root
+
+
+func _animate_human_medic(m: Dictionary, _delta: float) -> void:
+	var ap: AnimationPlayer = m.ap
+	if bool(m.pushing):
+		# Hands stay on the handle: the push stride runs with the crew and holds still when it stops.
+		ap.speed_scale = clampf(_speed / HUMAN_PUSH_SPEED, 0.0, 1.8)
+		return
+	var want := "Walk" if _speed > 0.25 else "Idle"
+	if want != String(m.clip):
+		m.clip = want
+		ap.play(want, 0.3)
+	ap.speed_scale = clampf(_speed / HUMAN_WALK_SPEED, 0.5, 1.8) if want == "Walk" else 1.0
 
 
 ## A paramedic: the rigged Kenney character in a green uniform when the model exists (it walks;

@@ -10,6 +10,7 @@ const RigMap := preload("res://scripts/hands/rig_map.gd")
 const Poser := preload("res://scripts/hands/body_poser.gd")
 const Grips := preload("res://scripts/hands/grips.gd")
 const WindupScript := preload("res://scripts/combat/windup.gd")
+const HumanModel := preload("res://scripts/human/human_model.gd")   # HUMAN HOOK
 
 ## The fallback attach point on a body without a rig (body space).
 const FIXED_ATTACH := Vector3(-0.25, 1.05, -0.35)
@@ -36,6 +37,9 @@ var _two := false
 var _shake_t := 0.0
 var _active := true
 var _syringe: Node3D = null
+# HUMAN HOOK: one-shot clips (Interact / PickUp) and the last interact seen.
+var _oneshot_t := 0.0
+var _interact_seen := -1
 
 static var _libs := {}
 
@@ -52,7 +56,11 @@ func _init(p: Node, body_visual: Node3D) -> void:
 	var aps := body.find_children("*", "AnimationPlayer", true, false)
 	anim = aps[0] if not aps.is_empty() else null
 	if anim != null:
-		_loop_clips()
+		if rig.get("generic", false):   # HUMAN HOOK: the human's library is already looped per variation
+			HumanModel.loop_clips(body.get_child(0) if body.get_child_count() > 0 else body)
+			set_meta("prefix", "")
+		else:
+			_loop_clips()
 	poser = Poser.new()
 	poser.name = "HandsPoser"
 	poser.rig = rig
@@ -60,7 +68,7 @@ func _init(p: Node, body_visual: Node3D) -> void:
 	for side in ["arm_r", "arm_l"]:
 		var ba := BoneAttachment3D.new()
 		ba.name = "HandR" if side == "arm_r" else "HandL"
-		ba.bone_name = String(rig.bones[side])
+		ba.bone_name = String(rig.get("hand_bone", rig.bones)[side])   # HUMAN HOOK: a real hand bone when the rig has one
 		skeleton.add_child(ba)
 		if side == "arm_r":
 			hand_r = ba
@@ -124,7 +132,9 @@ func update(delta: float) -> void:
 	_two = kind != "" and int(grip.hands) >= 2
 
 	# ---- the clip underneath
-	if anim != null:
+	if anim != null and rig.get("generic", false):
+		_human_clip(delta, act)   # HUMAN HOOK
+	elif anim != null:
 		var want := "idle"
 		var rate := 1.0
 		if player.moving and not player.downed and player.carried_by == 0 and not player.on_table:
@@ -177,7 +187,7 @@ func update(delta: float) -> void:
 		var w := float(_w[name])
 		if w <= 0.001:
 			continue
-		var pose: Dictionary = RigMap.POSES.get(name, {})
+		var pose: Dictionary = RigMap.pose_of(rig, name)
 		if pose.has("arm_r"):
 			ar += (pose.arm_r[0] as Vector3).normalized() * w
 			arw = maxf(arw, w * float(pose.arm_r[1]))
@@ -188,10 +198,10 @@ func update(delta: float) -> void:
 			tor += Vector2(pose.torso[0], pose.torso[1]) * w
 			torw = maxf(torw, w * float(pose.torso[2]))
 	if action_pose != "" and action_w > 0.0:
-		var ap: Dictionary = RigMap.POSES.get(action_pose, {})
+		var ap: Dictionary = RigMap.pose_of(rig, action_pose)
 		if from_pose != "":
 			# Strike: sweep from the wind-up pose to the strike pose.
-			var fp: Dictionary = RigMap.POSES.get(from_pose, {})
+			var fp: Dictionary = RigMap.pose_of(rig, from_pose)
 			var su := sqrt(clampf(float(act.u), 0.0, 1.0))
 			ap = _mix(fp, ap, su)
 		ar = _toward(ar, arw, ap.get("arm_r"), action_w)
@@ -270,7 +280,7 @@ func _after_skeleton() -> void:
 
 
 func _socket(to_body: Transform3D, side: String) -> Transform3D:
-	var bi := skeleton.find_bone(String(rig.bones[side]))
+	var bi := skeleton.find_bone(String(rig.get("hand_bone", rig.bones)[side]))   # HUMAN HOOK
 	if bi < 0:
 		return Transform3D(Basis(), FIXED_ATTACH)
 	var bone := skeleton.get_bone_global_pose(bi)
@@ -290,3 +300,55 @@ func _socket(to_body: Transform3D, side: String) -> Transform3D:
 	up = (up - z * up.dot(z))
 	up = up.normalized() if up.length() > 0.01 else Vector3.UP
 	return Transform3D(Basis(up.cross(z), up, z), at)
+
+
+# -- HUMAN HOOK: the human rig's clips -----------------------------------------------------------------
+
+## True when this body shows lying, crawling and being carried with its own clips (player.gd then
+## leaves the body upright instead of tipping it over).
+func lies_by_clip() -> bool:
+	return has_rig() and rig.get("generic", false)
+
+
+func _human_clip(delta: float, act: Dictionary) -> void:
+	var clips: Dictionary = rig.clips
+	var want := "idle"
+	var rate := 1.0
+	var blend := 0.2
+	var ic := int(player.interact_count)
+	if _interact_seen < 0:
+		_interact_seen = ic
+	_oneshot_t = maxf(0.0, _oneshot_t - delta)
+	var down: bool = player.downed or (player.is_bot and not player.alive) or player.stun > 0.0
+	if player.carried_by != 0:
+		want = "carried"
+		_oneshot_t = 0.0
+	elif player.on_table:
+		want = "lying"
+		_oneshot_t = 0.0
+	elif down:
+		want = "crawl"
+		rate = 1.0 if player.moving and player.alive else 0.0
+		_oneshot_t = 0.0
+	elif player.moving:
+		_oneshot_t = 0.0
+		if player.carrying != 0 or player.dragging_monster >= 0 or (not act.is_empty() and int(act.ph) == WindupScript.WINDUP):
+			want = "slow"
+			rate = 1.45
+		else:
+			want = "run" if player.sprinting else "walk"
+	if ic != _interact_seen:
+		_interact_seen = ic
+		if want == "idle" and player.carrying == 0:
+			want = "pickup" if String(player.aim_id).begins_with("it_") else "interact"
+			_oneshot_t = 1.35 if want == "pickup" else 0.95
+			_clip = ""
+			blend = 0.12
+	if _oneshot_t > 0.0 and want == "idle":
+		anim.speed_scale = 1.0
+		return
+	var clip: String = String(clips.get(want, want))
+	if clip != _clip and anim.has_animation(clip):
+		_clip = clip
+		anim.play(clip, blend)
+	anim.speed_scale = rate
