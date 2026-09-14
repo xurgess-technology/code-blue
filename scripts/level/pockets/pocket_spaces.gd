@@ -29,6 +29,7 @@ const SNAP_DISTANCE := 6.0
 ## Noises within this many metres of a seam (on its own side) are also heard on the other side.
 const NOISE_REACH := 26.0
 const LINK_OFFSET := 0.6
+const T2 := 1.5
 
 var game: Node = null
 ## {kind, origin: Vector2i, rect: Rect2 (world XZ), root: Node3D, spawn: Vector3, wing, depth} or {}
@@ -76,7 +77,9 @@ func build_kind(kind: String, info: Dictionary, parent: Node3D, pocket_seed: int
 		{"id": 0, "wing": "dev", "depth": 2, "zone": Plan.ZONE_STUB, "o": Vector2i(-400, -400), "eu": Vector2i(1, 0), "ev": Vector2i(0, 1), "w": 10, "d": 6, "lights": []},
 		{"id": 1, "wing": "dev", "depth": 2, "zone": Plan.ZONE_STUB, "o": Vector2i(-400, -380), "eu": Vector2i(-1, 0), "ev": Vector2i(0, 1), "w": 10, "d": 6, "lights": []},
 	]
-	pocket = build_into(kind, stubs, pocket_seed, pocket_seed, [], info, parent, seams, false)
+	# No hospital behind these stubs: their seams are not registered (nothing crosses; both ends dead-end).
+	var unused: Array = []
+	pocket = build_into(kind, stubs, pocket_seed, pocket_seed, [], info, parent, unused, false)
 	pocket["depth"] = 2
 	pocket["wing"] = "dev"
 
@@ -152,6 +155,42 @@ static func build_into(kind: String, stubs: Array, pocket_seed: int, map_seed: i
 	return p
 
 
+## Warmup (scripts/warmup.gd): both spaces' meshes and materials, shrunk in front of the camera for
+## a few frames so nothing compiles the first time a pocket comes into view. No lights, colliders,
+## occluders or containers (they would act in the world while kept alive).
+static func warm(parent: Node3D) -> void:
+	var fake := [
+		{"id": 0, "wing": "", "depth": 1, "o": Vector2i(0, 0), "eu": Vector2i(1, 0), "ev": Vector2i(0, 1), "w": 10, "d": 6, "lights": []},
+		{"id": 1, "wing": "", "depth": 1, "o": Vector2i(0, 20), "eu": Vector2i(-1, 0), "ev": Vector2i(0, 1), "w": 12, "d": 5, "lights": []},
+	]
+	var x := -1.2
+	for script: GDScript in [Factory, Restaurant]:
+		var lay: Dictionary = script.layout(fake, 1)
+		var out := {"lights": [], "containers": [], "loose_anchors": [], "monster_spawns": [], "nav_faces": PackedVector3Array(), "wing": "", "depth": 1}
+		var root: Node3D = script.build(lay, Vector2i.ZERO, out)
+		for n in root.find_children("*", "CollisionObject3D", true, false) + root.find_children("*", "OccluderInstance3D", true, false) \
+				+ root.find_children("*", "Light3D", true, false):
+			n.get_parent().remove_child(n)
+			n.free()
+		for n in ["Containers"]:
+			var c := root.get_node_or_null(n)
+			if c != null:
+				root.remove_child(c)
+				c.free()
+		root.scale = Vector3.ONE * 0.012
+		root.position = Vector3(x, -0.4, -0.6)
+		parent.add_child(root)
+		x += 1.1
+	var copy := Stub.build_copy(fake[0], 1, [])
+	for n in copy.node.find_children("*", "CollisionObject3D", true, false) + copy.node.find_children("*", "OccluderInstance3D", true, false) \
+			+ copy.node.find_children("*", "Light3D", true, false):
+		n.get_parent().remove_child(n)
+		n.free()
+	(copy.node as Node3D).scale = Vector3.ONE * 0.05
+	(copy.node as Node3D).position = Vector3(1.0, -0.4, -0.6)
+	parent.add_child(copy.node)
+
+
 static func _make_seam(s: Dictionary, port: Dictionary, origin: Vector2i) -> Dictionary:
 	var w: int = s.w
 	var d: int = s.d
@@ -160,7 +199,16 @@ static func _make_seam(s: Dictionary, port: Dictionary, origin: Vector2i) -> Dic
 	var t := xp * xh.affine_inverse()
 	var mid := Stub.seam_s(w)
 	var back := float(d) - Stub.CORRIDOR * 0.5
-	return {"id": int(s.id), "wing": String(s.wing), "depth": int(s.depth), "w": w, "d": d,
+	# World XZ bounds of each copy (the stub block and a margin), for a cheap first test.
+	var bounds := func(xf: Transform3D) -> Rect2:
+		var a: Vector3 = xf * Vector3(-T2, 0.0, -T2)
+		var r := Rect2(Vector2(a.x, a.z), Vector2.ZERO)
+		for c in [Vector3((w + 1) * Stub.T, 0.0, -T2), Vector3(-T2, 0.0, (d + 1) * Stub.T), Vector3((w + 1) * Stub.T, 0.0, (d + 1) * Stub.T)]:
+			var b: Vector3 = xf * c
+			r = r.expand(Vector2(b.x, b.z))
+		return r
+	return {"id": int(s.id), "bounds_h": bounds.call(xh), "bounds_p": bounds.call(xp),
+			"xh_inv": xh.affine_inverse(), "xp_inv": xp.affine_inverse(), "wing": String(s.wing), "depth": int(s.depth), "w": w, "d": d,
 			"xh": xh, "xp": xp, "t": t, "t_inv": t.affine_inverse(), "yaw": t.basis.get_euler().y,
 			"link_h": Stub.local_point(xh, mid - LINK_OFFSET / Stub.T, back),
 			"link_p": Stub.local_point(xp, mid + LINK_OFFSET / Stub.T, back),
@@ -198,9 +246,13 @@ func in_pocket(p: Vector3) -> bool:
 
 ## [seam, to_pocket] when `p` stands in the half of a stub copy nobody should stand in, else [].
 func phantom_at(p: Vector3) -> Array:
+	var q := Vector2(p.x, p.z)
 	for s in seams:
 		for to_pocket in [true, false]:
-			var l := Stub.to_local(s.xh if to_pocket else s.xp, p)
+			if not (s.bounds_h if to_pocket else s.bounds_p).has_point(q):
+				continue
+			var l0: Vector3 = (s.xh_inv if to_pocket else s.xp_inv) * p
+			var l := Vector3(l0.x / Stub.T, l0.y, l0.z / Stub.T)
 			if l.y < -1.5 or l.y > C.WALL_H + 1.0:
 				continue
 			if l.z < 0.0 or l.z > float(s.d) or l.x < 0.0 or l.x > float(s.w):
@@ -284,7 +336,8 @@ func _physics_process(_delta: float) -> void:
 			if not hit.is_empty():
 				transfer_monster(m, hit[0], hit[1])
 		for it in game.world_items.values():
-			if not is_instance_valid(it) or it.get("state") != WorldItem.State.LOOSE:
+			# Only what is moving: a settled item never slides across a seam.
+			if not is_instance_valid(it) or it.freeze or it.get("state") != WorldItem.State.LOOSE:
 				continue
 			var hit := phantom_at(it.global_position)
 			if not hit.is_empty():
@@ -396,6 +449,8 @@ func _blend_environment(k: float) -> void:
 		if we == null or we.environment == null:
 			return
 		_air_env = we.environment
+	if absf(k - _air_k) < 0.002 and k > 0.0:
+		return
 	if _air_k <= 0.0:
 		_air_base = {}
 		for key in AIR.factory.keys():

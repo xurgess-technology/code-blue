@@ -92,6 +92,36 @@ func is_host() -> bool:
 # lifecycle (called from game.gd hooks)
 # =========================================================================
 
+# ---- POCKETS HOOK: a pocket space built beside the room (every machine, from the dv state) ----
+
+var dev_pocket := ""
+
+
+func _set_pocket(kind: String) -> void:
+	if kind == dev_pocket or game == null or game.get("pockets") == null:
+		return
+	dev_pocket = kind
+	if kind == "":
+		game.pockets.teardown()
+		return
+	if game.level != null:
+		game.pockets.build_kind(kind, game.level_info, game.level, 4077)
+		game._attach_light_flicker(game.pockets.pocket.root)
+		game.say("The %s is through the wall. Dev panel: Go there." % kind, 3.0)
+
+
+## The local player (who owns their own position) steps into the pocket or back to the room.
+func pocket_go(into: bool) -> void:
+	var me: Node = game.local_player()
+	if me == null:
+		return
+	if into and game.pockets.active():
+		me.teleport(game.pockets.pocket.spawn)
+	elif not into:
+		var spots: Array = game.level_info.get("player_spawns", [])
+		me.teleport(spots[0] if not spots.is_empty() else Vector3.ZERO)
+
+
 ## Builds the room into `info` (game._build_level's dev branch).
 func build_level(info: Dictionary) -> Node3D:
 	return LevelScript.build(info)
@@ -157,6 +187,7 @@ func reset_state() -> void:
 	nurse_ignore_watch = false
 	nurse_walk = ""
 	nurse_pace = 0
+	dev_pocket = ""   # POCKETS HOOK (its nodes go with the level)
 	nurse_who = 0
 	nurse_loop = []
 	_applied_gate = false
@@ -489,6 +520,8 @@ func _apply_request(sender: int, action: String, a: Dictionary) -> void:
 			set_nurse_walk(String(a.get("mode", "")), who)
 		"nurse_pace":
 			nurse_pace = clampi(int(a.get("i", 0)), 0, NURSE_PACES.size() - 1)
+		"pocket":
+			_set_pocket(String(a.get("kind", "")))   # POCKETS HOOK
 		"strap_monster":
 			# SWEEP 3 HOOK (dissection): a Walk-In or Discharged strapped to a patient table.
 			game.dissection.dev_strap(String(a.get("kind", "walk_in")), float(a.get("sedation", 1.0)), int(a.get("table", -1)))
@@ -821,6 +854,7 @@ func net_state() -> Dictionary:
 		"ts": time_scale, "lo": lights_on, "po": pen_open, "fv": freeze_vitals, "ar": auto_revive,
 		"gd": god.keys(), "nc": noclip.keys(), "gn": gun.keys(), "bt": bots, "st": stun,
 		"nn": [nurse_ignore_watch, nurse_walk, nurse_pace],   # NURSE HOOK
+		"pk": dev_pocket,   # POCKETS HOOK
 	}
 
 
@@ -837,6 +871,7 @@ func apply_net_state(s: Dictionary) -> void:
 	god = _as_set(s.get("gd", []))
 	noclip = _as_set(s.get("nc", []))
 	gun = _as_set(s.get("gn", []))
+	_set_pocket(String(s.get("pk", "")))   # POCKETS HOOK
 	var nn: Array = s.get("nn", [false, "", 0])   # NURSE HOOK
 	if nn.size() >= 3:
 		nurse_ignore_watch = bool(nn[0])
