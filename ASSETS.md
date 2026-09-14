@@ -327,6 +327,15 @@ Pulled and removed again because nothing used them: Kenney character-male-d/e an
 character-female-d/e, Quaternius "Wheel" (poly.pizza, a tyre), the Poly Haven 1K sources of
 the baked models (only the baked GLBs are kept).
 
+## Brains (sweep 3, brains worker)
+
+Nothing downloaded. The brain (`scripts/brains/brain_model.gd`: a generated mesh with the folds
+drawn by its shader), the blender (`scripts/brains/blender.gd`) and the Echo and Hive Eyes screens
+are built from code. The sounds `audio/sfx/brains_*.wav` are synthesized by
+`tools/gen_audio_brains.mjs` (deterministic, no samples). No CC0 brain model was searched for: a
+real anatomical model would need to rot through the same per-instance shader, and the procedural one
+reads well at the sizes the game shows it.
+
 ---
 
 ## Keys that do not resolve

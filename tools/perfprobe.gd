@@ -22,6 +22,7 @@ var _tune := false
 var _hitch := false
 var _orscreen := false
 var _models := false
+var _brains := false   # SWEEP 3 HOOK (brains)
 var _spikes: Array = []
 var _phase_label := ""
 var _phase_stats := {}
@@ -40,6 +41,7 @@ func _ready() -> void:
 			"hitch": _hitch = true
 			"orscreen": _orscreen = true
 			"models": _models = true
+			"brains": _brains = true
 			"quality":
 				_qualities = []
 				for q in v.split(","):
@@ -82,6 +84,9 @@ func _ready() -> void:
 		return
 	if _models:
 		await _run_models()
+		return
+	if _brains:
+		await _run_brains()
 		return
 	var scenarios := [
 		{"name": "lobby clock-in room", "setup": _lobby},
@@ -308,6 +313,52 @@ func _run_orscreen() -> void:
 	print("[perf] ============================================================================")
 	for r in _rows:
 		print("[perf] q%d %-32s avg %4.0f fps  1%%low %4.0f  worst %.1f ms  draws %d" % [r.q, r.name, r.fps, r.low_fps, r.worst, r.draws])
+	get_tree().quit(0)
+
+
+## SWEEP 3 HOOK (brains, --brains): what Echo and Hive Eyes cost at medium. The pharmacy with its
+## containers open and the long corridor, each with nothing, Echo at level 3 (30 m, as many outlines
+## as it allows, held on for the whole measurement) and Hive Eyes through a Walk-In standing there;
+## plus five brains on the floor in view. Twice, so the noise shows.
+func _run_brains() -> void:
+	main.set_quality(1, false)
+	var b: Node = game.brains
+	for pass_i in 2:
+		for scen in [{"name": "pharmacy", "setup": _containers}, {"name": "corridor", "setup": _corridor}]:
+			await scen.setup.call()
+			await _measure("%s: baseline %d" % [scen.name, pass_i + 1], 1)
+			var t0 := Time.get_ticks_usec()
+			b.echo_view.start(bot, bot.global_position, b.echo_radius(3), 60.0)
+			print("[perf] %s: Echo start took %.2f ms (%d outlines of %d things)" % [scen.name, (Time.get_ticks_usec() - t0) / 1000.0, b.echo_view.ghosts.size(), b.echo_view.target_count])
+			for i in 40:
+				await get_tree().process_frame
+			await _measure("%s: Echo L3 (%d outlines) %d" % [scen.name, b.echo_view.ghosts.size(), pass_i + 1], 1)
+			b.echo_view.stop()
+			var wi: Node = b.spawn_walk_in(bot.global_position - bot.global_transform.basis.z * 3.0)
+			wi.set_physics_process(false)
+			b._hive[bot.peer_id] = [int(wi.monster_id), game.world_time + 600.0]
+			b._hive_hp[bot.peer_id] = bot.hp
+			bot.hive_view = true
+			await _measure("%s: Hive Eyes %d" % [scen.name, pass_i + 1], 1)
+			b._end_hive(bot.peer_id, "")
+			game.kill_monster(wi)
+			for i in 10:
+				await get_tree().process_frame
+		var placed := []
+		var fwd: Vector3 = -bot.global_transform.basis.z
+		for i in 5:
+			var it: Node = b.spawn_brain("brain_walk_in" if i % 2 == 0 else "brain_discharged", 1.0, bot.global_position + fwd * (1.2 + i * 0.25) + Vector3.UP * 0.5)
+			it.bt = game.world_time - i * 50.0
+			placed.append(it)
+		bot.bot_pitch = -0.5
+		await _measure("corridor: 5 brains in view %d" % (pass_i + 1), 1)
+		bot.bot_pitch = 0.0
+		for it in placed:
+			game.world_items.erase(it.item_id)
+			it.queue_free()
+	print("[perf] ============================================================================")
+	for r in _rows:
+		print("[perf] %-44s avg %4.0f fps  1%%low %4.0f  worst %.1f ms  draws %d" % [r.name, r.fps, r.low_fps, r.worst, r.draws])
 	get_tree().quit(0)
 
 

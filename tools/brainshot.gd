@@ -152,7 +152,13 @@ func _blender_shots() -> void:
 func _dumpster_shot() -> void:
 	await _until(func(): return game.economy.placed(), 5.0)
 	var bin: Node3D = game.economy.sell_bin
-	var f: Vector3 = bin.global_position + bin.global_transform.basis.z * 4.5
+	var out: Vector3 = bin.global_transform.basis.z
+	var nsb = game.level_info.get("neutral", {}).get("sell_bin", {})
+	if nsb is Dictionary and nsb.has("front"):
+		out = (nsb.front as Vector3) - bin.global_position
+		out.y = 0.0
+		out = out.normalized()
+	var f: Vector3 = bin.global_position + out * 4.5
 	_clear()
 	bot.take_into("brain_walk_in", 1, 150)
 	bot.slots[0]["bt"] = game.world_time - 120.0
@@ -160,7 +166,7 @@ func _dumpster_shot() -> void:
 	bot.bot_aim_id = "sell_bin"
 	await _frames(30)
 	await _shot("10_dumpster_sign")
-	var near: Vector3 = bin.global_position + bin.global_transform.basis.z * 1.8
+	var near: Vector3 = bin.global_position + out * 1.8
 	_look_from(near, bin.global_position + Vector3.UP * 0.9)
 	await _frames(20)
 	await _shot("11_dumpster_prompt")

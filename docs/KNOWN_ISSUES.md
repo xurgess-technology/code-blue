@@ -358,6 +358,44 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 - **`tools/mapcheck.gd` reports seed 112** (a morgue tray anchor 3.3 m off the navmesh); the same
   on `main` before the pod removal.
 
+## Brains (sweep 3, brains worker)
+
+- **Hive Eyes was built against a stand-in Walk-In.** On the brains branch `Monster.WALK_IN` does
+  not exist, so `brains.spawn_walk_in` makes a Discharged body with `kind = "walk_in"` (it still
+  hunts by sound). The camera sits at `m.height * 0.93` and 0.34 m in front of the monster's origin
+  along its facing; the real Walk-In model may need a different eye point (its head can block the
+  view, or the camera can poke through a wall the Walk-In faces). The sedation end is only reached
+  through `has_method("is_sedated")` and was not exercised (no `sedate` on this branch).
+- **The HUD stays up during Hive Eyes** (crosshair, slots, messages): the view is the Walk-In's
+  but the HUD is yours. No HUD hook was added.
+- **Echo's veil does not fully hide a lit flashlight cone** (volumetric fog and the post layer draw
+  after it), so the spot on the nearest wall stays faintly visible under the outlines. Outlines of
+  skinned meshes follow their skeleton; only the dev dummy surgeon was checked in a screenshot.
+- **Brains keep spoiling through the paycheck screen and the next lobby** (world_time keeps
+  running), so a brain carried over a shift change is rotten by the next shift. Intended as "brains
+  spoil fast", but worth a look once the loop is tuned.
+- **Absorbed brains are keyed by peer id.** A player who leaves and joins again (a new ENet peer id)
+  starts from nothing; the old entry stays until game over.
+- **A client's shown value can be $1-2 off the host's** while the spoil clock runs: `bt` is snapped
+  to 0.5 s in the item report and a client's world_time is only corrected when more than 1 s off.
+  The host's `current_value` is what the dumpster pays.
+- **Blender placement is a heuristic:** the counter-height cell nearest the time clock with a
+  0.2 m margin, backed toward the nearest wall. On the hospital's entrance building (the same break
+  room every seed) it lands on the free end of the sink counter by the fridge; nothing checks for the
+  models that stand on counters without colliders (the coffee machine, the microwave), so a changed
+  break-room layout could put it inside one. Levels without a break room get a steel stand.
+- **The brain is procedural** (merged ellipsoids, folds in the shader). It reads as a brain from
+  above and behind at hand and table distance (`tools/brain_shots/01..04`); from low side angles the
+  hemispheres still look like two smooth eggs, and the rot mostly changes colour (no geometry
+  change, so the gold rim overlay keeps fitting).
+- **Perf** (`perfprobe -- --brains`, 1600x900 medium, two passes): pharmacy baseline 188-201 fps
+  (1% low 134-150), Echo at level 3 with 66 outlines 180-192 (132-150); corridor baseline 88-94
+  (75-82), Echo 93-96 (81-86); Hive Eyes depends on what the Walk-In looks at (131-236); five brains
+  in view 102-108 (89-96). Starting Echo takes 1.8-2.8 ms (it walks every container once).
+- **One lagged `nettest --only=brains` run never connected** (port 7941; the client timed out
+  before joining); the same run passed on another port, lagged and unlagged. Probably a port clash
+  with another worktree's nettest.
+
 ## Testing tips
 
 - Add `--fixed-fps 60` to headless runs: the game then steps as fast as the CPU allows (a 250 s
