@@ -14,6 +14,7 @@ extends Node3D
 
 const Kit := preload("res://scripts/patients/patient_kit.gd")
 const BobBuilder := preload("res://scripts/patients/bob_builder.gd")
+const BobModelBuilder := preload("res://scripts/patients/bob_model_builder.gd")   # HUMAN HOOK
 const SealBuilder := preload("res://scripts/patients/seal_builder.gd")
 const SealModelBuilder := preload("res://scripts/patients/seal_model_builder.gd")
 const DummyBuilder := preload("res://scripts/patients/dummy_builder.gd")
@@ -88,8 +89,12 @@ static func create(id: String) -> Node3D:
 	else:
 		if not Procedures.PATIENTS.has(id):
 			push_warning("PatientBody: unknown patient '%s', using Bob" % id)
-		ok = BobBuilder.build(b)
-		b._builder = BobBuilder
+		# HUMAN HOOK: Bob's Blender model first, the reshaped Kenney rig as the fallback.
+		ok = BobModelBuilder.build(b)
+		b._builder = BobModelBuilder
+		if not ok:
+			ok = BobBuilder.build(b)
+			b._builder = BobBuilder
 	if not ok:
 		DummyBuilder.build(b)
 		b._builder = DummyBuilder

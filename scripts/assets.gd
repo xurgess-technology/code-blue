@@ -98,6 +98,38 @@ const MODELS := {
 		"anims": _KENNEY_CHAR_ANIMS,
 		"note": "Kenney Mini Characters, character-female-a. Second surgeon body.",
 	},
+	# HUMAN HOOK (2026-09-14): the Blender-built humans (art/human/), made in-house. Authored facing +Z,
+	# feet at y 0, 1 unit = 1 m; scripts/human/human_model.gd dresses them (tint, masks, pieces).
+	"char/human_surgeon_a": {
+		"path": "res://assets/models/characters/human/surgeon_a.glb", "scale": 1.0, "yaw": 180,
+		"anims": {"idle": "Idle", "walk": "Jog", "run": "Sprint"},
+		"note": "Player surgeon A, made for Code Blue with Blender scripts (art/human/blender_src). No third-party licence.",
+	},
+	"char/human_surgeon_b": {
+		"path": "res://assets/models/characters/human/surgeon_b.glb", "scale": 1.0, "yaw": 180,
+		"anims": {"idle": "Idle", "walk": "Jog", "run": "Sprint"},
+		"note": "Player surgeon B, made for Code Blue with Blender scripts (art/human/blender_src). No third-party licence.",
+	},
+	"char/human_surgeon_c": {
+		"path": "res://assets/models/characters/human/surgeon_c.glb", "scale": 1.0, "yaw": 180,
+		"anims": {"idle": "Idle", "walk": "Jog", "run": "Sprint"},
+		"note": "Player surgeon C, made for Code Blue with Blender scripts (art/human/blender_src). No third-party licence.",
+	},
+	"patient/human_bob": {
+		"path": "res://assets/models/characters/human/bob.glb", "scale": 1.0, "yaw": 180,
+		"anims": {"idle": "Lying"},
+		"note": "Bob the patient, made for Code Blue with Blender scripts (art/human/blender_src). No third-party licence.",
+	},
+	"crew/human_paramedic_a": {
+		"path": "res://assets/models/characters/human/paramedic_a.glb", "scale": 1.0, "yaw": 180,
+		"anims": {"idle": "Idle", "walk": "Walk", "push": "Push"},
+		"note": "Paramedic A, made for Code Blue with Blender scripts (art/human/blender_src). No third-party licence.",
+	},
+	"crew/human_paramedic_b": {
+		"path": "res://assets/models/characters/human/paramedic_b.glb", "scale": 1.0, "yaw": 180,
+		"anims": {"idle": "Idle", "walk": "Walk", "push": "Push"},
+		"note": "Paramedic B, made for Code Blue with Blender scripts (art/human/blender_src). No third-party licence.",
+	},
 
 	# ---- monsters ---------------------------------------------------------
 	"monster/nurse": {

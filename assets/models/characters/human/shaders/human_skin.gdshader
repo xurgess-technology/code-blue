@@ -20,6 +20,8 @@ uniform float infect : hint_range(0.0, 1.0) = 0.0;
 uniform float infect_from = 0.43;
 uniform float infect_full = 0.48;
 uniform float pallor : hint_range(0.0, 1.0) = 0.0;
+uniform float grey : hint_range(0.0, 1.0) = 0.0;     // flatlined
+uniform float breath = 0.0;                            // PatientBody sets it; the model breathes by its chest bone
 
 varying vec2 uv2v;
 
@@ -41,8 +43,9 @@ void fragment() {
 	float k = smoothstep(infect_from, infect_full, uv2v.x) * on_arm * infect;
 	vec3 rot = mix(vec3(0.22, 0.25, 0.15), vec3(0.08, 0.09, 0.05), smoothstep(0.3, 0.7, fract(sin(dot(UV * 311.0, vec2(12.9, 78.2))) * 43758.5)));
 	a = mix(a, rot * (0.6 + 0.4 * dot(a, vec3(0.33))), k * 0.85);
-	float grey = dot(a, vec3(0.3, 0.55, 0.15));
-	a = mix(a, vec3(grey) * vec3(0.95, 0.97, 1.0), pallor * 0.7);
+	float grey_l = dot(a, vec3(0.3, 0.55, 0.15));
+	a = mix(a, vec3(grey_l) * vec3(0.95, 0.97, 1.0), pallor * 0.7);
+	a = mix(a, vec3(grey_l) * vec3(0.78, 0.82, 0.86), grey * 0.8);
 	ALBEDO = a;
 	ROUGHNESS = rough;
 	NORMAL_MAP = texture(normal_tex, UV).rgb;
