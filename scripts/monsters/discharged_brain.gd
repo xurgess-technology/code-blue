@@ -147,6 +147,10 @@ func _hear(g: Node) -> Dictionary:
 			continue
 		var pos: Vector3 = n.pos
 		var reach := float(n.loudness) * HEAR_PER_LOUDNESS
+		# DOORS HOOK: closed doors between the noise and its head muffle it.
+		var doors = g.get("doors")
+		if doors != null:
+			reach *= doors.sound_factor(pos, ear)
 		var d := ear.distance_to(pos + Vector3.UP * 0.5)
 		if d > reach:
 			continue

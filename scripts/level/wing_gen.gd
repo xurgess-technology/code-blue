@@ -373,24 +373,41 @@ func _place_room(slot: Dictionary) -> void:
 	var kind: String = slot.kind
 	var wd := slot_wd(slot)
 	var open_w := int(Rooms.KINDS[kind].open)
+	var double := bool(Rooms.KINDS[kind].get("double", false)) and wd.x >= 4
 	var a: int
 	if open_w > 0:
 		a = wd.x / 2
+	elif double:
+		a = rng.pick([1, wd.x / 2 - 1, wd.x - 3])
 	elif wd.x <= 5:
 		a = 1 if rng.chance(0.5) else wd.x - 2
 	else:
 		a = rng.pick([1, wd.x / 2, wd.x - 2])
-	a = clampi(a, 0, wd.x - 1)
-	var door: Vector2i
+	a = clampi(a, 0, wd.x - (2 if double else 1))
 	var along := Vector2i(absi(f.y), absi(f.x))
-	if f == Vector2i(0, 1):
-		door = Vector2i(r.position.x + a, r.end.y)
-	elif f == Vector2i(0, -1):
-		door = Vector2i(r.position.x + a, r.position.y - 1)
-	elif f == Vector2i(1, 0):
-		door = Vector2i(r.end.x, r.position.y + a)
-	else:
-		door = Vector2i(r.position.x - 1, r.position.y + a)
+	var door_at := func(k: int) -> Vector2i:
+		if f == Vector2i(0, 1):
+			return Vector2i(r.position.x + k, r.end.y)
+		elif f == Vector2i(0, -1):
+			return Vector2i(r.position.x + k, r.position.y - 1)
+		elif f == Vector2i(1, 0):
+			return Vector2i(r.end.x, r.position.y + k)
+		return Vector2i(r.position.x - 1, r.position.y + k)
+	var door: Vector2i = door_at.call(a)
+	var door2 := Vector2i(-1, -1)
+	if double:
+		# Both halves of the doorway must open onto hallway; slide along the wall until they do.
+		double = false
+		for k in [a, a - 1, a + 1, 0, wd.x - 2]:
+			if k < 0 or k > wd.x - 2:
+				continue
+			var d1: Vector2i = door_at.call(k)
+			var d2: Vector2i = door_at.call(k + 1)
+			if is_corr(d1 + f) and is_corr(d2 + f):
+				door = d1
+				door2 = d2
+				double = true
+				break
 	var side := "S"
 	if f == Vector2i(0, -1):
 		side = "N"
@@ -399,10 +416,17 @@ func _place_room(slot: Dictionary) -> void:
 	elif f == Vector2i(-1, 0):
 		side = "W"
 	var n := -f
-	var ri := st.add_room(r, kind, z, String(wing.id), int(wing.depth), {"side": side, "door": door, "entry": door + n})
+	var extra := {"side": side, "door": door, "entry": door + n}
+	if double:
+		extra["door2"] = door2
+	var ri := st.add_room(r, kind, z, String(wing.id), int(wing.depth), extra)
 	st.set_c(door.x, door.y, S.CH_DOOR)
 	st.zone[st.idx(door.x, door.y)] = z
 	(st.rooms[ri].doors as Array).append(door)
+	if double:
+		st.set_c(door2.x, door2.y, S.CH_DOOR)
+		st.zone[st.idx(door2.x, door2.y)] = z
+		(st.rooms[ri].doors as Array).append(door2)
 	if open_w > 0:
 		# An archway instead of a door: the wall tiles either side of the door open too.
 		st.set_c(door.x, door.y, S.CH_FLOOR)

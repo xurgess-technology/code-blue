@@ -29,6 +29,7 @@ const Entrance := preload("res://scripts/level/entrance.gd")
 const Neutral := preload("res://scripts/level/neutral.gd")
 const WingGen := preload("res://scripts/level/wing_gen.gd")
 const Rooms := preload("res://scripts/level/room_furnish.gd")
+const DoorPlan := preload("res://scripts/level/door_plan.gd")
 const ItemsData := preload("res://scripts/items.gd")
 
 ## Kept for callers that still pass a size; the layout decides the real size.
@@ -75,12 +76,16 @@ static func _is_walkable_code(c: int) -> bool:
 # Public API
 # ---------------------------------------------------------------------------
 
-## Generate a hospital. The size arguments are ignored (kept for old callers).
+## Generate a hospital. `seed` is the run: it fixes the entrance building, the neutral area and
+## how many wings there are. `wing_seed` lays out the wings behind the gates (-1: the run seed,
+## which is what shift 1 uses); every shift of a run regenerates them from its own wing seed
+## (`wing_seed_for`) while the entrance and everything outside stay identical, tile for tile.
 ## Returns a dictionary; see docs/CONTRACTS.md "Hospital" for every key.
-static func generate(seed: int, _width := DEFAULT_WIDTH, _height := DEFAULT_HEIGHT) -> Dictionary:
+static func generate(seed: int, wing_seed := -1, _height := DEFAULT_HEIGHT) -> Dictionary:
+	var ws := seed if wing_seed < 0 else wing_seed
 	var best: Dictionary = {}
 	for attempt in MAX_ATTEMPTS:
-		var gen := _attempt(seed, attempt)
+		var gen := _attempt(seed, ws, attempt)
 		if gen.get("missing", []).is_empty():
 			return gen
 		if best.is_empty() or gen.missing.size() < best.missing.size():
@@ -88,37 +93,61 @@ static func generate(seed: int, _width := DEFAULT_WIDTH, _height := DEFAULT_HEIG
 	return best
 
 
-static func _attempt(seed: int, attempt: int) -> Dictionary:
-	var sub := seed if attempt == 0 else (seed * 7919 + attempt * 104729) & 0x7FFFFFFF
+## The wing seed of a run's shift: shift 1 lays out the wings from the run seed itself.
+static func wing_seed_for(run_seed: int, generation: int) -> int:
+	if generation <= 1:
+		return run_seed
+	return (run_seed * 2654435761 + generation * 40503 + 0x51ED27) & 0x7FFFFFFF
+
+
+## Where the entrance building's top-left tile is, for every run and every shift: wings of any
+## size attach to it, so its gates, rooms and landmarks never move.
+const ENTRANCE_ORIGIN := Vector2i(32, 34)
+## Wing sizes (tiles): side wings' widths and every wing's reach north of the entrance.
+const SIDE_WING_W := Vector2i(20, 32)
+const WING_REACH := Vector2i(22, 34)
+
+
+static func _attempt(seed: int, wing_seed: int, attempt: int) -> Dictionary:
+	var sub := wing_seed if attempt == 0 else (wing_seed * 7919 + attempt * 104729) & 0x7FFFFFFF
+	# The run's own stream: the wing count and the neutral area's parked cars never change
+	# within a run.
+	var run_rng := Rng.new(seed)
 	var rng := Rng.new(sub)
-	var four := rng.chance(0.42)
-	var nh := rng.rint(22, 34)
-	var ww := rng.rint(20, 32)
-	var ew := rng.rint(20, 32)
-	var ex := ww
-	var ey := nh
+	var four := run_rng.chance(0.42)
+	var ww := rng.rint(SIDE_WING_W.x, SIDE_WING_W.y)
+	var ew := rng.rint(SIDE_WING_W.x, SIDE_WING_W.y)
+	var ex := ENTRANCE_ORIGIN.x
+	var ey := ENTRANCE_ORIGIN.y
 	var ey1 := ey + Entrance.H - 1
-	var W := ex + Entrance.W - 1 + ew + 1
+	var W := ex + Entrance.W - 1 + SIDE_WING_W.y + 1
 	var H := ey1 + 1 + Neutral.OUT_H + 2
 	var st := S.new(W, H)
+	var top := func() -> int:
+		return ey - rng.rint(WING_REACH.x, WING_REACH.y)
 
 	# ---- wings: rects, doorways, depth by area ------------------------------------------
 	var side: Array = Entrance.SIDE_DOOR_ROWS
 	var defs: Array = []
-	defs.append({"id": "west", "rect": Rect2i(0, 0, ex + 1, ey1 + 1),
+	var tw: int = top.call()
+	defs.append({"id": "west", "rect": Rect2i(ex - ww, tw, ww + 1, ey1 - tw + 1),
 			"entry": [Vector2i(ex, ey + side[0]), Vector2i(ex, ey + side[1])], "dir": Vector2i(-1, 0)})
 	if four:
 		var a: Array = Entrance.NORTH_DOORS_TWO[0]
 		var b: Array = Entrance.NORTH_DOORS_TWO[1]
-		defs.append({"id": "north_west", "rect": Rect2i(ex, 0, 15, ey + 1),
+		var t1: int = top.call()
+		var t2: int = top.call()
+		defs.append({"id": "north_west", "rect": Rect2i(ex, t1, 15, ey - t1 + 1),
 				"entry": [Vector2i(ex + a[0], ey), Vector2i(ex + a[1], ey)], "dir": Vector2i(0, -1)})
-		defs.append({"id": "north_east", "rect": Rect2i(ex + 14, 0, Entrance.W - 14, ey + 1),
+		defs.append({"id": "north_east", "rect": Rect2i(ex + 14, t2, Entrance.W - 14, ey - t2 + 1),
 				"entry": [Vector2i(ex + b[0], ey), Vector2i(ex + b[1], ey)], "dir": Vector2i(0, -1)})
 	else:
 		var c: Array = Entrance.NORTH_DOORS_ONE
-		defs.append({"id": "north", "rect": Rect2i(ex, 0, Entrance.W, ey + 1),
+		var tn: int = top.call()
+		defs.append({"id": "north", "rect": Rect2i(ex, tn, Entrance.W, ey - tn + 1),
 				"entry": [Vector2i(ex + c[0], ey), Vector2i(ex + c[1], ey)], "dir": Vector2i(0, -1)})
-	defs.append({"id": "east", "rect": Rect2i(ex + Entrance.W - 1, 0, ew + 1, ey1 + 1),
+	var te: int = top.call()
+	defs.append({"id": "east", "rect": Rect2i(ex + Entrance.W - 1, te, ew + 1, ey1 - te + 1),
 			"entry": [Vector2i(ex + Entrance.W - 1, ey + side[0]), Vector2i(ex + Entrance.W - 1, ey + side[1])], "dir": Vector2i(1, 0)})
 	var by_area := defs.duplicate()
 	by_area.sort_custom(func(a, b):
@@ -138,7 +167,7 @@ static func _attempt(seed: int, attempt: int) -> Dictionary:
 
 	# ---- entrance building and neutral area ----------------------------------------------
 	Entrance.build(st, ex, ey, 2 if four else 1)
-	var neutral_rect := Neutral.build(st, ex + Entrance.DOOR_X, ey1 + 1, rng)
+	var neutral_rect := Neutral.build(st, ex + Entrance.DOOR_X, ey1 + 1, run_rng)
 
 	# ---- wings: hallways and room slots, then which room is which --------------------------
 	var gens: Array = []
@@ -151,7 +180,8 @@ static func _attempt(seed: int, attempt: int) -> Dictionary:
 		g.finish()
 
 	_place_markers(st, rng)
-	_light_modes(st, sub)
+	_light_modes(st, seed, sub)
+	var doors := DoorPlan.plan(st, Rect2i(ex, ey, Entrance.W, Entrance.H))
 
 	var rooms: Array = []
 	for r in st.rooms:
@@ -162,6 +192,8 @@ static func _attempt(seed: int, attempt: int) -> Dictionary:
 
 	return {
 		"seed": seed,
+		"wing_seed": wing_seed,
+		"doors": doors,
 		"attempt": attempt,
 		"missing": missing,
 		"width": W,
@@ -415,13 +447,17 @@ static func _place_markers(st: S, rng: Rng) -> void:
 		st.set_c(c.x, c.y, S.CH_MON)
 
 
-static func _light_modes(st: S, seed: int) -> void:
-	var rng := Rng.new((seed ^ 0x5f356495) & 0xFFFFFFFF)
+## Fixture modes. The entrance building and the outdoor lights roll from the run seed (they are
+## stamped first, so their order never changes); the wings from the wing seed.
+static func _light_modes(st: S, run_seed: int, wing_seed: int) -> void:
+	var run_rng := Rng.new((run_seed ^ 0x5f356495) & 0xFFFFFFFF)
+	var wing_rng := Rng.new((wing_seed ^ 0x5f356495) & 0xFFFFFFFF)
 	var depth_of := {}
 	for wdef in st.wings:
 		depth_of[int(wdef.zone)] = int(wdef.depth)
 	for l in st.lights:
-		var roll := rng.nextf()
+		var zl := int(l.zone)
+		var roll := run_rng.nextf() if zl == S.ZONE_ENTRANCE or zl == S.ZONE_OUTDOOR else wing_rng.nextf()
 		if int(l.mode) >= 0:
 			continue
 		var table: Array = LIGHTS_ENTRANCE
@@ -577,18 +613,31 @@ static func validate(gen: Dictionary) -> PackedStringArray:
 			if absi(m.x - p.x) + absi(m.y - p.y) < MONSTER_MIN_DIST:
 				problems.append("'M' at %d,%d is too close to a player spawn" % [m.x, m.y])
 
-	# Doors.
+	# Doorways, and the door hanging in each.
+	var door_of := {}
+	for d in gen.get("doors", []):
+		for t in d.tiles:
+			if door_of.has(t):
+				problems.append("doorway %s has two doors" % str(t))
+			door_of[t] = d
+		if not DoorPlan.passable(d):
+			problems.append("%s door %s opens only %d/%d degrees" % [d.kind, d.id, int(d.max_in), int(d.max_out)])
 	for y in h:
 		for x in w:
 			if rows[y][x] != "+":
 				continue
+			if not door_of.has(Vector2i(x, y)):
+				problems.append("doorway at %d,%d has no door" % [x, y])
 			var ns: bool = st.walkable(x, y - 1) and st.walkable(x, y + 1)
 			var ew: bool = st.walkable(x - 1, y) and st.walkable(x + 1, y)
 			if not ns and not ew:
 				problems.append("door at %d,%d lacks walkable tiles on two opposite sides" % [x, y])
 			for off in [Vector2i(1, 0), Vector2i(0, 1)]:
-				if at.call(x + off.x, y + off.y) == "+" and not er.grow(0).has_point(Vector2i(x, y)):
-					problems.append("doors at %d,%d and %d,%d are adjacent" % [x, y, x + off.x, y + off.y])
+				var o := Vector2i(x + off.x, y + off.y)
+				if at.call(o.x, o.y) == "+" and not er.grow(0).has_point(Vector2i(x, y)):
+					# The two halves of one double doorway are fine.
+					if not (door_of.has(o) and door_of.has(Vector2i(x, y)) and door_of[o] == door_of[Vector2i(x, y)]):
+						problems.append("doors at %d,%d and %d,%d are adjacent" % [x, y, o.x, o.y])
 
 	# Lights on walkable tiles.
 	for l in gen.get("lights", []):
