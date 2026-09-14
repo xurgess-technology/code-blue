@@ -70,6 +70,9 @@ class LabCombat extends Node:
 	func monster_pin(_m: Node) -> Transform3D:
 		return pin
 
+	func animate_held(_p: Node, _delta: float, _fp: Node3D, _tp: Node3D) -> void:
+		pass
+
 	func drop_dragged(p: Node) -> void:
 		dropped.append(p)
 		for m in p.get_tree().get_nodes_in_group("monster"):
