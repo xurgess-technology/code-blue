@@ -3,6 +3,7 @@ extends Node
 ## are the real cost rather than the monitor's refresh rate.
 ##
 ##   godot --path . tools/perfprobe.tscn -- [--seed=N] [--frames=N] [--shift=N] [--quality=0,1,2]
+##   ... -- --hands   (what the first-person hands and teammates holding things cost)
 ##
 ## For each scenario and quality preset it prints average fps, the 1% low (99th percentile
 ## frame time), the worst frame, script time for physics and process, draw calls, and node count.
@@ -23,6 +24,7 @@ var _hitch := false
 var _orscreen := false
 var _models := false
 var _brains := false   # SWEEP 3 HOOK (brains)
+var _hands := false    # HANDS HOOK
 var _spikes: Array = []
 var _phase_label := ""
 var _phase_stats := {}
@@ -42,6 +44,9 @@ func _ready() -> void:
 			"orscreen": _orscreen = true
 			"models": _models = true
 			"brains": _brains = true
+			"hands": _hands = true
+			# SEAL HOOK: build the procedural seal instead of the Blender model (A/B the patient's cost).
+			"seal-procedural": (load("res://scripts/patients/seal_model_builder.gd") as GDScript).set("procedural_only", true)
 			"quality":
 				_qualities = []
 				for q in v.split(","):
@@ -85,6 +90,9 @@ func _ready() -> void:
 	if _models:
 		await _run_models()
 		return
+	if _hands:
+		await _run_hands()
+		return
 	if _brains:
 		await _run_brains()
 		return
@@ -93,6 +101,7 @@ func _ready() -> void:
 		{"name": "corridor, long sightline", "setup": _corridor},
 		{"name": "pharmacy, containers open", "setup": _containers},
 		{"name": "OR, patient + stocked shelf", "setup": _or_view},
+		{"name": "OR, the seal close up", "setup": _or_seal},  # SEAL HOOK
 		{"name": "operating: bone saw, bloody", "setup": _operating_saw},
 		# INVENTORY HOOK: the same view of the gold pile empty and with 500 bars.
 		{"name": "gold pile, 0 bars", "setup": func(): await _pile_view(0)},
@@ -183,6 +192,16 @@ func _or_view() -> void:
 	game.shelf_node.show_stock(game.shelf)
 	var t := game.table_pos()
 	_look(t + Vector3(0.8, 0, 3.0), t + Vector3.UP * 1.0)
+
+
+## SEAL HOOK: the seal (Blender model unless --seal-procedural) on the table, idle and breathing, from
+## a player standing beside it.
+func _or_seal() -> void:
+	await _ensure_shift()
+	game.case = {"patient_id": "seal", "ailment_id": "amputation", "step_index": 0, "flags": {"sedation": 0.3}}
+	game._apply_case_locally()
+	var t := game.table_pos()
+	_look(t + Vector3(0.9, 0, 1.6), t + Vector3.UP * 0.95)
 
 
 ## INVENTORY HOOK: look at the gold pile (and the sell bin and shop behind it) with `n` bars.
@@ -573,4 +592,50 @@ func _run_hitch() -> void:
 		total_spikes += int(st2.spikes)
 		print("[perf]   %-34s worst %6.1f ms  spikes %2d  pipeline compiles %d" % [k, st2.worst, st2.spikes, st2.compiles])
 	print("[perf] total spikes %d" % total_spikes)
+	get_tree().quit(0)
+
+
+## HANDS HOOK (--hands): what the hands sweep costs at medium. The OR and the long corridor, each with
+## the first-person hands hidden, the hands holding a bone saw, and the hands plus three teammates in
+## view holding things (animated bodies with pose overrides, one mid wind-up). Twice, so the noise shows.
+func _run_hands() -> void:
+	main.set_quality(1, false)
+	var HandsFP = load("res://scripts/hands/fp_hands.gd")
+	var mates: Array = []
+	for i in 3:
+		var m = game.dev._make_bot_node(-60 - i, "Mate %d" % i, "bot")
+		m.teleport(Vector3(0, -50, 0))
+		mates.append(m)
+	await get_tree().process_frame
+	bot.slots = Player.empty_slots()
+	bot.slots[0] = {"kind": "bone_saw", "count": 1}
+	bot.selected = 0
+	for pass_i in 2:
+		for scen in [{"name": "OR", "setup": _or_view}, {"name": "corridor", "setup": _corridor}]:
+			await scen.setup.call()
+			for m in mates:
+				m.teleport(Vector3(0, -50, 0))
+			bot.camera.cull_mask = bot.camera.cull_mask & ~HandsFP.HANDS_LAYER
+			bot.hands.visible = false
+			await _measure("%s: no hands (%d)" % [scen.name, pass_i + 1], 1)
+			bot.camera.cull_mask = bot.camera.cull_mask | HandsFP.HANDS_LAYER
+			bot.hands.visible = true
+			await _measure("%s: hands + saw (%d)" % [scen.name, pass_i + 1], 1)
+			var eye: Vector3 = bot.global_position
+			var fwd: Vector3 = -Vector3(sin(bot.bot_yaw), 0, cos(bot.bot_yaw))
+			var side := fwd.cross(Vector3.UP)
+			var kinds := ["anesthetic", "heart_monitor", "bone_saw"]
+			for i in mates.size():
+				var m: Player = mates[i]
+				m.slots = Player.empty_slots()
+				m.take_into(kinds[i], 2 if kinds[i] == "anesthetic" else 1, 0)
+				m.teleport(game._floor_at(eye + fwd * (2.6 + i * 0.9) + side * (float(i) - 1.0) * 1.1))
+				m.bot_yaw = bot.bot_yaw + PI
+			game.combat.pose_at(mates[2], "saw", 0, 0.3)
+			await _measure("%s: hands + 3 teammates (%d)" % [scen.name, pass_i + 1], 1)
+			game.combat.stop_anim(mates[2])
+			game.combat.anim_freeze = false
+	print("[perf] ============================================================================")
+	for r in _rows:
+		print("[perf] %-36s avg %4.0f fps  1%%low %4.0f  worst %5.1f ms  proc %5.2f ms  draws %d" % [r.name, r.fps, r.low_fps, r.worst, r.proc, r.draws])
 	get_tree().quit(0)

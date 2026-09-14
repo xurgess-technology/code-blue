@@ -342,6 +342,19 @@ reads well at the sizes the game shows it.
 
 ---
 
+## Hands, wind-ups and the carry camera (hands worker, 2026-09-14)
+
+Nothing downloaded. The first-person forearms, hands (two-segment fingers, a thumb) and the torch
+are low-poly primitives merged by `scripts/hands/fp_arms.gd` (about 180 triangles per arm, skin plus
+a sleeve in the player's scrub colour); the third-person holding, carrying and wind-up poses are
+bone overrides on the existing Kenney `char/surgeon` rig (`scripts/hands/rig_map.gd`,
+`body_poser.gd`) over its own `idle` / `walk` / `sprint` clips. The sounds `audio/sfx/hands_*.wav`
+(`windup_01/_02`, `charge`, `full`, `dazed_01/_02`, `rise`) are synthesized by
+`tools/gen_audio_hands.mjs` (deterministic, no samples). The shared Blender human, when it lands,
+replaces the arm meshes through `fp_arms.make_arm()` and the rig through `rig_map.gd`.
+
+---
+
 ## The Night Nurse (made in-house, 2026-09-14) — `assets/models/monsters/night_nurse/`
 
 | Key | File | Source | Author | Licence | size (m) | Fix-ups |
@@ -359,6 +372,25 @@ reads well at the sizes the game shows it.
   is 0.9 MB, the maps 24 MB of PNG.
 - `nn_build.py` exports an embedded GLB (not committed) and runs `nn_glb_extern.py`, which writes
   the game copy and its textures here.
+
+---
+
+## The seal patient (made in-house, 2026-09-14) - `assets/models/patients/seal/`
+
+| Key | File | Source | Author | Licence | size (m) | Fix-ups |
+| --- | --- | --- | --- | --- | --- | --- |
+| `patient/seal` | `seal.glb` + `textures/Seal_{Coat,Detail}_{albedo,normal,roughness}.png`, `textures/Seal_Infect.png`, `seal_skin.gdshader` | Built for Code Blue from Python scripts in Blender 5.2 (`art/seal/blender_src/`) | Code Blue (made with Claude) | None needed: original work of this project, no third-party content | 1.84 long, 0.37 high, 0.97 across the fore flippers | none (authored in the PatientBody frame) |
+
+- **Not downloaded, not made by an AI image or mesh service.** Every vertex, UV, weight, keyframe and
+  texel comes from `seal_geometry.py`, `seal_materials.py`, `seal_rig.py` and `seal_build.py`
+  (procedural Cycles materials baked to maps). `art/seal/README.md` explains the build (about 18
+  minutes at full quality) and documents every surgery site; `art/seal/` has a `.gdignore`.
+- 16,246 triangles for the whole seal, plus the amputation-only pieces (stump cap 238, fishing line
+  684, severed paddle 2,170). 2 materials, 20 bones, clips `Idle`, `Stir`, `Fidget`, `Twitch`,
+  `Flatline` (in place). The coat maps are 2048 px, the detail maps and the infection map 1024 px,
+  all separate files, VRAM compressed with mipmaps (normal-map mode for the normals). The GLB's
+  import keeps constant animation tracks (`remove_immutable_tracks=false`: Flatline is all constant).
+- Used by `scripts/patients/seal_model_builder.gd`; the procedural seal is the fallback.
 
 ---
 
