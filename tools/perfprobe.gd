@@ -42,6 +42,8 @@ func _ready() -> void:
 			"orscreen": _orscreen = true
 			"models": _models = true
 			"brains": _brains = true
+			# SEAL HOOK: build the procedural seal instead of the Blender model (A/B the patient's cost).
+			"seal-procedural": (load("res://scripts/patients/seal_model_builder.gd") as GDScript).set("procedural_only", true)
 			"quality":
 				_qualities = []
 				for q in v.split(","):
@@ -93,6 +95,7 @@ func _ready() -> void:
 		{"name": "corridor, long sightline", "setup": _corridor},
 		{"name": "pharmacy, containers open", "setup": _containers},
 		{"name": "OR, patient + stocked shelf", "setup": _or_view},
+		{"name": "OR, the seal close up", "setup": _or_seal},  # SEAL HOOK
 		{"name": "operating: bone saw, bloody", "setup": _operating_saw},
 		# INVENTORY HOOK: the same view of the gold pile empty and with 500 bars.
 		{"name": "gold pile, 0 bars", "setup": func(): await _pile_view(0)},
@@ -183,6 +186,16 @@ func _or_view() -> void:
 	game.shelf_node.show_stock(game.shelf)
 	var t := game.table_pos()
 	_look(t + Vector3(0.8, 0, 3.0), t + Vector3.UP * 1.0)
+
+
+## SEAL HOOK: the seal (Blender model unless --seal-procedural) on the table, idle and breathing, from
+## a player standing beside it.
+func _or_seal() -> void:
+	await _ensure_shift()
+	game.case = {"patient_id": "seal", "ailment_id": "amputation", "step_index": 0, "flags": {"sedation": 0.3}}
+	game._apply_case_locally()
+	var t := game.table_pos()
+	_look(t + Vector3(0.9, 0, 1.6), t + Vector3.UP * 0.95)
 
 
 ## INVENTORY HOOK: look at the gold pile (and the sell bin and shop behind it) with `n` bars.

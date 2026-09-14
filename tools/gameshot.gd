@@ -19,6 +19,7 @@ var _i := 0
 var _seed := 4242
 var _tag := ""
 var _only := ""
+var _seal_table := 0
 
 
 func _ready() -> void:
@@ -50,6 +51,8 @@ func _ready() -> void:
 		{"name": "03_corridor", "fn": _pose_corridor},
 		{"name": "11_orscreen_idle", "fn": _pose_screen_idle, "settle": 40},
 		{"name": "04_operating_room", "fn": _pose_or},
+		{"name": "21_seal_on_table", "fn": _pose_seal, "settle": 40},
+		{"name": "22_seal_on_table_close", "fn": _pose_seal_close, "settle": 20},
 		{"name": "12_orscreen_door", "fn": _pose_screen_door, "settle": 40},
 		{"name": "13_orscreen_close", "fn": _pose_screen_close, "settle": 40},
 		{"name": "05_monster_close", "fn": _pose_monster},
@@ -140,6 +143,39 @@ func _pose_or() -> void:
 		game.begin_shift()
 	var t := game.table_pos()
 	_look_from(t + Vector3(0.6, 0, 3.4), t + Vector3(0, 1.0, 0))
+
+
+## A real seal case (the Blender model) on a free patient table, seen from the doorway side.
+func _pose_seal() -> void:
+	_ensure_shift()
+	var ti := -1
+	for c in game.cases:
+		if String(c.get("patient_id", "")) == "seal" and int(c.get("table", -1)) >= 0:
+			ti = int(c.table)
+	if ti < 0:
+		ti = game.free_patient_table()
+		if ti < 0 and not game.patient_tables.is_empty():
+			ti = int(game.patient_tables[game.patient_tables.size() - 1].index)
+			var old: Dictionary = game.case_on_table(ti)
+			if not old.is_empty():
+				game.remove_case(int(old.id))
+		game.add_case({"patient_id": "seal", "ailment_id": "amputation", "table": ti, "flags": {"sedation": 0.3}})
+	_seal_table = ti
+	var t: Vector3 = game.table_position(ti)
+	_look_from(t + Vector3(1.4, 0, 1.9), t + Vector3(0, 0.95, 0))
+
+
+func _pose_seal_close() -> void:
+	var t: Vector3 = game.table_position(_seal_table)
+	var body = game.body_for_table(_seal_table)
+	var at: Vector3 = body.global_position if body != null else t + Vector3(0, 0.9, 0)
+	if body == null:
+		_look_from(t + Vector3(0.8, 0, 1.0), at)
+		return
+	var bx: Vector3 = body.global_transform.basis.x
+	var bz: Vector3 = body.global_transform.basis.z
+	# off its left side, eyes about 0.9 m over the table top
+	_look_from(at - bx * 0.2 + bz * 1.7 + Vector3(0, 0.9 - 1.7, 0), at - bx * 0.25 + Vector3(0, 0.1, 0))
 
 
 func _pose_monster() -> void:
