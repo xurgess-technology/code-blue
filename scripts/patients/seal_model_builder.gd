@@ -335,7 +335,7 @@ static func make_severed_limb(b, parent: Node) -> Node3D:
 # -- overlays ---------------------------------------------------------------------------------------
 
 ## Gauze wrapped round the stub and over the cut end, in the `limb_cut` site frame (+X distal,
-## +Y up out of the skin): diagonal wraps with frayed edges, a padded dome over the stump, tape, and
+## +Y up out of the skin): diagonal wraps with frayed edges, a padded dome over the stump, and
 ## blood seeping through at the end.
 static func make_stump_dressing(parent: Node3D, sec: Dictionary) -> Node3D:
 	var root := Node3D.new()
@@ -386,9 +386,7 @@ static func make_stump_dressing(parent: Node3D, sec: Dictionary) -> Node3D:
 	gauze.cull_mode = BaseMaterial3D.CULL_DISABLED
 	mi.material_override = gauze
 	root.add_child(mi)
-	# tape across the wraps, and blood soaking through the end
-	var tape := Kit.mat("tape", Color(0.86, 0.82, 0.7), 0.9)
-	Kit.add_mesh(root, Kit.box(Vector3(0.018, 0.003, hs * 2.5)), tape, Transform3D(Basis(Vector3.RIGHT, 0.25), Vector3(-0.028, cy + ry * 1.17, 0.0)), "Tape")
+	# blood soaking through the end and the top
 	var seep := Kit.decal(root, Kit.blood_tex(), Vector3(hs * 1.3, 0.05, (hu + hd) * 1.1),
 		Transform3D(Basis(Vector3(0, 0, -1), PI * 0.5), Vector3(0.05, cy, 0.0)))
 	seep.name = "Seep"
