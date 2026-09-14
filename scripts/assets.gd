@@ -589,13 +589,9 @@ var _warned: Dictionary = {}
 
 
 func _ready() -> void:
-	# models sweep 2: start loading the loot and paramedic models on worker threads while the
-	# menu is up, so the first shift's warmup does not wait on their textures. model() still
-	# works if a load has not finished (ResourceLoader.load waits for it).
-	for key in MODELS:
-		var k := String(key)
-		if (k.begins_with("item/") or k.begins_with("crew/")) and ResourceLoader.exists(MODELS[key]["path"]):
-			ResourceLoader.load_threaded_request(MODELS[key]["path"], "", true)
+	# No threaded preload: meshes created on loader threads raced the main thread's own mesh
+	# building (level build, warmup) and crashed Godot (signal 11) in about half of the headless
+	# test runs on 2026-09-13. Models load on first use; the warmup cover hides it.
 	var gone := missing()
 	if not gone.is_empty():
 		push_warning("Assets: %d declared key(s) have no file on disk: %s"
