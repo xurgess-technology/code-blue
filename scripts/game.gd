@@ -160,6 +160,14 @@ var downed_view: Node = null
 var player_table: Dictionary = {}
 var _call_at: Dictionary = {}   # peer id -> world_time of their last call for help
 
+# SWEEP 3 HOOK (docs/SWEEP3.md): children created in _ready on every machine.
+const CombatScript := preload("res://scripts/combat/combat.gd")
+const DissectionScript := preload("res://scripts/dissection/dissection.gd")
+const BrainsScript := preload("res://scripts/brains/brains.gd")
+var combat: Node = null       # bone saw swings, anesthetic jabs, dragging and strapping monsters
+var dissection: Node = null   # monster cases on the patient tables: sedation, re-dosing, the brain
+var brains: Node = null       # brain spoilage, the blender, per-player upgrades, Echo and Hive Eyes
+
 
 func _ready() -> void:
 	_entities = Node3D.new()
@@ -193,6 +201,20 @@ func _ready() -> void:
 	or_screen.name = "ORScreen"
 	add_child(or_screen)
 	or_screen.setup(self)
+	# SWEEP 3 HOOK: fighting and capturing monsters, dissection on the patient tables, brains and
+	# the abilities they teach. Same path on every machine.
+	combat = CombatScript.new()
+	combat.name = "Combat"
+	add_child(combat)
+	combat.setup(self)
+	dissection = DissectionScript.new()
+	dissection.name = "Dissection"
+	add_child(dissection)
+	dissection.setup(self)
+	brains = BrainsScript.new()
+	brains.name = "Brains"
+	add_child(brains)
+	brains.setup(self)
 	Net.roster_changed.connect(_on_roster_changed)
 	Net.joined_ok.connect(_net_client_forget)  # net: a new connection starts a new replica
 	Net.host_left.connect(func(): end_session("The host left the game."))
@@ -1218,6 +1240,8 @@ func reset_money() -> void:
 	gold_bars = 0
 	if economy != null:
 		economy.on_reset()
+	if brains != null:
+		brains.on_reset()   # SWEEP 3 HOOK: absorbed brains go with the money
 
 
 ## What the next gold bar costs (the n-th bar bought costs more than the last).
@@ -1683,6 +1707,8 @@ func _add_monster(kind: String, pos: Vector3) -> Node:
 
 
 func _clear_monsters() -> void:
+	if combat != null:
+		combat.on_monsters_cleared()   # SWEEP 3 HOOK: nobody is dragging a monster any more
 	for m in monsters.values():
 		m.queue_free()
 	monsters.clear()
@@ -1718,6 +1744,10 @@ func _physics_process(delta: float) -> void:
 		if body.has_method("set_sedation"):
 			body.set_sedation(float(c.get("flags", {}).get("sedation", 0.0)))
 	loop.physics_tick(delta)
+	# SWEEP 3 HOOK: every machine; each system does its host-only work behind is_host().
+	combat.physics_tick(delta)
+	dissection.physics_tick(delta)
+	brains.physics_tick(delta)
 
 	_update_danger()
 	_net_tick(delta)
@@ -1766,6 +1796,8 @@ func _sim_shift(delta: float) -> void:
 	for c in cases.duplicate():
 		if String(c.get("state", "")) != "on_table" or String(c.get("patient_id", "")) == "player":
 			continue
+		if dissection.owns_case(c):
+			continue   # SWEEP 3 HOOK: a strapped monster's vitals are its brain's condition (no drain)
 		c.vitals = float(c.vitals) - delta * 100.0 / drain
 		if float(c.vitals) <= 0.0:
 			c.vitals = 0.0
@@ -1895,6 +1927,8 @@ func kill_monster(m: Node) -> void:
 	if not is_host() or m == null or not is_instance_valid(m) or not monsters.has(m.monster_id):
 		return
 	monsters.erase(m.monster_id)
+	if combat != null:
+		combat.on_monster_removed(m)   # SWEEP 3 HOOK
 	var data := {"kind": m.kind, "pos": m.global_position, "y": m.rotation.y}
 	m.queue_free()
 	dev.monster_died_fx(data)
@@ -2341,6 +2375,18 @@ func player_shoved(p: Node) -> void:
 		else:
 			_drop_hands(q, true)
 			say("%s shoved %s. Supplies everywhere." % [p.player_name, q.player_name], 3.0)
+
+
+## SWEEP 3 HOOK, host: the player pressed left mouse with a usable item in hand.
+func player_used(p: Node) -> void:
+	if is_host() and combat != null:
+		combat.use(p)
+
+
+## SWEEP 3 HOOK, host: the player pressed R (brain ability).
+func player_ability(p: Node) -> void:
+	if is_host() and brains != null:
+		brains.ability(p)
 
 
 func _in_shove_cone(from: Node, target: Vector3, forward: Vector3) -> bool:
@@ -2828,6 +2874,8 @@ func _global_fields() -> Dictionary:
 		"wp": waiting_peers.keys(),
 		"dv": dev.net_state() if dev_mode else {},  # DEV HOOK
 		"mn": money, "gb": gold_bars,  # inventory: team money and the gold pile
+		# SWEEP 3 HOOK: small dictionaries of quantized values only (see docs/SWEEP3.md)
+		"cb": combat.net_state(), "dx": dissection.net_state(), "br": brains.net_state(),
 	}
 	# loop: the cases, one field per case so a vitals tick resends a float, not every case:
 	# "cs" the ids in order, "c.<id>" the case without vitals, "v.<id>" its vitals.
@@ -3047,6 +3095,10 @@ func _apply_state(state: Dictionary, msg: Dictionary, keyframe: bool) -> void:
 		money = new_money
 		economy.on_money_changed(delta, "")
 	gold_bars = int(g.get("gb", gold_bars))
+	# SWEEP 3 HOOK
+	combat.apply_net_state(g.get("cb", {}))
+	dissection.apply_net_state(g.get("dx", {}))
+	brains.apply_net_state(g.get("br", {}))
 	if dev_mode and not (g.get("dv", {}) as Dictionary).is_empty():
 		dev.apply_net_state(g.dv)  # DEV HOOK: creates bot players before their entries apply
 
@@ -3230,7 +3282,15 @@ func _event(kind: String, data: Dictionary) -> void:
 			if st != null:
 				st.stun = float(data.t)
 		_:
-			dev.on_event(kind, data)  # DEV HOOK: monster_killed and other dev room events
+			# SWEEP 3 HOOK: each system's reliable one-off events carry its prefix.
+			if kind.begins_with("cb_"):
+				combat.on_event(kind, data)
+			elif kind.begins_with("dx_"):
+				dissection.on_event(kind, data)
+			elif kind.begins_with("br_"):
+				brains.on_event(kind, data)
+			else:
+				dev.on_event(kind, data)  # DEV HOOK: monster_killed and other dev room events
 
 
 static func _shuffle(a: Array, rng: RandomNumberGenerator) -> void:

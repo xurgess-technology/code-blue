@@ -124,7 +124,7 @@ func _build() -> void:
 	col.add_child(help)
 
 	var controls := Label.new()
-	controls.text = "WASD move · mouse look · Shift sprint · F flashlight · E interact · Q shove · G drop · Esc pause · F11 fullscreen"
+	controls.text = "WASD move · mouse look · Shift sprint · F flashlight · E interact · Q shove · LMB use held item · R ability · G drop · Esc pause · F11 fullscreen"
 	controls.add_theme_font_size_override("font_size", 12)
 	controls.add_theme_color_override("font_color", Color("5e6a73"))
 	col.add_child(controls)

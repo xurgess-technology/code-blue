@@ -101,14 +101,31 @@ A battered reference binder on a lectern in the clock-in room. It is a physical 
 
 ## Monsters
 
-| Monster | Rule |
-| --- | --- |
-| **The Discharged** | A gaunt patient in a stained gown, eyes bandaged, dragging a rattling IV pole. Blind: it hunts by sound (footsteps, sprinting, containers, drops, breaking glass, the monitors during surgery). When it hears you, the rattle stops, it listens, then it rushes the sound. Standing still in the dark works. A shove stuns it. One heart. |
-| **The Night Nurse** | Too tall and too thin, in old-fashioned whites and a surgical mask. It can only move while nobody is looking at it with light on it (a flashlight or a working ceiling fixture). Its shoes squeak only when it moves. A shove does nothing. Two hearts. |
+Each monster runs on one sense, so players learn them in order: eyes, then ears, then being watched.
 
-Surgery is the worst case for both: the monitors call the Discharged, and every surgeon's eyes are on the table instead of the door.
+| Monster | Sense | Rule |
+| --- | --- | --- |
+| **The Walk-In** | Eyes | A shambling patient, common near the start of every wing. Sees you and lumbers slowly after you; break line of sight and it loses interest within a few seconds. Deaf. Weak: the easy fight that teaches the saw and the capture loop. Has a brain. Walk-Ins share a hive mind (that is why they forget you so fast). |
+| **The Discharged** | Ears | Eyeless and a head taller than a surgeon, with clear ears on the large side of normal that swivel toward sounds. Drags a rattling IV pole. Hunts by sound: the rattle stops, the ears turn, then it rushes the noise. A shove stuns it. Has a brain. |
+| **The Night Nurse** | Being watched | Moves only while nobody is looking at it with light on it. A shove does nothing, and neither do the saw or the needle: she is the one you run from. No brain. |
 
-Shift 1 has one Discharged; the Night Nurse joins from shift 2; more of each on later shifts and with more players.
+Surgery is the worst case: the monitors and the bone saw call the Discharged, and every surgeon's eyes are on the table instead of the door.
+
+## Fighting and capturing monsters (sweep 3)
+
+The core choice in every fight: **kill it to be safe, or catch it to get paid.**
+
+- **Kill:** the bone saw is a weapon (left mouse while holding it). Hits stagger, a few hits kill. Every hit has a chance to snap the saw, which is also the saw the surgery needs. Swinging is loud. A killed monster pays nothing: organs are only worth anything harvested alive.
+- **Catch:** shove it (stunned), then jab it with anesthetic (left mouse while holding a vial) inside the stun window. It drops, sedated, for a while. Hold E to drag it, E on a free patient table to strap it down. Strapped monsters cannot hurt anyone.
+- **On the table:** sedation wears off, faster with noise (the saw is the loudest). Low sedation makes it stir (the operator's hand shakes); lower still it is awake and thrashing, which botches the work and damages the brain. Anyone can re-dose it with anesthetic from their hands (E at the table), but every dose works for less time than the last.
+- **Dissection:** saw open the skull, pull the brain out with the forceps. Botches cost brain condition instead of patient vitals. The finished monster dies on the table.
+- **Brains spoil.** A harvested brain loses value quickly: run it to the dumpster (the only sell point) or to the break-room blender.
+- **The blender:** blend a brain and drink it to absorb that monster's knowledge. Per player, and lost on a game over along with the money.
+  - Walk-In brains, **Hive Eyes** (R): see through a nearby Walk-In's eyes for a few seconds while your body stands helpless. More brains: longer range and time. (Later: Puppet, steering it.)
+  - Discharged brains, **Echo** (R): a loud shriek; for a few seconds everything nearby shows as outlines through walls. It is loud enough to bring every Discharged in the wing. More brains: bigger radius and longer.
+- Later sweeps: Puppet, Rise (get back up as a shambler when downed), visible side effects (pale skin, groans, bigger ears, loud noises hurt), rare strap breaks.
+
+Shift 1 has Walk-Ins and one Discharged; the Night Nurse joins from shift 2; more of each on later shifts and with more players.
 
 ## Look and sound
 

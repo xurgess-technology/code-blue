@@ -48,6 +48,10 @@ var shove_count: int = 0
 var drop_count: int = 0
 var interact_count: int = 0
 var wants_interact: bool = false
+## SWEEP 3 HOOK: left mouse with a usable item in hand (bone saw swing, anesthetic jab; see
+## scripts/combat/combat.gd), and R for the absorbed-brain ability (scripts/brains/brains.gd).
+var use_count: int = 0
+var ability_count: int = 0
 
 ## Test seam: when bot_active is set, these stand in for keyboard and mouse so a
 ## script can play the game headlessly. Nothing in the shipped game touches them.
@@ -62,6 +66,9 @@ var bot_pitch: float = 0.0
 var bot_aim_id: String = ""
 ## Bump to press E once on whatever the bot aims at.
 var bot_press: int = 0
+## Bump to use the held item once (left mouse) / the brain ability once (R).
+var bot_use: int = 0
+var bot_ability: int = 0
 
 ## DEV HOOK (scripts/dev): a dev room bot or target dummy. The host simulates it like a local
 ## player through the bot_* seam; everyone else sees it like a remote player.
@@ -92,6 +99,10 @@ var _shove_seen: int = 0
 var _drop_seen: int = 0
 var _interact_seen: int = 0
 var _bot_press_seen: int = 0
+var _use_seen: int = 0
+var _ability_seen: int = 0
+var _bot_use_seen: int = 0
+var _bot_ability_seen: int = 0
 var _held_key: String = ""
 var _held_fp: Node3D
 var _held_tp: Node3D
@@ -441,6 +452,13 @@ func _local_step(delta: float) -> void:
 		if bot_press != _bot_press_seen:
 			_bot_press_seen = bot_press
 			interact_count += 1
+		# SWEEP 3 HOOK: scripted item use and brain ability.
+		if bot_use != _bot_use_seen:
+			_bot_use_seen = bot_use
+			use_count += 1
+		if bot_ability != _bot_ability_seen:
+			_bot_ability_seen = bot_ability
+			ability_count += 1
 	elif can_move:
 		input_dir = Input.get_vector("move_left", "move_right", "move_forward", "move_back")
 		wants_interact = Input.is_action_pressed("interact")
@@ -505,6 +523,16 @@ func _local_step(delta: float) -> void:
 		if Input.is_action_just_pressed("shove") and _shove_cd <= 0.0 and not gun_out:
 			_shove_cd = C.SHOVE_COOLDOWN
 			shove_count += 1
+		# SWEEP 3 HOOK: left mouse uses the held item when it has a use (saw, anesthetic), else it
+		# shoves like Q. R triggers the brain ability unless R would open the guide.
+		if Input.is_action_just_pressed("use") and not gun_out and not downed and carrying == 0:
+			if g != null and g.combat != null and g.combat.is_usable(selected_stack().kind):
+				use_count += 1
+			elif _shove_cd <= 0.0:
+				_shove_cd = C.SHOVE_COOLDOWN
+				shove_count += 1
+		if Input.is_action_just_pressed("read") and not downed and not _would_read_guide():
+			ability_count += 1
 		if Input.is_action_just_pressed("drop") and selected_stack().kind != "":
 			drop_count += 1
 		for i in C.CARRY_CAP:
@@ -578,12 +606,32 @@ func _pinned_step(delta: float) -> void:
 		head.rotation.x = lerpf(head.rotation.x, _pitch, clampf(delta * 12.0, 0.0, 1.0))
 
 
+## SWEEP 3 HOOK: R opens the guide (main.gd) while holding it or looking at it; otherwise R is the
+## brain ability. Same test as main.gd's _can_read.
+func _would_read_guide() -> bool:
+	if holding("guide"):
+		return true
+	if aim_id.begins_with("it_") and game != null:
+		var node: Node = game.find_interactable(aim_id)
+		return node != null and node.get("kind") == "guide"
+	return false
+
+
 ## Host-side: turn the shove/drop counters into actual events, exactly once each.
 func _consume_actions() -> void:
 	if game == null:
 		return
 	# Downed hook: a downed player only calls for help; a carrier only puts down or places.
 	var busy := downed or carrying != 0
+	# SWEEP 3 HOOK: item use and the brain ability (the systems decide what a busy player may do).
+	if use_count != _use_seen:
+		_use_seen = use_count
+		if alive and not busy:
+			game.player_used(self)
+	if ability_count != _ability_seen:
+		_ability_seen = ability_count
+		if alive and not downed:
+			game.player_ability(self)
 	if shove_count != _shove_seen:
 		_shove_seen = shove_count
 		if alive and not busy:
@@ -1031,10 +1079,10 @@ func _update_down_pose(delta: float) -> void:
 ## Client -> host, 20 Hz: everything about my own surgeon. A positional array rather than a
 ## dictionary: no key strings on the wire, about a third of the size.
 ##   [position, yaw, pitch, flag bits (1 light, 2 sprint, 4 moving, 8 holding E),
-##    shove count, drop count, aim id, interact count, selected hand]
+##    shove count, drop count, aim id, interact count, selected hand, use count, ability count]
 func report_state() -> Array:
 	var bits := (1 if flashlight_on else 0) | (2 if sprinting else 0) | (4 if moving else 0) | (8 if wants_interact else 0)
-	return [global_position, rotation.y, head.rotation.x, bits, shove_count, drop_count, aim_id, interact_count, selected]
+	return [global_position, rotation.y, head.rotation.x, bits, shove_count, drop_count, aim_id, interact_count, selected, use_count, ability_count]
 
 
 func apply_remote_state(s: Array) -> void:
@@ -1058,6 +1106,9 @@ func apply_remote_state(s: Array) -> void:
 	selected = clampi(int(s[8]), 0, slots.size() - 1)
 	# Drop before interacting so a count that moved in the same tick uses the right hand.
 	interact_count = int(s[7])
+	if s.size() >= 11:   # sweep 3
+		use_count = int(s[9])
+		ability_count = int(s[10])
 	_consume_actions()
 
 
