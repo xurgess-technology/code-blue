@@ -465,6 +465,33 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   (`material_get_instance_shader_parameters`, dummy renderer). The run passes; not traced, and not
   checked against main.
 
+## The seal's Blender model (2026-09-14)
+
+- **The stump floats.** After the cut the stub ends in the air: the paddle, not the arm, rests on
+  the table. The stump cap and its dressing hang a few centimetres over the sheet
+  (`tools/patient_shots/seal_dressed_amputation.png`).
+- **The fore flipper root is a tube pushed into the body**, with a crease where it meets the flank,
+  and the flipper is splayed further from the body than a resting seal would hold it (that keeps the
+  tourniquet and the cut clear of the flank).
+- **The infection has less relief in the engine than in Blender.** It bumps through a screen-space
+  derivative of its height map, which is soft at grazing light.
+- **The tourniquet step's own infection tint overlaps the model's** at the front edge (see "The
+  infection still shows in two styles" above): its red-purple decal sits over the baked ulcers for a
+  few centimetres.
+- **The gunshot dressing band is an elliptical cylinder** sized to the flank (half width 0.30 m); it
+  sinks into the belly under the table and stands a few millimetres off the back in places.
+- **Stir while low on vitals** blends Stir over Twitch, so a twitching seal that is jolted loses its
+  tremor for about half a second.
+- **Site frames are the rest pose.** Stirs and the idle look move the neck and flippers under a
+  minigame's plane by up to a few centimetres (the surgery system re-places minigames at
+  `site_transform` every tick, so the sites must not follow the bones); the overlays on the anchors
+  do follow.
+- **Perf** (`perfprobe -- --quality=1,0` and `-- --seal-procedural`, 1280x720, seed 4242, other
+  workers idle): "OR, the seal close up" 120 fps at q1 and 144 at q0 with the model (129 draws), 104
+  and 137 with the procedural seal (159-162 draws); "operating: bone saw" 144 / 163 with the model,
+  156 / 160 procedural. Runs while another worker baked in Blender swung by 2x, so compare numbers
+  only from quiet runs.
+
 ## Dissection (sweep 3)
 
 - **The strapped rig bodies are fitted by measured constants** (`monster_rig_look.gd` `RIG`: scale,

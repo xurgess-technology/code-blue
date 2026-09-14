@@ -1,11 +1,11 @@
 # The seal patient: Blender sources
 
-**Art test, not in the game yet.** The model is `assets/models/patients/seal/seal.glb` (skinned mesh,
-2 materials, 5 clips) with its maps as separate PNGs in `textures/` beside it, plus
-`seal_skin.gdshader`, the shader that drives it. The game still builds the procedural seal
-(`scripts/patients/seal_builder.gd`); nothing in `scripts/` was changed. `tools/seal_viewer.tscn`
-shows the new model on the OR table in every surgery state. This folder has a `.gdignore`, so Godot
-never imports it.
+**In the game since 2026-09-14.** The model is `assets/models/patients/seal/seal.glb` (asset key
+`patient/seal`; skinned mesh, 2 materials, 5 clips) with its maps as separate PNGs in `textures/`
+beside it, plus `seal_skin.gdshader`, the shader that drives it. `scripts/patients/seal_model_builder.gd`
+builds the patient from it (how the game uses it: `docs/CONTRACTS.md`, "Patient body"); the lofted
+`seal_builder.gd` is the fallback when the asset is missing. `tools/seal_viewer.tscn` shows the model
+on the OR table in every surgery state. This folder has a `.gdignore`, so Godot never imports it.
 
 Like the Night Nurse (`art/night_nurse/README.md`), the seal is modelled entirely from Python in
 Blender 5.2.1, headless. No AI generation, downloaded models or hand sculpting: every vertex, UV,
@@ -177,7 +177,7 @@ Sections (`site_section`), measured from the mesh ring at each site:
     clean flesh. The infection is baked, shown through `COLOR.r` and `infect`, and can creep forward
     with `infect_front`.
 
-### Wiring it in later (not done)
+### How it was wired in (done 2026-09-14, `seal_model_builder.gd`)
 
 1. In `seal_builder.gd`, instantiate the GLB under `b.rig` instead of lofting. Override the materials
    with `seal_skin.gdshader`, and add the coat material (and the detail one) to `b.skin_mats`.
@@ -218,7 +218,5 @@ the chin just off the table.
 - **Infection shading** uses a screen-space bump from the height map. It has no normal map of its own,
   so grazing light shows less relief than the Blender renders.
 - **The clips are procedural**, as with the Nurse. Stir and Fidget read clearly; Twitch is subtle.
-- **The cut face reads too clean and red.** The two bone rings look a little like eyes, and the muscle
-  is candy-red rather than dark. This is a tuning change in `seal_materials.py` plus a rebake.
 - **The wound overlays** (kit decal, bullet, tourniquet, dressings) are the existing procedural
   pieces. They work at the sites but look simpler than the model.
