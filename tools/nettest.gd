@@ -751,9 +751,15 @@ func _sc_dissection():
 			err.skip_until = _wall() + 1.0
 		if msgs.size() >= 2 and absf(float(msgs[msgs.size() - 2].data.s) - host_s) > 0.04:
 			err.skip_until = _wall() + 0.5
+		var mine := float((c.flags as Dictionary).get("sedation", -1.0))
+		# The dose's jump in my snapshot can arrive before the case's `doses` and the host's next report.
+		if absf(mine - float(err.get("last_mine", mine))) > 0.04:
+			err.skip_until = _wall() + 1.0
+		err.last_mine = mine
 		if _wall() < float(err.get("skip_until", 0.0)):
 			return
-		var mine := float((c.flags as Dictionary).get("sedation", -1.0))
+		if absf(mine - host_s) > float(err.max):
+			err.worst = "mine %.3f host %.3f (report %d of %d) doses %d at %.2f s" % [mine, host_s, msgs.size(), _count_msgs("sed"), doses, _wall() - _t0]
 		err.max = maxf(float(err.max), absf(mine - host_s))
 		err.n = int(err.n) + 1
 	if int(order.op) == Net.my_id():
@@ -797,7 +803,7 @@ func _sc_dissection():
 	# 0.05 is the contract. Under simulated lag the host's own report is as late as the snapshot and
 	# the game runs several times faster than the wall clock, so the comparison itself drifts more.
 	if int(err.n) < 20 or float(err.max) > (0.09 if lagged else 0.05):
-		return _end(false, "replicated sedation off by %.3f (%d samples)" % [float(err.max), int(err.n)])
+		return _end(false, "replicated sedation off by %.3f (%d samples; worst: %s)" % [float(err.max), int(err.n), String(err.get("worst", ""))])
 	_say("sedation within %.3f of the host over %d samples" % [float(err.max), int(err.n)])
 	await _finish_together("dissection %s: sedation within %.3f" % ["operated" if int(order.op) == Net.my_id() else "re-dosed", float(err.max)])
 
