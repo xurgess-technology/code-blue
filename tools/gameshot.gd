@@ -19,6 +19,7 @@ var _i := 0
 var _seed := 4242
 var _tag := ""
 var _only := ""
+var _pocket := ""
 var _seal_table := 0
 
 
@@ -30,6 +31,8 @@ func _ready() -> void:
 			_tag = "_" + a.split("=")[1]
 		elif a.begins_with("--only="):
 			_only = a.split("=")[1]
+		elif a.begins_with("--pocket="):
+			_pocket = a.split("=")[1]   # POCKETS: the pocket space shots (tools/gameshot_pockets.gd)
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(OUT_DIR))
 	# Never outlive a broken run (a windowed Godot left behind holds the GPU).
 	get_tree().create_timer(900.0).timeout.connect(func(): get_tree().quit(2))
@@ -40,12 +43,19 @@ func _ready() -> void:
 	game = main.game
 	main.menu.hide_menu()
 	Net.start_solo("Camera")
+	if _pocket != "":
+		preload("res://scripts/level/pockets/pocket_plan.gd").force_kind = _pocket
 	game.start_session(_seed)
 	await get_tree().process_frame
 	bot = game.local_player()
 	bot.bot_active = true
 	bot.bot_invulnerable = true
 	bot.bot_move = Vector2.ZERO
+	if _pocket != "":
+		await preload("res://tools/gameshot_pockets.gd").new().run(self, _pocket)
+		print("[gameshot] done")
+		get_tree().quit(0)
+		return
 
 	shots = [
 		{"name": "01_clockin_room", "fn": _pose_clockin},

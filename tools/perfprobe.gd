@@ -24,6 +24,7 @@ var _hitch := false
 var _orscreen := false
 var _models := false
 var _brains := false   # SWEEP 3 HOOK (brains)
+var _pockets := false  # POCKETS: --pockets, the Factory and the Restaurant against the corridor baseline
 var _doors := false    # DOORS HOOK
 var _hands := false    # HANDS HOOK
 var _humans := false   # HUMAN HOOK
@@ -46,6 +47,7 @@ func _ready() -> void:
 			"orscreen": _orscreen = true
 			"models": _models = true
 			"brains": _brains = true
+			"pockets": _pockets = true   # POCKETS
 			"doors": _doors = true
 			"hands": _hands = true
 			"humans": _humans = true
@@ -104,6 +106,8 @@ func _ready() -> void:
 	if _brains:
 		await _run_brains()
 		return
+	if _pockets:
+		await _run_pockets()   # POCKETS
 	if _doors:
 		await _run_doors()
 		return
@@ -291,6 +295,81 @@ func _measure(label: String, q: int) -> void:
 	}
 	_rows.append(row)
 	print("[perf] q%d %-30s avg %.0f fps, 1%% low %.0f fps, worst %.1f ms, draws %d" % [q, label, row.fps, row.low_fps, row.worst, draws])
+
+
+## POCKETS: each space forced onto the run's hospital, measured from a few views, with the
+## hospital's long corridor on the same map as the baseline.
+func _run_pockets() -> void:
+	var Plan := preload("res://scripts/level/pockets/pocket_plan.gd")
+	var Stub := preload("res://scripts/level/pockets/stub.gd")
+	for kind in ["none", "factory", "restaurant"]:
+		Plan.force_kind = kind
+		game.start_session(_seed)
+		await get_tree().process_frame
+		bot = game.local_player()
+		bot.bot_active = true
+		bot.bot_invulnerable = true
+		while game.get_parent().has_node("WarmupCover"):
+			await get_tree().process_frame
+		for i in 30:
+			await get_tree().process_frame
+		var pk = game.pockets
+		if kind == "none":
+			for q in _qualities:
+				main.set_quality(q, false)
+				await _corridor()
+				await _measure("no pocket: hospital corridor", q)
+			continue
+		var o := Vector3(Vector2i(pk.pocket.origin).x * C.TILE, 0.0, Vector2i(pk.pocket.origin).y * C.TILE)
+		var w := func(t: Vector2, y := 0.0) -> Vector3:
+			return o + Vector3(t.x * C.TILE, y, t.y * C.TILE)
+		var s: Dictionary = pk.seams[0]
+		var views: Array = [{"name": "%s map: hospital corridor" % kind, "setup": _corridor}]
+		if kind == "factory":
+			views.append({"name": "factory: hall, corner to corner", "setup": func(): _look(w.call(Vector2(13, 13)), w.call(Vector2(70, 52), C.EYE_H))})
+			views.append({"name": "factory: down a production line", "setup": func(): _look(w.call(Vector2(14, 27)), w.call(Vector2(70, 23), C.EYE_H))})
+			views.append({"name": "factory: from the catwalk", "setup": func(): _look(w.call(Vector2(40, 12), 6.0), w.call(Vector2(40, 45), 1.0))})
+		else:
+			views.append({"name": "restaurant: dining room", "setup": func(): _look(w.call(Vector2(12.5, 25.5)), w.call(Vector2(38, 12), C.EYE_H))})
+			views.append({"name": "restaurant: bar", "setup": func(): _look(w.call(Vector2(33, 23)), w.call(Vector2(41, 13), C.EYE_H))})
+			views.append({"name": "restaurant: kitchen", "setup": func(): _look(w.call(Vector2(26, 29.5)), w.call(Vector2(44, 33), C.EYE_H))})
+		views.append({"name": "%s: an entrance from inside" % kind, "setup": func(): _look(Stub.local_point(s.xp, float(s.w) - 1.0, -8.0), Stub.local_point(s.xp, float(s.w) - 1.0, 0.0, C.EYE_H))})
+		views.append({"name": "%s: seam, hospital side" % kind, "setup": func(): _look(Stub.local_point(s.xh, 1.0, float(s.d) - 1.0), Stub.local_point(s.xh, float(s.w), float(s.d) - 1.0, C.EYE_H))})
+		# POCKETS + HUMAN: looking back at a seam from inside the pocket, then the same with two
+		# teammates (skinned human bodies) standing in the hospital's copy, drawn here as mirrors.
+		var back_view := func(): _look(Stub.local_point(s.xp, float(s.w) - 1.0, float(s.d) - 1.0), Stub.local_point(s.xp, 0.0, float(s.d) - 1.0, C.EYE_H))
+		views.append({"name": "%s: seam, pocket side" % kind, "setup": back_view})
+		views.append({"name": "%s: seam, 2 teammates mirrored" % kind, "setup": back_view, "mates": [
+				Stub.local_point(s.xh, Stub.seam_s(s.w) - 1.6, float(s.d) - 1.3), Stub.local_point(s.xh, Stub.seam_s(s.w) - 2.6, float(s.d) - 0.7)]})
+		for q in _qualities:
+			main.set_quality(q, false)
+			for v in views:
+				# (mirrors are updated with the crossings: on for the teammates, who stand on their own side)
+				pk.crossing_enabled = v.has("mates")
+				var mates: Array = []
+				for i in (v.get("mates", []) as Array).size():
+					var mate = preload("res://scripts/player.gd").new_player(-90 - i, "Mate%d" % i, false)
+					mate.is_bot = true
+					mate.bot_active = true
+					mate.bot_invulnerable = true
+					game.players[-90 - i] = mate
+					game.get_node("Entities").add_child(mate)
+					mate.teleport(v.mates[i])
+					mates.append(mate)
+				await v.setup.call()
+				await _measure(v.name, q)
+				if not mates.is_empty():
+					print("[perf]   %d mirrors while measuring '%s'" % [pk._mirrors.size(), v.name])
+				for mate in mates:
+					game.players.erase(mate.peer_id)
+					mate.queue_free()
+				pk.crossing_enabled = true
+	Plan.force_kind = ""
+	print("[perf] ============================================================================")
+	print("[perf] %-36s q  avg fps  1%%low fps  worst ms  phys ms  proc ms  draws  nodes" % "scenario")
+	for r in _rows:
+		print("[perf] %-36s %d  %7.0f  %9.0f  %8.1f  %7.2f  %7.2f  %5d  %5d" % [r.name, r.q, r.fps, r.low_fps, r.worst, r.phys, r.proc, r.draws, r.nodes])
+	get_tree().quit(0)
 
 
 ## Which part of the frame costs the most in the worst scenes: toggle one thing at a time.

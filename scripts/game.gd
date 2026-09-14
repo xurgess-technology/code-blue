@@ -167,6 +167,9 @@ const BrainsScript := preload("res://scripts/brains/brains.gd")
 var combat: Node = null       # bone saw swings, anesthetic jabs, dragging and strapping monsters
 var dissection: Node = null   # monster cases on the patient tables: sedation, re-dosing, the brain
 var brains: Node = null       # brain spoilage, the blender, per-player upgrades, Echo and Hive Eyes
+# POCKETS HOOK: pocket spaces (the Factory, the Restaurant), their seams and crossings.
+const PocketSpacesScript := preload("res://scripts/level/pockets/pocket_spaces.gd")
+var pockets: Node = null
 
 # DOORS HOOK: every door of the level, and the wings behind the loading gates rebuilt each shift.
 const DoorsScript := preload("res://scripts/doors/doors.gd")
@@ -223,6 +226,11 @@ func _ready() -> void:
 	brains.name = "Brains"
 	add_child(brains)
 	brains.setup(self)
+	# POCKETS HOOK: after Entities, so crossings see this frame's movement. Same path everywhere.
+	pockets = PocketSpacesScript.new()
+	pockets.name = "Pockets"
+	add_child(pockets)
+	pockets.setup(self)
 	# DOORS HOOK: same path on every machine.
 	doors = DoorsScript.new()
 	doors.name = "Doors"
@@ -232,6 +240,7 @@ func _ready() -> void:
 	wing_loader.name = "WingLoader"
 	add_child(wing_loader)
 	wing_loader.setup(self)
+	wing_loader.extra_builders.append(pockets)   # POCKETS HOOK: the pocket is built and torn down with the wings
 	Net.roster_changed.connect(_on_roster_changed)
 	Net.joined_ok.connect(_net_client_forget)  # net: a new connection starts a new replica
 	Net.host_left.connect(func(): end_session("The host left the game."))
@@ -339,7 +348,7 @@ func clock_in() -> void:
 		return
 	# DOORS HOOK: the wings behind the gates are still being rebuilt: clock in once they are ready
 	# (the gates' lamps blink amber meanwhile).
-	if not wing_loader.wings_ready:
+	if not wing_loader.wings_ready or pockets.busy:   # POCKETS HOOK: and the pocket built with them
 		if not clock_in_pending:
 			clock_in_pending = true
 			say("Clocked in. The wing doors are unlocking...", 3.0)
@@ -360,6 +369,7 @@ func begin_shift() -> void:
 	if not is_host():
 		return
 	wing_loader.finish_now()   # DOORS HOOK: tools cannot wait for the wings
+	pockets.finish_now()   # POCKETS HOOK: nor for the pocket
 	clock_in_pending = false
 	if phase == Phase.LOBBY:
 		_populate_shift_world()
@@ -565,6 +575,7 @@ func _build_level(for_seed: int) -> void:
 	doors.clear()
 	doors.register(level_info.get("door_nodes", []))
 	wing_loader.on_level_built(level_info)
+	pockets.finish_now()   # POCKETS HOOK: a whole level (a loading screen) does not wait frames for its pocket
 
 
 func _level_info_usable() -> bool:
@@ -644,6 +655,8 @@ func _add_occluders() -> void:
 
 
 func _clear_level() -> void:
+	if pockets != null:
+		pockets.teardown()   # POCKETS HOOK
 	if level != null and is_instance_valid(level):
 		level.queue_free()
 	level = null
@@ -1696,6 +1709,10 @@ func emit_noise(pos: Vector3, loudness: float, kind: String) -> void:
 	if not is_host():
 		return
 	_noises.append({"pos": pos, "loudness": loudness, "kind": kind, "time": world_time})
+	# POCKETS HOOK: sound carries through seams (the same noise in the other copy of a nearby stub).
+	if pockets != null:
+		for p in pockets.mirror_noise(pos, loudness):
+			_noises.append({"pos": p, "loudness": loudness, "kind": kind, "time": world_time, "mirrored": true})
 
 
 func recent_noises(max_age: float = 1.5) -> Array:
@@ -1842,7 +1859,7 @@ func _simulate(delta: float) -> void:
 
 
 func _sim_lobby(delta: float) -> void:
-	if clock_in_pending and wing_loader.wings_ready:
+	if clock_in_pending and wing_loader.wings_ready and not pockets.busy:   # POCKETS HOOK
 		clock_in()   # DOORS HOOK: the wings finished while the team waited at the clock
 		return
 	if _holding_aim("clock"):

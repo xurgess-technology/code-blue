@@ -31,6 +31,7 @@ var failures: PackedStringArray = []
 var first_seed := 1
 var seed_count := 300
 var build_count := 8
+var build_pocket := ""   # POCKETS
 
 
 func _initialize() -> void:
@@ -42,9 +43,11 @@ func _initialize() -> void:
 			"seeds": seed_count = int(kv[1])
 			"builds": build_count = int(kv[1])
 			"first": first_seed = int(kv[1])
+			"build_pocket": build_pocket = kv[1]   # POCKETS: "" alternate, none, factory, restaurant
 	var t0 := Time.get_ticks_msec()
 	_check_generation()
 	_check_determinism()
+	_check_pockets()   # POCKETS
 	print("")
 	print("--- seed %d ---" % ASCII_SEED)
 	var g7: Dictionary = MG.generate(ASCII_SEED)
@@ -187,6 +190,211 @@ func _longest_run(gen: Dictionary) -> int:
 	return best
 
 
+# ---------------------------------------------------------------------------
+# POCKETS: pocket spaces over many seeds (docs/POCKET_SPACES.md)
+# ---------------------------------------------------------------------------
+
+const Plan := preload("res://scripts/level/pockets/pocket_plan.gd")
+const Stub := preload("res://scripts/level/pockets/stub.gd")
+const PS := preload("res://scripts/level/pockets/pocket_spaces.gd")
+const S := preload("res://scripts/level/level_state.gd")
+
+## Every seed of the run again with a pocket forced (Factory on odd seeds, Restaurant on even), plus
+## the natural roll: the plan, the stubs carved into the hospital, the pocket's own grid, and the
+## seams lining up tile for tile both ways.
+func _check_pockets() -> void:
+	var t0 := Time.get_ticks_msec()
+	var natural := {}
+	var entrances := {}
+	var placed := 0
+	var tried := 0
+	for seed in range(first_seed, first_seed + seed_count):
+		Plan.force_kind = ""
+		var g0: Dictionary = MG.generate(seed)
+		var k0 := String(Plan.of(g0).get("kind", "none"))
+		natural[k0] = int(natural.get(k0, 0)) + 1
+		for kind in ["factory", "restaurant"]:
+			if (seed % 2 == 1) != (kind == "factory") and seed > first_seed + 40:
+				continue   # both kinds on the first 40 seeds, then alternate
+			Plan.force_kind = kind
+			tried += 1
+			# Wings differ every shift: later shifts' wing seeds too (the plan is rolled with the wings).
+			var gn := 1 + (seed + (1 if kind == "factory" else 0)) % 4
+			var gen: Dictionary = MG.generate(seed, MG.wing_seed_for(seed, gn))
+			var plan := Plan.of(gen)
+			if plan.is_empty():
+				fail("seed %d shift %d: a forced %s placed no pocket (%s)" % [seed, gn, kind, Plan.last_failure])
+				continue
+			placed += 1
+			entrances[plan.stubs.size()] = int(entrances.get(plan.stubs.size(), 0)) + 1
+			for p in MG.validate(gen):
+				fail("seed %d shift %d (%s forced): %s" % [seed, gn, kind, p])
+			_check_pocket_plan(seed, kind, gen, plan)
+	Plan.force_kind = ""
+	print("pockets: natural roll %s over %d seeds; forced %d/%d placed; entrances %s (%d ms)" % [str(natural), seed_count, placed, tried, str(entrances), Time.get_ticks_msec() - t0])
+
+
+func _check_pocket_plan(seed: int, kind: String, gen: Dictionary, plan: Dictionary) -> void:
+	var tag := "seed %d %s" % [seed, kind]
+	var rows: PackedStringArray = gen.rows
+	var w: int = gen.width
+	var h: int = gen.height
+	var zone: PackedByteArray = gen.zone
+	var blocked: PackedByteArray = gen.blocked
+	var er: Rect2i = gen.entrance_rect
+	var nr: Rect2i = gen.neutral_rect
+	var stubs: Array = plan.stubs
+	if stubs.size() < Plan.MIN_ENTRANCES or stubs.size() > Plan.MAX_ENTRANCES:
+		fail("%s: %d entrances" % [tag, stubs.size()])
+	var wings := {}
+	var wing_zone := {}
+	for wd in gen.wings:
+		wing_zone[String(wd.id)] = int(wd.zone)
+	var at := func(p: Vector2i) -> String:
+		return "#" if p.x < 0 or p.y < 0 or p.x >= w or p.y >= h else rows[p.y][p.x]
+	# Reachability over the hospital's tiles (the stub halves past a seam are blocked, like the nav).
+	var st := S.new(w, h)
+	for y in h:
+		for x in w:
+			st.cells[y * w + x] = rows[y].unicode_at(x)
+	st.blocked = blocked
+	var start: Vector2 = gen.spots.neutral_spawns[0]
+	var reach := st.flood([Vector2i(int(start.x), int(start.y))])
+	for s in stubs:
+		wings[s.wing] = true
+		var o: Vector2i = s.o
+		var eu: Vector2i = s.eu
+		var ev: Vector2i = s.ev
+		if not Stub.size_ok(s.w, s.d):
+			fail("%s stub %d: %dx%d is too small to hide its seam" % [tag, s.id, s.w, s.d])
+		var open := {}
+		for t in Stub.open_tiles(s.w, s.d, true):
+			open[t] = true
+		for v in range(-1, s.d + 1):
+			for u in range(-1, s.w + 1):
+				var t := Vector2i(u, v)
+				var p: Vector2i = o + eu * u + ev * v
+				var c: String = at.call(p)
+				if open.has(t):
+					if c != ".":
+						fail("%s stub %d: tile %s should be floor, is '%s'" % [tag, s.id, str(t), c])
+					elif zone[p.y * w + p.x] != Plan.ZONE_STUB:
+						fail("%s stub %d: tile %s is not in the stub zone" % [tag, s.id, str(t)])
+					if Stub.phantom_hospital(s.w, t) != (blocked[p.y * w + p.x] == 1):
+						fail("%s stub %d: tile %s blocked=%d but past the seam=%s" % [tag, s.id, str(t), blocked[p.y * w + p.x], str(Stub.phantom_hospital(s.w, t))])
+					if er.has_point(p) or nr.has_point(p):
+						fail("%s stub %d: tile %s inside the entrance building or neutral area" % [tag, s.id, str(t)])
+				elif v >= 0 and v < s.d and u >= 0 and u < s.w and c != "#":
+					fail("%s stub %d: the middle block tile %s is '%s'" % [tag, s.id, str(t), c])
+				elif (v == -1 or v == s.d or u == -1 or u == s.w) and not open.has(t) and c != "#":
+					fail("%s stub %d: the wall around it is open at %s ('%s')" % [tag, s.id, str(t), c])
+		# Its mouth opens onto a hallway of its own wing, reachable from outside.
+		for u in Stub.CORRIDOR:
+			var hall: Vector2i = o + eu * u - ev * 2
+			if int(zone[hall.y * w + hall.x]) != int(wing_zone.get(String(s.wing), -1)) or at.call(hall) == "#":
+				fail("%s stub %d: its mouth does not open onto a %s hallway" % [tag, s.id, s.wing])
+			var m: Vector2i = o + eu * u + ev * 0
+			if reach[m.y * w + m.x] == 0:
+				fail("%s stub %d: leg 1 is not reachable from the neutral area" % [tag, s.id])
+	if wings.size() < 2:
+		fail("%s: every entrance leads to the same wing" % tag)
+	# The pocket's own grid: every stub has a port, the copies line up tile for tile with the hospital's
+	# stubs through the seam transform (both ways), and everything open is reachable from each opening.
+	var layout_script: GDScript = PS.Factory if kind == "factory" else PS.Restaurant
+	var lay: Dictionary = layout_script.layout(stubs, int(plan.seed))
+	var g: Dictionary = lay.grid
+	var origin: Vector2i = PS.ORIGINS[kind]
+	for i in stubs.size():
+		var s: Dictionary = stubs[i]
+		var port: Dictionary = lay.ports[i]
+		if port.is_empty():
+			fail("%s stub %d: no place for it on the pocket's walls" % [tag, s.id])
+			continue
+		var seam := PS._make_seam(s, port, origin)
+		var t: Transform3D = seam.t
+		var ti: Transform3D = seam.t_inv
+		for v in range(-1, s.d + 1):
+			for u in range(-1, s.w + 1):
+				var hp: Vector2i = (s.o as Vector2i) + (s.eu as Vector2i) * u + (s.ev as Vector2i) * v
+				var pp: Vector2i = (port.o as Vector2i) + (port.eu as Vector2i) * u + (port.ev as Vector2i) * v
+				var hc := C.tile_to_world(hp.x, hp.y)
+				var pc := C.tile_to_world(origin.x + pp.x, origin.y + pp.y)
+				if (t * hc).distance_to(pc) > 0.001 or (ti * pc).distance_to(hc) > 0.001:
+					fail("%s stub %d: tile %d,%d does not map onto its copy" % [tag, s.id, u, v])
+					break
+				if v < 0 or v >= s.d or u < 0 or u >= s.w:
+					# The ring: walls in both copies except each copy's own mouth / opening.
+					var h_open: bool = at.call(hp) != "#"
+					var p_open := Common_is_open(g, pp)
+					var mouth: bool = v == -1 and u >= 0 and u < Stub.CORRIDOR
+					var opening: bool = v == -1 and u >= int(s.w) - Stub.CORRIDOR and u < int(s.w)
+					if h_open != mouth or p_open != opening:
+						fail("%s stub %d: ring tile %d,%d hospital open=%s pocket open=%s" % [tag, s.id, u, v, str(h_open), str(p_open)])
+				else:
+					var h_open: bool = at.call(hp) != "#"
+					var p_open := Common_is_open(g, pp)
+					if h_open != p_open:
+						fail("%s stub %d: tile %d,%d open in one copy only (hospital %s, pocket %s)" % [tag, s.id, u, v, str(h_open), str(p_open)])
+	# Flood the pocket from each opening over walkable tiles (the nav mask stands in for props).
+	var gw: int = g.w
+	var gh: int = g.h
+	for i in stubs.size():
+		var port: Dictionary = lay.ports[i]
+		if port.is_empty():
+			continue
+		var s: Dictionary = stubs[i]
+		var from: Vector2i = (port.o as Vector2i) + (port.eu as Vector2i) * (s.w - 1) + (port.ev as Vector2i) * 0
+		var seen := PackedByteArray()
+		seen.resize(gw * gh)
+		var q: Array[Vector2i] = [from]
+		seen[from.y * gw + from.x] = 1
+		var qi := 0
+		while qi < q.size():
+			var c: Vector2i = q[qi]
+			qi += 1
+			for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+				var n: Vector2i = c + d
+				if n.x < 0 or n.y < 0 or n.x >= gw or n.y >= gh or seen[n.y * gw + n.x] == 1:
+					continue
+				if not Common_is_open(g, n) or g.nav[n.y * gw + n.x] == 1:
+					continue
+				seen[n.y * gw + n.x] = 1
+				q.append(n)
+		var missed := 0
+		var example := Vector2i(-1, -1)
+		for y in gh:
+			for x in gw:
+				if Common_is_open(g, Vector2i(x, y)) and g.nav[y * gw + x] == 0 and seen[y * gw + x] == 0:
+					missed += 1
+					if example.x < 0:
+						example = Vector2i(x, y)
+		if missed > 0:
+			fail("%s: %d walkable pocket tiles unreachable from entrance %d (e.g. %s)" % [tag, missed, i, str(example)])
+	# The pocket's doors (scripts/doors): each in a doorway one tile deep between two walkable tiles,
+	# the whole outward swing (the tile in front of each leaf) clear of props, containers and stubs.
+	var ct_tiles := {}
+	for c in lay.containers:
+		ct_tiles[c.tile] = true
+	for d in layout_script.door_entries(lay, origin):
+		var n: Vector2i = d.n
+		var side := Vector2i(n.y, n.x).abs()
+		for wt: Vector2i in d.tiles:
+			var t: Vector2i = wt - origin
+			var front: Vector2i = t + n
+			var back: Vector2i = t - n
+			if not Common_is_open(g, t) or Common_is_open(g, t + side) and Common_is_open(g, t - side) and d.tiles.size() == 1:
+				fail("%s: door %s is not in a one-tile doorway" % [tag, d.id])
+			for p: Vector2i in [front, back]:
+				if not Common_is_open(g, p) or g.nav[p.y * gw + p.x] == 1 or g.stub[p.y * gw + p.x] == 1:
+					fail("%s: door %s opens onto a blocked tile %s" % [tag, d.id, str(p)])
+			if ct_tiles.has(front) or ct_tiles.has(back):
+				fail("%s: door %s swings into a container at %s" % [tag, d.id, str(front)])
+
+
+static func Common_is_open(g: Dictionary, p: Vector2i) -> bool:
+	return p.x >= 0 and p.y >= 0 and p.x < int(g.w) and p.y < int(g.h) and (g.cells as PackedByteArray)[p.y * int(g.w) + p.x] != 35
+
+
 func _check_determinism() -> void:
 	for seed in DETERMINISM_SEEDS:
 		var a: Dictionary = MG.generate(seed)
@@ -230,7 +438,12 @@ func _check_determinism() -> void:
 						wings_differ += 1
 			if not same:
 				fail("seed %d shift %d: the entrance building or neutral area changed" % [seed, shift])
-			if str(s1.spots) != str(sn.spots) or er != (sn.entrance_rect as Rect2i):
+			# POCKETS: the pocket plan is rolled with the wings, so it may change (spots.pocket).
+			var sp1: Dictionary = (s1.spots as Dictionary).duplicate()
+			var spn: Dictionary = (sn.spots as Dictionary).duplicate()
+			sp1.erase("pocket")
+			spn.erase("pocket")
+			if str(sp1) != str(spn) or er != (sn.entrance_rect as Rect2i):
 				fail("seed %d shift %d: a landmark moved" % [seed, shift])
 			if wings_differ < 100:
 				fail("seed %d shift %d: the wings barely changed (%d tiles)" % [seed, shift, wings_differ])
@@ -268,6 +481,10 @@ class Runner extends Node:
 	const MG := preload("res://scripts/mapgen.gd")
 	const HB := preload("res://scripts/hospital_builder.gd")
 
+	const Plan := preload("res://scripts/level/pockets/pocket_plan.gd")
+	const PS := preload("res://scripts/level/pockets/pocket_spaces.gd")
+	const Stub := preload("res://scripts/level/pockets/stub.gd")
+	var pocket_seams: Array = []
 	var check: Object
 	var seeds: Array = []
 	var index := 0
@@ -291,10 +508,19 @@ class Runner extends Node:
 			return
 		var seed: int = seeds[index]
 		info = {}
+		# POCKETS: every build seed gets a pocket, the Factory and the Restaurant in turn.
+		Plan.force_kind = ("factory" if index % 2 == 0 else "restaurant") if check.build_pocket == "" else check.build_pocket
 		gen = MG.generate(seed)
+		Plan.force_kind = ""
 		var t0 := Time.get_ticks_msec()
 		level = HB.build(gen, info)
 		var build_ms := Time.get_ticks_msec() - t0
+		var plan := Plan.of(gen)
+		pocket_seams = []
+		if not plan.is_empty():
+			var tp := Time.get_ticks_msec()
+			PS.build_into(String(plan.kind), plan.stubs, int(plan.seed), int(gen.seed), gen.lights, info, level, pocket_seams)
+			print("seed %d: %s with %d entrances built in %d ms" % [seed, plan.kind, plan.stubs.size(), Time.get_ticks_msec() - tp])
 		var map_before := get_tree().root.world_3d.navigation_map
 		base_iter = NavigationServer3D.map_get_iteration_id(map_before)
 		get_tree().root.add_child(level)
@@ -384,7 +610,8 @@ class Runner extends Node:
 			var q := Vector2(m.x, m.z)
 			if er.has_point(q) or nr.grow(C.TILE).has_point(q):
 				_fail("%s: monster spawn %s inside the entrance building or the neutral area" % [tag, str(m)])
-			if HB.zone_of(info, m) in ["entrance", "neutral", ""]:
+			var in_pocket: bool = not info.get("pockets", {}).is_empty() and (info.pockets.rect as Rect2).has_point(q)   # POCKETS
+			if HB.zone_of(info, m) in ["entrance", "neutral", ""] and not in_pocket:
 				_fail("%s: monster spawn %s is not in a wing" % [tag, str(m)])
 		var ids := {}
 		for c in info.get("containers", []):
@@ -429,7 +656,14 @@ class Runner extends Node:
 		var region: NavigationRegion3D = info.nav_region
 		var map := region.get_navigation_map()
 		var synced: bool = map.is_valid() and NavigationServer3D.map_get_iteration_id(map) >= base_iter + 2
-		if not synced and waited < 240:
+		# POCKETS: regions update asynchronously; wait until both the hospital's and the pocket's are in.
+		if synced:
+			var t: Vector3 = info.table
+			synced = NavigationServer3D.map_get_closest_point(map, t).distance_to(t) < 5.0
+			if synced and not info.get("pockets", {}).is_empty():
+				var sp: Vector3 = info.pockets.spawn
+				synced = NavigationServer3D.map_get_closest_point(map, sp).distance_to(sp) < 5.0
+		if not synced and waited < 600:
 			return
 		var seed: int = seeds[index]
 		if not synced:
@@ -482,6 +716,7 @@ class Runner extends Node:
 				_fail("%s: no navigation path from the neutral area to the %s" % [tag, name])
 			elif Vector2(target.x - goal.x, target.z - goal.z).length() > 2.2:
 				_fail("%s: the %s is %.1f m off the navigation mesh" % [tag, name, target.distance_to(goal)])
+		_check_pocket_nav(tag, map, start)
 		# Every container and loose anchor must be reachable to within interaction range.
 		var unreachable := 0
 		var examples: Array = []
@@ -500,11 +735,13 @@ class Runner extends Node:
 			# (1.7 m) is within interaction range of the target with nothing solid in between.
 			var ok := false
 			var best_flat := INF
-			var cands: Array = [NavigationServer3D.map_get_closest_point(map, Vector3(p.x, 0.0, p.z))]
+			# POCKETS: stand on the level the spot is on (the Factory's catwalk is 6 m up).
+			var floor_y := maxf(0.0, p.y - 1.2)
+			var cands: Array = [NavigationServer3D.map_get_closest_point(map, Vector3(p.x, floor_y, p.z))]
 			for k in 8:
 				for rad in [0.9, 1.5]:
 					var a := TAU * k / 8.0
-					cands.append(NavigationServer3D.map_get_closest_point(map, Vector3(p.x + cos(a) * rad, 0.0, p.z + sin(a) * rad)))
+					cands.append(NavigationServer3D.map_get_closest_point(map, Vector3(p.x + cos(a) * rad, floor_y, p.z + sin(a) * rad)))
 			for q in cands:
 				var flat := Vector2(q.x - p.x, q.z - p.z).length()
 				best_flat = minf(best_flat, flat)
@@ -550,6 +787,68 @@ class Runner extends Node:
 			_fail("%s: %d resting spots have no surface under them, e.g. %s" % [tag, unsupported.size(), "; ".join(unsupported.slice(0, 4))])
 		print("  nav: coverage %.1f%%, longest path from the neutral area %.0f m, %d spots checked, %d out of reach" % [
 				coverage * 100.0, longest, spots.size(), unreachable])
+
+	## POCKETS: into the pocket from outside through a seam link; from inside the pocket out through
+	## every entrance's link to its hospital mouth; the pocket's open tiles covered by its navigation.
+	func _check_pocket_nav(tag: String, map: RID, start: Vector3) -> void:
+		var pk: Dictionary = info.get("pockets", {})
+		if pk.is_empty():
+			return
+		var spawn: Vector3 = pk.spawn
+		var path := NavigationServer3D.map_get_path(map, start, NavigationServer3D.map_get_closest_point(map, spawn), true)
+		if path.size() < 2 or path[path.size() - 1].distance_to(spawn) > 2.5 or _longest_step(path) < 100.0:
+			_fail("%s: no navigation path from the neutral area into the %s through a seam" % [tag, pk.kind])
+		var through := 0
+		for s in pocket_seams:
+			var mouth := NavigationServer3D.map_get_closest_point(map, Stub.local_point(s.xh, 1.0, 0.6))
+			var p2 := NavigationServer3D.map_get_path(map, NavigationServer3D.map_get_closest_point(map, spawn), mouth, true)
+			if p2.size() < 2 or p2[p2.size() - 1].distance_to(mouth) > 0.6 or _longest_step(p2) < 100.0:
+				_fail("%s: no navigation path from inside the %s out to entrance %d" % [tag, pk.kind, s.id])
+				continue
+			# From just inside its own opening, out through its own link.
+			var inside := NavigationServer3D.map_get_closest_point(map, Stub.local_point(s.xp, float(s.w) - 1.0, 0.6))
+			var p3 := NavigationServer3D.map_get_path(map, inside, mouth, true)
+			var own := false
+			for i in range(1, p3.size()):
+				if p3[i - 1].distance_to(s.link_p) < 1.2 and p3[i].distance_to(s.link_h) < 1.2:
+					own = true
+					break
+			if own:
+				through += 1
+			else:
+				var jumps := []
+				for i in range(1, p3.size()):
+					if p3[i - 1].distance_to(p3[i]) > 100.0:
+						jumps.append([p3[i - 1], p3[i]])
+				print("  entrance %d: from %s to %s the path jumps %s; its link is %s -> %s" % [s.id, str(inside), str(mouth), str(jumps), str(s.link_p), str(s.link_h)])
+		if through < pocket_seams.size():
+			_fail("%s: only %d of %d entrances were walked straight through their own seam" % [tag, through, pocket_seams.size()])
+		var origin: Vector2i = pk.origin
+		var covered := 0
+		var open := 0
+		# Coverage from the pocket's grid, rebuilt from the plan (layouts are pure).
+		var plan := Plan.of(gen)
+		var layout_script: GDScript = PS.Factory if String(plan.kind) == "factory" else PS.Restaurant
+		var g: Dictionary = layout_script.layout(plan.stubs, int(plan.seed)).grid
+		for y in int(g.h):
+			for x in int(g.w):
+				var i: int = y * int(g.w) + x
+				if g.cells[i] == 35 or g.nav[i] == 1:
+					continue
+				open += 1
+				var p := C.tile_to_world(origin.x + x, origin.y + y)
+				if NavigationServer3D.map_get_closest_point(map, p).distance_to(p) < 0.8:
+					covered += 1
+		var coverage := float(covered) / maxf(1.0, open)
+		if coverage < 0.9:
+			_fail("%s: the %s's navigation covers only %.1f%% of its open tiles" % [tag, pk.kind, coverage * 100.0])
+		print("  pocket nav: %s coverage %.1f%%, %d/%d entrances walked out through their seam" % [pk.kind, coverage * 100.0, through, pocket_seams.size()])
+
+	static func _longest_step(path: PackedVector3Array) -> float:
+		var best := 0.0
+		for i in range(1, path.size()):
+			best = maxf(best, path[i - 1].distance_to(path[i]))
+		return best
 
 	static func _path_length(path: PackedVector3Array) -> float:
 		var total := 0.0

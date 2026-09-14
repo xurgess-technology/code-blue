@@ -39,6 +39,10 @@ static func observed_any(game: Node, points: Array) -> bool:
 	if watchers.is_empty():
 		return false
 	var space: PhysicsDirectSpaceState3D = (watchers[0] as Node3D).get_world_3d().direct_space_state
+	# POCKETS HOOK: near a seam the body is also drawn in the other copy of the stub; seen there is seen.
+	var pk = game.get("pockets")
+	if pk != null and pk.active():
+		points = points + pk.mirror_points(points)
 	for point in points:
 		var seen := false
 		for p in watchers:

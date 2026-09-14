@@ -579,6 +579,73 @@ Players, Bob, the paramedics and the downed player on the table use the Blender 
 - **Warmup builds four more bodies and four more minigames** (both monsters, closed and opened, the
   skull saw and the brain forceps). `tools/perfprobe.tscn` was not run for this change.
 
+## Pocket spaces (2026-09-14, pockets worker)
+
+- **The pocket is rebuilt with every shift's wings, a little after them**: the wing loader finishes the
+  wings, then the pocket takes another 100-200 ms of wall time (data on a worker thread, then 35-55 node
+  steps within 5 ms a frame). Clock-in and the gates wait for it. A rebuild started from the dev panel
+  during a shift spawns the new wings' loot and monsters as soon as the wings are done, before the pocket
+  exists, so that pocket has no loot and no monsters until the next shift.
+- **The first build of a session is slow**: a whole level build (`game._build_level`) finishes its pocket
+  at once (`finish_now`), 60-220 ms on top of the hospital, with single steps up to about 90 ms the first
+  time the pocket's meshes and materials are made (warmup makes most of them; the second build's slowest
+  step is 3-8 ms).
+- **Navigation regions update asynchronously**: right after a build the pocket's and the hospital's
+  regions join the map a few frames apart. `tools/mapcheck.gd` waits for both; code that paths the frame
+  after a build may get a hospital-only path.
+- **Things the mirrors do not carry across a seam**: a player's head glow, held-item models' own lights,
+  monster sounds (a Discharged's rattle is heard where it really is), the Echo outlines and Hive Eyes. A
+  Walk-In does not see a player on the other side of a seam (its sight rays go to the real position), and
+  the danger heartbeat counts only monsters in the same space. Hearing does cross: a noise within 26 m of
+  a seam is mirrored into the other copy, pulled into the stub (the Discharged comes through and then
+  hears the real noise).
+- **Mirrors copy meshes, not animation state**: a mirror shares the body's skeleton, so it animates, but
+  anything drawn without a MeshInstance3D (particles, decals, Label3D name tags) does not show, and blend
+  shape weights (the human model's GashOpen) are not copied. The skinned human bodies mirror correctly
+  (`tools/game_shots/p_*_ghost.png`).
+- **Only moving items cross**: an item that settles (freezes) inside a stub's unwalked half stays there.
+  A dropped item never settles before the host moves it, so this only happens to items placed there by code.
+- **Pocket doors are only checked by mapcheck's grid test** (a doorway one tile deep, both sides walkable,
+  no container in front); `DoorPlan.check`'s swing sweep runs on the hospital's plan, not on the
+  pockets'. Their `max_out` is a fixed 90 degrees.
+- **Eviction covers the pocket and the hospital-side stubs**, which the wing loader's own eviction does
+  not see (stub tiles are zone 10). Someone standing in the pocket when the shift ends is put in front of
+  the gate of the pocket's deepest connected wing, not the wing whose entrance they used.
+- **The Restaurant's fourth entrance wall is the kitchen's back wall**, so an entrance can open into the
+  kitchen between the stove and the sink (only when the dining room's walls are taken).
+- **The pockets add loot, containers and monster spawn points** to the map's lists, so a map with a pocket
+  has more loot, and a Discharged or a Night Nurse may spawn inside the pocket. `Monster.random_nav_point`
+  can pick a pocket point, so hospital monsters sometimes wander into a pocket through a seam.
+- **The Factory reads dim**: pools of high-bay light 12-20 m apart and the flashlight; the far walls are
+  lost in the (per-pocket) fog on purpose. Its machines are primitive silhouettes.
+- **The two copies of a stub are not pixel-identical**: the gameshot comparison (same pose in both copies,
+  post effects off, flicker clock frozen) differs by a mean of 0.1-0.3% with a 99th percentile of 0.8-2.1%
+  and single pixels up to about 29% (volumetric fog noise, the chamfered wall corners HospitalBuilder gives
+  collision only, filtering). Stub geometry copies `HospitalBuilder._build_surfaces`' corridor rules by hand
+  (`stub.gd` `build_copy`); a change to how hallways are drawn (doors' wall parts) must be mirrored there,
+  and `tools/gameshot.tscn -- --pocket=...` prints the difference.
+- **The playtest bot and pockets**: before the doors merge, seed 1 (with its Restaurant) failed with the bot
+  wedged on a hallway trauma bag (`ct_20_24_0`); with the doors worker's bot it passes (`playtest --god`
+  seeds 12345, 4244 (Factory), 3 and 1 (Restaurant) all clock out).
+- **Perf** (`perfprobe -- --pockets --quality=1`, 1600x900, Radeon 890M, after the doors and human models
+  merges): hospital corridor 126 fps (1% low 110) with no pocket, 118 (103) and 122 (107) on the two
+  pocket maps; Factory hall corner to corner 127 (106), down a production line 127 (86), from the catwalk
+  117 (91), an entrance from inside 193 (120), the seam from the hospital side 112 (90), from the pocket
+  side 118 (88) and 97 (85) with two teammates standing in the hospital's copy (skinned human bodies drawn
+  as mirrors, 4 mirror instances including their flashlights); Restaurant dining room 166 (119), bar 166
+  (108), kitchen 81 (75), an entrance 102 (92), seam 110 (86), pocket side 121 (110) and 106 (97) with the
+  two teammates. Earlier runs with Blender bakes on the machine read about half these numbers.
+- **Rebuild frame times** (`pockettest -- --frames`, windowed 1280x720): from the next lobby's first frame
+  until the wings and the pocket are rebuilt, the frames while the pocket builds are at most 18 ms (its own
+  work at most 6.9 ms (Factory) / 8.1 ms (Restaurant) a frame, slowest step 3.3 ms, 54 / 21 ms on the
+  thread, teardown 1.3 ms). One frame during the wings' part reaches 40-44 ms; `doortest -- --frames` on a
+  map without a pocket shows the same (38 ms rebuilding, 36.5 ms with nothing rebuilding).
+- **mapcheck's morgue tray anchors**: builds of seeds 112 (with or without a pocket) and 149 (with its
+  forced Factory, which changes the wings' rooms) report one morgue tray anchor 2.6-3.4 m from the
+  navigation mesh. Not pocket geometry; a hospital furnishing issue that the pocket plan can expose.
+- **`mapcheck` takes about twice as long** (every seed is generated again with a pocket forced).
+- **The Restaurant is very warm-orange** under the game's teal/amber grade; the tables' tops and the booth
+  wood read dark from a distance.
 ## Doors and the per-shift wings (doors worker, 2026-09-14)
 
 - **Ceiling fixtures still light through closed doors** (they cast no shadows, as they already lit

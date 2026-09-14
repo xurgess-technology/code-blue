@@ -247,6 +247,8 @@ func _physics_process(delta: float) -> void:
 			pass
 		else:
 			var k := clampf(delta * 12.0, 0.0, 1.0)
+			if global_position.distance_squared_to(_target_pos) > 36.0:
+				k = 1.0   # POCKETS HOOK: through a seam the monster jumps; never lerp it across the world
 			global_position = global_position.lerp(_target_pos, k)
 			rotation.y = lerp_angle(rotation.y, _target_yaw, k)
 	_update_visual(delta)
@@ -401,6 +403,12 @@ func eye_transform() -> Transform3D:
 
 ## Walk toward a target on the navigation mesh. Returns the remaining straight distance.
 func nav_move(target: Vector3, move_speed: float, delta: float, face := true) -> float:
+	# POCKETS HOOK: a target standing in the unwalked half of an entrance stub is really in the other
+	# copy; a path through a seam link continues on the far side of the world, so steer across the
+	# seam here and let the crossing move the monster (scripts/level/pockets/pocket_spaces.gd).
+	var pk = game.get("pockets") if game != null else null
+	if pk != null and pk.active():
+		target = pk.real_point(target)
 	_repath -= delta
 	if _repath <= 0.0:
 		_repath = 0.35
@@ -411,6 +419,8 @@ func nav_move(target: Vector3, move_speed: float, delta: float, face := true) ->
 		var p := agent.get_next_path_position()
 		if Vector2(p.x - global_position.x, p.z - global_position.z).length() > 0.05:
 			next = p
+	if pk != null and pk.active():
+		next = pk.steer_point(global_position, next)
 	return step_toward(next, move_speed, delta, face, target)
 
 

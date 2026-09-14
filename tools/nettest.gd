@@ -40,6 +40,11 @@ extends Node
 ##                    client sees each (sweep 3)
 ##   dissection       a Walk-In strapped to a table: client 1 saws the skull and pulls the brain,
 ##                    client 2 re-doses it meanwhile; sedation replicates within 0.05
+##   pockets          (--pocket=factory) client 1 walks through a seam into the pocket holding gauze
+##                    (the host sees it arrive and stay, client 2 sees it jump, never slide across the
+##                    world); client 2 goes down, client 1 walks out, lifts it and carries it in; then the
+##                    next shift: every machine rebuilds the same pocket (entrances, doors) with the
+##                    new wings and nobody is left standing in it
 ##   doors            client 1 finds the wing gates locked in the lobby, sees them unlock at
 ##                    clock-in, opens and closes a hinged door with E; client 2 joins mid-shift and
 ##                    sees the doors as they are and the same wings; at the next shift both clients
@@ -91,6 +96,7 @@ func _ready() -> void:
 			"timeout": timeout_s = float(v)
 			"stats": stats = true
 			"lagged": lagged = true
+			"pocket": PocketPlan.force_kind = v   # POCKETS: every process builds the same pocket
 	if role == "host":
 		index = 0
 	_t0 = _wall()
@@ -144,6 +150,7 @@ func _run() -> void:
 		"brains": await _sc_brains()
 		"monsters": await _sc_monsters()   # SWEEP 3 HOOK (monsters)
 		"dissection": await _sc_dissection()
+		"pockets": await _sc_pockets()   # POCKETS
 		"doors": await _sc_doors()   # DOORS HOOK
 		_: _end(false, "unknown scenario " + scenario)
 
@@ -1262,6 +1269,197 @@ func _sc_combat():
 
 
 ## Stand `dist` metres from a monster (on my side of it) and look at its chest.
+# =========================================================================
+# POCKETS: a client, a carried player and an item through a seam
+# =========================================================================
+
+const PocketPlan := preload("res://scripts/level/pockets/pocket_plan.gd")
+const PocketStub := preload("res://scripts/level/pockets/stub.gd")
+
+## Host + 2 clients, a pocket forced on every machine (--pocket=factory). Client 1 walks through a seam
+## into the pocket holding gauze; the host sees it arrive with the gauze and stay there (no snap back);
+## client 2 sees its body jump across, never slide through the world. Then client 2 goes down by the
+## same entrance, client 1 walks back out, lifts it and carries it through the seam into the pocket:
+## the host and client 2 itself see both arrive, client 2 on client 1's shoulder.
+func _sc_pockets():
+	if role == "host":
+		if not await _until(func(): return Net.names.size() == clients + 1 and game.players.size() == clients + 1, 90.0, "all %d clients" % clients):
+			return
+		await _wall_wait(1.0)
+		game.clock_in()
+		game._clear_monsters()
+		if not game.pockets.active():
+			return _end(false, "no pocket on the host")
+		var c1: int = _peer_of(1)
+		var c2: int = _peer_of(2)
+		var p1: Player = game.players[c1]
+		var p2: Player = game.players[c2]
+		p1.slots = Player.empty_slots()
+		p1.take_into("gauze", 3)
+		_send("go", {})
+		if not await _until(func(): return _count_msgs("in1") > 0, 90.0, "client 1 to walk into the pocket"):
+			return
+		if not await _until(func(): return game.pockets.in_pocket(p1.global_position), 10.0, "client 1 in the pocket on the host"):
+			return
+		var t0 := _wall()
+		while _wall() - t0 < 2.0:
+			if not game.pockets.in_pocket(p1.global_position):
+				return _end(false, "client 1 snapped back out of the pocket on the host at %s" % str(p1.global_position))
+			await _frames(1)
+		if not p1.holding("gauze"):
+			return _end(false, "client 1 arrived without its gauze (host slots %s)" % str(p1.slots))
+		_say("client 1 in the pocket with its gauze, and it stayed there")
+		if not await _until(func(): return _count_msgs("c2_ready") > 0, 60.0, "client 2 by the entrance"):
+			return
+		await _wall_wait(0.6)
+		game.knock_down_player(p2, "test")
+		p1.clear_slot(p1.slot_for("gauze"))
+		_send("carry", {"peer": c2})
+		if not await _until(func(): return _count_msgs("in2") > 0, 120.0, "client 1 to carry client 2 into the pocket"):
+			return
+		if not await _until(func(): return p1.carrying == c2 and game.pockets.in_pocket(p1.global_position) and game.pockets.in_pocket(p2.global_position), 10.0, "both in the pocket on the host"):
+			return
+		t0 = _wall()
+		while _wall() - t0 < 2.0:
+			if not game.pockets.in_pocket(p2.global_position) or p2.global_position.distance_to(p1.global_position) > 2.0:
+				return _end(false, "on the host the carried client is at %s, the carrier at %s" % [str(p2.global_position), str(p1.global_position)])
+			await _frames(1)
+		_say("client 1 carried client 2 into the pocket, seen by the host")
+		# The next shift: the wings and the pocket are rebuilt on every machine, the same everywhere.
+		_send("next_shift", {})
+		await _wall_wait(0.5)
+		game._to_next_shift()
+		if not await _until(func(): return game.wing_loader.wings_ready and not game.pockets.busy and game.pockets.active(), 90.0, "the host's new wings and pocket"):
+			return
+		var sig := _pocket_signature()
+		_say("next shift: the host rebuilt its %s (%s)" % [game.pockets.pocket.kind, str(sig)])
+		_send("rebuilt", sig)
+		await _finish_together("a client, a carried client and an item crossed a seam; the next shift rebuilt the pocket everywhere")
+		return
+	# Clients.
+	if not await _until(func(): return game.phase == Game.Phase.SHIFT and _me() != null and game.pockets.active() and _count_msgs("go") > 0, 120.0, "the shift and the pocket"):
+		return
+	var me := _me()
+	me.bot_active = true
+	me.bot_invulnerable = true
+	var s: Dictionary = game.pockets.seams[0]
+	var map := get_viewport().world_3d.navigation_map
+	if index == 1:
+		if not await _until(func(): return me.holding("gauze"), 20.0, "the gauze in hand"):
+			return
+		if not await _walk_stub(s, true):
+			return
+		if not me.holding("gauze") or not game.pockets.in_pocket(me.global_position):
+			return _end(false, "after walking in: holding gauze %s, in pocket %s" % [str(me.holding("gauze")), str(game.pockets.in_pocket(me.global_position))])
+		_send("in1", {})
+		if not await _until(func(): return _count_msgs("carry") > 0, 60.0, "the carry order"):
+			return
+		var target_id: int = _msgs("carry")[0].data.peer
+		if not await _until(func(): return not me.holding("gauze"), 20.0, "empty hands"):
+			return
+		if not await _walk_stub(s, false):
+			return
+		var target = game.players.get(target_id)
+		if not await _until(func(): return target != null and target.downed, 20.0, "client 2 down"):
+			return
+		var lift := func(): _press_at(target.global_position, "pl_%d" % target_id, true)
+		if not await _do_until(lift, func(): return me.carrying == target_id, 40.0, "lifting client 2"):
+			return
+		me.bot_interact = false
+		me.bot_aim_id = ""
+		if not await _walk_stub(s, true):
+			return
+		if me.carrying != target_id or not game.pockets.in_pocket(target.global_position):
+			return _end(false, "carried %d, client 2's body in pocket %s" % [me.carrying, str(game.pockets.in_pocket(target.global_position))])
+		_send("in2", {})
+		if not await _pocket_rebuilt_here():
+			return
+		await _finish_together("walked in with gauze, walked out, carried a teammate in")
+		return
+	# Client 2: waits by the entrance, watches client 1 cross, goes down and is carried in.
+	var spot := NavigationServer3D.map_get_closest_point(map, PocketStub.local_point(s.xh, -2.0, -2.5))
+	me.teleport(spot)
+	var watch := {"between": 0, "jump": 0, "seen_in": false}
+	var c1: Node = game.players.get(_peer_of(1))
+	var prev: Vector3 = c1.global_position if c1 != null else Vector3.ZERO
+	var observe := func():
+		if c1 == null or not is_instance_valid(c1):
+			return
+		var p: Vector3 = c1.global_position
+		var in_h := p.x < 400.0 and p.z < 400.0
+		if not in_h and not game.pockets.in_pocket(p):
+			watch.between += 1
+		if p.distance_to(prev) > 100.0:
+			watch.jump += 1
+		if game.pockets.in_pocket(p):
+			watch.seen_in = true
+		prev = p
+	if not await _do_until(observe, func(): return watch.seen_in, 90.0, "client 1 to show up in the pocket"):
+		return
+	if watch.between > 0:
+		return _end(false, "client 1's body was drawn %d frames between the hospital and the pocket" % watch.between)
+	_say("saw client 1 jump into the pocket (%d jump(s), 0 frames in between)" % watch.jump)
+	_send("c2_ready", {})
+	if not await _until(func(): return me.downed, 30.0, "going down"):
+		return
+	var carried := {"seen": false}
+	if not await _do_until(func(): if me.carried_by != 0: carried.seen = true, func(): return carried.seen and game.pockets.in_pocket(me.global_position), 120.0, "being carried into the pocket"):
+		return
+	var t1 := _wall()
+	while _wall() - t1 < 1.5:
+		if not game.pockets.in_pocket(me.global_position):
+			return _end(false, "my carried body left the pocket again (%s)" % str(me.global_position))
+		await _frames(1)
+	if not await _pocket_rebuilt_here():
+		return
+	await _finish_together("watched client 1 cross, was carried through the seam, saw the pocket rebuilt")
+
+
+## Walk this client's surgeon through a stub along its centre line: from the hospital hallway into
+## the pocket (`into`), or back out. The client owns its movement, so this is exactly a player walking.
+func _walk_stub(s: Dictionary, into: bool) -> bool:
+	var me := _me()
+	var line: Array = PocketStub.centre_line(s.w, s.d)
+	if into:
+		line = [Vector2(1.0, -2.2)] + line + [Vector2(float(s.w) - 1.0, -3.6)]
+	else:
+		line.reverse()
+		line = [Vector2(float(s.w) - 1.0, -3.6)] + line + [Vector2(1.0, -2.2)]
+	var here_pocket: bool = game.pockets.in_pocket(me.global_position)
+	var start_frame: Transform3D = s.xp if here_pocket else s.xh
+	var start := PocketStub.local_point(start_frame, line[0].x, line[0].y)
+	if me.global_position.distance_to(start) > 1.0:
+		me.teleport(start)
+	await _frames(3)
+	var st := {"i": 1}
+	var crossed_before: int = game.pockets.crossings.size()
+	var step := func():
+		var i: int = st.i
+		if i >= line.size():
+			me.bot_move = Vector2.ZERO
+			return
+		var frame: Transform3D = s.xp if game.pockets.in_pocket(me.global_position) else s.xh
+		var wp: Vector2 = line[i]
+		var to := PocketStub.local_point(frame, wp.x, wp.y) - me.global_position
+		to.y = 0.0
+		if to.length() < 0.35:
+			st.i = i + 1
+			return
+		me.bot_yaw = atan2(-to.x, -to.z)
+		me.bot_move = Vector2(0, -1)
+	var ok := await _do_until(step, func(): return int(st.i) >= line.size(), 60.0, "walking %s the stub" % ("into" if into else "out of"))
+	me.bot_move = Vector2.ZERO
+	if not ok:
+		return false
+	if game.pockets.in_pocket(me.global_position) != into:
+		_end(false, "walked the stub but ended in the wrong space (%s)" % str(me.global_position))
+		return false
+	if game.pockets.crossings.size() - crossed_before != 1:
+		_end(false, "crossed %d times walking through one seam" % (game.pockets.crossings.size() - crossed_before))
+		return false
+	return true
+
+
 func _face_at(m: Node, dist: float) -> void:
 	var me := _me()
 	var tp: Vector3 = m.global_position
@@ -1805,3 +2003,38 @@ func _end(ok: bool, why: String) -> bool:
 		Net.leave()
 		get_tree().quit(0 if ok else 1))
 	return ok
+
+
+## POCKETS: what must match between machines after a rebuild: the wings' generation, the pocket's
+## kind, its entrances (hospital frames) and its doors.
+func _pocket_signature() -> Dictionary:
+	var pk = game.pockets
+	var stubs: Array = []
+	for s in pk.seams:
+		stubs.append(str((s.xh as Transform3D).origin.snapped(Vector3.ONE * 0.01)))
+	var door_ids: Array = []
+	for d in pk.pocket.get("doors", []):
+		if is_instance_valid(d):
+			door_ids.append(String(d.door_id))
+	door_ids.sort()
+	return {"gen": int(game.wing_loader.generation), "kind": String(pk.pocket.get("kind", "")), "stubs": stubs, "doors": door_ids}
+
+
+## POCKETS (client): the host rebuilt its pocket for the next shift; this machine builds the same one
+## and nobody is left standing in the old one.
+func _pocket_rebuilt_here() -> bool:
+	if not await _until(func(): return _count_msgs("rebuilt") > 0, 120.0, "the host's rebuilt pocket"):
+		return false
+	var want: Dictionary = _msgs("rebuilt")[0].data
+	if not await _until(func(): return int(game.wing_loader.generation) == int(want.gen) and game.wing_loader.wings_ready \
+			and not game.pockets.busy and game.pockets.active(), 90.0, "the new wings and pocket here"):
+		return false
+	var have := _pocket_signature()
+	if str(have) != str(want):
+		return _end(false, "the rebuilt pocket differs: host %s, here %s" % [str(want), str(have)])
+	await _wall_wait(1.0)
+	var me := _me()
+	if me != null and game.pockets.in_pocket(me.global_position):
+		return _end(false, "still standing in the pocket after the next shift began (%s)" % str(me.global_position))
+	_say("next shift: the same %s rebuilt here, %d doors, and I was walked out" % [have.kind, (have.doors as Array).size()])
+	return true

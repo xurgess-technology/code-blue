@@ -72,6 +72,8 @@ static func run(game: Node) -> void:
 	shelf.add_child(syringe)
 	syringe.position = Vector3(x, 0.3, 0.3)
 	BrainsScript.warm(shelf)  # SWEEP 3 HOOK (brains): the blender, Echo's ghosts and veil, Hive Eyes' screen
+	# POCKETS HOOK: the Factory's and the Restaurant's meshes, textures and materials, and a stub copy.
+	preload("res://scripts/level/pockets/pocket_spaces.gd").warm(shelf)
 	# HANDS HOOK: the first-person forearms, hands and torch (their skin, sleeve and lens materials, on
 	# the hands layer the flashlight skips). The wind-ups build nothing new: they pose these and the
 	# syringe above.

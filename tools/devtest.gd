@@ -312,6 +312,21 @@ func _run_solo() -> void:
 
 	await _nurse_watch_solo()
 
+	# POCKETS HOOK: the panel builds a pocket space beside the room and walks you in and out.
+	for kind in ["Factory", "Restaurant"]:
+		_press_panel(kind)
+		await _frames(3)
+		_check(game.pockets.active() and String(game.pockets.pocket.kind) == kind.to_lower(), "the panel's %s button builds the %s" % [kind, kind.to_lower()])
+		_press_panel("Go there")
+		await _frames(3)
+		_check(game.pockets.in_pocket(me.global_position), "Go there puts you in the %s" % kind.to_lower())
+		_press_panel("Back to the room")
+		await _frames(3)
+		_check(not game.pockets.in_pocket(me.global_position), "Back to the room brings you back")
+	_press_panel("Remove")
+	await _frames(3)
+	_check(not game.pockets.active() and dev.dev_pocket == "", "Remove takes the pocket away")
+
 	# Leaving resets the global state.
 	main._back_to_menu("")
 	await _frames(3)

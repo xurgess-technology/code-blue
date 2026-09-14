@@ -208,6 +208,17 @@ func _build() -> void:
 	_c["nurse_pace"] = pace
 	_label(col, "Follows me: stops 2.5 m away, never attacks. A loop is a 6 x 3.5 m rectangle round where you stand, long side the way you face.", 11, DIM)
 
+	# ---- POCKETS HOOK: a pocket space beside the dev room, and a way in and out
+	_section(col, "Pocket spaces")
+	var pk1 := _row(col)
+	_button(pk1, "Factory", func(): _req("pocket", {"kind": "factory"}))
+	_button(pk1, "Restaurant", func(): _req("pocket", {"kind": "restaurant"}))
+	_button(pk1, "Remove", func(): _req("pocket", {"kind": ""}))
+	var pk2 := _row(col)
+	_button(pk2, "Go there", func(): game.dev.pocket_go(true))
+	_button(pk2, "Back to the room", func(): game.dev.pocket_go(false))
+	_label(col, "Builds the space for this session (no hospital entrances here). In a hospital: PocketPlan.force_kind.", 11, DIM)
+
 	# ---- brains (SWEEP 3 HOOK, scripts/brains/brains.gd dev_request)
 	_section(col, "Brains")
 	var br1 := _row(col)

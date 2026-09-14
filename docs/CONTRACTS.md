@@ -538,6 +538,103 @@ zones: {grid, width, height, names}   # HospitalBuilder.zone_of(info, pos) -> wi
   anchor in reach), `tools/spawncheck.gd`, and windowed screenshots with
   `godot --path . tools/hospitalshot.tscn --resolution 1280x720 -- --seed=N [--only=a,b]`.
 
+### Pocket spaces (pockets worker, docs/POCKET_SPACES.md)
+
+A map (each shift's wings) rolls 0-1 pocket space (`PocketPlan.CHANCE` 0.5; about 40% of seeds end up with one): **the Factory**
+or **the Restaurant**, built far from the hospital (world tile origin `PocketSpaces.ORIGINS`: factory
+(800, 0), restaurant (800, 500)) with 2-3 entrances into at least two different wings, deeper wings more
+likely. Code in `scripts/level/pockets/`: `pocket_plan.gd` (generation), `stub.gd` (an entrance, its frame
+and its pocket-side copy), `pocket_spaces.gd` (runtime, `game.pockets`), `pocket_common.gd`,
+`factory.gd`, `restaurant.gd`.
+
+```gdscript
+# Generation (MapGen._attempt, before room kinds are chosen)
+PocketPlan.plan(st, gens, defs, seed) / PocketPlan.release(gens)
+PocketPlan.of(gen) -> {kind: "factory" | "restaurant", seed, stubs: [{id, wing, depth, zone, o: Vector2i, eu: Vector2i, ev: Vector2i, w, d, lights: [Vector2i]}]} or {}
+PocketPlan.force_kind   # static: "" roll, "none", "factory", "restaurant" (tools, dev); force_entrances
+PocketPlan.ZONE_STUB    # 10: the zone of stub tiles (HospitalBuilder.zone_of answers "")
+
+# Runtime, every machine
+game.pockets.build_wings(info, wing_seed, generation)   # game.wing_loader.extra_builders: with every level's
+                                   # and every shift's wings, from info.pocket_plan (HospitalBuilder.finish_info
+                                   # also stores info.map_lights, info.map_seed), under info.wings_root
+game.pockets.teardown_wings()      # the wings are going: evict, forget, free the old nodes over frames
+game.pockets.busy / finish_now() / stats   # building (clock-in and the gates wait); {generation, frames, steps,
+                                   # max_frame_ms, slowest_step_ms, thread_ms, wall_ms}
+game.pockets.build_kind(kind, level_info, parent, seed)   # no hospital entrances (dev room); nothing crosses
+game.pockets.teardown()
+PocketSpaces.prepare(kind, stubs, seed) -> Dictionary      # data only (layout, surface arrays, nav bake): thread-safe
+PocketSpaces.build_steps(prep, stubs, map_seed, lights, info, parent, out_seams, links, result) -> Array[Callable]
+PocketSpaces.build_into(kind, stubs, seed, map_seed, lights, info, parent, out_seams, links := true)   # all at once (tools)
+game.pockets.active() -> bool; .pocket -> {kind, origin, rect (world XZ Rect2), root, spawn, wing, depth, layout, ...}
+game.pockets.seams -> [{id, wing, depth, w, d, xh, xp (stub-local -> world frames), t (hospital copy -> pocket copy), t_inv, yaw,
+                        link_h, link_p (NavigationLink3D ends), seam_h, seam_p, mouth, opening, link}]
+game.pockets.space_of(pos) -> "" (hospital) | kind;  in_pocket(pos)
+game.pockets.phantom_at(pos) -> [seam, to_pocket] or []    # standing in a stub's unwalked half
+game.pockets.real_point(pos)       # a point in an unwalked half -> the same point in the other copy
+game.pockets.steer_point(from, next)   # a path point past a seam link -> the same point on this side
+game.pockets.mirror_noise(pos, loudness) -> [Vector3]      # host; game.emit_noise adds them
+game.pockets.mirror_points(points) -> [Vector3]            # Perception: bodies inside a stub seen in the other copy
+game.pockets.crossings -> [{what: "player"|"monster"|"item", id, seam, to_pocket, time}]   # this machine's moves
+game.pockets.crossing_enabled      # tools only
+```
+
+- **Per shift** (doors contract, `scripts/level/wing_loader.gd`): the plan is rolled with the wings, so
+  every shift's wings may bring a different pocket, other entrances or none. `teardown_wings` (from the
+  loader's teardown, after its own eviction) puts players and bots standing in the pocket or in a
+  hospital-side stub (zone 10, which the loader does not see) in front of that wing's gate (a client:
+  `dr_evict`), removes monsters and items in there (host), and frees the old nodes a few at a time.
+  `build_wings` runs the layout, the surface arrays and the navigation bake on a WorkerThreadPool
+  task, then the node steps within `FRAME_BUDGET_MS` (5 ms) per frame; the pocket root is a child of
+  `info.wings_root`. A whole level build (`game._build_level`) and `begin_shift` call `finish_now()`.
+  While `busy`: `game.clock_in` waits (as for the wings), `doors._wings_ready()` is false (gates stay
+  locked), `pocket` is `{}` and nothing crosses.
+- **Doors**: the pockets' own doorways get doors from `scripts/doors/door.gd` (plan entries from
+  `PocketCommon.door_entry`, ids `dr_<x>_<y>` in world tiles, `base` false, `pocket` true), registered
+  with `game.doors` when the build finishes and dropped by `doors.unregister_wings()`: the Factory's
+  three site offices (hinged, hung at the hall face), the Restaurant's kitchen (a `double` pair), back
+  corridor and two restrooms (hinged), each under a lintel at `HospitalBuilder.LINTEL_Y`
+  (`PocketCommon.lintels`). Entrance stubs never get a door.
+- **An entrance** is a U-shaped hallway stub carved into one or two neighbouring room slots of a wing
+  (stub-local tiles `u` 0..w-1 along the slot, `v` 0..d-1 away from the hallway; leg 1 at u 0..1 opens
+  onto the hallway at v -1, leg 2 runs along the back, leg 3 at u w-2..w-1; `Stub.size_ok`: w >= 8 and
+  `d - 2 - 4 / ((w - 4) / 2) >= 0.5`). The seam is the plane s = w / 2 across leg 2. The pocket copy is
+  built from the same tiles in hospital coordinates under a Node3D with transform `t` (same vertices,
+  UVs, materials, fixture seeds), on render layer bit `Stub.COPY_LAYER_BIT` (11), lit by its own
+  fixtures and copies of the hospital fixtures within reach of the stub (fixtures cast no shadows);
+  those lights leave out `Stub.POCKET_LAYER_BIT` (12), the layer of every pocket surface and prop, and
+  pocket lights leave out the copy layer. Bodies, items and first-person hands stay on their own layers
+  and are lit by both. Leg 3 opens into the pocket through its outer wall.
+- **Crossing**: anything standing past the seam in its copy's unwalked half (hospital copy: s >= w/2;
+  pocket copy: s < w/2) is moved through `t` / `t_inv`, keeping position relative to the stub,
+  velocity and facing (players: `_yaw`, `bot_yaw`, `_knock`; monsters: `_target_*`, `_repath`; loose
+  unfrozen items: transform and velocities). The local player and host bots move on their own
+  machine; monsters and items on the host. A carried player and a dragged monster are re-pinned in the
+  same frame. Remote players, monsters and items that jump more than 6 m between snapshots snap
+  instead of lerping (`player.gd`, `monster.gd`, `world_item.gd`). The host accepts a client's position
+  as always (no check).
+- **Navigation**: the hospital's stub tiles past the seam are `blocked` (left out of its navigation
+  mesh); the pocket bakes its own region (unwalked halves left out) and each seam has a bidirectional
+  `NavigationLink3D` (travel cost about 1 m). `Monster.nav_move` maps the target with `real_point` and
+  the next path point with `steer_point`, so a chase paths into the pocket, walks across the seam and
+  continues; the test bots do the same.
+- **level_info**: `pockets` = `{kind, rect, origin, spawn, wing, depth, seams: [{id, wing, depth, w, d,
+  hospital, pocket, transform, mouth, opening, link}], nav_region}` (`{}` without a pocket); the pocket's
+  `lights` (fixtures: node with a Bulb OmniLight3D), `containers`, `loose_anchors` (wing = the deepest
+  connected wing, depth its depth; room kinds `factory_floor`, `factory_office`, `factory_catwalk`,
+  `restaurant`, `restaurant_kitchen`) and `monster_spawns` are appended to the hospital's lists.
+- **Air**: inside a pocket, away from its openings, `game.pockets` blends the environment's depth fog,
+  volumetric fog density and ambient light toward `PocketSpaces.AIR[kind]` and back.
+- **Mirrors**: players and monsters inside a stub are also drawn in the other copy (RenderingServer
+  instances of their meshes, skeletons attached); `Perception.observed_any` checks the mirrored points
+  too.
+- Tests: `tools/mapcheck.gd` (every seed again with a pocket forced, on shift 1-4 wing seeds: plan, stub tiles, seams tile for tile
+  both ways, pocket grid reachability, door swings; builds: navigation into the pocket and out through each seam,
+  containers and anchors in reach), `tools/pockettest.tscn` (also the next shift's rebuild; `-- --frames` windowed
+  frame times), `tools/looptest.tscn -- --pocket=factory`, nettest `pockets` (also the next shift's rebuild on every
+  machine), `tools/gameshot.tscn --
+  --pocket=factory|restaurant`, `tools/perfprobe.tscn -- --pockets`, devtest's pocket panel checks.
+
 ## Settings (settings worker, sweep 2)
 
 `Settings` autoload (`scripts/settings.gd`, registered after `Audio`), persisted to
@@ -629,6 +726,9 @@ knocked down, no movement; a `"stun"` event plus the dev snapshot block), `nocli
 - World changes from the panel or tests: `game.dev.request(action, args)`; the host applies,
   a client sends. Shots: `game.dev.fire(shooter, from, dir, "kill" | "knock")`.
 - Sounds `dev_zap`, `dev_thump`, `dev_defib` from `tools/gen_audio_dev.mjs`.
+- **Pocket spaces** (2026-09-14): request `pocket {kind: "factory" | "restaurant" | ""}` builds that space
+  beside the room on every machine (`dv.pk`, `game.pockets.build_kind`); `dev.pocket_go(into)` moves the
+  local player to its spawn and back (panel "Go there" / "Back to the room").
 - **Night Nurse section** (2026-09-14): requests `nurse_ignore_watch {on}`, `nurse_walk {mode: "" |
   "follow" | "loop"}` (follow: the sender; loop: a 6 x 3.5 m rectangle round where the sender stands,
   long side along their facing, corners snapped to the navigation mesh) and `nurse_pace {i}`

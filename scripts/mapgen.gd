@@ -31,6 +31,7 @@ const WingGen := preload("res://scripts/level/wing_gen.gd")
 const Rooms := preload("res://scripts/level/room_furnish.gd")
 const DoorPlan := preload("res://scripts/level/door_plan.gd")
 const ItemsData := preload("res://scripts/items.gd")
+const PocketPlan := preload("res://scripts/level/pockets/pocket_plan.gd")  # POCKETS HOOK
 
 ## Kept for callers that still pass a size; the layout decides the real size.
 const DEFAULT_WIDTH := 100
@@ -173,11 +174,17 @@ static func _attempt(seed: int, wing_seed: int, attempt: int) -> Dictionary:
 	var gens: Array = []
 	for d in defs:
 		gens.append(WingGen.carve(st, d, rng))
+	# POCKETS HOOK: a pocket space (0-1) takes a few room slots for its entrance stubs before the
+	# rooms are chosen (scripts/level/pockets/pocket_plan.gd; the plan lands in spots.pocket).
+	PocketPlan.plan(st, gens, defs, sub)
 	var missing := _assign_kinds(gens, defs, rng)
+	PocketPlan.release(gens)   # POCKETS HOOK
 	for g in gens:
 		g.place_rooms()
 	for g in gens:
 		g.finish()
+	# POCKETS HOOK: with fewer slots a room can land somewhere it cannot be furnished; retry then.
+	missing.append_array(PocketPlan.unfurnished(st))
 
 	_place_markers(st, rng)
 	_light_modes(st, seed, sub)

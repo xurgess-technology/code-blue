@@ -332,6 +332,11 @@ static func finish_info(gen: Dictionary, info: Dictionary, base: Dictionary, win
 	info["doors"] = gen.get("doors", [])
 	info["door_nodes"] = (base.out.doors as Array) + (wings.out.doors as Array)
 	info["wing_seed"] = int(gen.get("wing_seed", gen.get("seed", 0)))
+	# POCKETS HOOK: what game.pockets.build_wings needs from the map (the plan, the fixtures and the run
+	# seed they are seeded with, for the entrance stubs' pocket copies).
+	info["pocket_plan"] = gen.get("spots", {}).get("pocket", {})
+	info["map_lights"] = gen.get("lights", [])
+	info["map_seed"] = int(gen.get("seed", 0))
 	info["occluders_built"] = true
 
 
