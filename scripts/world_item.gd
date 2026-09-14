@@ -145,6 +145,8 @@ func _physics_process(delta: float) -> void:
 		return
 	if _has_target:
 		var k := clampf(delta * 14.0, 0.0, 1.0)
+		if global_position.distance_squared_to(_target.origin) > 36.0:
+			k = 1.0   # POCKETS HOOK: moved through a seam; never slide across the world
 		global_position = global_position.lerp(_target.origin, k)
 		global_basis = global_basis.slerp(_target.basis.orthonormalized(), k)
 

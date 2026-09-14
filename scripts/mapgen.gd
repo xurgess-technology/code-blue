@@ -30,6 +30,7 @@ const Neutral := preload("res://scripts/level/neutral.gd")
 const WingGen := preload("res://scripts/level/wing_gen.gd")
 const Rooms := preload("res://scripts/level/room_furnish.gd")
 const ItemsData := preload("res://scripts/items.gd")
+const PocketPlan := preload("res://scripts/level/pockets/pocket_plan.gd")  # POCKETS HOOK
 
 ## Kept for callers that still pass a size; the layout decides the real size.
 const DEFAULT_WIDTH := 100
@@ -144,7 +145,11 @@ static func _attempt(seed: int, attempt: int) -> Dictionary:
 	var gens: Array = []
 	for d in defs:
 		gens.append(WingGen.carve(st, d, rng))
+	# POCKETS HOOK: a pocket space (0-1) takes a few room slots for its entrance stubs before the
+	# rooms are chosen (scripts/level/pockets/pocket_plan.gd; the plan lands in spots.pocket).
+	PocketPlan.plan(st, gens, defs, sub)
 	var missing := _assign_kinds(gens, defs, rng)
+	PocketPlan.release(gens)   # POCKETS HOOK
 	for g in gens:
 		g.place_rooms()
 	for g in gens:

@@ -167,6 +167,9 @@ const BrainsScript := preload("res://scripts/brains/brains.gd")
 var combat: Node = null       # bone saw swings, anesthetic jabs, dragging and strapping monsters
 var dissection: Node = null   # monster cases on the patient tables: sedation, re-dosing, the brain
 var brains: Node = null       # brain spoilage, the blender, per-player upgrades, Echo and Hive Eyes
+# POCKETS HOOK: pocket spaces (the Factory, the Restaurant), their seams and crossings.
+const PocketSpacesScript := preload("res://scripts/level/pockets/pocket_spaces.gd")
+var pockets: Node = null
 
 
 func _ready() -> void:
@@ -215,6 +218,11 @@ func _ready() -> void:
 	brains.name = "Brains"
 	add_child(brains)
 	brains.setup(self)
+	# POCKETS HOOK: after Entities, so crossings see this frame's movement. Same path everywhere.
+	pockets = PocketSpacesScript.new()
+	pockets.name = "Pockets"
+	add_child(pockets)
+	pockets.setup(self)
 	Net.roster_changed.connect(_on_roster_changed)
 	Net.joined_ok.connect(_net_client_forget)  # net: a new connection starts a new replica
 	Net.host_left.connect(func(): end_session("The host left the game."))
@@ -513,6 +521,10 @@ func _build_level(for_seed: int) -> void:
 		var BuilderScript: GDScript = load(builder_path)
 		gen = MapGenScript.generate(for_seed)
 		level = BuilderScript.build(gen, level_info)
+		# POCKETS HOOK: the rolled pocket space, built far away with its stub copies and seams.
+		# (With doors: build and tear down with each shift's wings.)
+		if level != null:
+			pockets.build(gen, level_info, level)
 	# A level missing its landmarks is worse than no level; fall back rather than ship a broken shift.
 	if not dev_mode and (level == null or not _level_info_usable()):
 		if level != null:
@@ -605,6 +617,8 @@ func _add_occluders() -> void:
 
 
 func _clear_level() -> void:
+	if pockets != null:
+		pockets.teardown()   # POCKETS HOOK
 	if level != null and is_instance_valid(level):
 		level.queue_free()
 	level = null
@@ -1657,6 +1671,10 @@ func emit_noise(pos: Vector3, loudness: float, kind: String) -> void:
 	if not is_host():
 		return
 	_noises.append({"pos": pos, "loudness": loudness, "kind": kind, "time": world_time})
+	# POCKETS HOOK: sound carries through seams (the same noise in the other copy of a nearby stub).
+	if pockets != null:
+		for p in pockets.mirror_noise(pos, loudness):
+			_noises.append({"pos": p, "loudness": loudness, "kind": kind, "time": world_time, "mirrored": true})
 
 
 func recent_noises(max_age: float = 1.5) -> Array:

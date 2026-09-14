@@ -598,6 +598,9 @@ func _local_step(delta: float) -> void:
 
 func _remote_step(delta: float) -> void:
 	var k := clampf(delta * 12.0, 0.0, 1.0)
+	# POCKETS HOOK: through a seam (or any teleport) the body jumps; never lerp it across the world.
+	if global_position.distance_squared_to(_target_pos) > 36.0:
+		k = 1.0
 	global_position = global_position.lerp(_target_pos, k)
 	rotation.y = lerp_angle(rotation.y, _target_yaw, k)
 	head.rotation.x = lerpf(head.rotation.x, -0.95 if hive_view else _pitch, k)   # SWEEP 3 HOOK (brains): head droops
