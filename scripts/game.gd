@@ -2517,7 +2517,10 @@ func _build_state() -> Dictionary:
 	for n in get_tree().get_nodes_in_group("container"):
 		if n.has_meta("interact_id") and n.has_method("is_open") and n.is_open():
 			ct[String(n.get_meta("interact_id"))] = {}
-	return {"g": _global_groups(_global_fields()), "pl": pl, "mo": mo, "ct": ct, "it": it}
+	# A deep copy: several net_state()s hand out their live dictionaries (the dev room's bots, a
+	# surgery's minigame state), and the replication records keep these values to compare with
+	# later ticks. A shared dictionary edited in place would look unchanged and never be sent.
+	return {"g": _global_groups(_global_fields().duplicate(true)), "pl": pl, "mo": mo, "ct": ct, "it": it}
 
 
 ## The global fields as a few entities whose field names change together, so a client missing
