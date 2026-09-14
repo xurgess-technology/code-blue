@@ -42,7 +42,9 @@ extends Node
 ##                    client 2 re-doses it meanwhile; sedation replicates within 0.05
 ##   pockets          (--pocket=factory) client 1 walks through a seam into the pocket holding gauze
 ##                    (the host sees it arrive and stay, client 2 sees it jump, never slide across the
-##                    world); client 2 goes down, client 1 walks out, lifts it and carries it in
+##                    world); client 2 goes down, client 1 walks out, lifts it and carries it in; then the
+##                    next shift: every machine rebuilds the same pocket (entrances, doors) with the
+##                    new wings and nobody is left standing in it
 ##   doors            client 1 finds the wing gates locked in the lobby, sees them unlock at
 ##                    clock-in, opens and closes a hinged door with E; client 2 joins mid-shift and
 ##                    sees the doors as they are and the same wings; at the next shift both clients
@@ -1323,7 +1325,16 @@ func _sc_pockets():
 				return _end(false, "on the host the carried client is at %s, the carrier at %s" % [str(p2.global_position), str(p1.global_position)])
 			await _frames(1)
 		_say("client 1 carried client 2 into the pocket, seen by the host")
-		await _finish_together("a client, a carried client and an item crossed a seam")
+		# The next shift: the wings and the pocket are rebuilt on every machine, the same everywhere.
+		_send("next_shift", {})
+		await _wall_wait(0.5)
+		game._to_next_shift()
+		if not await _until(func(): return game.wing_loader.wings_ready and not game.pockets.busy and game.pockets.active(), 90.0, "the host's new wings and pocket"):
+			return
+		var sig := _pocket_signature()
+		_say("next shift: the host rebuilt its %s (%s)" % [game.pockets.pocket.kind, str(sig)])
+		_send("rebuilt", sig)
+		await _finish_together("a client, a carried client and an item crossed a seam; the next shift rebuilt the pocket everywhere")
 		return
 	# Clients.
 	if not await _until(func(): return game.phase == Game.Phase.SHIFT and _me() != null and game.pockets.active() and _count_msgs("go") > 0, 120.0, "the shift and the pocket"):
@@ -1361,6 +1372,8 @@ func _sc_pockets():
 		if me.carrying != target_id or not game.pockets.in_pocket(target.global_position):
 			return _end(false, "carried %d, client 2's body in pocket %s" % [me.carrying, str(game.pockets.in_pocket(target.global_position))])
 		_send("in2", {})
+		if not await _pocket_rebuilt_here():
+			return
 		await _finish_together("walked in with gauze, walked out, carried a teammate in")
 		return
 	# Client 2: waits by the entrance, watches client 1 cross, goes down and is carried in.
@@ -1397,7 +1410,9 @@ func _sc_pockets():
 		if not game.pockets.in_pocket(me.global_position):
 			return _end(false, "my carried body left the pocket again (%s)" % str(me.global_position))
 		await _frames(1)
-	await _finish_together("watched client 1 cross, was carried through the seam")
+	if not await _pocket_rebuilt_here():
+		return
+	await _finish_together("watched client 1 cross, was carried through the seam, saw the pocket rebuilt")
 
 
 ## Walk this client's surgeon through a stub along its centre line: from the hospital hallway into
@@ -1988,3 +2003,38 @@ func _end(ok: bool, why: String) -> bool:
 		Net.leave()
 		get_tree().quit(0 if ok else 1))
 	return ok
+
+
+## POCKETS: what must match between machines after a rebuild: the wings' generation, the pocket's
+## kind, its entrances (hospital frames) and its doors.
+func _pocket_signature() -> Dictionary:
+	var pk = game.pockets
+	var stubs: Array = []
+	for s in pk.seams:
+		stubs.append(str((s.xh as Transform3D).origin.snapped(Vector3.ONE * 0.01)))
+	var door_ids: Array = []
+	for d in pk.pocket.get("doors", []):
+		if is_instance_valid(d):
+			door_ids.append(String(d.door_id))
+	door_ids.sort()
+	return {"gen": int(game.wing_loader.generation), "kind": String(pk.pocket.get("kind", "")), "stubs": stubs, "doors": door_ids}
+
+
+## POCKETS (client): the host rebuilt its pocket for the next shift; this machine builds the same one
+## and nobody is left standing in the old one.
+func _pocket_rebuilt_here() -> bool:
+	if not await _until(func(): return _count_msgs("rebuilt") > 0, 120.0, "the host's rebuilt pocket"):
+		return false
+	var want: Dictionary = _msgs("rebuilt")[0].data
+	if not await _until(func(): return int(game.wing_loader.generation) == int(want.gen) and game.wing_loader.wings_ready \
+			and not game.pockets.busy and game.pockets.active(), 90.0, "the new wings and pocket here"):
+		return false
+	var have := _pocket_signature()
+	if str(have) != str(want):
+		return _end(false, "the rebuilt pocket differs: host %s, here %s" % [str(want), str(have)])
+	await _wall_wait(1.0)
+	var me := _me()
+	if me != null and game.pockets.in_pocket(me.global_position):
+		return _end(false, "still standing in the pocket after the next shift began (%s)" % str(me.global_position))
+	_say("next shift: the same %s rebuilt here, %d doors, and I was walked out" % [have.kind, (have.doors as Array).size()])
+	return true

@@ -4,9 +4,10 @@ extends RefCounted
 ## stairs at both ends, a row of site offices, dim high-bay lamps hanging on long rods, and the
 ## volumetric haze and depth fog swallowing the far walls. Nothing works and nothing moves.
 ##
-## layout(stubs, seed) is pure data (tools/mapcheck.gd checks it); build(layout, origin, out) makes
-## the nodes in world space and fills `out` (lights, containers, loose_anchors, monster_spawns,
-## nav_faces, spawn).
+## layout(stubs, seed) and prepare(layout, origin) (surface arrays, navigation faces) are pure data (a
+## worker thread; tools/mapcheck.gd checks the layout); build_steps(layout, origin, out, root, prep) makes
+## the nodes in world space a step at a time and fills `out` (lights, containers, loose_anchors,
+## monster_spawns, spawn); build() does it all at once. doorways() / door_entries(): the real doors.
 
 const Common := preload("res://scripts/level/pockets/pocket_common.gd")
 const Stub := preload("res://scripts/level/pockets/stub.gd")
@@ -206,6 +207,7 @@ static func prepare(lay: Dictionary, origin: Vector2i) -> Dictionary:
 	var nav := PackedVector3Array()
 	Common.build_surfaces(lay.grid, origin, geo, nav)
 	_catwalk_nav(origin, nav)
+	Common.lintels(lay.grid, origin, geo, doorways(lay))
 	geo.bake()
 	return {"geo": geo, "nav_faces": nav}
 
@@ -386,11 +388,19 @@ static func build_steps(lay: Dictionary, origin: Vector2i, out: Dictionary, root
 	return steps
 
 
-## The site offices' doorways, as door plan entries in world tiles (hinged, hung at the hall face).
-static func door_entries(lay: Dictionary, origin: Vector2i) -> Array:
+## The site offices' doorways (hinged doors, hung at the hall face). Data only.
+static func doorways(lay: Dictionary) -> Array:
 	var out: Array = []
 	for t: Vector2i in lay.doors:
-		out.append(Common.door_entry(origin, [t], Vector2i(0, -1), "hinged", 90.0))
+		out.append({"tiles": [t], "n": Vector2i(0, -1), "kind": "hinged"})
+	return out
+
+
+## The doorways as door plan entries in world tiles.
+static func door_entries(lay: Dictionary, origin: Vector2i) -> Array:
+	var out: Array = []
+	for dw in doorways(lay):
+		out.append(Common.door_entry(origin, dw.tiles, dw.n, dw.kind, 90.0))
 	return out
 
 

@@ -49,6 +49,7 @@ func run(gs: Node, pocket_kind: String) -> void:
 		await _shot("p_factory_3_line", w.call(Vector2(20, 30)), w.call(Vector2(34, 23), 1.5))
 		await _shot("p_factory_4_up", w.call(Vector2(36, 32)), w.call(Vector2(40, 30), 20.0))
 		await _shot("p_factory_5_offices", w.call(Vector2(24, 42)), w.call(Vector2(26, 49), 1.5))
+		await _shot("p_factory_7_office_door", w.call(Vector2(27.5, 45.0)), w.call(Vector2(25.5, 48.5), 1.2))
 	else:
 		await _shot("p_restaurant_1_dining", w.call(Vector2(12.5, 25.5)), w.call(Vector2(34, 12), 1.0))
 		await _shot("p_restaurant_2_host", w.call(Vector2(28, 22)), w.call(Vector2(28, 11), 1.6))
@@ -57,6 +58,8 @@ func run(gs: Node, pocket_kind: String) -> void:
 		var tp: Vector3 = w.call(Vector2(t.tile) + Vector2(0.5, 0.5))
 		await _shot("p_restaurant_4_table", tp + Vector3(1.1, 0, 1.3), tp + Vector3(0, 0.8, 0))
 		await _shot("p_restaurant_5_kitchen", w.call(Vector2(27, 29.5)), w.call(Vector2(40, 33), 1.2))
+		await _shot("p_restaurant_7_kitchen_doors", w.call(Vector2(30.5, 22.5)), w.call(Vector2(33.0, 27.5), 1.2))
+		await _shot("p_restaurant_8_restroom_doors", w.call(Vector2(22.5, 28.6)), w.call(Vector2(15.5, 30.5), 1.2))
 	# An entrance from inside the space.
 	var s0: Dictionary = pk.seams[0]
 	await _shot("p_%s_6_opening" % kind, Stub.local_point(s0.xp, float(s0.w) - 1.0, -7.0), Stub.local_point(s0.xp, float(s0.w) - 1.0, 0.0, 1.6))

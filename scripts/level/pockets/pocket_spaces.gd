@@ -52,6 +52,8 @@ var busy := false
 ## The last per-shift build: {kind, generation, frames, steps, max_frame_ms, slowest_step_ms,
 ## thread_ms, wall_ms}.
 var stats := {}
+## How long the last teardown_wings() took on the main thread (the nodes are freed later), ms.
+var teardown_ms := 0.0
 
 var _task := -1
 var _job := {}
@@ -102,9 +104,11 @@ static func _thread_prepare(job: Dictionary) -> void:
 ## The wings are going (a new shift): nobody may stay in the pocket or its entrance stubs, what was
 ## left in there is gone, and the pocket's nodes are freed over the next frames.
 func teardown_wings() -> void:
+	var t0 := Time.get_ticks_usec()
 	_evict()
 	_cancel_build()
 	_forget()
+	teardown_ms = float(Time.get_ticks_usec() - t0) / 1000.0
 
 
 ## Finish a build in progress right now (a whole level being built, begin_shift, tools).
@@ -253,7 +257,7 @@ func _evict() -> void:
 			continue
 		var to: Vector3 = wl.gate_front(wing, slot) if wl != null else Vector3.ZERO
 		slot += 1
-		if p.is_local or bool(p.get("is_bot")) or not Net.active:
+		if p.is_local or bool(p.get("is_bot")) or not bool(game.get_node("/root/Net").get("active")):
 			p.teleport(to)
 		else:
 			game._event.rpc_id(p.peer_id, "dr_evict", {"pos": to})
@@ -495,9 +499,12 @@ static func _make_seam(s: Dictionary, port: Dictionary, origin: Vector2i) -> Dic
 			"opening": Stub.local_point(xp, float(w) - Stub.CORRIDOR * 0.5, -1.5)}
 
 
-## The whole level is going (game._clear_level): stop, forget; the nodes go with the level.
+## Forget the pocket and free its nodes at the end of the frame (the whole level is going:
+## game._clear_level; the dev room's pocket is removed).
 func teardown() -> void:
 	_cancel_build()
+	if not pocket.is_empty() and is_instance_valid(pocket.get("root")):
+		(pocket.root as Node).queue_free()
 	_forget(false)
 
 

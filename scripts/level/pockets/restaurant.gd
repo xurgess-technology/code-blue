@@ -4,7 +4,7 @@ extends RefCounted
 ## kitchen out back through a swing door, and the restrooms. The dining room is a little larger than
 ## it should be. Every table is set as if the first customers are about to walk in; nobody does.
 ##
-## layout(stubs, seed) is pure data; build(layout, origin, out) makes the nodes (see factory.gd).
+## layout, prepare, build_steps, build and the doorways as in factory.gd.
 
 const Common := preload("res://scripts/level/pockets/pocket_common.gd")
 const Stub := preload("res://scripts/level/pockets/stub.gd")
@@ -168,6 +168,7 @@ static func prepare(lay: Dictionary, origin: Vector2i) -> Dictionary:
 	var geo := Common.Geo.new()
 	var nav := PackedVector3Array()
 	Common.build_surfaces(lay.grid, origin, geo, nav)
+	Common.lintels(lay.grid, origin, geo, doorways(lay))
 	geo.bake()
 	return {"geo": geo, "nav_faces": nav}
 
@@ -239,18 +240,24 @@ static func build_steps(lay: Dictionary, origin: Vector2i, out: Dictionary, root
 	return steps
 
 
-## The doorways as door plan entries in world tiles: the swing doors into the kitchen (a pair), the
-## door to the back corridor, and the two restrooms'. All hang at the side you come from.
-static func door_entries(lay: Dictionary, origin: Vector2i) -> Array:
+## The doorways: the swing doors into the kitchen (a pair), the door to the back corridor, and the two
+## restrooms'. All hang at the side you come from. Data only.
+static func doorways(lay: Dictionary) -> Array:
 	var d: Dictionary = lay.doors
 	return [
-		Common.door_entry(origin, d.kitchen, Vector2i(0, -1), "double", 90.0),
-		Common.door_entry(origin, [d.corridor], Vector2i(0, -1), "hinged", 90.0),
-		Common.door_entry(origin, [d.men], Vector2i(0, -1), "hinged", 90.0),
-		Common.door_entry(origin, [d.women], Vector2i(0, -1), "hinged", 90.0),
+		{"tiles": d.kitchen, "n": Vector2i(0, -1), "kind": "double"},
+		{"tiles": [d.corridor], "n": Vector2i(0, -1), "kind": "hinged"},
+		{"tiles": [d.men], "n": Vector2i(0, -1), "kind": "hinged"},
+		{"tiles": [d.women], "n": Vector2i(0, -1), "kind": "hinged"},
 	]
 
 
+## The doorways as door plan entries in world tiles.
+static func door_entries(lay: Dictionary, origin: Vector2i) -> Array:
+	var out: Array = []
+	for dw in doorways(lay):
+		out.append(Common.door_entry(origin, dw.tiles, dw.n, dw.kind, 90.0))
+	return out
 
 
 # ---- materials and textures -----------------------------------------------

@@ -31,6 +31,7 @@ var failures: PackedStringArray = []
 var first_seed := 1
 var seed_count := 300
 var build_count := 8
+var build_pocket := ""   # POCKETS
 
 
 func _initialize() -> void:
@@ -42,6 +43,7 @@ func _initialize() -> void:
 			"seeds": seed_count = int(kv[1])
 			"builds": build_count = int(kv[1])
 			"first": first_seed = int(kv[1])
+			"build_pocket": build_pocket = kv[1]   # POCKETS: "" alternate, none, factory, restaurant
 	var t0 := Time.get_ticks_msec()
 	_check_generation()
 	_check_determinism()
@@ -216,15 +218,17 @@ func _check_pockets() -> void:
 				continue   # both kinds on the first 40 seeds, then alternate
 			Plan.force_kind = kind
 			tried += 1
-			var gen: Dictionary = MG.generate(seed)
+			# Wings differ every shift: later shifts' wing seeds too (the plan is rolled with the wings).
+			var gn := 1 + (seed + (1 if kind == "factory" else 0)) % 4
+			var gen: Dictionary = MG.generate(seed, MG.wing_seed_for(seed, gn))
 			var plan := Plan.of(gen)
 			if plan.is_empty():
-				fail("seed %d: a forced %s placed no pocket (%s)" % [seed, kind, Plan.last_failure])
+				fail("seed %d shift %d: a forced %s placed no pocket (%s)" % [seed, gn, kind, Plan.last_failure])
 				continue
 			placed += 1
 			entrances[plan.stubs.size()] = int(entrances.get(plan.stubs.size(), 0)) + 1
 			for p in MG.validate(gen):
-				fail("seed %d (%s forced): %s" % [seed, kind, p])
+				fail("seed %d shift %d (%s forced): %s" % [seed, gn, kind, p])
 			_check_pocket_plan(seed, kind, gen, plan)
 	Plan.force_kind = ""
 	print("pockets: natural roll %s over %d seeds; forced %d/%d placed; entrances %s (%d ms)" % [str(natural), seed_count, placed, tried, str(entrances), Time.get_ticks_msec() - t0])
@@ -366,6 +370,25 @@ func _check_pocket_plan(seed: int, kind: String, gen: Dictionary, plan: Dictiona
 						example = Vector2i(x, y)
 		if missed > 0:
 			fail("%s: %d walkable pocket tiles unreachable from entrance %d (e.g. %s)" % [tag, missed, i, str(example)])
+	# The pocket's doors (scripts/doors): each in a doorway one tile deep between two walkable tiles,
+	# the whole outward swing (the tile in front of each leaf) clear of props, containers and stubs.
+	var ct_tiles := {}
+	for c in lay.containers:
+		ct_tiles[c.tile] = true
+	for d in layout_script.door_entries(lay, origin):
+		var n: Vector2i = d.n
+		var side := Vector2i(n.y, n.x).abs()
+		for wt: Vector2i in d.tiles:
+			var t: Vector2i = wt - origin
+			var front: Vector2i = t + n
+			var back: Vector2i = t - n
+			if not Common_is_open(g, t) or Common_is_open(g, t + side) and Common_is_open(g, t - side) and d.tiles.size() == 1:
+				fail("%s: door %s is not in a one-tile doorway" % [tag, d.id])
+			for p: Vector2i in [front, back]:
+				if not Common_is_open(g, p) or g.nav[p.y * gw + p.x] == 1 or g.stub[p.y * gw + p.x] == 1:
+					fail("%s: door %s opens onto a blocked tile %s" % [tag, d.id, str(p)])
+			if ct_tiles.has(front) or ct_tiles.has(back):
+				fail("%s: door %s swings into a container at %s" % [tag, d.id, str(front)])
 
 
 static func Common_is_open(g: Dictionary, p: Vector2i) -> bool:
@@ -415,7 +438,12 @@ func _check_determinism() -> void:
 						wings_differ += 1
 			if not same:
 				fail("seed %d shift %d: the entrance building or neutral area changed" % [seed, shift])
-			if str(s1.spots) != str(sn.spots) or er != (sn.entrance_rect as Rect2i):
+			# POCKETS: the pocket plan is rolled with the wings, so it may change (spots.pocket).
+			var sp1: Dictionary = (s1.spots as Dictionary).duplicate()
+			var spn: Dictionary = (sn.spots as Dictionary).duplicate()
+			sp1.erase("pocket")
+			spn.erase("pocket")
+			if str(sp1) != str(spn) or er != (sn.entrance_rect as Rect2i):
 				fail("seed %d shift %d: a landmark moved" % [seed, shift])
 			if wings_differ < 100:
 				fail("seed %d shift %d: the wings barely changed (%d tiles)" % [seed, shift, wings_differ])
@@ -481,7 +509,7 @@ class Runner extends Node:
 		var seed: int = seeds[index]
 		info = {}
 		# POCKETS: every build seed gets a pocket, the Factory and the Restaurant in turn.
-		Plan.force_kind = "factory" if index % 2 == 0 else "restaurant"
+		Plan.force_kind = ("factory" if index % 2 == 0 else "restaurant") if check.build_pocket == "" else check.build_pocket
 		gen = MG.generate(seed)
 		Plan.force_kind = ""
 		var t0 := Time.get_ticks_msec()

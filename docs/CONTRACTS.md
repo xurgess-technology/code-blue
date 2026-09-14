@@ -540,7 +540,7 @@ zones: {grid, width, height, names}   # HospitalBuilder.zone_of(info, pos) -> wi
 
 ### Pocket spaces (pockets worker, docs/POCKET_SPACES.md)
 
-A map rolls 0-1 pocket space (`PocketPlan.CHANCE` 0.5; about 43% of seeds end up with one): **the Factory**
+A map (each shift's wings) rolls 0-1 pocket space (`PocketPlan.CHANCE` 0.5; about 40% of seeds end up with one): **the Factory**
 or **the Restaurant**, built far from the hospital (world tile origin `PocketSpaces.ORIGINS`: factory
 (800, 0), restaurant (800, 500)) with 2-3 entrances into at least two different wings, deeper wings more
 likely. Code in `scripts/level/pockets/`: `pocket_plan.gd` (generation), `stub.gd` (an entrance, its frame
@@ -555,9 +555,17 @@ PocketPlan.force_kind   # static: "" roll, "none", "factory", "restaurant" (tool
 PocketPlan.ZONE_STUB    # 10: the zone of stub tiles (HospitalBuilder.zone_of answers "")
 
 # Runtime, every machine
-game.pockets.build(gen, level_info, parent)   # after the hospital (doors: with each shift's wings)
+game.pockets.build_wings(info, wing_seed, generation)   # game.wing_loader.extra_builders: with every level's
+                                   # and every shift's wings, from info.pocket_plan (HospitalBuilder.finish_info
+                                   # also stores info.map_lights, info.map_seed), under info.wings_root
+game.pockets.teardown_wings()      # the wings are going: evict, forget, free the old nodes over frames
+game.pockets.busy / finish_now() / stats   # building (clock-in and the gates wait); {generation, frames, steps,
+                                   # max_frame_ms, slowest_step_ms, thread_ms, wall_ms}
 game.pockets.build_kind(kind, level_info, parent, seed)   # no hospital entrances (dev room); nothing crosses
 game.pockets.teardown()
+PocketSpaces.prepare(kind, stubs, seed) -> Dictionary      # data only (layout, surface arrays, nav bake): thread-safe
+PocketSpaces.build_steps(prep, stubs, map_seed, lights, info, parent, out_seams, links, result) -> Array[Callable]
+PocketSpaces.build_into(kind, stubs, seed, map_seed, lights, info, parent, out_seams, links := true)   # all at once (tools)
 game.pockets.active() -> bool; .pocket -> {kind, origin, rect (world XZ Rect2), root, spawn, wing, depth, layout, ...}
 game.pockets.seams -> [{id, wing, depth, w, d, xh, xp (stub-local -> world frames), t (hospital copy -> pocket copy), t_inv, yaw,
                         link_h, link_p (NavigationLink3D ends), seam_h, seam_p, mouth, opening, link}]
@@ -571,6 +579,22 @@ game.pockets.crossings -> [{what: "player"|"monster"|"item", id, seam, to_pocket
 game.pockets.crossing_enabled      # tools only
 ```
 
+- **Per shift** (doors contract, `scripts/level/wing_loader.gd`): the plan is rolled with the wings, so
+  every shift's wings may bring a different pocket, other entrances or none. `teardown_wings` (from the
+  loader's teardown, after its own eviction) puts players and bots standing in the pocket or in a
+  hospital-side stub (zone 10, which the loader does not see) in front of that wing's gate (a client:
+  `dr_evict`), removes monsters and items in there (host), and frees the old nodes a few at a time.
+  `build_wings` runs the layout, the surface arrays and the navigation bake on a WorkerThreadPool
+  task, then the node steps within `FRAME_BUDGET_MS` (5 ms) per frame; the pocket root is a child of
+  `info.wings_root`. A whole level build (`game._build_level`) and `begin_shift` call `finish_now()`.
+  While `busy`: `game.clock_in` waits (as for the wings), `doors._wings_ready()` is false (gates stay
+  locked), `pocket` is `{}` and nothing crosses.
+- **Doors**: the pockets' own doorways get doors from `scripts/doors/door.gd` (plan entries from
+  `PocketCommon.door_entry`, ids `dr_<x>_<y>` in world tiles, `base` false, `pocket` true), registered
+  with `game.doors` when the build finishes and dropped by `doors.unregister_wings()`: the Factory's
+  three site offices (hinged, hung at the hall face), the Restaurant's kitchen (a `double` pair), back
+  corridor and two restrooms (hinged), each under a lintel at `HospitalBuilder.LINTEL_Y`
+  (`PocketCommon.lintels`). Entrance stubs never get a door.
 - **An entrance** is a U-shaped hallway stub carved into one or two neighbouring room slots of a wing
   (stub-local tiles `u` 0..w-1 along the slot, `v` 0..d-1 away from the hallway; leg 1 at u 0..1 opens
   onto the hallway at v -1, leg 2 runs along the back, leg 3 at u w-2..w-1; `Stub.size_ok`: w >= 8 and
@@ -604,9 +628,11 @@ game.pockets.crossing_enabled      # tools only
 - **Mirrors**: players and monsters inside a stub are also drawn in the other copy (RenderingServer
   instances of their meshes, skeletons attached); `Perception.observed_any` checks the mirrored points
   too.
-- Tests: `tools/mapcheck.gd` (every seed again with a pocket forced: plan, stub tiles, seams tile for tile
-  both ways, pocket grid reachability; builds: navigation into the pocket and out through each seam,
-  containers and anchors in reach), `tools/pockettest.tscn`, nettest `pockets`, `tools/gameshot.tscn --
+- Tests: `tools/mapcheck.gd` (every seed again with a pocket forced, on shift 1-4 wing seeds: plan, stub tiles, seams tile for tile
+  both ways, pocket grid reachability, door swings; builds: navigation into the pocket and out through each seam,
+  containers and anchors in reach), `tools/pockettest.tscn` (also the next shift's rebuild; `-- --frames` windowed
+  frame times), `tools/looptest.tscn -- --pocket=factory`, nettest `pockets` (also the next shift's rebuild on every
+  machine), `tools/gameshot.tscn --
   --pocket=factory|restaurant`, `tools/perfprobe.tscn -- --pockets`, devtest's pocket panel checks.
 
 ## Settings (settings worker, sweep 2)

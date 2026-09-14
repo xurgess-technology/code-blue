@@ -335,12 +335,34 @@ func _run_pockets() -> void:
 			views.append({"name": "restaurant: kitchen", "setup": func(): _look(w.call(Vector2(26, 29.5)), w.call(Vector2(44, 33), C.EYE_H))})
 		views.append({"name": "%s: an entrance from inside" % kind, "setup": func(): _look(Stub.local_point(s.xp, float(s.w) - 1.0, -8.0), Stub.local_point(s.xp, float(s.w) - 1.0, 0.0, C.EYE_H))})
 		views.append({"name": "%s: seam, hospital side" % kind, "setup": func(): _look(Stub.local_point(s.xh, 1.0, float(s.d) - 1.0), Stub.local_point(s.xh, float(s.w), float(s.d) - 1.0, C.EYE_H))})
+		# POCKETS + HUMAN: looking back at a seam from inside the pocket, then the same with two
+		# teammates (skinned human bodies) standing in the hospital's copy, drawn here as mirrors.
+		var back_view := func(): _look(Stub.local_point(s.xp, float(s.w) - 1.0, float(s.d) - 1.0), Stub.local_point(s.xp, 0.0, float(s.d) - 1.0, C.EYE_H))
+		views.append({"name": "%s: seam, pocket side" % kind, "setup": back_view})
+		views.append({"name": "%s: seam, 2 teammates mirrored" % kind, "setup": back_view, "mates": [
+				Stub.local_point(s.xh, Stub.seam_s(s.w) - 1.6, float(s.d) - 1.3), Stub.local_point(s.xh, Stub.seam_s(s.w) - 2.6, float(s.d) - 0.7)]})
 		for q in _qualities:
 			main.set_quality(q, false)
 			for v in views:
-				pk.crossing_enabled = false
+				# (mirrors are updated with the crossings: on for the teammates, who stand on their own side)
+				pk.crossing_enabled = v.has("mates")
+				var mates: Array = []
+				for i in (v.get("mates", []) as Array).size():
+					var mate = preload("res://scripts/player.gd").new_player(-90 - i, "Mate%d" % i, false)
+					mate.is_bot = true
+					mate.bot_active = true
+					mate.bot_invulnerable = true
+					game.players[-90 - i] = mate
+					game.get_node("Entities").add_child(mate)
+					mate.teleport(v.mates[i])
+					mates.append(mate)
 				await v.setup.call()
 				await _measure(v.name, q)
+				if not mates.is_empty():
+					print("[perf]   %d mirrors while measuring '%s'" % [pk._mirrors.size(), v.name])
+				for mate in mates:
+					game.players.erase(mate.peer_id)
+					mate.queue_free()
 				pk.crossing_enabled = true
 	Plan.force_kind = ""
 	print("[perf] ============================================================================")

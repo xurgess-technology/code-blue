@@ -732,3 +732,36 @@ static func door_entry(origin: Vector2i, tiles: Array, n: Vector2i, kind: String
 			"plane": centre + Vector2(n) * (0.5 - inset), "width": float(tiles.size()),
 			"hinge": -1, "max_in": 90.0, "max_out": max_out, "room": -1, "zone": 0, "wing": "", "depth": 0,
 			"base": false, "pocket": true}
+
+
+## The wall above each doorway (HospitalBuilder._lintel): an underside at the hospital's lintel
+## height across the door tiles and a face on both sides up to the doorway's own ceiling, in the
+## wall material of the room each face looks into. `doorways`: [{tiles: [local Vector2i], n}].
+## Data only.
+static func lintels(g: Dictionary, origin: Vector2i, geo: Geo, doorways: Array) -> void:
+	var y0: float = HB.LINTEL_Y
+	var rooms: Array = g.rooms
+	for dw in doorways:
+		var n: Vector2i = dw.n
+		for t: Vector2i in dw.tiles:
+			var i := idx(g, t.x, t.y)
+			var ri: int = g.room[i]
+			if ri < 0:
+				continue
+			var top := float(rooms[ri].ceil)
+			var cx := t.x / CHUNK
+			var cy := t.y / CHUNK
+			var x0 := (origin.x + t.x) * T
+			var z0 := (origin.y + t.y) * T
+			var x1 := x0 + T
+			var z1 := z0 + T
+			var own: Dictionary = rooms[ri]
+			geo.quad(cx, cy, String(own.wall), Vector3(x0, y0, z0), Vector3(x0, y0, z1), Vector3(x1, y0, z1), Vector3(x1, y0, z0),
+					Vector2(x0, z0), Vector2(x0, z1), Vector2(x1, z1), Vector2(x1, z0))
+			var centre := Vector3((origin.x + t.x + 0.5) * T, 0.0, (origin.y + t.y + 0.5) * T)
+			for side in [n, -n]:
+				var p: Vector2i = t + side
+				var looks: Dictionary = own
+				if inb(g, p.x, p.y) and int(g.room[idx(g, p.x, p.y)]) >= 0:
+					looks = rooms[int(g.room[idx(g, p.x, p.y)])]
+				vface(geo, cx, cy, String(looks.wall), centre, Vector3(side.x, 0.0, side.y), y0, top, float(looks.get("uv", 1.0)))

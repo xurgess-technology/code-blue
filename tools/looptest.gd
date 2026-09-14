@@ -2,7 +2,8 @@ extends Node
 ## Headless check of the whole shift loop (loop worker, sweep 2), played by a bot the way a player
 ## would: walking on the navmesh and pressing E.
 ##
-##   godot --headless --fixed-fps 60 --path . tools/looptest.tscn [-- --seed=N]
+##   godot --headless --fixed-fps 60 --path . tools/looptest.tscn [-- --seed=N] [--pocket=factory]
+##   (--pocket forces that pocket space on every shift's wings and checks it is rebuilt for shift 2)
 ##
 ## Shift 1  start at a spawn point, walk to the time clock and clock in; the grace period runs;
 ##          pick up some loot; the phone rings and the bot answers it (subtitles); the patient's
@@ -41,11 +42,15 @@ var _stuck := 0.0
 var _last_pos := Vector3.ZERO
 var _target_item := -1
 var _blacklist := {}
+var _pocket := ""
 
 
 func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
 		var kv := a.trim_prefix("--").split("=", true, 1)
+		if kv[0] == "pocket" and kv.size() > 1:   # POCKETS: none | factory | restaurant, every shift
+			_pocket = kv[1]
+			preload("res://scripts/level/pockets/pocket_plan.gd").force_kind = kv[1]
 		if kv[0] == "seed" and kv.size() > 1:
 			seed_value = int(kv[1])
 	main = load("res://scenes/main.tscn").instantiate()
@@ -76,6 +81,10 @@ func _run() -> void:
 	# ------------------------------------------------------------------ shift 1
 	_say("---- shift 1: in, grace, phone, paramedics, two patients, clock out")
 	_check(game.phase == Game.Phase.LOBBY and game.shift == 1, "a run starts in the lobby of shift 1")
+	var pocket_root1 = null
+	if _pocket == "factory" or _pocket == "restaurant":
+		_check(game.pockets.active() and String(game.pockets.pocket.kind) == _pocket, "POCKETS: shift 1 has the forced %s" % _pocket)
+		pocket_root1 = game.pockets.pocket.get("root")
 	var near_spawn := false
 	for s in game.spawn_points():
 		near_spawn = near_spawn or bot.global_position.distance_to(s) < 1.0
@@ -215,6 +224,8 @@ func _run() -> void:
 	var seed_before: int = game.seed_value
 	ok = await _do_until(func(): _go_use("clock", game.clock_pos(), true), func(): return game.phase == Game.Phase.SHIFT, 120.0)
 	_check(ok, "clock in for shift 2")
+	if _pocket == "factory" or _pocket == "restaurant":
+		_check_pocket_rebuilt(pocket_root1)
 	_check(game.seed_value == seed_before, "same run (seed %d)" % game.seed_value)
 	_check(not game.doors.gates_locked, "the gates unlocked at clock-in")
 	var rows_after: PackedStringArray = game.level_info.rows
@@ -490,3 +501,19 @@ func _finish() -> void:
 	for f in _failures:
 		_say("  failed: " + f)
 	get_tree().quit(0 if _failures.is_empty() else 1)
+
+
+## POCKETS: the forced pocket was torn down with shift 1's wings and built again with shift 2's.
+func _check_pocket_rebuilt(old_root) -> void:
+	var pk = game.pockets
+	_check(not is_instance_valid(old_root), "POCKETS: shift 1's pocket nodes are gone")
+	_check(pk.active() and String(pk.pocket.kind) == _pocket and pk.seams.size() >= 2, "POCKETS: shift 2 has the %s again (%d entrances)" % [_pocket, pk.seams.size()])
+	if not pk.active():
+		return
+	_check(int(pk.stats.get("generation", -1)) == int(game.wing_loader.generation), "POCKETS: built for the wings of generation %d (stats %s)" % [game.wing_loader.generation, str(pk.stats)])
+	_check(pk.pocket.root.get_parent() == game.level_info.get("wings_root"), "POCKETS: the pocket hangs under the new wings root")
+	var n := 0
+	for c in game.level_info.get("containers", []):
+		if c.get("node") != null and is_instance_valid(c.node) and pk.in_pocket(c.node.global_position):
+			n += 1
+	_check(n > 0, "POCKETS: the new pocket's containers are in level_info (%d)" % n)

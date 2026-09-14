@@ -203,7 +203,9 @@ func _host_tick(delta: float) -> void:
 
 func _wings_ready() -> bool:
 	var wl = game.get("wing_loader")
-	return wl == null or wl.wings_ready
+	# POCKETS HOOK: the pocket built with the wings counts as part of them.
+	var pk = game.get("pockets")
+	return (wl == null or wl.wings_ready) and (pk == null or not pk.busy)
 
 
 ## Everyone who can open a door this tick: {kind, pos, fwd, node, strength}.
