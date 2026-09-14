@@ -244,7 +244,7 @@ def cloth_material():
     mouth_h = b.mr(b.math('ADD', mouth, b.math('MULTIPLY', b.math('SUBTRACT', b.noise(co, 60.0, 5, 0.7), 0.5), 0.7)), 0.12, 0.40)
     mouth_h = b.math('MAXIMUM', b.math('MULTIPLY', mouth_h, 0.6), b.math('MULTIPLY', seep, maskA))
     col = b.mix(b.math('MULTIPLY', mouth_h, 0.75), col, (0.34, 0.24, 0.14))
-    col = b.mix(b.math('MULTIPLY', b.math('MULTIPLY', grin, maskA), 0.7), col, (0.22, 0.07, 0.05))
+    col = b.mix(b.math('MULTIPLY', b.math('MULTIPLY', grin, maskA), 0.9), col, (0.19, 0.05, 0.04))
     mouth_e = b.math('MULTIPLY', grin_dark, maskA)
     col = b.mix(mouth_e, col, (0.07, 0.018, 0.014))
     # black tears running from the sockets down over the mask
