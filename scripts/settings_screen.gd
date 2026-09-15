@@ -21,6 +21,9 @@ const COL_DIM := Color("5e6a73")
 var _sliders: Dictionary = {}
 ## key -> {option_value: Button}
 var _choices: Dictionary = {}
+## SWEEP 4A HOOK (controls): key -> its rebind Button. Click one, press a key.
+var _rebind_buttons: Dictionary = {}
+var _listening_key: String = ""
 var _syncing := false
 ## The title menu, set by main.gd, so the pause button hides while it is up.
 var menu: Control = null
@@ -66,6 +69,15 @@ func is_open() -> bool:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not is_open():
+		return
+	# SWEEP 4A HOOK (controls): a rebind row is waiting for the next key. Esc cancels it without
+	# changing anything; any other key becomes the new binding.
+	if _listening_key != "":
+		if event is InputEventKey and event.pressed and not event.echo:
+			if int(event.physical_keycode) != KEY_ESCAPE:
+				Settings.set_value(_listening_key, int(event.physical_keycode))
+			_listening_key = ""
+			get_viewport().set_input_as_handled()
 		return
 	# Esc goes back (to the menu or the pause overlay) instead of resuming the shift, and
 	# nothing underneath (pause toggles, Q to walk out) reacts while the screen is up.
@@ -156,6 +168,12 @@ func _build() -> void:
 	col.add_child(_choice_row("carry_camera", "Carry camera", [["shoulder", "Shoulder"], ["first_person", "First person"]]))   # HANDS HOOK
 	col.add_child(_slider_row("fov", "Field of view", 60.0, 100.0, 1.0,
 		func(v): return "%d°" % roundi(v)))
+
+	col.add_child(_section("KEYS"))   # SWEEP 4A HOOK (controls)
+	col.add_child(_rebind_row("key_crouch", "Crouch"))
+	col.add_child(_rebind_row("key_jump", "Jump"))
+	col.add_child(_rebind_row("key_ability_alt", "Ability modifier"))
+	col.add_child(_rebind_row("key_scan", "Scan"))
 
 	var hint := Label.new()
 	hint.text = "Changes apply right away.  F2 cycles graphics, F11 toggles fullscreen."
@@ -250,6 +268,33 @@ func _slider_row(key: String, text: String, lo: float, hi: float, step: float, f
 	return row
 
 
+## SWEEP 4A HOOK (controls): a row with a button that shows the current key; click it, then press
+## any key to rebind (Esc cancels). Consistent with _slider_row / _choice_row: writes straight to
+## Settings, which applies it to the InputMap action immediately (Settings.REBIND_ACTIONS).
+func _rebind_row(key: String, text: String) -> Control:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+	row.custom_minimum_size.y = 32
+	row.add_child(_row_label(text))
+	var b := Button.new()
+	b.name = "Rebind_" + key
+	b.custom_minimum_size = Vector2(140, 30)
+	b.add_theme_font_size_override("font_size", 15)
+	_style_button(b)
+	b.pressed.connect(func():
+		_listening_key = key
+		b.text = "Press a key…")
+	row.add_child(b)
+	_rebind_buttons[key] = b
+	if _first_focus == null:
+		_first_focus = b
+	return row
+
+
+func _key_name(keycode: int) -> String:
+	return OS.get_keycode_string(keycode) if keycode > 0 else "?"
+
+
 func _choice_row(key: String, text: String, options: Array) -> Control:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 8)
@@ -339,6 +384,8 @@ func _sync_all() -> void:
 		_on_setting_changed(key, Settings.get_value(key))
 	for key in _choices.keys():
 		_on_setting_changed(key, Settings.get_value(key))
+	for key in _rebind_buttons.keys():
+		_on_setting_changed(key, Settings.get_value(key))
 
 
 func _on_setting_changed(key: String, value) -> void:
@@ -351,4 +398,6 @@ func _on_setting_changed(key: String, value) -> void:
 		var map: Dictionary = _choices[key]
 		for opt in map.keys():
 			(map[opt] as Button).set_pressed_no_signal(str(opt) == str(value))
+	elif _rebind_buttons.has(key):   # SWEEP 4A HOOK (controls)
+		(_rebind_buttons[key] as Button).text = _key_name(int(value))
 	_syncing = false

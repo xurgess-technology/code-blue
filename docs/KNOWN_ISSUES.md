@@ -857,3 +857,27 @@ Players, Bob, the paramedics and the downed player on the table use the Blender 
   noisy (other workers' Blender builds). The probe's local player shows the new first-person hands in
   every scene (about 14 draw calls: palm, sleeve, finger and thumb pieces, the torch); remote bodies
   add an AnimationPlayer and a SkeletonModifier3D each (no teammates in the probe).
+
+## Controls, ability slots and HUD, scanner (sweep 4a chunk 1, docs/SWEEP4A.md)
+
+- **The rebind screen has no conflict detection.** Settings > CONTROLS > KEYS (crouch, jump, ability
+  modifier, scan) writes straight to `Settings.set_value("key_*", ...)`, which rebinds the matching
+  InputMap action immediately, but nothing stops binding two of these (or one of these and an
+  existing fixed action like `interact`) to the same physical key, and there is no "already in use"
+  warning or reset-to-default-only-this-key control (only "Reset to defaults" for everything).
+- **The scanner's range/LOS check is a single centre raycast**, not a cone: `game._scan_aim` requires
+  the crosshair to be essentially on the monster (mask `L_WORLD | L_MONSTER`), same as the aim ray
+  used for interactables. It works, but is stricter than "aiming at it" might suggest for a moving
+  target at range.
+- **Crouch's third-person pose is a single fixed-weight torso lean** (`body_poser.gd`'s new `crouch`
+  field, ~0.3 rad), independent of whatever `body_hands.gd` sets `torso`/`torso_w` to for a held
+  item, carry or wind-up pose, rather than a rig-aware crouched stance blended with those poses.
+  Reads correctly (a stooped lean) in the common cases; not verified against every hold pose.
+- **`game.database` (the scanner's sighted/scanned records) has no reset hook.** It is host-only,
+  in-memory, and intentionally not cleared on `reset_money()` / game over the way `brains.on_reset()`
+  clears absorbed brains — species knowledge is meant to persist across a wipe with money — but
+  nothing has exercised that assumption yet (chunk 4 is expected to formalize it when the database
+  is saved to disk).
+- **Screenshots were not taken.** `tools/gameshot.tscn` needs a windowed run; this chunk was built
+  and tested entirely headless, and grabbing 1-3 screenshots was judged not worth the added run in
+  this pass (the spec allows skipping them when they prove awkward in a headless environment).

@@ -66,6 +66,12 @@ var level: Node3D = null
 var level_info: Dictionary = {}
 var players: Dictionary = {}      # peer id -> Player
 var monsters: Dictionary = {}     # monster id -> Monster
+## SWEEP 4A HOOK (scanner): host-only, in memory. kind -> DbRecord (sighted / scanned). Chunk 4
+## (docs/backlog/SWEEP4B.md) extends DbRecord and saves it; for now it is lost on restart.
+const DbRecordScript := preload("res://scripts/database/db_record.gd")
+var database: Dictionary = {}
+var _scan_progress: Dictionary = {}   # peer id -> 0..1
+var _scan_target: Dictionary = {}     # peer id -> monster id being scanned
 var world_items: Dictionary = {}  # item id -> WorldItem
 ## loop: the PatientBody on the first patient case's table, or null.
 var patient_body: Node3D:
@@ -1728,7 +1734,9 @@ func _tick_noise(delta: float) -> void:
 	while not _noises.is_empty() and float(_noises[0].time) < cut:
 		_noises.pop_front()
 	for p in alive_players():
-		if not p.moving:
+		# SWEEP 4A HOOK (controls): a crouching player's footsteps make no sound and no noise event
+		# at all (not just quieter): the Discharged can't hear a crouching player walk.
+		if not p.moving or bool(p.get("crouching")):
 			_footstep_acc[p.peer_id] = 0.0
 			continue
 		var acc: float = float(_footstep_acc.get(p.peer_id, 0.0)) + delta
@@ -1831,8 +1839,71 @@ func _physics_process(delta: float) -> void:
 	_net_tick(delta)
 
 
+## SWEEP 4A HOOK (scanner): this species' record, created on first touch.
+func db_record(kind: String) -> DbRecord:
+	if not database.has(kind):
+		database[kind] = DbRecordScript.new(kind)
+	return database[kind]
+
+
+## Host: is `p` aiming at `m`, in scan range, with a clear shot (a straight raycast from the
+## camera: if a wall is in the way, the ray hits the wall first, not the monster)?
+func _scan_aim(p: Node, m: Node) -> bool:
+	if p == null or m == null or not is_instance_valid(m) or p.camera == null:
+		return false
+	var from: Vector3 = p.camera.global_position
+	var to_m: Vector3 = (m.global_position as Vector3) + Vector3.UP * 1.0
+	if from.distance_to(to_m) > C.SCAN_RANGE:
+		return false
+	var q := PhysicsRayQueryParameters3D.create(from, from - p.camera.global_transform.basis.z * C.SCAN_RANGE)
+	q.collision_mask = C.L_WORLD | C.L_MONSTER
+	q.exclude = [p.get_rid()]
+	var hit := get_world_3d().direct_space_state.intersect_ray(q)
+	return not hit.is_empty() and hit.get("collider") == m
+
+
+## Host: hold R aiming at a monster (in range, in sight) to scan it; breaking either resets
+## progress. A completed scan marks the species scanned and tells the scanner "Entry updated".
+## Also tracks "sighted": a monster within scan range and visible (aimed at is not required) to
+## any living player, regardless of whether anyone is scanning.
+func _tick_scan(delta: float) -> void:
+	for m in monsters.values():
+		if m == null or not is_instance_valid(m):
+			continue
+		for p in alive_players():
+			if p.camera != null and p.camera.global_position.distance_to(m.global_position) <= C.SCAN_RANGE \
+					and Perception.in_view(p, m.global_position) and _scan_aim(p, m):
+				db_record(String(m.kind)).sighted = true
+				break
+	for p in alive_players():
+		var peer: int = p.peer_id
+		var target: Node = null
+		if bool(p.get("scan_holding")):
+			var mid := int(_scan_target.get(peer, -1))
+			var cur = monsters.get(mid) if mid >= 0 and _scan_aim(p, monsters.get(mid)) else null
+			target = cur
+			if target == null:
+				for m in monsters.values():
+					if _scan_aim(p, m):
+						target = m
+						break
+		if target == null:
+			_scan_progress[peer] = 0.0
+			_scan_target[peer] = -1
+			continue
+		_scan_target[peer] = int(target.monster_id)
+		var prog: float = float(_scan_progress.get(peer, 0.0)) + delta / C.SCAN_SECONDS
+		if prog >= 1.0:
+			_scan_progress[peer] = 0.0
+			db_record(String(target.kind)).scanned = true
+			tell(p, "Entry updated", 2.0)
+		else:
+			_scan_progress[peer] = prog
+
+
 func _simulate(delta: float) -> void:
 	_tick_noise(delta)
+	_tick_scan(delta)   # SWEEP 4A HOOK (scanner)
 	var pop: int = player_surgery.operator_peer()   # downed: operating on the player table counts too
 	for p in players.values():
 		p.operating = pop != 0 and p.peer_id == pop
@@ -2480,10 +2551,10 @@ func player_used(p: Node) -> void:
 		combat.use(p)
 
 
-## SWEEP 3 HOOK, host: the player pressed R (brain ability).
-func player_ability(p: Node) -> void:
+## SWEEP 4A HOOK, host: the player pressed Alt+(slot_idx+1).
+func player_ability_slot(p: Node, slot_idx: int) -> void:
 	if is_host() and brains != null:
-		brains.ability(p)
+		brains.ability_slot(p, slot_idx)
 
 
 func _in_shove_cone(from: Node, target: Vector3, forward: Vector3) -> bool:

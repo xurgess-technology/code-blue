@@ -39,6 +39,21 @@ const DEFAULTS := {
 	"fov": 78.0,
 	"quality": 1,
 	"carry_camera": "shoulder",   # HANDS HOOK: "shoulder" | "first_person"
+	# SWEEP 4A HOOK (controls): rebindable keys, stored as a physical_keycode int. Applied to the
+	# matching InputMap action (see REBIND_ACTIONS / _apply) so the whole game (not just the
+	# settings screen) follows a rebind immediately.
+	"key_crouch": KEY_CTRL,
+	"key_jump": KEY_SPACE,
+	"key_ability_alt": KEY_ALT,
+	"key_scan": KEY_R,
+}
+
+## Settings key -> the InputMap action it rebinds.
+const REBIND_ACTIONS := {
+	"key_crouch": "crouch",
+	"key_jump": "jump",
+	"key_ability_alt": "ability_alt",
+	"key_scan": "scan",
 }
 
 ## Numeric keys: [min, max]. Values are clamped into these on set and on load.
@@ -50,6 +65,10 @@ const RANGES := {
 	"sensitivity": [0.2, 3.0],
 	"fov": [60.0, 100.0],
 	"quality": [0, 2],
+	"key_crouch": [0, 4194500],
+	"key_jump": [0, 4194500],
+	"key_ability_alt": [0, 4194500],
+	"key_scan": [0, 4194500],
 }
 
 ## Below this slider position a bus is muted outright.
@@ -214,6 +233,21 @@ func _apply(key: String) -> void:
 				audio.music_volume_db = slider_to_db(v)
 		"window_mode":
 			_apply_window_mode()
+	if REBIND_ACTIONS.has(key):   # SWEEP 4A HOOK (controls)
+		_rebind(String(REBIND_ACTIONS[key]), int(get_value(key)))
+
+
+## Point an InputMap action's key event at `physical_keycode`, keeping any non-key events
+## (mouse buttons, joypad) on the action untouched.
+func _rebind(action: String, physical_keycode: int) -> void:
+	if not InputMap.has_action(action) or physical_keycode <= 0:
+		return
+	for ev in InputMap.action_get_events(action):
+		if ev is InputEventKey:
+			InputMap.action_erase_event(action, ev)
+	var ev := InputEventKey.new()
+	ev.physical_keycode = physical_keycode
+	InputMap.action_add_event(action, ev)
 
 
 func _set_bus(bus_name: String, v: float) -> void:

@@ -26,6 +26,20 @@ var _t: float = 0.0
 var _hint_timer: float = 45.0
 var _font: Font
 var _stamina_show: float = 0.0
+## SWEEP 4A HOOK (controls): the ability bar (Alt) and the scanner ring, both local-only.
+## 0 = Alt not held (abilities small top-left, items at full size); 1 = Alt held (abilities fill
+## the bar, items shrink to a small top-left row). ~0.12 s each way per docs/SWEEP4A.md.
+var _alt_t: float = 0.0
+## Ability id -> world_time its first-ability card should stop showing itself, and which ids have
+## already had their card (so it only shows once per id per session).
+var _card_until: Dictionary = {}
+var _card_seen: Dictionary = {}
+const ABILITY_LABEL := {"echo": "Echo", "hive_in": "Hive Eyes"}
+const ABILITY_COST := {"echo": "LOUD", "hive_in": ""}
+const ABILITY_DESC := {
+	"echo": "A shriek that outlines everything nearby through walls for a few seconds.",
+	"hive_in": "See through a nearby Walk-In's eyes for a few seconds.",
+}
 
 
 func _ready() -> void:
@@ -41,6 +55,16 @@ func _process(delta: float) -> void:
 	var me = game.local_player() if game != null else null
 	var tired: bool = me != null and me.stamina < 0.995
 	_stamina_show = clampf(_stamina_show + (delta * 4.0 if tired else -delta * 1.5), 0.0, 1.0)
+	var alt_held: bool = Input.is_action_pressed("ability_alt")
+	_alt_t = move_toward(_alt_t, 1.0 if alt_held else 0.0, delta / 0.12)
+	# SWEEP 4A HOOK: the first time an ability lands in a slot, a short card for it.
+	if me != null and game.brains != null:
+		for id in (game.brains.slots_for(me.peer_id) as Array):
+			if String(id) != "" and not _card_seen.has(id):
+				_card_seen[id] = true
+				_card_until[id] = _t + 5.0
+	if _card_until.size() > 0 and Input.is_anything_pressed():
+		_card_until.clear()
 	queue_redraw()
 
 
@@ -58,7 +82,11 @@ func _draw() -> void:
 		_draw_prompt(w, h, me)
 	if me != null and me.alive and not in_surgery:
 		_draw_hands(w, h, me)
+		_draw_ability_bar(w, h, me)   # SWEEP 4A HOOK (controls)
 		_draw_health(h, me)
+	if me != null and me.alive and not game.paused and not in_surgery:
+		_draw_scan_ring(w, h, me)   # SWEEP 4A HOOK (scanner)
+		_draw_ability_card(w, h)
 	if me != null and not in_surgery:
 		_draw_money(w, h, me)
 	if me != null and not me.alive:
@@ -156,7 +184,7 @@ func _draw_prompt(w: float, h: float, me) -> void:
 		var node := game.find_interactable(me.aim_id)
 		guide_here = node != null and node.get("kind") == "guide"
 	if guide_here:
-		_text(Vector2(0, y), "[R] Read the medical guide", 13, Color("c9d1d9"), HORIZONTAL_ALIGNMENT_CENTER, w)
+		_text(Vector2(0, y), "[E] Read the medical guide", 13, Color("c9d1d9"), HORIZONTAL_ALIGNMENT_CENTER, w)
 
 
 const SLOT_TEAL := Color(0.3, 0.9, 0.82)
@@ -174,23 +202,33 @@ func _draw_hands(w: float, h: float, me) -> void:
 	var x0 := w * 0.5 - (box.x * n + gap * (n - 1)) * 0.5
 	var y := h - 66.0
 	var sel_head: int = me.selected_head()
+	# SWEEP 4A HOOK (controls): while Alt is held, the item bar slides up and shrinks into the same
+	# small top-left row the ability bar's icons occupy when idle (_draw_ability_bar), and the
+	# ability bar grows into this row instead. `t` is the same `_alt_t` both bars share, so they
+	# cross-fade into each other's spot over ~0.12 s rather than overlapping.
+	var t := clampf(_alt_t, 0.0, 1.0)
+	var small := Vector2(30, 20)
+	var small_y := y - small.y - 6.0
 	var rects := []
 	for i in n:
-		rects.append(Rect2(x0 + i * (box.x + gap), y, box.x, box.y))
-	# Bridges between a bulky stack and its second half, drawn under the boxes.
-	for i in n:
-		var t: int = me.tail_of(i)
-		if t < 0 or String(me.slots[i].kind) == "":
-			continue
-		var a: Rect2 = rects[mini(i, t)]
-		var b: Rect2 = rects[maxi(i, t)]
-		if absi(i - t) == 1:
-			draw_rect(Rect2(a.end.x - 2, a.position.y + 12, b.position.x - a.end.x + 4, box.y - 24), Color(SLOT_GOLD, 0.55))
-		else:
-			var ya := a.position.y - 4.0
-			draw_line(Vector2(a.get_center().x, ya), Vector2(b.get_center().x, ya), Color(SLOT_GOLD, 0.75), 2.0)
-			draw_line(Vector2(a.get_center().x, ya), Vector2(a.get_center().x, a.position.y), Color(SLOT_GOLD, 0.75), 2.0)
-			draw_line(Vector2(b.get_center().x, ya), Vector2(b.get_center().x, b.position.y), Color(SLOT_GOLD, 0.75), 2.0)
+		var big_r := Rect2(x0 + i * (box.x + gap), y, box.x, box.y)
+		var small_r := Rect2(x0 + i * (small.x + 4.0), small_y, small.x, small.y)
+		rects.append(Rect2(big_r.position.lerp(small_r.position, t), big_r.size.lerp(small_r.size, t)))
+	# Bridges between a bulky stack and its second half, drawn under the boxes (full size only).
+	if t < 0.5:
+		for i in n:
+			var tail: int = me.tail_of(i)
+			if tail < 0 or String(me.slots[i].kind) == "":
+				continue
+			var a: Rect2 = rects[mini(i, tail)]
+			var b: Rect2 = rects[maxi(i, tail)]
+			if absi(i - tail) == 1:
+				draw_rect(Rect2(a.end.x - 2, a.position.y + 12, b.position.x - a.end.x + 4, box.y - 24), Color(SLOT_GOLD, 0.55))
+			else:
+				var ya := a.position.y - 4.0
+				draw_line(Vector2(a.get_center().x, ya), Vector2(b.get_center().x, ya), Color(SLOT_GOLD, 0.75), 2.0)
+				draw_line(Vector2(a.get_center().x, ya), Vector2(a.get_center().x, a.position.y), Color(SLOT_GOLD, 0.75), 2.0)
+				draw_line(Vector2(b.get_center().x, ya), Vector2(b.get_center().x, b.position.y), Color(SLOT_GOLD, 0.75), 2.0)
 	for i in n:
 		var s: Dictionary = me.slots[i]
 		var r: Rect2 = rects[i]
@@ -206,7 +244,15 @@ func _draw_hands(w: float, h: float, me) -> void:
 		if kind != "":
 			draw_rect(Rect2(r.position.x, r.end.y - 3, r.size.x, 3), Color(accent, 0.85))
 		draw_rect(r, Color("f0e6c8") if sel else Color(0.5, 0.55, 0.6, 0.5), false, 2.0 if sel else 1.0)
-		_text(r.position + Vector2(5, 13), "%d" % (i + 1), 10, Color("8a9aa0"))
+		if t < 0.5:
+			_text(r.position + Vector2(5, 13), "%d" % (i + 1), 10, Color("8a9aa0"))
+		if kind == "":
+			continue
+		if t >= 0.5:
+			# Shrunk: just the key and a one-letter/short hint, same spirit as the ability bar's
+			# small idle icons.
+			_text(r.position + Vector2(3, 14), "%d" % (i + 1), 9, Color("8a9aa0"))
+			continue
 		if s.has("of"):
 			# Second half of a bulky stack: hatched.
 			for k in 6:
@@ -215,8 +261,6 @@ func _draw_hands(w: float, h: float, me) -> void:
 			var head_name := _fit(Items.display_name(kind), 11, box.x - 10)
 			_text(r.position + Vector2(0, 22), head_name, 11, Color(SLOT_GOLD, 0.75), HORIZONTAL_ALIGNMENT_CENTER, box.x)
 			_text(r.position + Vector2(0, 35), "(2nd slot)", 10, Color(0.75, 0.75, 0.75, 0.7), HORIZONTAL_ALIGNMENT_CENTER, box.x)
-			continue
-		if kind == "":
 			continue
 		var label: String = Items.def(kind).get("short", Items.display_name(kind)) if int(s.count) > 1 else Items.display_name(kind)
 		label = _fit(label, 12, box.x - 10)
@@ -229,6 +273,107 @@ func _draw_hands(w: float, h: float, me) -> void:
 			_text(r.position + Vector2(0, 37), "$%d" % worth, 10, Color(SLOT_GOLD, 0.95), HORIZONTAL_ALIGNMENT_CENTER, box.x)
 		if int(s.count) > 1 and int(s.get("v", 0)) > 0:
 			_text(r.position + Vector2(box.x - 34, 13), "$%d" % int(s.v), 10, Color(SLOT_GOLD, 0.95))
+
+
+## SWEEP 4A HOOK (controls): the 4 ability slots. Small top-left of the hands bar normally; while
+## Alt is held they slide/grow into the bar itself (~0.12 s, `_alt_t`) and the item icons shrink to
+## a small row where the abilities were. Each icon: the key, a cooldown sweep, level pips, a cost
+## tag, and (Alt held) the ability's name and, when it cannot fire, why.
+func _draw_ability_bar(w: float, h: float, me) -> void:
+	var b := game.brains
+	if b == null:
+		return
+	drawn.append("abilities")
+	var slots: Array = b.slots_for(me.peer_id)
+	var n: int = slots.size()
+	var box := Vector2(112, 40)
+	var gap := 6.0
+	var x0 := w * 0.5 - (box.x * n + gap * (n - 1)) * 0.5
+	var big_y := h - 66.0
+	var small := Vector2(30, 20)
+	var small_y := big_y - small.y - 6.0
+	var t := clampf(_alt_t, 0.0, 1.0)
+	for i in n:
+		var big_r := Rect2(x0 + i * (box.x + gap), big_y, box.x, box.y)
+		var small_r := Rect2(x0 + i * (small.x + 4.0), small_y, small.x, small.y)
+		var r := Rect2(big_r.position.lerp(small_r.position, t), big_r.size.lerp(small_r.size, t))
+		var id := String(slots[i])
+		var name: String = String(ABILITY_LABEL.get(id, ""))
+		var lvl: int = b.level(me.peer_id, String(b.ABILITY_ID_TO_PATH.get(id, ""))) if id != "" else 0
+		var cd: float = b.cooldown_left(me.peer_id, String(b.ABILITY_ID_TO_PATH.get(id, ""))) if id != "" else 0.0
+		var reason := _slot_reason(me, id, cd)
+		var usable := id != "" and reason == ""
+		draw_rect(r, Color(0, 0, 0, 0.55))
+		draw_rect(r, Color("f0e6c8", 0.85) if id != "" else Color(0.5, 0.55, 0.6, 0.4), false, 1.5)
+		if id == "":
+			continue
+		if not usable:
+			draw_rect(r, Color(0, 0, 0, 0.45))
+		_text(r.position + Vector2(4, 12), "Alt+%d" % (i + 1), 9, Color("8a9aa0"))
+		if cd > 0.0:
+			var sweep: float = clampf(cd / (20.0 if id == "echo" else 12.0), 0.0, 1.0)
+			draw_rect(Rect2(r.position.x, r.end.y - 4, r.size.x * sweep, 4), Color("5ce0d0", 0.85))
+		for pip in lvl:
+			draw_circle(r.position + Vector2(10 + pip * 8, r.size.y - 8), 2.5, Color("9fe8a0"))
+		var cost := String(ABILITY_COST.get(id, ""))
+		if cost != "":
+			_text(Vector2(r.end.x - 34, r.position.y + 12), cost, 9, Color("e0a020"))
+		if t > 0.4:
+			_text(r.position + Vector2(0, r.size.y * 0.5 + 4), _fit(name, 11, box.x - 8), 11, Color("eeeeee"), HORIZONTAL_ALIGNMENT_CENTER, box.x)
+			if reason != "":
+				_text(Vector2(0, r.position.y - 6), reason, 11, Color("e0a020"), HORIZONTAL_ALIGNMENT_CENTER, w)
+
+
+## Why a slot cannot fire right now, "" when it can (or it is empty / not the local player's).
+func _slot_reason(me, id: String, cd: float) -> String:
+	if id == "":
+		return ""
+	if not me.alive or me.downed:
+		return "Not now"
+	if cd > 0.0:
+		return "Cooling down (%d s)" % ceili(cd)
+	if id == "hive_in" and (me.carrying != 0 or me.operating):
+		return "Hands busy"
+	if id == "hive_in" and not me.get("hive_view"):
+		var b = game.brains
+		var lvl: int = b.level(me.peer_id, "walk_in")
+		if b.nearest_walk_in(me, b.hive_range(lvl)) == null:
+			return "No Walk-In in range"
+	return ""
+
+
+## SWEEP 4A HOOK (scanner): a small progress ring at the crosshair while R is held on a monster.
+func _draw_scan_ring(w: float, h: float, me) -> void:
+	if not bool(me.get("scan_holding")) or float(me.get("scan_progress")) <= 0.001:
+		return
+	drawn.append("scan_ring")
+	var c := Vector2(w, h) * 0.5
+	var prog: float = float(me.scan_progress)
+	draw_arc(c, 22.0, -PI * 0.5, -PI * 0.5 + TAU * prog, 32, Color("5ce0d0", 0.9), 3.0)
+	draw_arc(c, 22.0, 0.0, TAU, 32, Color(1, 1, 1, 0.15), 1.5)
+
+
+## SWEEP 4A HOOK: the first-ability card, closing itself after a few seconds or on any key.
+func _draw_ability_card(w: float, h: float) -> void:
+	var id := ""
+	var until := 0.0
+	for k in _card_until.keys():
+		if float(_card_until[k]) > until:
+			until = float(_card_until[k])
+			id = String(k)
+	if id == "" or _t > until:
+		return
+	drawn.append("ability_card")
+	var name: String = String(ABILITY_LABEL.get(id, id))
+	var desc: String = String(ABILITY_DESC.get(id, ""))
+	var cost: String = String(ABILITY_COST.get(id, ""))
+	var box := Rect2(w * 0.5 - 190, h * 0.28, 380, 96)
+	draw_rect(box, Color(0.03, 0.04, 0.06, 0.9))
+	draw_rect(box, Color("f0e6c8", 0.6), false, 1.5)
+	_text(Vector2(box.position.x, box.position.y + 24), "New ability: %s" % name, 18, Color("f0e6c8"), HORIZONTAL_ALIGNMENT_CENTER, box.size.x)
+	_text(Vector2(box.position.x + 14, box.position.y + 48), desc, 12, Color("c9d1d9"), HORIZONTAL_ALIGNMENT_LEFT, box.size.x - 28)
+	var foot := "Press any key to close" if cost == "" else "Cost: %s   Press any key to close" % cost
+	_text(Vector2(box.position.x, box.position.y + 82), foot, 11, Color("8a9aa0"), HORIZONTAL_ALIGNMENT_CENTER, box.size.x)
 
 
 ## Shorten a label with an ellipsis until it fits `width` pixels at `size_px`.
@@ -326,7 +471,7 @@ func _draw_hint(w: float, h: float) -> void:
 		return
 	drawn.append("hint")
 	_text(Vector2(0, h - 8),
-		"WASD move   MOUSE look   SHIFT sprint   F light   E use   G set down   1-4 slots   R read guide   Q shove   ESC pause",
+		"WASD move   SPACE jump   CTRL crouch   MOUSE look   SHIFT sprint   F light   E use   G set down   1-4 slots   ALT+1-4 abilities   R scan   Q shove   ESC pause",
 		12, Color(0.67, 0.67, 0.67, minf(1.0, _hint_timer / 2.0)), HORIZONTAL_ALIGNMENT_CENTER, w)
 
 
