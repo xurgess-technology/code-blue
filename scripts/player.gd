@@ -46,6 +46,14 @@ var aim_hold: float = 0.0
 ## Counters the host watches so each press fires exactly once.
 var shove_count: int = 0
 var drop_count: int = 0
+## SWEEP 4A HOOK (pharmacy, chunk 3): 0..1 charge the drop key had when it last fired
+## (client-owned, sent alongside drop_count so the host reads them together). A quick tap
+## reports ~0 (the old gentle toss); holding the key ramps it up to 1 by DROP_CHARGE_FULL.
+var drop_charge: float = 0.0
+var _drop_holding: bool = false
+var _drop_hold_t: float = 0.0
+const DROP_TAP_MAX := 0.15
+const DROP_CHARGE_FULL := 1.1
 var interact_count: int = 0
 var wants_interact: bool = false
 ## SWEEP 3 HOOK: left mouse with a usable item in hand (bone saw swing, anesthetic jab; see
@@ -68,6 +76,20 @@ var scan_target_id: int = -1
 var hive_view: bool = false
 var _hive_pitch := 0.0
 var _was_hive := false
+
+## SWEEP 4A HOOK (pharmacy, chunk 3): the placebo pill's warm screen effect. Purely local
+## presentation (never replicated): the host tells the affected machine a pill landed
+## (game._event "pill_warm") and that machine alone ticks and renders this. `warm_level` is what
+## hud.gd draws (0..1, capped low so it never hurts visibility); `warm_target`/`warm_hold_left`
+## drive the fade in / hold / fade out.
+var warm_level: float = 0.0
+var warm_target: float = 0.0
+var warm_hold_left: float = 0.0
+const WARM_FADE_IN := 2.0
+const WARM_HOLD := 15.0
+const WARM_FADE_OUT := 3.0
+const WARM_CAP := 1.0
+const WARM_STEP := 0.4
 
 ## Test seam: when bot_active is set, these stand in for keyboard and mouse so a
 ## script can play the game headlessly. Nothing in the shipped game touches them.
@@ -636,8 +658,18 @@ func _local_step(delta: float) -> void:
 			if _charging_with != "" and not Input.is_action_pressed(_charging_with):
 				_charging_with = ""
 				g.combat.local_shove_release(self)
+		# SWEEP 4A HOOK (pharmacy, chunk 3): hold the drop key to charge a throw, release to fire
+		# it; a quick tap still reports ~0 charge, the old gentle drop. Client-owned charge timer.
 		if Input.is_action_just_pressed("drop") and selected_stack().kind != "" and dragging_monster < 0 and not winding:
-			drop_count += 1
+			_drop_holding = true
+			_drop_hold_t = 0.0
+		if _drop_holding:
+			_drop_hold_t += delta
+			if not Input.is_action_pressed("drop"):
+				_drop_holding = false
+				var held: float = _drop_hold_t
+				drop_charge = 0.0 if held <= DROP_TAP_MAX else clampf((held - DROP_TAP_MAX) / (DROP_CHARGE_FULL - DROP_TAP_MAX), 0.0, 1.0)
+				drop_count += 1
 		# SWEEP 4A HOOK (controls): Alt+1..4 fires an ability slot; plain 1..4 still picks an item
 		# slot. Holding Alt does not block movement or anything else.
 		var alt_down: bool = Input.is_action_pressed("ability_alt")
@@ -772,7 +804,7 @@ func _consume_actions() -> void:
 	if drop_count != _drop_seen:
 		_drop_seen = drop_count
 		if alive and not busy:
-			game.drop_selected(self)
+			game.drop_selected(self, drop_charge)   # SWEEP 4A HOOK (pharmacy, chunk 3): charged throw
 	if interact_count != _interact_seen:
 		_interact_seen = interact_count
 		if hive_view:
@@ -1081,7 +1113,25 @@ func holding(kind: String) -> bool:
 	return false
 
 
+## SWEEP 4A HOOK (pharmacy, chunk 3): a placebo pill just landed on me. Local-only; stacking
+## resets the hold and nudges the strength up, capped low.
+func add_warm() -> void:
+	warm_target = clampf(warm_target + WARM_STEP, WARM_STEP, WARM_CAP)
+	warm_hold_left = WARM_HOLD
+
+
+func _tick_warm(delta: float) -> void:
+	if warm_hold_left > 0.0:
+		warm_hold_left -= delta
+		warm_level = move_toward(warm_level, warm_target, delta / WARM_FADE_IN)
+	else:
+		warm_target = 0.0
+		warm_level = move_toward(warm_level, 0.0, delta / WARM_FADE_OUT)
+
+
 func _process(_delta: float) -> void:
+	if is_local:
+		_tick_warm(_delta)
 	_update_down_pose(_delta)  # DEV HOOK
 	var s: Dictionary = selected_stack()
 	var key := "%s:%d" % [s.kind, s.count]
@@ -1325,7 +1375,8 @@ func report_state() -> Array:
 	var bits := (1 if flashlight_on else 0) | (2 if sprinting else 0) | (4 if moving else 0) | (8 if wants_interact else 0) \
 		| (16 if crouching else 0) | (32 if scan_holding else 0)
 	return [global_position, rotation.y, head.rotation.x, bits, shove_count, drop_count, aim_id, interact_count, selected, use_count,
-		ability_slot_press[0], ability_slot_press[1], ability_slot_press[2], ability_slot_press[3]]
+		ability_slot_press[0], ability_slot_press[1], ability_slot_press[2], ability_slot_press[3],
+		snappedf(drop_charge, 0.02)]   # SWEEP 4A HOOK (pharmacy, chunk 3)
 
 
 func apply_remote_state(s: Array) -> void:
@@ -1356,6 +1407,8 @@ func apply_remote_state(s: Array) -> void:
 	if s.size() >= 14:   # sweep 4a: ability slots
 		for i in 4:
 			ability_slot_press[i] = int(s[10 + i])
+	if s.size() >= 15:   # SWEEP 4A HOOK (pharmacy, chunk 3): charged throw
+		drop_charge = float(s[14])
 	_consume_actions()
 
 

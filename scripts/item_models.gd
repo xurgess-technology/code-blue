@@ -50,6 +50,7 @@ static func make(kind: String, count: int = 1) -> Node3D:
 		"bone_saw": _bone_saw(root)
 		"guide": _guide(root)
 		"suture_kit": _suture_kits(root, clampi(count, 1, 4))
+		"placebo_pills": _placebo_bottle(root)   # SWEEP 4A HOOK (pharmacy, chunk 3)
 		_:
 			if LootTable.has(kind):
 				LootModels.build(root, kind, count)
@@ -135,6 +136,7 @@ static func footprint(kind: String) -> Vector3:
 		"bone_saw": return Vector3(0.52, 0.05, 0.16)
 		"guide": return Vector3(0.24, 0.06, 0.31)
 		"suture_kit": return Vector3(0.16, 0.05, 0.11)
+		"placebo_pills": return Vector3(0.045, 0.07, 0.045)
 	if LootTable.has(kind):
 		return LootModels.footprint(kind)
 	return Vector3(0.15, 0.1, 0.15)
@@ -602,6 +604,19 @@ static func _suture_kits(root: Node3D, n: int) -> void:
 			coil.material_override = thread
 			_add(pack, coil, Vector3(0.035, 0.0072, -0.012)).scale = Vector3(1, 0.25, 1)
 		_add(root, pack, Vector3(i * 0.004, y, i * 0.003), Vector3(0, (i * 11) % 14 - 7, 0))
+
+
+## SWEEP 4A HOOK (pharmacy, chunk 3): one small amber bottle, same shape family as the loot
+## pill_bottle (loot_models.gd) but its own primitives so it stays independent of the loot table.
+static func _placebo_bottle(root: Node3D) -> void:
+	var amber := _glass(Color(0.95, 0.5, 0.12))
+	var cap := _mat(Color(0.93, 0.93, 0.9), 0.45)
+	var label := _mat(Color(0.98, 0.97, 0.94), 0.9)
+	var pills := _mat(Color(0.95, 0.92, 0.85), 0.8)
+	_add(root, _cyl(0.021, 0.07, amber), Vector3(0, 0.035, 0))
+	_add(root, _cyl(0.017, 0.04, pills), Vector3(0, 0.022, 0))
+	_add(root, _cyl(0.0215, 0.03, label), Vector3(0, 0.036, 0))
+	_add(root, _cyl(0.023, 0.014, cap), Vector3(0, 0.077, 0))
 
 
 static func _guide(root: Node3D) -> void:
