@@ -1,7 +1,7 @@
 extends Node
 ## Headless checks for the inventory sweep: four hand slots, merging, bulky loot, drops on a hit,
-## loot spawning and colour coding, selling, money, the gold bar shop and the pile, persistence
-## across shifts and the reset.
+## loot spawning and colour coding, selling into the furnace, buying at the pharmacy, placebo
+## pills and the charged throw, persistence across shifts and the reset.
 ##
 ##   godot --headless --fixed-fps 60 --path . tools/inventorytest.tscn [-- --seed=N]
 ##

@@ -457,8 +457,8 @@ func finish_shift(text: String, seconds: float) -> void:
 		_rpc_shift.rpc(seed_value, shift, phase, _net_seq)
 
 
-## Host: everyone is down or dead during a shift. Game over: after the screen, money and the gold
-## pile reset and a new run starts in a new hospital.
+## Host: everyone is down or dead during a shift. Game over: after the screen, money resets and a
+## new run starts in a new hospital.
 func game_over(text: String) -> void:
 	if not is_host() or phase == Phase.LOST:
 		return

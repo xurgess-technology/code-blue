@@ -626,8 +626,8 @@ static func _build_surfaces(gen: Dictionary, geo: GeoChunks, part: int = PART_BA
 		_ground_paint(geo, gen)
 
 
-## Parking stall lines, the ambulance bay box, a crossing from the main doors and a square
-## where the gold bars go: flat quads just above the asphalt.
+## Parking stall lines, the ambulance bay box and a crossing from the main doors: flat quads just
+## above the asphalt.
 static func _ground_paint(geo: GeoChunks, gen: Dictionary) -> void:
 	var spots: Dictionary = gen.spots
 	if not spots.has("stalls"):

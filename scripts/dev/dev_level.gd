@@ -230,7 +230,7 @@ static func build(info: Dictionary) -> Node3D:
 		disp_root.add_child(d)
 		_obstacles.append([d.position, Vector3(0.7, 0, 0.9)])
 
-	# ---- inventory (sweep 2): the loot rack, the sell bin, the shop and the gold pile ----
+	# ---- inventory (sweep 2): the loot rack; pharmacy chunk 3: the pharmacy and the furnace ----
 	# A rack of cubbies on the south wall, west of the spawn line: one dispenser per loot kind,
 	# bulky ones on the bottom row. The economy spots are read by scripts/economy/economy.gd.
 	var loot_kinds: Array = LootTableScript.kinds()

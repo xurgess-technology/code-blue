@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// tools/gen_audio_economy.mjs: offline synth for selling loot and buying gold bars.
+// tools/gen_audio_economy.mjs: offline synth for the furnace sale and the pharmacy purchase.
 //
 //   node tools/gen_audio_economy.mjs          # write audio/sfx/economy_*.wav
 //   node tools/gen_audio_economy.mjs --check  # render and report, write nothing
@@ -7,9 +7,10 @@
 // Same style as gen_audio.mjs: dependency-free, one seeded PRNG stream per file, so re-running
 // produces byte-identical output.
 //
-//   economy_sell       loot into the sell bin: a clattering drop, then a bright till "ka-ching"
-//   economy_buy        buying at the shop: a till beep and the cash drawer thunking open
-//   economy_bar_01/02  a gold bar landing on the pile: a heavy, ringing metal clunk
+//   economy_sell       an item burns in the furnace: a clattering drop, then a bright "ka-ching"
+//   economy_buy        buying pills at the pharmacy: a till beep and the cash drawer thunking open
+//   economy_bar_01/02  SWEEP 4A HOOK (pharmacy, chunk 3): unused now the shop's bars are gone;
+//                      kept so nothing that still references the wav files 404s
 
 import fs from 'node:fs';
 import path from 'node:path';

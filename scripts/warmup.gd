@@ -58,8 +58,8 @@ static func run(game: Node) -> void:
 			m.position = Vector3(x, 0.35, 0.0)
 			x += 0.26
 
-	# INVENTORY HOOK: the teal / gold rim overlay on stacks, every loot kind, the sell bin, the
-	# shop counter and a gold pile.
+	# INVENTORY HOOK: the teal / gold rim overlay on stacks, every loot kind, and (pharmacy chunk 3)
+	# the pharmacy window and the furnace.
 	for kind in Items.ITEMS.keys() + LootTable.kinds():
 		var tm := ItemModels.make_tinted(kind, 1)
 		shelf.add_child(tm)
