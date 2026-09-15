@@ -48,6 +48,7 @@ func _run() -> void:
 	await _blender()
 	await _abilities_nothing_and_echo()
 	await _hive_eyes()
+	await _ability_slots()
 	await _reset_on_game_over()
 
 
@@ -225,6 +226,8 @@ func _abilities_nothing_and_echo() -> void:
 	var mon: Node = game._add_monster("discharged", game._floor_at(here + Vector3(6, 0, 0)))
 	await _frames(4)
 	b.add_points(me.peer_id, "discharged", 1.0)
+	_check(b.slot_of(me.peer_id, "echo") == 0, "reaching level 1 puts Echo in the first empty slot")
+	me.bot_ability_slot = b.slot_of(me.peer_id, "echo")
 	var t0 := game.world_time
 	me.bot_ability += 1
 	await _frames(3)
@@ -263,7 +266,8 @@ func _hive_eyes() -> void:
 	me.bot_invulnerable = true
 	b.add_points(me.peer_id, "walk_in", 1.0)
 	b.add_points(me.peer_id, "discharged", 0.5)
-	_check(b.best_path(me.peer_id) == "walk_in", "more Walk-In points: R is Hive Eyes")
+	_check(b.slot_of(me.peer_id, "hive_in") == 0 and b.slot_of(me.peer_id, "echo") == -1, "Walk-In reached level 1 (0.5 points is not): Hive Eyes took the first slot, Echo has none yet")
+	me.bot_ability_slot = 0
 	me.bot_ability += 1
 	await _frames(3)
 	_check(b.last_result == "no_walk_in" and not me.hive_view, "no Walk-In nearby: nothing happens but a hint (%s)" % b.last_result)
@@ -342,15 +346,35 @@ func _hive_eyes() -> void:
 		me.bot_ability += 1
 		await _frames(3)
 		_say("(no Monster.sedate on this branch: the sedation end is covered by has_method only)")
-	# Tie: Echo.
+	# Both paths at once: each gets its own slot, independent of order.
 	b.on_reset()
 	b.add_points(me.peer_id, "walk_in", 1.0)
 	b.add_points(me.peer_id, "discharged", 1.0)
-	_check(b.best_path(me.peer_id) == "discharged", "a tie uses Echo")
+	_check(b.slot_of(me.peer_id, "hive_in") == 0 and b.slot_of(me.peer_id, "echo") == 1, "Hive Eyes and Echo each land in their own slot")
 	game.kill_monster(wi2)
 	game.kill_monster(far)
 	b.echo_view.stop()
 	me.bot_invulnerable = false
+
+
+## SWEEP 4A HOOK (controls): add_ability() / set_level() / slot_of(), the 4-slot cap, and a
+## refusal past it. Synthetic ids so this does not depend on how many real abilities exist.
+func _ability_slots() -> void:
+	_say("---- ability slots (sweep 4a)")
+	var b: Node = game.brains
+	b.on_reset()
+	_check(b.add_ability(me.peer_id, "test_a"), "slot 1 accepts a new ability")
+	_check(b.add_ability(me.peer_id, "test_b"), "slot 2 accepts a new ability")
+	_check(b.add_ability(me.peer_id, "test_c"), "slot 3 accepts a new ability")
+	_check(b.add_ability(me.peer_id, "test_d"), "slot 4 accepts a new ability")
+	_check(not b.add_ability(me.peer_id, "test_e"), "a 5th ability is refused")
+	_check(b.slots_for(me.peer_id) == ["test_a", "test_b", "test_c", "test_d"], "each landed in the first empty slot, in order")
+	_check(b.add_ability(me.peer_id, "test_a") and b.slot_of(me.peer_id, "test_a") == 0, "adding an ability already in a slot is a no-op, not a refusal")
+	b.on_reset()
+	_check(b.slots_for(me.peer_id) == ["", "", "", ""], "a reset clears the slots")
+	b.set_level(me.peer_id, "echo", 2)
+	_check(b.level(me.peer_id, "discharged") == 2 and b.slot_of(me.peer_id, "echo") == 0, "set_level(peer, id, lvl) sets the level and grants the slot directly")
+	b.on_reset()
 
 
 func _reset_on_game_over() -> void:

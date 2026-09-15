@@ -24,6 +24,13 @@ const PATH_OF := {"brain_walk_in": "walk_in", "brain_discharged": "discharged"}
 const KIND_OF := {"walk_in": "brain_walk_in", "discharged": "brain_discharged"}
 const PATHS := ["walk_in", "discharged"]
 const ABILITY_NAME := {"walk_in": "Hive Eyes", "discharged": "Echo"}
+## SWEEP 4A HOOK (controls): ability ids, and the ability-slot cap. add_ability()/set_level()/
+## slot_of() are independent of how a level is earned (today: brains + blender points; grafting
+## will source them later, docs/backlog/SWEEP4B.md), so slot code never reads `_points` directly
+## except through level()/points().
+const ABILITY_ID := {"discharged": "echo", "walk_in": "hive_in"}
+const ABILITY_ID_TO_PATH := {"echo": "discharged", "hive_in": "walk_in"}
+const MAX_SLOTS := 4
 ## A spoil time at or below this means "none" (WorldItem.bt defaults to -1e6; a real one can be negative).
 const NO_BT := -100000.0
 const WALK_IN := "walk_in"   # Monster.WALK_IN (monsters worker); the string, so this runs without it
@@ -64,6 +71,10 @@ var _points: Dictionary = {}
 var _hive: Dictionary = {}
 ## Replicated. peer id -> blend progress 0..1 (only while someone holds E on the blender).
 var _blend: Dictionary = {}
+## Replicated. peer id -> Array[MAX_SLOTS] of ability id ("" empty). Host authoritative; a new
+## ability goes into the first empty slot the moment its path first reaches level 1. See
+## add_ability() / set_level() / slot_of() below.
+var _slots: Dictionary = {}
 
 # host only
 var _hive_hp: Dictionary = {}          # peer id -> hp when the view started
@@ -205,22 +216,61 @@ func level(peer_id: int, path: String) -> int:
 	return mini(MAX_LEVEL, int(floor(points(peer_id, path) + 0.001)))
 
 
-## The path R uses: the one with more points (a tie is Echo), "" with none.
-func best_path(peer_id: int) -> String:
-	var w := points(peer_id, "walk_in")
-	var d := points(peer_id, "discharged")
-	if w <= 0.0 and d <= 0.0:
-		return ""
-	return "walk_in" if w > d else "discharged"
-
-
 func add_points(peer_id: int, path: String, amount: float) -> void:
 	var i := PATHS.find(path)
 	if i < 0:
 		return
+	var before := level(peer_id, path)
 	var arr: Array = _points.get(peer_id, [0.0, 0.0]).duplicate()
 	arr[i] = clampf(float(arr[i]) + amount, 0.0, float(MAX_LEVEL))
 	_points[peer_id] = arr
+	if before == 0 and level(peer_id, path) >= 1 and ABILITY_ID.has(path):
+		add_ability(peer_id, String(ABILITY_ID[path]))
+
+
+# =========================================================================
+# ability slots (sweep 4a, docs/SWEEP4A.md "Controls, ability slots and HUD, scanner")
+# =========================================================================
+
+## This player's 4 ability slots, ability id or "" for empty. Never call this to add an ability
+## (it does not create the entry lazily on clients that should not invent one); use add_ability().
+func slots_for(peer_id: int) -> Array:
+	if not _slots.has(peer_id):
+		_slots[peer_id] = ["", "", "", ""]
+	return _slots[peer_id]
+
+
+## Host: `id` goes into the first empty slot. Refuses (returns false, the slots unchanged) once
+## the player already has MAX_SLOTS abilities, or if `id` is already in a slot (idempotent).
+func add_ability(peer_id: int, id: String) -> bool:
+	var arr: Array = slots_for(peer_id)
+	if arr.has(id):
+		return true
+	var i := arr.find("")
+	if i < 0:
+		return false
+	arr[i] = id
+	return true
+
+
+## Which slot `id` is in for this player, or -1.
+func slot_of(peer_id: int, id: String) -> int:
+	return slots_for(peer_id).find(id)
+
+
+## Host (tests, dev, and later grafting): set the level of an ability directly, independent of
+## how points are normally earned. `id` must be a known ability id (echo / hive_in); a level of
+## 1 or more also grants the slot, same as reaching it through points.
+func set_level(peer_id: int, id: String, lvl: int) -> void:
+	var path: String = String(ABILITY_ID_TO_PATH.get(id, ""))
+	if path == "":
+		return
+	var i := PATHS.find(path)
+	var arr: Array = _points.get(peer_id, [0.0, 0.0]).duplicate()
+	arr[i] = clampf(float(lvl), 0.0, float(MAX_LEVEL))
+	_points[peer_id] = arr
+	if lvl >= 1:
+		add_ability(peer_id, id)
 
 
 static func points_for(factor: float) -> float:
@@ -261,6 +311,7 @@ func on_reset() -> void:
 	_cd.clear()
 	_press_grace.clear()
 	_hint_at.clear()
+	_slots.clear()
 
 
 # =========================================================================
@@ -338,12 +389,24 @@ func drink(p: Node) -> void:
 # the ability (R)
 # =========================================================================
 
-## Host: p pressed R.
-func ability(p: Node) -> void:
+## Host: p pressed Alt+(slot_idx+1). Per-slot dispatch: each slot's ability (if any) runs on its
+## own cooldown (echo:/hive: keys in _cd, unchanged by the slot it sits in). Pressing the slot again
+## while its ability is active (Hive Eyes) ends it, same as R used to.
+func ability_slot(p: Node, slot_idx: int) -> void:
 	if game == null or not game.is_host() or p == null:
 		return
 	var peer: int = p.peer_id
-	if _hive.has(peer):
+	var arr: Array = slots_for(peer)
+	if slot_idx < 0 or slot_idx >= arr.size():
+		return
+	var id := String(arr[slot_idx])
+	if id == "":
+		last_result = "nothing"
+		if float(game.world_time) - float(_hint_at.get(peer, -99.0)) > 1.0:
+			_hint_at[peer] = game.world_time
+			game.tell(p, "Nothing happens.", 1.5)
+		return
+	if id == "hive_in" and _hive.has(peer):
 		_end_hive(peer, "")
 		last_result = "hive_end"
 		return
@@ -353,13 +416,7 @@ func ability(p: Node) -> void:
 	if not p.alive or p.downed:
 		last_result = "down"
 		return
-	var path := best_path(peer)
-	if path == "":
-		last_result = "nothing"
-		if float(game.world_time) - float(_hint_at.get(peer, -99.0)) > 1.0:
-			_hint_at[peer] = game.world_time
-			game.tell(p, "Nothing happens.", 1.5)
-		return
+	var path: String = String(ABILITY_ID_TO_PATH.get(id, ""))
 	var lvl := level(peer, path)
 	var left := cooldown_left(peer, path)
 	if left > 0.0:
@@ -460,11 +517,14 @@ func camera() -> Camera3D:
 	return null
 
 
-## Every machine: the local player pressed Esc during Hive Eyes (same as R).
+## Every machine: the local player pressed Esc during Hive Eyes (same as pressing its slot again).
 func local_exit() -> void:
 	var me = game.local_player() if game != null else null
-	if me != null:
-		me.ability_count += 1
+	if me == null:
+		return
+	var i := slot_of(me.peer_id, "hive_in")
+	if i >= 0:
+		me.ability_slot_press[i] = int(me.ability_slot_press[i]) + 1
 
 
 # =========================================================================
@@ -673,7 +733,10 @@ func net_state() -> Dictionary:
 	var bh := {}
 	for peer in _blend.keys():
 		bh[peer] = snappedf(float(_blend[peer]), 0.05)
-	return {"p": pts, "hv": hv, "bh": bh}
+	var ab := {}
+	for peer in _slots.keys():
+		ab[peer] = (_slots[peer] as Array).duplicate()
+	return {"p": pts, "hv": hv, "bh": bh, "ab": ab}
 
 
 func apply_net_state(s: Dictionary) -> void:
@@ -682,6 +745,7 @@ func apply_net_state(s: Dictionary) -> void:
 	_points = (s.get("p", {}) as Dictionary).duplicate(true)
 	_hive = (s.get("hv", {}) as Dictionary).duplicate(true)
 	_blend = (s.get("bh", {}) as Dictionary).duplicate(true)
+	_slots = (s.get("ab", {}) as Dictionary).duplicate(true)
 
 
 ## Host: an event everywhere, this machine included.

@@ -51,7 +51,17 @@ var wants_interact: bool = false
 ## SWEEP 3 HOOK: left mouse with a usable item in hand (bone saw swing, anesthetic jab; see
 ## scripts/combat/combat.gd), and R for the absorbed-brain ability (scripts/brains/brains.gd).
 var use_count: int = 0
-var ability_count: int = 0
+## SWEEP 4A HOOK (controls): four ability slots (scripts/brains/brains.gd), each with its own
+## bump counter (Alt+1..4), analogous to ability_count before it. Report keys "a1".."a4".
+var ability_slot_press: Array = [0, 0, 0, 0]
+## SWEEP 4A HOOK (controls): crouch (client-owned, replicated: report bit 16 / report_full "cr")
+## and the scanner (client-owned aim/hold, report bit 32; the host checks range/LOS and records).
+var crouching: bool = false
+var scan_holding: bool = false
+## Local-only cosmetic scan progress (0..1) and the monster id it is aimed at, for the HUD ring.
+## Not replicated: every machine computes its own from its own aim, same as aim_id/aim_prompt.
+var scan_progress: float = 0.0
+var scan_target_id: int = -1
 ## SWEEP 3 HOOK (brains): looking through a Walk-In's eyes (Hive Eyes). Host authoritative, report
 ## key `hv`. The body stands still and helpless: no moving, looking, using or picking up; E or R
 ## (or Esc, main.gd) ends it; others see the head droop.
@@ -75,6 +85,11 @@ var bot_press: int = 0
 ## Bump to use the held item once (left mouse) / the brain ability once (R).
 var bot_use: int = 0
 var bot_ability: int = 0
+## SWEEP 4A HOOK: which slot bot_ability fires (default 0, back-compat with older bot scripts).
+var bot_ability_slot: int = 0
+var bot_crouch: bool = false
+var bot_jump: int = 0
+var bot_scan: bool = false
 
 ## DEV HOOK (scripts/dev): a dev room bot or target dummy. The host simulates it like a local
 ## player through the bot_* seam; everyone else sees it like a remote player.
@@ -129,9 +144,15 @@ var _drop_seen: int = 0
 var _interact_seen: int = 0
 var _bot_press_seen: int = 0
 var _use_seen: int = 0
-var _ability_seen: int = 0
+var _ability_slot_seen: Array = [0, 0, 0, 0]
 var _bot_use_seen: int = 0
 var _bot_ability_seen: int = 0
+var _bot_jump_seen: int = 0
+var _bot_jump_fire: bool = false
+## SWEEP 4A HOOK (controls): the collision capsule, resized crouched/standing.
+var _capsule: CapsuleShape3D
+var _coll_shape: CollisionShape3D
+var _want_crouch: bool = false
 var _held_key: String = ""
 var _held_fp: Node3D
 var _held_tp: Node3D
@@ -140,6 +161,7 @@ var _yaw: float = 0.0
 var _pitch: float = 0.0
 var _knock: Vector3 = Vector3.ZERO
 var _step_accum: float = 0.0
+var _scan_beep_accum: float = 0.0   # SWEEP 4A HOOK (scanner)
 var _target_pos: Vector3 = Vector3.ZERO
 var _target_yaw: float = 0.0
 var _was_on_floor: bool = true
@@ -194,6 +216,8 @@ func _build() -> void:
 	shape.shape = capsule
 	shape.position.y = C.PLAYER_HEIGHT * 0.5
 	add_child(shape)
+	_capsule = capsule
+	_coll_shape = shape
 
 	body_visual = _make_body()
 	add_child(body_visual)
@@ -476,13 +500,22 @@ func _local_step(delta: float) -> void:
 				g.combat.local_shove_release(self)
 		if bot_ability != _bot_ability_seen:
 			_bot_ability_seen = bot_ability
-			ability_count += 1
+			var bi: int = clampi(bot_ability_slot, 0, ability_slot_press.size() - 1)
+			ability_slot_press[bi] = int(ability_slot_press[bi]) + 1
+		_want_crouch = bot_crouch
+		scan_holding = bot_scan and not hive_view and not downed
+		if bot_jump != _bot_jump_seen:
+			_bot_jump_seen = bot_jump
+			_bot_jump_fire = true
 	elif can_move:
 		input_dir = Input.get_vector("move_left", "move_right", "move_forward", "move_back")
 		wants_interact = Input.is_action_pressed("interact")
 		want_sprint = Input.is_action_pressed("sprint")
+		_want_crouch = Input.is_action_pressed("crouch")
+		scan_holding = Input.is_action_pressed("scan") and not hive_view and not downed
 	else:
 		wants_interact = false
+		scan_holding = false
 	# SWEEP 3 HOOK (brains): Hive Eyes freezes the body; E or R asks to come back.
 	if hive_view != _was_hive:
 		_was_hive = hive_view
@@ -495,10 +528,13 @@ func _local_step(delta: float) -> void:
 		want_sprint = false
 		wants_interact = false
 		_pitch = move_toward(_pitch, -0.95, delta * 2.5)
-		if can_move and not bot_active and (Input.is_action_just_pressed("interact") or Input.is_action_just_pressed("read")):
-			ability_count += 1
+		if can_move and not bot_active and Input.is_action_just_pressed("interact") and game != null and game.brains != null:
+			var hi: int = game.brains.slot_of(peer_id, "hive_in")
+			if hi >= 0:
+				ability_slot_press[hi] = int(ability_slot_press[hi]) + 1
 
 	_update_aim()
+	_update_scan_progress(delta)
 	if can_move and not bot_active and not hive_view and Input.is_action_just_pressed("interact") \
 			and aim_id != "" and aim_hold <= 0.0 and not aim_prompt.begins_with("!"):
 		interact_count += 1
@@ -519,13 +555,19 @@ func _local_step(delta: float) -> void:
 	moving = input_dir.length() > 0.1 and not operating
 	# HANDS HOOK: winding up or charging walks (no sprint) and keeps the slot.
 	var winding: bool = g != null and g.combat != null and g.combat.is_winding(self)
-	sprinting = moving and can_move and want_sprint and stamina > 0.0 and not downed and carrying == 0 and dragging_monster < 0 and not winding
+	# SWEEP 4A HOOK (controls): crouch is client-owned. Standing back up is refused under a low
+	# ceiling (a raycast from the crouched head to the standing head height); until there is room
+	# the player stays crouched even if the key is let go.
+	_apply_crouch(delta)
+	sprinting = moving and can_move and want_sprint and stamina > 0.0 and not downed and not crouching and carrying == 0 and dragging_monster < 0 and not winding
 	stamina = clampf(stamina + (-delta / 4.5 if sprinting else delta / 5.0), 0.0, 1.0)
 
 	var speed: float = 0.0 if operating else (C.SPRINT_SPEED if sprinting else C.WALK_SPEED)
 	# Downed hook: crawling is slow; a teammate over your shoulder slows you down.
 	if downed:
 		speed = CRAWL_SPEED
+	elif crouching:
+		speed = C.CROUCH_SPEED   # SWEEP 4A HOOK (controls): crouching is slow, on top of everything else
 	elif carrying != 0:
 		speed *= CARRY_SPEED_K
 	elif dragging_monster >= 0:
@@ -535,10 +577,16 @@ func _local_step(delta: float) -> void:
 	var a: float = ACCEL if is_on_floor() else AIR_ACCEL
 	velocity.x = move_toward(velocity.x, target.x, a * delta * maxf(1.0, _knock.length()))
 	velocity.z = move_toward(velocity.z, target.z, a * delta * maxf(1.0, _knock.length()))
+	# SWEEP 4A HOOK (controls): a small grounded jump. Nothing floaty: gravity below still applies.
+	var want_jump: bool = is_on_floor() and not downed and not crouching and carrying == 0 and dragging_monster < 0 and not winding \
+			and ((can_move and not bot_active and Input.is_action_just_pressed("jump")) or (bot_active and _bot_jump_fire))
+	_bot_jump_fire = false
 	if not is_on_floor():
 		velocity.y -= 18.0 * delta
 	else:
 		velocity.y = minf(velocity.y, 0.0) + _knock.y
+	if want_jump:
+		velocity.y = C.JUMP_VELOCITY
 	_knock = _knock.lerp(Vector3.ZERO, clampf(delta * 6.0, 0.0, 1.0))
 
 	var was_air := not is_on_floor()
@@ -570,11 +618,16 @@ func _local_step(delta: float) -> void:
 			if _charging_with != "" and not Input.is_action_pressed(_charging_with):
 				_charging_with = ""
 				g.combat.local_shove_release(self)
-		if Input.is_action_just_pressed("read") and not downed and not _would_read_guide():
-			ability_count += 1
 		if Input.is_action_just_pressed("drop") and selected_stack().kind != "" and dragging_monster < 0 and not winding:
 			drop_count += 1
-		if dragging_monster < 0 and not winding:   # SWEEP 3 HOOK (combat): no slot changes while dragging (HANDS: or winding up)
+		# SWEEP 4A HOOK (controls): Alt+1..4 fires an ability slot; plain 1..4 still picks an item
+		# slot. Holding Alt does not block movement or anything else.
+		var alt_down: bool = Input.is_action_pressed("ability_alt")
+		if alt_down:
+			for i in ability_slot_press.size():
+				if Input.is_action_just_pressed("slot_%d" % (i + 1)):
+					ability_slot_press[i] = int(ability_slot_press[i]) + 1
+		elif dragging_monster < 0 and not winding:   # SWEEP 3 HOOK (combat): no slot changes while dragging (HANDS: or winding up)
 			for i in C.CARRY_CAP:
 				if Input.is_action_just_pressed("slot_%d" % (i + 1)):
 					selected = i
@@ -588,8 +641,9 @@ func _local_step(delta: float) -> void:
 		_charging_with = ""
 		g.combat.local_shove_release(self)
 
-	# Footsteps (a crawl makes none)
-	if moving and is_on_floor() and not downed:
+	# Footsteps (a crawl makes none). SWEEP 4A HOOK (controls): crouching makes no sound at all,
+	# on top of emit_noise() never firing for a crouching player (game.gd's _tick_noise).
+	if moving and is_on_floor() and not downed and not crouching:
 		_step_accum += delta * (3.0 if sprinting else 1.9)
 		if _step_accum >= 1.0:
 			_step_accum = 0.0
@@ -607,7 +661,30 @@ func _local_step(delta: float) -> void:
 		_consume_actions()
 
 
+## SWEEP 4A HOOK (controls): resize the collision capsule for crouch. `authoritative` (local /
+## host-simulated bots) decides `crouching` itself, including the "can't stand under a low
+## ceiling" refusal; a remote copy just follows the replicated bit and only resizes visually.
+func _apply_crouch(delta: float, authoritative: bool = true) -> void:
+	if authoritative:
+		var want_down: bool = _want_crouch and not downed and carried_by == 0 and not on_table
+		if crouching and not want_down:
+			var from: Vector3 = global_position + Vector3.UP * C.CROUCH_HEIGHT
+			var to: Vector3 = global_position + Vector3.UP * C.PLAYER_HEIGHT
+			var space := get_world_3d().direct_space_state
+			var q := PhysicsRayQueryParameters3D.create(from, to)
+			q.collision_mask = C.L_WORLD
+			q.exclude = [get_rid()]
+			if not space.intersect_ray(q).is_empty():
+				want_down = true   # blocked overhead: stay crouched even though the key is up
+		crouching = want_down
+	if _capsule != null:
+		var target_h: float = C.CROUCH_HEIGHT if crouching else C.PLAYER_HEIGHT
+		_capsule.height = target_h
+		_coll_shape.position.y = target_h * 0.5
+
+
 func _remote_step(delta: float) -> void:
+	_apply_crouch(delta, false)
 	var k := clampf(delta * 12.0, 0.0, 1.0)
 	# POCKETS HOOK: through a seam (or any teleport) the body jumps; never lerp it across the world.
 	if global_position.distance_squared_to(_target_pos) > 36.0:
@@ -615,7 +692,7 @@ func _remote_step(delta: float) -> void:
 	global_position = global_position.lerp(_target_pos, k)
 	rotation.y = lerp_angle(rotation.y, _target_yaw, k)
 	head.rotation.x = lerpf(head.rotation.x, -0.95 if hive_view else _pitch, k)   # SWEEP 3 HOOK (brains): head droops
-	if moving and not downed:
+	if moving and not downed and not crouching:
 		_step_accum += delta * (3.0 if sprinting else 1.9)
 		if _step_accum >= 1.0:
 			_step_accum = 0.0
@@ -654,19 +731,6 @@ func _pinned_step(delta: float) -> void:
 		head.rotation.x = lerpf(head.rotation.x, _pitch, clampf(delta * 12.0, 0.0, 1.0))
 
 
-## SWEEP 3 HOOK: R opens the guide (main.gd) while holding it or looking at it; otherwise R is the
-## brain ability. Same test as main.gd's _can_read.
-func _would_read_guide() -> bool:
-	if hive_view:
-		return false   # SWEEP 3 HOOK (brains): R comes back from Hive Eyes
-	if holding("guide"):
-		return true
-	if aim_id.begins_with("it_") and game != null:
-		var node: Node = game.find_interactable(aim_id)
-		return node != null and node.get("kind") == "guide"
-	return false
-
-
 ## Host-side: turn the shove/drop counters into actual events, exactly once each.
 func _consume_actions() -> void:
 	if game == null:
@@ -678,10 +742,11 @@ func _consume_actions() -> void:
 		_use_seen = use_count
 		if alive and not busy:
 			game.player_used(self)
-	if ability_count != _ability_seen:
-		_ability_seen = ability_count
-		if alive and not downed:
-			game.player_ability(self)
+	for i in ability_slot_press.size():
+		if int(ability_slot_press[i]) != int(_ability_slot_seen[i]):
+			_ability_slot_seen[i] = ability_slot_press[i]
+			if alive and not downed:
+				game.player_ability_slot(self, i)
 	if shove_count != _shove_seen:
 		_shove_seen = shove_count
 		if alive and not busy:
@@ -781,6 +846,47 @@ func _update_aim_core() -> void:
 	aim_id = String(node.get_meta("interact_id"))
 	aim_prompt = prompt
 	aim_hold = node.interact_hold()
+
+
+## SWEEP 4A HOOK (scanner): a purely local, cosmetic progress ring for the HUD. Every machine
+## computes its own (same as aim_id/aim_prompt); the host runs the authoritative range/LOS check
+## and records the scan separately in game.gd/_tick_scan.
+func _update_scan_progress(delta: float) -> void:
+	if not scan_holding or camera == null:
+		scan_progress = 0.0
+		scan_target_id = -1
+		return
+	var from := camera.global_position
+	var to := from - camera.global_transform.basis.z * C.SCAN_RANGE
+	var q := PhysicsRayQueryParameters3D.create(from, to)
+	q.collision_mask = C.L_WORLD | C.L_MONSTER
+	q.exclude = [get_rid()]
+	var hit := get_world_3d().direct_space_state.intersect_ray(q)
+	var target_id := -1
+	if not hit.is_empty():
+		var collider = hit.get("collider")
+		if collider != null and "monster_id" in collider:
+			target_id = int(collider.monster_id)
+	if target_id != scan_target_id:
+		scan_progress = 0.0
+		scan_target_id = target_id
+		_scan_beep_accum = 0.0
+	if target_id >= 0:
+		scan_progress = clampf(scan_progress + delta / C.SCAN_SECONDS, 0.0, 1.0)
+		# SWEEP 4A HOOK (scanner): a beep while scanning, faster as progress builds. This is a
+		# plain 2D sound (Audio.play), never game.emit_noise(): it is not a noise event, so
+		# monsters cannot hear it. is_local only, so it plays on the scanning player's own machine.
+		if is_local:
+			_scan_beep_accum += delta
+			var period: float = lerpf(0.45, 0.12, scan_progress)
+			if _scan_beep_accum >= period:
+				_scan_beep_accum = 0.0
+				Audio.play("beep", null, -6.0, 0.08)
+		if scan_progress >= 1.0:
+			scan_progress = 0.0
+	else:
+		scan_progress = 0.0
+		_scan_beep_accum = 0.0
 
 
 static func empty_slot() -> Dictionary:
@@ -1059,6 +1165,8 @@ func revive_full() -> void:
 	operating = false
 	dragging_monster = -1   # SWEEP 3 HOOK (combat)
 	hive_view = false   # SWEEP 3 HOOK (brains)
+	crouching = false   # SWEEP 4A HOOK (controls)
+	scan_holding = false
 	_clear_downed()
 	_set_visible_alive(true)
 
@@ -1138,6 +1246,11 @@ func refresh_downed_visuals() -> void:
 ## you hang over the carrier's shoulder. Dead bots lie there too.
 func _update_down_pose(delta: float) -> void:
 	var down := stun > 0.0 or downed or (is_bot and not alive)
+	# SWEEP 4A HOOK (controls): the third-person crouch pose (body_poser.gd): a torso lean blended
+	# in independently of the hold/carry/wind-up targets body_hands sets every frame.
+	if body_hands != null and "poser" in body_hands and body_hands.poser != null:
+		var want_crouch_w: float = 1.0 if (crouching and not down) else 0.0
+		body_hands.poser.crouch = move_toward(float(body_hands.poser.crouch), want_crouch_w, delta * 6.0)
 	if is_local and not is_bot:
 		var eye := C.EYE_H
 		if on_table:
@@ -1146,6 +1259,8 @@ func _update_down_pose(delta: float) -> void:
 			eye = 0.3
 		elif down and alive:
 			eye = 0.45
+		elif crouching:   # SWEEP 4A HOOK (controls)
+			eye = C.CROUCH_EYE_H
 		if not is_equal_approx(head.position.y, eye):
 			head.position.y = eye if carried_by != 0 or on_table else move_toward(head.position.y, eye, delta * 6.0)
 		# Carried, your view hangs back over the carrier's shoulder instead of inside their head.
@@ -1185,11 +1300,14 @@ func _update_down_pose(delta: float) -> void:
 
 ## Client -> host, 20 Hz: everything about my own surgeon. A positional array rather than a
 ## dictionary: no key strings on the wire, about a third of the size.
-##   [position, yaw, pitch, flag bits (1 light, 2 sprint, 4 moving, 8 holding E),
-##    shove count, drop count, aim id, interact count, selected hand, use count, ability count]
+##   [position, yaw, pitch, flag bits (1 light, 2 sprint, 4 moving, 8 holding E, 16 crouching,
+##    32 scan-holding), shove count, drop count, aim id, interact count, selected hand, use count,
+##    ability slot 1..4 press counts]
 func report_state() -> Array:
-	var bits := (1 if flashlight_on else 0) | (2 if sprinting else 0) | (4 if moving else 0) | (8 if wants_interact else 0)
-	return [global_position, rotation.y, head.rotation.x, bits, shove_count, drop_count, aim_id, interact_count, selected, use_count, ability_count]
+	var bits := (1 if flashlight_on else 0) | (2 if sprinting else 0) | (4 if moving else 0) | (8 if wants_interact else 0) \
+		| (16 if crouching else 0) | (32 if scan_holding else 0)
+	return [global_position, rotation.y, head.rotation.x, bits, shove_count, drop_count, aim_id, interact_count, selected, use_count,
+		ability_slot_press[0], ability_slot_press[1], ability_slot_press[2], ability_slot_press[3]]
 
 
 func apply_remote_state(s: Array) -> void:
@@ -1207,6 +1325,8 @@ func apply_remote_state(s: Array) -> void:
 	sprinting = bits & 2 != 0
 	moving = bits & 4 != 0
 	wants_interact = bits & 8 != 0
+	crouching = bits & 16 != 0   # SWEEP 4A HOOK (controls): the host trusts the client's own crouch
+	scan_holding = bits & 32 != 0
 	shove_count = int(s[4])
 	drop_count = int(s[5])
 	aim_id = String(s[6])
@@ -1215,7 +1335,9 @@ func apply_remote_state(s: Array) -> void:
 	interact_count = int(s[7])
 	if s.size() >= 11:   # sweep 3
 		use_count = int(s[9])
-		ability_count = int(s[10])
+	if s.size() >= 14:   # sweep 4a: ability slots
+		for i in 4:
+			ability_slot_press[i] = int(s[10 + i])
 	_consume_actions()
 
 
@@ -1233,6 +1355,7 @@ func report_full() -> Dictionary:
 		"ch": snappedf(carry_hold, 0.1),
 		"dm": dragging_monster,   # SWEEP 3 HOOK (combat)
 		"hv": hive_view,   # SWEEP 3 HOOK (brains)
+		"cr": crouching,   # SWEEP 4A HOOK (controls)
 	}
 
 
@@ -1282,4 +1405,5 @@ func apply_remote_full(s: Dictionary) -> void:
 	_pitch = s.pi
 	set_flashlight(s.fl)
 	sprinting = s.sp
+	crouching = bool(s.get("cr", false))   # SWEEP 4A HOOK (controls)
 	moving = s.mv

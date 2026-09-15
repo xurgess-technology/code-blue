@@ -102,9 +102,21 @@ func _run() -> void:
 	Settings.set_value("fov", 95.0)
 	Settings.set_value("quality", 0)
 	Settings.set_value("carry_camera", "first_person")   # HANDS HOOK
+	Settings.set_value("key_crouch", KEY_C)   # SWEEP 4A HOOK (controls)
+	Settings.set_value("key_jump", KEY_J)
+	Settings.set_value("key_ability_alt", KEY_X)
+	Settings.set_value("key_scan", KEY_V)
 	await _frames(3)
 	for key in Settings.DEFAULTS.keys():
 		_check(seen.has(key), "changed emitted for %s" % key)
+	# SWEEP 4A HOOK (controls): a rebind applies to the InputMap action right away.
+	for pair in [["key_crouch", "crouch", KEY_C], ["key_jump", "jump", KEY_J], ["key_ability_alt", "ability_alt", KEY_X], ["key_scan", "scan", KEY_V]]:
+		var evs: Array = InputMap.action_get_events(String(pair[1]))
+		var found := false
+		for ev in evs:
+			if ev is InputEventKey and int((ev as InputEventKey).physical_keycode) == int(pair[2]):
+				found = true
+		_check(found, "rebinding %s updates the '%s' InputMap action" % [pair[0], pair[1]])
 
 	_check(_near(AudioServer.get_bus_volume_db(AudioServer.get_bus_index("Master")), -12.04), "Master bus at -12 dB for 0.5")
 	_check(_near(AudioServer.get_bus_volume_db(AudioServer.get_bus_index("SFX")), -24.08), "SFX bus at -24 dB for 0.25")

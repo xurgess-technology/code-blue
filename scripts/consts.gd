@@ -11,6 +11,14 @@ const PLAYER_HEIGHT := 1.8
 
 const WALK_SPEED := 3.4
 const SPRINT_SPEED := 5.6
+## SWEEP 4A HOOK (controls): crouching lowers height/eye and slows movement; a small grounded jump.
+const CROUCH_HEIGHT := 1.05
+const CROUCH_EYE_H := 1.0
+const CROUCH_SPEED := 1.8
+const JUMP_VELOCITY := 5.2
+## SWEEP 4A HOOK (scanner): hold R aiming at a monster, in range and in sight, for this long.
+const SCAN_RANGE := 14.0
+const SCAN_SECONDS := 3.0
 ## Hand slots (inventory worker, sweep 2): bulky loot takes two of them.
 const CARRY_CAP := 4
 const SURGERY_TABLE_RANGE := 3.2

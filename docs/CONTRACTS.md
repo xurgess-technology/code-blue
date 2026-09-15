@@ -1442,10 +1442,25 @@ game.brains.current_value(stack_or_item) -> int   # a hand slot {kind, v, bt} or
 game.brains.factor_of(stack_or_item) / age_of(stack_or_item)
 game.brains.points(peer_id, path) -> float # path "walk_in" | "discharged"; 0..3, steps of 0.25
 game.brains.level(peer_id, path) -> int    # floor(points), 0..3
-game.brains.best_path(peer_id) -> String   # more points wins, a tie is "discharged" (Echo), "" none
-game.brains.add_points(peer_id, path, amount)   # host (the blender, dev, tests)
-game.brains.ability(p)                     # host, from game.player_ability (R)
+game.brains.add_points(peer_id, path, amount)   # host (the blender, dev, tests); the moment a path
+    # first reaches level 1 it also grants that ability's slot (add_ability, below)
 game.brains.on_reset()                     # host, from game.reset_money (game over, new session)
+
+# SWEEP 4A (docs/SWEEP4A.md "Ability slots"): 4 ability slots per player, independent of how a
+# level is earned (today: points/level above; grafting will source levels later, docs/backlog/
+# SWEEP4B.md), so nothing here reads `_points` except through level()/points().
+Brains.ABILITY_ID := {"discharged": "echo", "walk_in": "hive_in"}   # path -> ability id (static)
+game.brains.slots_for(peer_id) -> Array    # this player's 4 slots, ability id or "" (host authoritative,
+    # replicated: net_state()["ab"]; the ability bar is local-only, so a client only really needs its own)
+game.brains.add_ability(peer_id, id) -> bool    # host: id into the first empty slot; true if it was
+    # already in a slot (no-op); false and unchanged once all 4 slots are full (refused, not swapped)
+game.brains.slot_of(peer_id, id) -> int    # this player's slot index for id, or -1
+game.brains.set_level(peer_id, id, lvl)    # host (tests, dev, later grafting): sets the level directly
+    # (id must be "echo" / "hive_in") and grants the slot the same as reaching it through points
+game.brains.ability_slot(p, slot_idx)      # host, from game.player_ability_slot (Alt+1..4): per-slot
+    # dispatch, replacing the old best_path()/ability(p) (removed). Each slot's ability still cools
+    # down on its own path's cooldown key (echo:<peer> / hive:<peer>), unaffected by which slot it
+    # sits in. Pressing the slot again while its ability is active (Hive Eyes) ends it.
 game.brains.blender                        # the placed blender node (interact_id "blender") or null
 game.brains.blend_progress(peer_id) -> float    # 0..1 while that player holds E on the blender
 game.brains.camera() -> Camera3D           # every machine: the Hive Eyes camera while the LOCAL
@@ -1476,11 +1491,14 @@ game.brains.dev_request(sender, action, args)   # "br_spawn_brain" {kind, qualit
   frames after a new `game.level`, same spot on every machine. Holding a brain selected: hold E
   (`interact_hold` 1.5 s; the host simulates it from `wants_interact` + `aim_id`, like the clock).
   Drinking: +1.0 fresh, +0.75 spoiling, +0.5 rotten to that path, capped at 3.0.
-- **R:** in Hive Eyes, R ends it. Otherwise `best_path`; none: "Nothing happens." (at most once a
-  second). Cooldowns: Echo 20 s from the shriek, Hive Eyes 12 s from when the view ends (R presses
-  in the 0.5 s after a view ends are ignored). Not while downed; Hive Eyes not while carrying or
-  operating. Scaling is literal: `12 + 6 * level` m and `2.5 + 0.75 * level` s for Echo, `20 + 10 *
-  level` m and `5 + 2 * level` s for Hive Eyes, so a half point (level 0) already works at the base.
+- **Alt+1..4 (sweep 4a):** fires that slot's ability through `ability_slot`; an empty slot (or the
+  slot pressed again while its ability is active, other than ending Hive Eyes): "Nothing happens."
+  (at most once a second). Cooldowns: Echo 20 s from the shriek, Hive Eyes 12 s from when the view
+  ends (presses in the 0.5 s after a view ends are ignored). Not while downed; Hive Eyes not while
+  carrying or operating. Scaling is literal: `12 + 6 * level` m and `2.5 + 0.75 * level` s for Echo,
+  `20 + 10 * level` m and `5 + 2 * level` s for Hive Eyes, so a half point (level 0) already works
+  at the base. R itself no longer fires an ability (docs/SWEEP4A.md "Controls"): it holds the
+  built-in scanner instead (below), and the guide opens on E.
 - **Echo** (host): `game.emit_noise(pos + 1.5 up, 1.2, "echo")`, event `br_echo {id, pos, r, s}`:
   everyone hears `brains_shriek` at pos (the shrieker hears it 2D); the shrieker's machine runs
   `echo_view.start`: a dark veil quad on the camera and at most 40 things / 150 mesh outlines
@@ -1488,16 +1506,47 @@ game.brains.dev_request(sender, action, args)   # "br_spawn_brain" {kind, qualit
   (`depth_test_disabled`, `ignore_occlusion_culling`), lit as a 26 m/s wave passes. Freed when it ends.
 - **Hive Eyes** (host): the nearest `kind == "walk_in"` monster within range (through walls, not
   `is_sedated()`); `Player.hive_view = true` (report key `hv`), `br.hv[peer] = [monster id, end
-  world_time]`, event `br_hive {id, on}`. Ends on time, R / E / Esc, the monster leaving
+  world_time]`, event `br_hive {id, on}`. Ends on time, its slot / E / Esc, the monster leaving
   `game.monsters` (killed, strapped) or `is_sedated()`, and the player's hp dropping, being downed,
   stunned or carried. While `hive_view` the Player ignores movement, mouse look, aim, use, shove,
-  drop and interact (E and R bump `ability_count`); remote copies droop the head and lean.
+  drop and interact (E bumps the Hive Eyes slot's `ability_slot_press`); remote copies droop the
+  head and lean.
 - **Replication:** `net_state()` = `{"p": {peer: [walk_in, discharged]}, "hv": {peer: [id, end]},
-  "bh": {peer: progress}}` (copies, quantized; empty dictionaries when idle).
+  "bh": {peer: progress}, "ab": {peer: [4 ability ids]}}` (copies, quantized; empty dictionaries
+  when idle).
 - Sounds `brains_squelch`, `brains_blend`, `brains_gulp`, `brains_shriek`, `brains_hive_in`,
   `brains_hive_out` (`tools/gen_audio_brains.mjs`).
-- Tests: `tools/braintest.tscn` (headless, 71 checks), nettest scenario `brains`,
-  `tools/brainshot.tscn` (windowed shots to `tools/brain_shots/`), `tools/perfprobe.tscn -- --brains`.
+- Tests: `tools/braintest.tscn` (headless), nettest scenario `brains`,
+  `tools/brainshot.tscn` (windowed shots to `tools/brain_shots/`), `tools/perfprobe.tscn -- --brains`,
+  `tools/controlstest.tscn` (sweep 4a: crouch/jump, Alt+1..4 slot dispatch, the scanner).
+
+### Ability bar (HUD, local-only, sweep 4a)
+
+`scripts/hud.gd` `_draw_ability_bar`: 4 slots always shown small top-left of the item bar; holding
+`ability_alt` (Alt) grows them into the bar over ~0.12 s (`Hud._alt_t`) while the item icons shrink
+to a small row where the abilities were. Each icon: `Alt+N`, a cooldown sweep, level pips, a cost
+tag (`Hud.ABILITY_COST`, e.g. Echo's "LOUD"), and while Alt is held, the ability's name and (greyed
+out) why it cannot fire right now (`Hud._slot_reason`: cooling down, hands busy, no Walk-In in
+range, downed). The first time an ability lands in a slot, a short card names it, what it does, its
+key and its cost, and closes itself after 5 s or on any key (`Hud._card_until` / `_card_seen`).
+
+### Scanner (docs/SWEEP4A.md "Scanner", sweep 4a)
+
+Every player has a scanner built in: not an item, no slot. Hold `scan` (R) aimed at a monster to
+scan it; the host checks range (`C.SCAN_RANGE`, 14 m) and a clear raycast from the camera each tick
+(`game._tick_scan`, `game._scan_aim`) and accumulates progress over `C.SCAN_SECONDS` (3 s);
+breaking range or line of sight resets it to 0. A completed scan marks that species `scanned` on the
+host's in-memory database (below) and tells the scanner "Entry updated" (`game.tell`). The HUD ring
+at the crosshair (`Hud._draw_scan_ring`) and the beep are local, client-side cosmetics computed the
+same way every machine computes its own aim/prompt (`Player._update_scan_progress`); they are not
+noise events (monsters cannot hear a scan).
+
+`game.database: Dictionary` (kind -> `scripts/database/db_record.gd` `DbRecord {kind, sighted,
+scanned}`), host-only, in memory (lost on restart). `game.db_record(kind) -> DbRecord` creates one
+on first touch. "Sighted" is broader than scanning: any monster within scan range and visible
+(frustum + line of sight, `Perception.in_view`) to any living player marks it sighted, whether or
+not anyone is aiming at it to scan. Chunk 4 (`docs/backlog/SWEEP4B.md`) extends `DbRecord` and
+saves it to disk; nothing here persists across a restart yet.
 
 ## Doors and the per-shift wings (doors worker, 2026-09-14)
 

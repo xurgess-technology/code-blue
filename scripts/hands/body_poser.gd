@@ -11,6 +11,10 @@ var arm_l := Vector3.FORWARD
 var arm_l_w := 0.0
 var torso := Vector2.ZERO
 var torso_w := 0.0
+## SWEEP 4A HOOK (controls): 0..1, the third-person crouch lean. Additive on top of torso_w (set
+## every frame by body_hands.gd from the hold/carry/wind-up pose table) so crouching still reads
+## while holding or carrying something.
+var crouch := 0.0
 
 var _idx := {}
 
@@ -34,6 +38,9 @@ func _process_modification_with_delta(_delta: float) -> void:
 	if torso_w > 0.001:
 		var want := tq * Quaternion.from_euler(Vector3(torso.x, torso.y, 0.0))
 		tq = tq.slerp(want, clampf(torso_w, 0.0, 1.0))
+		sk.set_bone_pose_rotation(ti, tq)
+	if crouch > 0.001:
+		tq = tq * Quaternion(Vector3.RIGHT, 0.3 * clampf(crouch, 0.0, 1.0))
 		sk.set_bone_pose_rotation(ti, tq)
 	# The arms hang off the torso: express the skeleton-space direction in the torso's frame.
 	var parent := sk.get_bone_parent(ti)
@@ -76,6 +83,11 @@ func _generic(sk: Skeleton3D) -> void:
 		var q := Quaternion(Vector3.UP, torso.y * k) * Quaternion(Vector3.RIGHT, torso.x * k)
 		for bi in chain:
 			_turn(sk, int(bi), q)
+	if crouch > 0.001 and not chain.is_empty():   # SWEEP 4A HOOK (controls)
+		var ck := clampf(crouch, 0.0, 1.0) / float(chain.size())
+		var cq := Quaternion(Vector3.RIGHT, 0.3 * ck)
+		for bi in chain:
+			_turn(sk, int(bi), cq)
 	for side in [["arm_r", arm_r, arm_r_w], ["arm_l", arm_l, arm_l_w]]:
 		var w: float = side[2]
 		var upper := int(_gidx.get(side[0], -1))
