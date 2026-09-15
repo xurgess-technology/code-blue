@@ -586,14 +586,20 @@ class Runner extends Node:
 		if not (n.get("gold_pile", {}).get("position") is Vector3):
 			_fail("%s: neutral.gold_pile is missing" % tag)
 		var nr: Rect2 = info.get("neutral_rect", Rect2())
-		for p in n.get("spawn_points", []):
-			if not nr.has_point(Vector2(p.x, p.z)):
-				_fail("%s: neutral spawn %s is outside the neutral area" % [tag, str(p)])
 		var er: Rect2 = info.get("entrance_rect", Rect2())
-		for key in ["shop", "sell_bin", "gold_pile"]:
+		# SWEEP 4A HOOK (fog lot, chunk 2): player spawns and the shop moved indoors.
+		for p in n.get("spawn_points", []):
+			if not er.has_point(Vector2(p.x, p.z)):
+				_fail("%s: player spawn %s is outside the entrance building" % [tag, str(p)])
+		var shop_p: Vector3 = n.get("shop", {}).get("position", Vector3.ZERO)
+		if not er.has_point(Vector2(shop_p.x, shop_p.z)):
+			_fail("%s: neutral.shop is outside the entrance building" % tag)
+		for key in ["sell_bin", "gold_pile"]:
 			var p: Vector3 = n.get(key, {}).get("position", Vector3.ZERO)
 			if not nr.has_point(Vector2(p.x, p.z)):
 				_fail("%s: neutral.%s is outside the neutral area" % [tag, key])
+		if not (info.get("safe_zone", {}).get("pharmacy_rect") is Rect2) or not (info.get("safe_zone", {}).get("crematorium_rect") is Rect2):
+			_fail("%s: safe_zone pharmacy/crematorium reservation is missing" % tag)
 		var amb: Vector3 = info.get("ambulance", {}).get("position", Vector3.ZERO)
 		if not nr.grow(0.1).has_point(Vector2(amb.x, amb.z)):
 			_fail("%s: the ambulance spot is not outside" % tag)

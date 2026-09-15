@@ -97,8 +97,11 @@ func _run() -> void:
 	_check(ok, "walking to the time clock and holding E clocks in")
 	_check(bot.global_position.distance_to(start) > 1.0 or start.distance_to(game.clock_pos()) < 3.0, "the bot walked to the clock")
 	if game.level_info.has("zones"):
-		_check(Zones.zone_of(game.level_info, start) == "neutral" and Zones.zone_of(game.level_info, bot.global_position) == "entrance",
-			"it walked in from the neutral area (%s) to the entrance building (%s)" % [Zones.zone_of(game.level_info, start), Zones.zone_of(game.level_info, bot.global_position)])
+		# SWEEP 4A HOOK (fog lot, chunk 2): the run's start and every respawn are inside the main
+		# doors now (the lobby), not out in the neutral area, so the bot is already in the
+		# entrance building both before and after walking to the clock.
+		_check(Zones.zone_of(game.level_info, start) == "entrance" and Zones.zone_of(game.level_info, bot.global_position) == "entrance",
+			"it starts and stays inside the entrance building (%s -> %s)" % [Zones.zone_of(game.level_info, start), Zones.zone_of(game.level_info, bot.global_position)])
 		_check(not game.monster_may_wander_to(game.clock_pos()) and not game.monster_may_wander_to(start), "monsters may not wander into the entrance building or the neutral area")
 	_check(game.loop.grace_left > game.loop.GRACE_SECONDS - 3.0, "the grace period started (%.0f s)" % game.loop.grace_left)
 	_check(game.cases.is_empty() and game.monsters.size() > 0, "no patient yet, monsters are awake")

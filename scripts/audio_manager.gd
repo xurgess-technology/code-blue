@@ -131,6 +131,44 @@ func _setup_buses() -> void:
 	_ensure_bus(BUS_AMBIENCE, "Master")
 	AudioServer.set_bus_volume_db(AudioServer.get_bus_index(BUS_MUSIC), MUSIC_BASE_DB)
 	AudioServer.set_bus_volume_db(AudioServer.get_bus_index(BUS_AMBIENCE), AMBIENCE_BASE_DB)
+	_ensure_fog_filters()
+
+
+# ------------------------------------------------------------------ fog (SWEEP 4A HOOK, chunk 2)
+
+## Sound gets muffled in the lot's fog ring: a low-pass on SFX and Ambience, driven locally by
+## whatever the local player's fog depth is this frame (scripts/level/fog_ring.gd). 0 = clear.
+var fog_muffle := 0.0
+var _fog_lpf_sfx: AudioEffectLowPassFilter
+var _fog_lpf_amb: AudioEffectLowPassFilter
+
+
+func _ensure_fog_filters() -> void:
+	if _fog_lpf_sfx == null:
+		var sfx := AudioServer.get_bus_index(BUS_SFX)
+		if sfx >= 0:
+			_fog_lpf_sfx = AudioEffectLowPassFilter.new()
+			_fog_lpf_sfx.cutoff_hz = 20000.0
+			AudioServer.add_bus_effect(sfx, _fog_lpf_sfx)
+	if _fog_lpf_amb == null:
+		var amb := AudioServer.get_bus_index(BUS_AMBIENCE)
+		if amb >= 0:
+			_fog_lpf_amb = AudioEffectLowPassFilter.new()
+			_fog_lpf_amb.cutoff_hz = 20000.0
+			AudioServer.add_bus_effect(amb, _fog_lpf_amb)
+
+
+func set_fog_muffle(amount01: float) -> void:
+	amount01 = clampf(amount01, 0.0, 1.0)
+	if is_equal_approx(amount01, fog_muffle):
+		return
+	fog_muffle = amount01
+	_ensure_fog_filters()
+	var hz := lerpf(20000.0, 400.0, amount01)
+	if _fog_lpf_sfx != null:
+		_fog_lpf_sfx.cutoff_hz = hz
+	if _fog_lpf_amb != null:
+		_fog_lpf_amb.cutoff_hz = hz
 
 
 func _ensure_bus(bus_name: String, send_to: String) -> int:

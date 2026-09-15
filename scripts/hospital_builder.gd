@@ -17,6 +17,7 @@ const Factory := preload("res://scripts/level/piece_factory.gd")
 const Rooms := preload("res://scripts/level/room_furnish.gd")
 const Legacy := preload("res://scripts/level/legacy_builder.gd")
 const FridgeScript := preload("res://scripts/containers/med_fridge.gd")
+const FogRingScript := preload("res://scripts/level/fog_ring.gd")   # SWEEP 4A HOOK (fog lot, chunk 2)
 const DrawerUnitScript := preload("res://scripts/containers/drawer_unit.gd")
 const StationScript := preload("res://scripts/containers/station_drawers.gd")
 const TraumaBagScript := preload("res://scripts/containers/trauma_bag.gd")
@@ -92,6 +93,7 @@ static func build(gen: Dictionary, info: Dictionary) -> Node3D:
 	for step in commit_steps(wings, wings_root):
 		step.call()
 	finish_info(gen, info, base, wings)
+	_build_fog_belt(info, root)
 	# The base part is kept (the wing loader merges its lists with every new set of wings); its
 	# mesh data is not needed any more.
 	for key in ["geo", "faces", "furn", "colliders", "signs", "lights", "containers", "doors", "occluder"]:
@@ -104,6 +106,40 @@ static func build(gen: Dictionary, info: Dictionary) -> Node3D:
 	info["wings_root"] = wings_root
 	info["base_part"] = base
 	return root
+
+
+## SWEEP 4A HOOK (fog lot, chunk 2): a real local FogVolume over the outdoor lot, so the fog is
+## visible atmosphere from anywhere on the lot (including standing at the doors, not yet inside
+## the fog_ring.gd belt) instead of only a per-camera tint that activates once a player's own
+## position is deep in the ring. Without this the lot's border wall was plainly visible in the
+## distance since nothing occluded it. One box sized to the whole neutral_rect (already world-
+## space metres, see finish_info) plus a pad past its outer edge so it also swallows the border
+## wall; `edge_fade` softens the box's own boundary instead of a hard cutoff. Local density only
+## (the doc asks to prefer this over raising the tuned global volumetric fog everywhere).
+const FOG_BELT_PAD_M := 6.0
+const FOG_BELT_HEIGHT_M := 8.0
+const FOG_BELT_DENSITY := 3.0
+const FOG_BELT_EDGE_FADE := 5.0
+
+
+static func _build_fog_belt(info: Dictionary, root: Node3D) -> void:
+	if not info.has("neutral_rect"):
+		return
+	var r: Rect2 = info.neutral_rect
+	if r.size == Vector2.ZERO:
+		return
+	var mat := FogMaterial.new()
+	mat.density = FOG_BELT_DENSITY
+	mat.albedo = FogRingScript.FOG_COLOR
+	mat.edge_fade = FOG_BELT_EDGE_FADE
+	var vol := FogVolume.new()
+	vol.name = "FogBelt"
+	vol.shape = 3   # FogVolume box shape (this Godot build exposes no GDScript-visible enum constant for it)
+	vol.material = mat
+	vol.size = Vector3(r.size.x + FOG_BELT_PAD_M * 2.0, FOG_BELT_HEIGHT_M, r.size.y + FOG_BELT_PAD_M * 2.0)
+	var c := r.get_center()
+	vol.position = Vector3(c.x, FOG_BELT_HEIGHT_M * 0.5, c.y)
+	root.add_child(vol)
 
 
 const PART_BASE := 0
@@ -1341,19 +1377,32 @@ static func _fill_contract(gen: Dictionary, info: Dictionary) -> void:
 	var nr: Rect2i = gen.neutral_rect
 	info["neutral_rect"] = Rect2(Vector2(nr.position) * C.TILE, Vector2(nr.size) * C.TILE)
 	if spots.has("ambulance"):
+		# SWEEP 4A HOOK (fog lot, chunk 2): the ambulance is a driven vehicle now (shift_loop.gd /
+		# ambulance.gd), not a static prop; this is only the bay parking spot and the lane it
+		# drives in along.
 		info["ambulance"] = {"position": _w(spots.ambulance.pos), "yaw": float(spots.ambulance.yaw),
-				"vehicle": _w(spots.ambulance.vehicle)}
+				"lane_start": _w(spots.ambulance.get("lane_start", spots.ambulance.pos))}
 	var spawns: Array = []
 	for p in spots.get("neutral_spawns", []):
 		spawns.append(_w(p))
 	var neutral := {"spawn_points": spawns}
 	if spots.has("shop"):
-		neutral["shop"] = {"position": _w(spots.shop.pos), "yaw": float(spots.shop.yaw), "vehicle": _w(spots.shop.vehicle)}
+		neutral["shop"] = {"position": _w(spots.shop.pos), "yaw": float(spots.shop.yaw)}
 	if spots.has("sell_bin"):
 		neutral["sell_bin"] = {"position": _w(spots.sell_bin.pos), "yaw": float(spots.sell_bin.yaw), "front": _w(spots.sell_bin.front)}
 	if spots.has("gold_pile"):
 		neutral["gold_pile"] = {"position": _w(spots.gold_pile.pos)}
 	info["neutral"] = neutral
+	# SWEEP 4A HOOK (fog lot, chunk 2): space off the lobby chunk 3's pharmacy and crematorium
+	# build into; reserved now so both have fixed spots.
+	var reserve: Dictionary = spots.get("reserve", {})
+	if reserve.has("pharmacy") or reserve.has("crematorium"):
+		var sz := {}
+		for key in ["pharmacy", "crematorium"]:
+			if reserve.has(key):
+				var r: Rect2i = reserve[key]
+				sz[key + "_rect"] = Rect2(Vector2(r.position) * C.TILE, Vector2(r.size) * C.TILE)
+		info["safe_zone"] = sz
 	var wings: Array = []
 	var names := {S.ZONE_ENTRANCE: "entrance", S.ZONE_OUTDOOR: "neutral"}
 	for wd in gen.wings:

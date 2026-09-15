@@ -83,6 +83,10 @@ const CAMERA_NODE_NAME := "Camera"
 @export var lean_roll := 0.22          ## radians
 @export var lean_rate := 8.0
 
+# --- fog (SWEEP 4A HOOK, sweep 4A chunk 2) ---------------------------------
+## Smoothing rate for fog depth, so stepping across the edge doesn't pop.
+@export var fog_rate := 3.0
+
 ## Below this, a channel is snapped to exactly zero so nothing can drift.
 const EPSILON := 0.00008
 
@@ -130,6 +134,11 @@ var _recoil_rv := Vector3.ZERO
 # lean
 var _lean_target := 0.0
 var _lean := 0.0
+
+# fog (SWEEP 4A HOOK: the lot's fog ring, scripts/level/fog_ring.gd)
+var _fog_target01 := 0.0
+var _fog01 := 0.0
+var _fog_cache := {}
 
 
 func _ready() -> void:
@@ -267,6 +276,12 @@ func set_lean(amount: float) -> void:
 	_lean_target = clampf(amount, -1.0, 1.0)
 
 
+## SWEEP 4A HOOK (fog lot): how deep in the lot's fog ring the player is, 0 clear .. 1 fully
+## blind. Smoothed and applied as a per-camera screen-space fog override (FogRing.apply_camera_fog).
+func set_fog(depth01: float) -> void:
+	_fog_target01 = clampf(depth01, 0.0, 1.0)
+
+
 ## Immediately zero every channel. Use on respawn / teleport so the camera does
 ## not spring across the map.
 func reset() -> void:
@@ -292,10 +307,13 @@ func reset() -> void:
 	_recoil_rv = Vector3.ZERO
 	_lean = 0.0
 	_lean_target = 0.0
+	_fog_target01 = 0.0
+	_fog01 = 0.0
 	if camera != null:
 		camera.position = _base_pos
 		camera.rotation = _base_rot
 		camera.fov = _base_fov
+		FogRing.apply_camera_fog(camera, 0.0, _fog_cache)
 
 
 ## Current shake magnitude, 0..1. Useful for driving screen post in sympathy.
@@ -350,6 +368,10 @@ func _process(delta: float) -> void:
 	_fov_cur = _damp(_fov_cur, _fov_target, fov_rate, delta)
 	_fov_cur = _dz(_fov_cur)
 	camera.fov = _base_fov + _fov_cur * fov_kick_max
+
+	_fog01 = _damp(_fog01, _fog_target01, fog_rate, delta)
+	_fog01 = 0.0 if _fog01 < EPSILON and _fog_target01 <= 0.0 else _fog01
+	FogRing.apply_camera_fog(camera, _fog01, _fog_cache)
 
 
 var _bob_rot := Vector3.ZERO

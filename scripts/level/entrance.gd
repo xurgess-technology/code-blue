@@ -166,6 +166,23 @@ static func build(st: S, ox: int, oy: int, north_wings: int) -> void:
 	put.call("wall_clock", 25.5, 4.0, SOUTH, scrub)
 
 	# ---- lobby (x 1-26, y 14-18) ---------------------------------------------------------
+	# SWEEP 4A HOOK (fog lot, chunk 2): the run's start and every respawn move inside the main
+	# doors, into the lobby. Reserve the tiles before any lobby furniture claims them.
+	var lobby_spawn_tiles: Array[Vector2i] = [
+		Vector2i(11, 15), Vector2i(12, 15), Vector2i(13, 15), Vector2i(14, 15),
+		Vector2i(15, 15), Vector2i(16, 15), Vector2i(11, 16), Vector2i(16, 16),
+	]
+	var lobby_spawns: Array = []
+	for t in lobby_spawn_tiles:
+		st.set_keep(ox + t.x, oy + t.y)
+		lobby_spawns.append(Vector2(ox + t.x + 0.5, oy + t.y + 0.5))
+	st.spots["lobby_spawns"] = lobby_spawns
+	# Space off the lobby for chunk 3's pharmacy and crematorium: two fixed rectangles chunk 3
+	# builds into. Not furniture-cleared (chunk 3 redesigns what is there today); just recorded.
+	st.spots["reserve"] = {
+		"pharmacy": Rect2i(ox + 2, oy + 14, 5, 4),
+		"crematorium": Rect2i(ox + 21, oy + 14, 5, 4),
+	}
 	put.call("reception_desk", 20.5, 15.25, SOUTH, lobby)
 	put.call("office_chair", 20.5, 14.5, SOUTH, lobby)
 	for x in [2.4, 3.7, 5.0, 6.3]:

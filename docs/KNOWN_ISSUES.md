@@ -881,3 +881,47 @@ Players, Bob, the paramedics and the downed player on the table use the Blender 
 - **Screenshots were not taken.** `tools/gameshot.tscn` needs a windowed run; this chunk was built
   and tested entirely headless, and grabbing 1-3 screenshots was judged not worth the added run in
   this pass (the spec allows skipping them when they prove awkward in a headless environment).
+
+## The fog lot, the ambulance, and the safe zone (sweep 4a chunk 2, docs/SWEEP4A.md)
+
+- **The pharmacy and crematorium reservation overlaps existing lobby furniture.** `entrance.gd`'s
+  `spots["reserve"]` picks the lobby's two corners (near the west chairs/tv and the east reception
+  desk/plant) rather than genuinely free floor -- there was none without widening the entrance
+  building's fixed footprint, which felt like more risk than this chunk's "just reserve the space"
+  ask justified. Chunk 3 will need to clear or work around a plant, a wall clock, a chair row or
+  two, and the TV when it builds there; nothing is load-bearing.
+- **The relocated shop placeholder is just an aim box.** `economy.gd`'s "attached" mode (used
+  because `level_info.neutral` still has a `shop` key) builds only the interactable/aim-box/sign,
+  expecting the level's own van mesh nearby -- there is none any more, so today it is an invisible
+  hit box floating in the reserved pharmacy space. Functions correctly (buys a gold bar, same as
+  before); chunk 3 replaces it with the real pharmacy window regardless.
+- **The fog's depth/steering falloff is a simple square (max of the x and y overshoot past the
+  clear rect), not a rounded one**, so the very corners of the belt are very slightly "deeper" for
+  the same straight-line distance than the middle of a side. Cheap and unnoticeable in practice
+  (`fog_ring.gd`); a distance-to-rect field would be marginally more correct.
+- **The screen-space fog look and the audio low-pass are tuned by eye** (`FogRing.MARGIN_M` /
+  `BLIND_M` / the density and cutoff-Hz curves in `fog_ring.gd` and `audio_manager.gd`), not
+  validated against a target "can't see your hand" distance in an actual playtest -- only checked
+  programmatically (depth goes to 0 outside the belt, visibility01 saturates at `BLIND_M`).
+  **Follow-up (still chunk 2):** the first playtest of this build showed the actual gap the note
+  above was flagging -- the per-camera tint only engages once the *local player's own* position is
+  deep in the belt, so standing at the doors (or anywhere in the clear area) the lot's real border
+  wall was plainly visible with nothing atmospheric between you and it, and several street lights
+  from the old parking-lot layout sat right at or past the outer edge, directly lighting that wall.
+  Fixed both: `hospital_builder.gd`'s `_build_fog_belt()` drops a real local `FogVolume` (world-
+  space, sized off the same `neutral_rect` / `MARGIN_M` math as `fog_ring.gd`, `FOG_BELT_DENSITY`
+  = 3.0, `edge_fade` = 5.0 -- picked by eye against `tools/fogshot.tscn` screenshots, not measured)
+  so the fog reads as atmosphere from any vantage point, and `neutral.gd`'s street lights were
+  pulled back inside `FogRing.inner_rect`'s clear area. Two things this did *not* fully fix, both
+  minor: one of the repositioned lamps still throws a faint beam far enough down its facing axis to
+  catch the wall at a distance (a light-range/aim tweak, not a placement bug), and the ambulance's
+  own headlights light up the wall behind the bay while it's parked there -- expected, since the
+  brief calls for the headlights to "glow through" the fog. `FogVolume` only renders when
+  `Environment.volumetric_fog_enabled` is on, which the LOW quality preset turns off (see
+  `look.gd`); on LOW the lot's fog is whatever the base depth `Environment.fog` gives it, same as
+  everywhere else in the level -- not specifically re-tuned for the lot as part of this pass.
+- **A pre-existing nav-coverage flake, unrelated to this chunk:** `mapcheck.gd`'s build pass
+  occasionally reports one container/anchor "out of reach" by 2.5-3.5 m (seen on seeds 13 and 49 of
+  120 in this pass, always a morgue tray). Reproduced on both this branch and (by inspection) code
+  paths this chunk never touches (`room_furnish.gd` / container placement); left alone as out of
+  scope for the fog lot work, worth a look from whoever owns the morgue/container layout.

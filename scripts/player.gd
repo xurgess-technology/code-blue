@@ -130,6 +130,7 @@ const BodyHandsScript := preload("res://scripts/hands/body_hands.gd")
 const HumanModel := preload("res://scripts/human/human_model.gd")   # HUMAN HOOK
 const CarryCameraScript := preload("res://scripts/camera/carry_camera.gd")
 const Grips := preload("res://scripts/hands/grips.gd")
+const FogRingScript := preload("res://scripts/level/fog_ring.gd")   # SWEEP 4A HOOK (fog lot, chunk 2)
 var body_hands: RefCounted = null
 var carry_cam: RefCounted = null
 ## Test seam: true holds the shove button (charging), false lets go (the shove fires).
@@ -544,6 +545,23 @@ func _local_step(delta: float) -> void:
 
 	rotation.y = _yaw
 	head.rotation.x = _pitch
+
+	# SWEEP 4A HOOK (fog lot, chunk 2): the lot's fog ring bends heading back and fades vision
+	# and sound with depth. Every machine computes the same steering from the static level
+	# geometry for whichever player it is actually driving here (client-owned movement, same as
+	# everything else in this function); a carried player needs nothing extra, since their body
+	# just follows whoever carries them, and that player is doing their own steering.
+	if g != null and FogRingScript.on_lot(global_position, g.level_info):
+		_yaw = FogRingScript.steer_yaw(global_position, _yaw, g.level_info, delta)
+		rotation.y = _yaw
+		var fog01 := FogRingScript.visibility01(FogRingScript.depth_m(global_position, g.level_info))
+		if is_local:
+			if fx != null:
+				(fx as CameraFX).set_fog(fog01)
+			Audio.set_fog_muffle(fog01)
+	elif is_local and fx != null:
+		(fx as CameraFX).set_fog(0.0)
+		Audio.set_fog_muffle(0.0)
 
 	# DEV HOOK (scripts/dev): noclip flies through walls; nothing below applies.
 	if noclip and g != null and g.dev != null:
