@@ -73,11 +73,16 @@ static func build(st: S, door_x: float, oy: int, rng: Rng) -> Rect2i:
 		for r in range(11, 15):
 			st.set_keep(ox + c, oy + r)
 
-	# ---- street lights: bright, warm, steady ------------------------------------------------
+	# ---- street lights: bright, warm, steady -------------------------------------------------
+	# SWEEP 4A FOLLOW-UP (fog lot, chunk 2): kept within FogRing.inner_rect's clear area (roughly
+	# x in [MARGIN_M/TILE, OUT_W - MARGIN_M/TILE], y in [0, OUT_H - MARGIN_M/TILE], no margin on
+	# the entrance/north side). The old parking-lot layout lit the outer edge tiles directly, which
+	# lit up the border wall itself and defeated the fog belt around it; a few lamps over the
+	# walkable plaza is what the doc actually asks for ("keep... a few street lights").
 	var lamps := [
-		[Vector2(0.4, 4.5), E], [Vector2(0.4, 16.8), E], [Vector2(5.0, 10.5), SOUTH], [Vector2(12.0, 10.5), SOUTH],
-		[Vector2(43.6, 4.5), WEST], [Vector2(43.6, 16.8), WEST], [Vector2(25.0, 17.6), N],
-		[Vector2(36.6, 10.0), WEST], [Vector2(17.0, 17.6), N], [Vector2(33.0, 17.6), N],
+		[Vector2(6.0, 4.0), E], [Vector2(6.0, 12.0), E],
+		[Vector2(38.0, 4.0), WEST], [Vector2(38.0, 12.0), WEST],
+		[Vector2(15.0, 11.0), SOUTH], [Vector2(33.0, 11.0), SOUTH],
 	]
 	for l in lamps:
 		put.call("street_light", l[0].x, l[0].y, l[1], {"lamp": true})

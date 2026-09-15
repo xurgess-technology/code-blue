@@ -122,6 +122,7 @@ func _ready() -> void:
 		{"name": "gold pile, 0 bars", "setup": func(): await _pile_view(0)},
 		{"name": "gold pile, 500 bars", "setup": func(): await _pile_view(500)},
 		{"name": "neutral area outside", "setup": _neutral},  # HOSPITAL HOOK: sweep 2 neutral area
+		{"name": "lot, facing the fog", "setup": _fog_lot},  # SWEEP 4A HOOK (fog lot, chunk 2)
 	]
 	for q in _qualities:
 		main.set_quality(q, false)
@@ -247,6 +248,20 @@ func _neutral() -> void:
 	var gold: Vector3 = n.gold_pile.position
 	var ent: Vector3 = game.level_info.entrance.position
 	_look(gold + (gold - ent).normalized() * 8.0 + Vector3(-5.0, 0, 0), ent + Vector3(0, 2.0, 0))
+
+
+## SWEEP 4A HOOK (fog lot, chunk 2): standing on the lot, right at the clear area's edge, looking
+## straight out into the fog belt -- the per-camera screen fog override plus whatever is driving
+## on the far side (the ambulance) is the worst case for this scenario. Skipped without a lot.
+func _fog_lot() -> void:
+	if not game.level_info.has("neutral_rect"):
+		return
+	if game.surgery.camera() != null:
+		game.surgery.end(bot)
+	var FogRing := preload("res://scripts/level/fog_ring.gd")
+	var inner: Rect2 = FogRing.inner_rect(game.level_info)
+	var edge := Vector3(inner.get_center().x, 0.0, inner.end.y - 0.5)
+	_look(edge, edge + Vector3(0, C.EYE_H, 8.0))
 
 
 ## The heaviest thing surgery does: the saw with a weak tourniquet (blood decals, particles),

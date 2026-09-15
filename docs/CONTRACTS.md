@@ -507,10 +507,19 @@ or_screen: {position: Vector3 (centre of the screen, on the OR wall, at its heig
 phone: {position: Vector3 (the wall phone, at its height, on the break room wall), yaw (faces into the room)}
 entrance: {position (just outside the main doors), yaw (faces out)}
 entrance_rect: Rect2            # world XZ of the whole entrance building, walls included
-ambulance: {position (by the canopy, where paramedics get out), yaw (faces the doors), vehicle: Vector3 (the parked ambulance)}
-neutral: {spawn_points: [Vector3] (8, around the gold pile), shop: {position (the van's open rear), yaw (faces away from the van), vehicle},
+# SWEEP 4A HOOK (fog lot worker, chunk 2, 2026-09-15): the lot is stripped to asphalt, stall
+# lines and the bay marking, ringed by fog instead of a fence (scripts/level/fog_ring.gd, purely
+# a function of neutral_rect -- no new key needed for it). The ambulance is a driven vehicle
+# (scripts/loop/shift_loop.gd / scripts/loop/ambulance.gd), not a parked prop, so `ambulance` is
+# now only the bay spot and the lane it drives in along. Player spawns and every respawn moved
+# indoors, into the lobby, still under `neutral.spawn_points` so nothing reading that key needed
+# to change. The shop's van is gone, so the shop interactable moved into the lobby space chunk 3
+# reserved (`safe_zone`), as a plain placeholder; chunk 3 replaces it with the real pharmacy.
+ambulance: {position (the bay, where paramedics get out), yaw (faces the doors), lane_start: Vector3 (deep in the fog, where it drives from/to)}
+neutral: {spawn_points: [Vector3] (8, now inside the lobby near the main doors), shop: {position (a placeholder in the reserved pharmacy space), yaw},
           sell_bin: {position (the dumpster), yaw, front: Vector3 (where to stand)}, gold_pile: {position}}
-neutral_rect: Rect2             # world XZ of the fenced neutral area
+neutral_rect: Rect2             # world XZ of the outdoor lot (asphalt + the fog belt around it; no fence any more)
+safe_zone: {pharmacy_rect: Rect2, crematorium_rect: Rect2}   # world XZ, off the lobby; fixed spots for chunk 3, not furniture-cleared
 wings: [{id, rect: Rect2 (world XZ), depth: int, tile_rect: Rect2i}]   # depth 1 = shallowest; deeper = bigger area
 rooms: [{id, kind, wing, depth, rect: Rect2 (world XZ, interior), tiles: Rect2i, doors: [Vector3]}]
 zones: {grid, width, height, names}   # HospitalBuilder.zone_of(info, pos) -> wing id, "entrance", "neutral" or ""
@@ -900,6 +909,62 @@ loop.pay_for(case, shift) -> int   # stable 200 (+25/shift), extra stable 300 (+
   `--extra`, `--skip-grace`), `tools/loopshot.tscn` (windowed shots to `tools/loop_shots/`),
   devtest's loop hooks, nettest `deliver`, `surgery`, `late_join`, `full_shift_lag`, `economy`
   (loot kept through a shift) and `two_patients`.
+
+### The fog lot and the driven ambulance (fog lot worker, sweep 4A chunk 2, 2026-09-15)
+
+The lot outside the main doors is now empty asphalt (`scripts/level/neutral.gd`) ringed by thick
+fog past `FogRing.inner_rect(level_info)` (`scripts/level/fog_ring.gd`; `neutral_rect` shrunk by
+`FogRing.MARGIN_M` on every side but the one against the entrance building). Everything is a pure
+function of that rect, computed identically on every machine with no extra network traffic:
+
+```gdscript
+FogRing.on_lot(pos, level_info) -> bool
+FogRing.depth_m(pos, level_info) -> float          # 0 inside the clear area or off the lot entirely
+FogRing.visibility01(depth) -> float               # 0 clear .. 1 fully blind/deaf
+FogRing.steer_yaw(pos, yaw, level_info, delta) -> float   # bends back with depth, snaps to face the
+                                                    # lot once fully blind past FogRing.SNAP_M
+FogRing.pull_from_fog(pos, level_info) -> Vector3  # where a settled item in the fog belongs instead
+FogRing.apply_camera_fog(cam, depth01, cache)      # the local screen-space fog look (per camera)
+```
+
+That per-camera tint alone only shows up once a player's own position is inside the belt, so the
+lot also gets one real `FogVolume` (`HospitalBuilder._build_fog_belt()`, world-space, sized off
+the same `neutral_rect` / `MARGIN_M`), so the fog reads as atmosphere from anywhere on the lot
+(including standing at the doors) instead of only from inside it. It only renders when
+`Environment.volumetric_fog_enabled` is on (off at the LOW quality preset, see `look.gd`).
+
+`player.gd`'s `_local_step` calls `steer_yaw` for whichever player it is actually driving (client-
+owned movement, same rule as everything else there -- a carried player needs nothing extra since
+their body just follows the carrier, who is doing the steering) and, for the local player only,
+feeds `visibility01` to `CameraFX.set_fog()` (a per-camera Environment override, cloned from
+whatever the camera already had, so brightness/tonemap keep working) and to
+`Audio.set_fog_muffle()` (a low-pass on the SFX/Ambience buses). `world_item.gd`'s settle step
+calls `pull_from_fog` once an item comes to rest, so a drop or a throw that lands in the fog
+comes back out at the clear area's edge. None of this touches the tuned global volumetric fog
+(`scripts/look.gd`).
+
+The ambulance is a driven, host-authoritative vehicle, replicated the same way the paramedic
+crews are (inside `loop.net_state()` / `apply_net_state()`, field `"am"`):
+
+```gdscript
+loop.ambulance: Dictionary   # {ph: "hidden"|"out"|"parked"|"back", p: Vector3, y: float, honk: bool}
+                             # empty until the first tick on a level with level_info.ambulance
+```
+
+`_ambulance_active()` is true while a delivery is incoming or a crew is still walking the patient
+in (`ph` "in"/"hand"); the ambulance drives from `ambulance.lane_start` to `ambulance.position`
+(the bay) while active and back once it isn't -- a fresh dispatch while it is still out or parked
+just keeps it there, one after it already left starts a new trip from "hidden". A standing,
+non-carried player within `AMBULANCE_LANE_RADIUS` of its remaining path stops it and sets `honk`
+(local presentation plays `amb_honk`, `tools/gen_audio_ambulance.mjs`); it never hurts anyone.
+`scripts/loop/ambulance.gd` is the local-only visual node (one per machine, synced like the crew
+nodes): the existing "ambulance" piece mesh, headlights and a flasher that glow through the fog
+(`light_volumetric_fog_energy`), no new model.
+
+- Tests: `tools/fogtest.tscn` (headless: a walker deep in the fog steers back out without
+  reaching the border wall, a dropped item settles back onto the clear lot, the ambulance leaves
+  the fog for a delivery, parks, unloads, stops and honks for a player in its lane, and drives
+  back once the delivery is done), `tools/perfprobe.tscn` scenario "lot, facing the fog".
 
 ## Models (loot and paramedic models, sweep 2 integration)
 
