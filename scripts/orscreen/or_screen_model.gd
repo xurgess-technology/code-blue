@@ -105,6 +105,9 @@ static func _panel(game: Object, c: Dictionary, order: int, shelf_left: Dictiona
 		# SWEEP 3 HOOK (dissection): a strapped monster shows its brain's condition and its sedation.
 		"monster": bool(c.get("monster", false)),
 		"sedation": clampf(float((c.get("flags", {}) as Dictionary).get("sedation", 1.0)), 0.0, 1.0) if c.get("flags") is Dictionary else 1.0,
+		# SWEEP 4A HOOK (pharmacy, chunk 3): a thrown placebo pill's green blip, purely derived
+		# from the replicated pill_notes timestamp -- vitals and sedation above are untouched.
+		"note": _pill_note(game, int(c.get("table", order))),
 	}
 	for i in steps.size():
 		var s: Dictionary = steps[i]
@@ -142,6 +145,22 @@ static func _panel(game: Object, c: Dictionary, order: int, shelf_left: Dictiona
 					p.ready = int(s.have) >= uses
 	_operator_into(game, c, order, p)
 	return p
+
+
+## SWEEP 4A HOOK (pharmacy, chunk 3): "Patient appears comforted" for a few seconds after a pill
+## lands on this table, purely a function of the replicated timestamp -- nothing else changes.
+const PILL_NOTE_SECONDS := 4.0
+
+
+static func _pill_note(game: Object, table_index: int) -> String:
+	var notes = game.get("pill_notes")
+	if not (notes is Dictionary) or not notes.has(table_index):
+		return ""
+	var at := float(notes[table_index])
+	var now := float(game.get("world_time")) if game.get("world_time") != null else at
+	if now - at > PILL_NOTE_SECONDS:
+		return ""
+	return "Patient appears comforted"
 
 
 static func _patient_name(game: Object, c: Dictionary) -> String:

@@ -262,7 +262,7 @@ func _run_solo() -> void:
 	await _frames(2)
 	_check(game.level_info.dev_gate.collision_layer == 0, "the pen gate opens")
 
-	# ---- inventory (sweep 2): loot dispensers, the money panel, the dev room's sell bin and shop
+	# ---- inventory (sweep 2): loot dispensers, the money panel, the dev room's pharmacy and furnace
 	dev.request("pen", {"open": false})
 	me.slots = Player.empty_slots()
 	me.selected = 0

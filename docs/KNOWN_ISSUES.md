@@ -925,3 +925,46 @@ Players, Bob, the paramedics and the downed player on the table use the Blender 
   120 in this pass, always a morgue tray). Reproduced on both this branch and (by inspection) code
   paths this chunk never touches (`room_furnish.gd` / container placement); left alone as out of
   scope for the fog lot work, worth a look from whoever owns the morgue/container layout.
+
+## Pharmacy, crematorium, charged throw, placebo pills, no gold (sweep 4a chunk 3, docs/SWEEP4A.md)
+
+- **The pharmacy and crematorium footprints still overlap the lobby furniture chunk 2 flagged.**
+  Neither `economy_props.gd` (the pharmacy window) nor `furnace.gd` (the crematorium) touch
+  `entrance.gd`'s furniture placement (it is not in this chunk's file list), so the reserved
+  rects can still land partly on the chair rows/TV/plant/wall clock near the lobby's west and east
+  ends depending on the seed. Nothing is load-bearing and the pieces are all static meshes, but a
+  furniture piece can visually poke through a wall or the grate. Whoever owns `entrance.gd`'s lobby
+  layout should either clear those rects when placing furniture or nudge the reserve away from it.
+- **The furnace's "grate blocks bodies, gaps let items through" safety rule is geometry, not a
+  simulated rule.** The steel bars are spaced to block a standing/crouching player capsule while
+  leaving room for a thrown pill or small loot stack; it has not been verified with an actual
+  player colliding at speed (sprinting into it, being shoved into it) or with every loot kind's
+  collision box, only by eye against the model. If a bulky item (a defibrillator, an ultrasound)
+  turns out to fit through a gap it would sell same as anything else; if a small monster or a
+  carried body's collision shape turns out thinner than a bar gap it could in principle slip
+  through. Worth a pass with `tools/perfprobe.tscn`'s scenario plus a live playtest shove-into-the-
+  furnace check.
+- **The pill mid-air hit check is a per-frame distance poll (`Game.pill_check_hit`, radius
+  `PILL_HIT_RADIUS`), not a swept collision.** At the charged throw's top speed (`THROW_MAX_SPEED`
+  11 m/s) and 60 Hz this covers less than the hit radius per tick so it should not tunnel through a
+  target, but it has not been stress-tested under lag/jitter (nettest's `economy` scenario throws
+  at a stationary furnace, not at a moving player or monster).
+- **The pharmacist's silhouette (`economy_props.gd`'s `_shape_body`) is a capsule that drifts and
+  blinks out of view on a fixed sine schedule**, not tied to any real presence or footstep audio;
+  it is pure set dressing, the same on every machine (deterministic by `_shape_t`, which is not
+  synced across clients -- each machine's pharmacist drifts on its own clock, imperceptible at this
+  scale but worth noting if it is ever made game-relevant).
+- **Chunk 4 owns the placebo pill database entry.** `Items.ITEMS.placebo_pills` exists and the item
+  works end to end (buy, throw, hit, eat), but there is no guide/terminal entry for it yet; the
+  text chunk 4 should use is in `docs/SWEEP4A.md` section 3e (*Placebo (sugar pill). Efficacy:
+  disputed. Side effects: optimism.*).
+- **The tube delivery capsule always thunks out at the same wall slot regardless of who bought it
+  or how many players are around**, and if two purchases queue back to back the second capsule
+  waits invisibly (no visible queue) until the first clears. Fine for one bottle at a time; would
+  need a visible queue or multiple delivery slots if the pharmacy ever sells more than one item.
+- **`tools/inventoryshot.gd`, `tools/braintest.gd`, `tools/brainshot.gd`, `tools/looptest.gd`,
+  `tools/nettest.gd`, `tools/mapcheck.gd` and `tools/perfprobe.gd` were updated to compile and stay
+  gold-free** (the old sell bin/shop/gold pile flows they drove no longer exist), but only
+  `inventorytest.gd`, `mapcheck.gd`, `devtest.gd`, `looptest.gd` and one `playtest --god` were
+  actually run this pass per the sweep's token budget; `nettest`'s `economy` scenario, `braintest`,
+  `brainshot` and `inventoryshot` were updated by inspection only and not executed.

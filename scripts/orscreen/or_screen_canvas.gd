@@ -122,6 +122,7 @@ func _draw_panel_wide(r: Rect2, p: Dictionary) -> void:
 	var ex := maxf(330.0, 28 + nw + 70)
 	_ecg(Rect2(ex, vy + 14, w - ex - 30, vh - 28), float(p.vitals), _rhythm(p), col, 5.0)
 	_monster_labels(Rect2(16, vy, w - 32, vh), p, 30)   # SWEEP 3 HOOK (dissection)
+	_pill_note(Rect2(16, vy, w - 32, vh), p, 26)   # SWEEP 4A HOOK (pharmacy, chunk 3)
 	# Checklist
 	var y := vy + vh + 18.0
 	var steps: Array = p.steps
@@ -155,6 +156,7 @@ func _draw_panel_narrow(r: Rect2, p: Dictionary) -> void:
 	var ex := x + 16 + nw + 44
 	_ecg(Rect2(ex, vy + 8, x + w - 16 - ex, vpx - 6), float(p.vitals), _rhythm(p), col, 4.0)
 	_monster_labels(Rect2(x + 8, vy, w - 16, vpx + 10), p, 18 if third else 22)   # SWEEP 3 HOOK (dissection)
+	_pill_note(Rect2(x + 8, vy, w - 16, vpx + 10), p, 16 if third else 20)   # SWEEP 4A HOOK (pharmacy, chunk 3)
 	var y := vy + vpx + 22.0
 	var steps: Array = p.steps
 	var row := 38.0 if not third else 32.0
@@ -228,6 +230,16 @@ func _rhythm(p: Dictionary) -> String:
 ## Beats per minute for a vitals value: faster as the patient weakens.
 static func bpm_for(vitals: float) -> float:
 	return lerpf(148.0, 64.0, clampf(vitals, 0.0, 100.0) / 100.0)
+
+
+## SWEEP 4A HOOK (pharmacy, chunk 3): a hopeful green blip in the bottom-left corner of the vitals
+## box for a few seconds after a thrown placebo pill lands on this patient. Vitals/sedation above
+## are untouched; this reads straight off p.note (or_screen_model.gd derives it from pill_notes).
+func _pill_note(box: Rect2, p: Dictionary, px: int) -> void:
+	var note := String(p.get("note", ""))
+	if note == "":
+		return
+	_txt(Vector2(box.position.x + 6, box.position.y + box.size.y - 8), note, px, GREEN)
 
 
 func _beat_dot(at: Vector2, p: Dictionary, col: Color, radius := 9.0) -> void:
