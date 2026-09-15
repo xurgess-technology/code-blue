@@ -170,6 +170,18 @@ static func _attempt(seed: int, wing_seed: int, attempt: int) -> Dictionary:
 	Entrance.build(st, ex, ey, 2 if four else 1)
 	var neutral_rect := Neutral.build(st, ex + Entrance.DOOR_X, ey1 + 1, run_rng)
 
+	# SWEEP 4A HOOK (fog lot, chunk 2): the run's start and every respawn now use the lobby's
+	# spawn points, indoors, not the old outdoor plaza points. Kept under the same "neutral_spawns"
+	# key so every downstream reader (finish_info, validate, the tools) needs no other change.
+	st.spots["neutral_spawns"] = st.spots.get("lobby_spawns", [])
+	# The shop van is gone (2a strips the lot): the shop interactable moves to the pharmacy space
+	# chunk 3 reserved off the lobby, as a plain placeholder (chunk 3 builds the real pharmacy).
+	var reserve: Dictionary = st.spots.get("reserve", {})
+	if reserve.has("pharmacy"):
+		var pr: Rect2i = reserve.pharmacy
+		st.spots["shop"] = {"pos": Vector2(pr.position.x + pr.size.x * 0.5, pr.position.y + pr.size.y * 0.5),
+				"yaw": Defs.yaw_facing(Vector2(0, 1))}
+
 	# ---- wings: hallways and room slots, then which room is which --------------------------
 	var gens: Array = []
 	for d in defs:
@@ -582,15 +594,19 @@ static func validate(gen: Dictionary) -> PackedStringArray:
 			problems.append("%s is not in the break room" % key)
 	if spots.has("phone") and String(room_of.call(spots.phone.pos + Vector2(0.3, 0.0)).get("kind", "")) != "break_room":
 		problems.append("phone is not on a break room wall")
-	for key in ["shop", "sell_bin", "gold_pile", "ambulance"]:
+	for key in ["sell_bin", "gold_pile", "ambulance"]:
 		if spots.has(key) and not Rect2(nr).grow(0.01).has_point(spots[key].pos):
 			problems.append("%s is outside the neutral area" % key)
+	# SWEEP 4A HOOK (fog lot, chunk 2): the shop moved indoors (the van it stood behind is gone);
+	# "neutral_spawns" is now the lobby's spawn points, also indoors.
+	if spots.has("shop") and not Rect2(er).grow(0.01).has_point(spots.shop.pos):
+		problems.append("shop is outside the entrance building")
 	for p in spots.get("neutral_spawns", []):
 		var t := Vector2i(int(floor(p.x)), int(floor(p.y)))
-		if not nr.has_point(t) or not st.open(t.x, t.y):
-			problems.append("neutral spawn %s is not open outdoor ground" % str(p))
+		if not er.has_point(t) or not st.open(t.x, t.y):
+			problems.append("player spawn %s is not open floor in the entrance building" % str(p))
 	if spots.get("neutral_spawns", []).size() < 4:
-		problems.append("fewer than 4 neutral spawn points")
+		problems.append("fewer than 4 player spawn points")
 
 	# Markers.
 	var ps: Array[Vector2i] = []

@@ -1341,19 +1341,32 @@ static func _fill_contract(gen: Dictionary, info: Dictionary) -> void:
 	var nr: Rect2i = gen.neutral_rect
 	info["neutral_rect"] = Rect2(Vector2(nr.position) * C.TILE, Vector2(nr.size) * C.TILE)
 	if spots.has("ambulance"):
+		# SWEEP 4A HOOK (fog lot, chunk 2): the ambulance is a driven vehicle now (shift_loop.gd /
+		# ambulance.gd), not a static prop; this is only the bay parking spot and the lane it
+		# drives in along.
 		info["ambulance"] = {"position": _w(spots.ambulance.pos), "yaw": float(spots.ambulance.yaw),
-				"vehicle": _w(spots.ambulance.vehicle)}
+				"lane_start": _w(spots.ambulance.get("lane_start", spots.ambulance.pos))}
 	var spawns: Array = []
 	for p in spots.get("neutral_spawns", []):
 		spawns.append(_w(p))
 	var neutral := {"spawn_points": spawns}
 	if spots.has("shop"):
-		neutral["shop"] = {"position": _w(spots.shop.pos), "yaw": float(spots.shop.yaw), "vehicle": _w(spots.shop.vehicle)}
+		neutral["shop"] = {"position": _w(spots.shop.pos), "yaw": float(spots.shop.yaw)}
 	if spots.has("sell_bin"):
 		neutral["sell_bin"] = {"position": _w(spots.sell_bin.pos), "yaw": float(spots.sell_bin.yaw), "front": _w(spots.sell_bin.front)}
 	if spots.has("gold_pile"):
 		neutral["gold_pile"] = {"position": _w(spots.gold_pile.pos)}
 	info["neutral"] = neutral
+	# SWEEP 4A HOOK (fog lot, chunk 2): space off the lobby chunk 3's pharmacy and crematorium
+	# build into; reserved now so both have fixed spots.
+	var reserve: Dictionary = spots.get("reserve", {})
+	if reserve.has("pharmacy") or reserve.has("crematorium"):
+		var sz := {}
+		for key in ["pharmacy", "crematorium"]:
+			if reserve.has(key):
+				var r: Rect2i = reserve[key]
+				sz[key + "_rect"] = Rect2(Vector2(r.position) * C.TILE, Vector2(r.size) * C.TILE)
+		info["safe_zone"] = sz
 	var wings: Array = []
 	var names := {S.ZONE_ENTRANCE: "entrance", S.ZONE_OUTDOOR: "neutral"}
 	for wd in gen.wings:

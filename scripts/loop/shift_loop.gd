@@ -24,6 +24,7 @@ extends Node
 const PhoneScript := preload("res://scripts/loop/phone.gd")
 const CrewScript := preload("res://scripts/loop/crew.gd")
 const HudScript := preload("res://scripts/loop/loop_hud.gd")
+const AmbulanceScript := preload("res://scripts/loop/ambulance.gd")   # SWEEP 4A HOOK (fog lot, chunk 2)
 
 const GRACE_SECONDS := 60.0
 const AUTO_ANSWER_SECONDS := 8.0
@@ -45,6 +46,10 @@ const PAY_STABLE_PER_SHIFT := 25
 const PAY_EXTRA := 300
 const PAY_EXTRA_PER_SHIFT := 40
 const DEAD_PENALTY := 150
+## SWEEP 4A HOOK (fog lot, chunk 2): the driven ambulance.
+const AMBULANCE_SPEED := 6.0
+const AMBULANCE_LANE_RADIUS := 1.4
+const AMBULANCE_HONK_EVERY := 2.2
 
 var game: Node = null
 
@@ -58,6 +63,9 @@ var first_called := false
 ## case id -> {p: Vector3, y: float, ph: "in"|"hand"|"out", pt, ai, tb}
 var crews := {}
 var pay_note := ""
+## SWEEP 4A HOOK (fog lot, chunk 2): {ph: "hidden"|"out"|"parked"|"back", p: Vector3, y: float,
+## honk: bool}. Empty (mode "hidden" once ticked) on a level with no level_info.ambulance.
+var ambulance := {}
 
 # ---- host ----
 var extra_at := -1.0
@@ -81,6 +89,11 @@ var _crew_nodes := {}
 var _ring_timer := 0.0
 var _rattle_timer := 0.0
 var _last_call_state := ""
+# SWEEP 4A HOOK (fog lot, chunk 2)
+var _amb_node: Node3D = null
+var _amb_honk_timer := 0.0
+var _amb_siren_timer := 0.0
+var _amb_was_moving := false
 
 
 func setup(g: Node) -> void:
@@ -108,7 +121,9 @@ func reset() -> void:
 	_dispatch.clear()
 	_paths.clear()
 	_calls_made = 0
+	ambulance = {}   # SWEEP 4A HOOK (fog lot, chunk 2): re-hidden at the next level/lobby
 	_sync_crew_nodes()
+	_sync_ambulance_node()
 
 
 ## The level exists (game._add_landmarks, not in the dev room): place the break-room phone.
@@ -168,6 +183,7 @@ func _host_tick(delta: float) -> void:
 		_tick_call(delta)
 		_tick_dispatch()
 	_tick_crews(delta)
+	_tick_ambulance(delta)   # SWEEP 4A HOOK (fog lot, chunk 2)
 
 
 func _has_live_case() -> bool:
@@ -282,7 +298,8 @@ func _send_crew(id: int, c: Dictionary, table: int) -> void:
 	var yaw := _yaw_along(pts[0], pts[1] if pts.size() > 1 else stand)
 	crews[id] = {"p": pts[0], "y": yaw, "ph": "in", "pt": String(c.patient_id), "ai": String(c.ailment_id), "tb": table}
 	if game.level_info.has("ambulance"):
-		game._sound("loop_siren", from)
+		# SWEEP 4A HOOK (fog lot, chunk 2): the siren comes from wherever the ambulance actually is.
+		game._sound("loop_siren", Vector3(ambulance.get("p", from)))
 
 
 func _tick_crews(delta: float) -> void:
@@ -338,6 +355,85 @@ func _walk(cr: Dictionary, path: Dictionary, delta: float) -> bool:
 	cr.p = pos
 	path.i = i
 	return i >= pts.size()
+
+
+# =========================================================================
+# SWEEP 4A HOOK (fog lot, chunk 2): the driven ambulance
+# =========================================================================
+
+## Host: whether a delivery is in progress (a crew waiting to be dispatched or still bringing
+## the patient in). The ambulance stays parked for as long as this is true and, once it isn't,
+## drives back into the fog -- "if another patient is due while it's still there, it waits or
+## makes another trip" falls straight out of this: a fresh dispatch while it is still out or
+## parked just keeps it there; one after it already left starts a new trip from "hidden".
+func _ambulance_active() -> bool:
+	if not _dispatch.is_empty():
+		return true
+	for cr in crews.values():
+		if String(cr.get("ph", "")) in ["in", "hand"]:
+			return true
+	return false
+
+
+func _tick_ambulance(delta: float) -> void:
+	var info: Dictionary = game.level_info.get("ambulance", {})
+	if info.is_empty():
+		return
+	var bay: Vector3 = info.position
+	var lane: Vector3 = info.get("lane_start", bay)
+	if ambulance.is_empty():
+		ambulance = {"ph": "hidden", "p": lane, "y": _yaw_along(lane, bay), "honk": false}
+	var ph := String(ambulance.ph)
+	var active := _ambulance_active()
+	if ph == "hidden" and active:
+		ambulance.p = lane
+		ambulance.ph = "out"
+		ph = "out"
+	elif ph == "parked" and not active:
+		ambulance.ph = "back"
+		ph = "back"
+	if ph != "out" and ph != "back":
+		ambulance.honk = false
+		return
+	var to: Vector3 = bay if ph == "out" else lane
+	var from_p: Vector3 = ambulance.p
+	if _ambulance_lane_blocked(from_p, to):
+		ambulance.honk = true
+		return
+	ambulance.honk = false
+	var d: Vector3 = to - from_p
+	d.y = 0.0
+	var dist := d.length()
+	var step := AMBULANCE_SPEED * delta
+	if dist <= step:
+		ambulance.p = to
+		ambulance.ph = "parked" if ph == "out" else "hidden"
+	else:
+		ambulance.p = from_p + d / dist * step
+		ambulance.y = _yaw_along(from_p, to)
+
+
+## True while a standing, non-carried player is close enough to the ambulance's remaining path
+## (from its current spot to where it is headed this leg) to stop for.
+func _ambulance_lane_blocked(from_p: Vector3, to: Vector3) -> bool:
+	var d: Vector3 = to - from_p
+	d.y = 0.0
+	var len := d.length()
+	if len < 0.01:
+		return false
+	var dir := d / len
+	for p in game.players.values():
+		if p == null or not is_instance_valid(p) or not p.alive or p.downed or p.carried_by != 0:
+			continue
+		var rel: Vector3 = p.global_position - from_p
+		rel.y = 0.0
+		var t := rel.dot(dir)
+		if t < -1.0 or t > len + 1.0:
+			continue
+		var perp := (rel - dir * t).length()
+		if perp < AMBULANCE_LANE_RADIUS:
+			return true
+	return false
 
 
 func _turn_back(id) -> void:
@@ -847,10 +943,15 @@ func net_state() -> Dictionary:
 	for id in crews.keys():
 		var c: Dictionary = crews[id]
 		cr[id] = [(c.p as Vector3).snappedf(0.02), snappedf(float(c.y), 1.0 / 64.0), String(c.ph), String(c.pt), String(c.ai), int(c.tb)]
-	return {
+	var s := {
 		"gr": ceili(grace_left), "ck": call_kind, "cs": call_state, "ct": floori(call_t), "sub": subtitle,
 		"fc": first_called, "cr": cr, "pay": pay_note,
 	}
+	# SWEEP 4A HOOK (fog lot, chunk 2): the ambulance, host authoritative like everything else here.
+	if not ambulance.is_empty():
+		s["am"] = [(ambulance.p as Vector3).snappedf(0.02), snappedf(float(ambulance.y), 1.0 / 64.0),
+				String(ambulance.ph), bool(ambulance.get("honk", false))]
+	return s
 
 
 func apply_net_state(s: Dictionary) -> void:
@@ -869,6 +970,8 @@ func apply_net_state(s: Dictionary) -> void:
 		var a: Array = cr[id]
 		if a.size() >= 6:
 			crews[int(id)] = {"p": a[0], "y": float(a[1]), "ph": String(a[2]), "pt": String(a[3]), "ai": String(a[4]), "tb": int(a[5])}
+	var am: Array = s.get("am", [])
+	ambulance = {"p": am[0], "y": float(am[1]), "ph": String(am[2]), "honk": bool(am[3])} if am.size() >= 4 else {}
 
 
 func on_event(_data: Dictionary) -> void:
@@ -904,6 +1007,49 @@ func _local_tick(delta: float) -> void:
 		n.set_target(c.p, float(c.y), String(c.ph))
 		if rattle and n.is_moving():
 			Audio.play("loop_gurney", n.global_position + Vector3.UP * 0.6, -6.0, 0.06)
+	_local_tick_ambulance(delta)
+
+
+# SWEEP 4A HOOK (fog lot, chunk 2): local presentation for the driven ambulance.
+func _local_tick_ambulance(delta: float) -> void:
+	_sync_ambulance_node()
+	if _amb_node == null or ambulance.is_empty():
+		return
+	_amb_node.set_target(ambulance.p, float(ambulance.y), String(ambulance.ph))
+	var moving: bool = _amb_node.is_moving()
+	if moving:
+		_amb_siren_timer -= delta
+		if _amb_siren_timer <= 0.0 or not _amb_was_moving:
+			_amb_siren_timer = 2.9
+			Audio.play("loop_siren", _amb_node.global_position, -4.0, 0.04)
+	else:
+		_amb_siren_timer = 0.0
+	_amb_was_moving = moving
+	if bool(ambulance.get("honk", false)):
+		_amb_honk_timer -= delta
+		if _amb_honk_timer <= 0.0:
+			_amb_honk_timer = AMBULANCE_HONK_EVERY
+			Audio.play("amb_honk", _amb_node.global_position)
+	else:
+		_amb_honk_timer = 0.0
+
+
+func _sync_ambulance_node() -> void:
+	if game == null:
+		return
+	if ambulance.is_empty() or game.phase == game.Phase.MENU:
+		if _amb_node != null and is_instance_valid(_amb_node):
+			_amb_node.queue_free()
+		_amb_node = null
+		return
+	if _amb_node != null and is_instance_valid(_amb_node):
+		return
+	var parent: Node = game.get_node_or_null("Entities")
+	if parent == null:
+		return
+	_amb_node = AmbulanceScript.create()
+	parent.add_child(_amb_node)
+	_amb_node.snap(ambulance.p, float(ambulance.y), String(ambulance.ph))
 
 
 func _sync_crew_nodes() -> void:

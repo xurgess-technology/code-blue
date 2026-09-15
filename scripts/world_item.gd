@@ -7,6 +7,8 @@ extends RigidBody3D
 ## settles; clients never simulate it, they glide toward the host's transform from the
 ## snapshot. That keeps drops looking physical without anything desyncing.
 
+const FogRingScript := preload("res://scripts/level/fog_ring.gd")   # SWEEP 4A HOOK (fog lot, chunk 2)
+
 enum State { IN_CONTAINER, LOOSE, ON_LECTERN }
 
 const SETTLE_MAX := 3.0
@@ -138,6 +140,10 @@ func _physics_process(delta: float) -> void:
 				freeze = true
 				linear_velocity = Vector3.ZERO
 				angular_velocity = Vector3.ZERO
+				# SWEEP 4A HOOK (fog lot, chunk 2): anything that settled in the lot's fog ring
+				# comes back out at the edge instead of staying lost in the blind.
+				if FogRingScript.on_lot(global_position, g.level_info):
+					global_position = FogRingScript.pull_from_fog(global_position, g.level_info)
 			elif global_position.y < -5.0:
 				# Fell through something: put it back on the floor near where it went in.
 				global_position = Vector3(global_position.x, 0.2, global_position.z)
