@@ -580,11 +580,8 @@ class Runner extends Node:
 		var n: Dictionary = info.get("neutral", {})
 		if (n.get("spawn_points", []) as Array).size() < 4:
 			_fail("%s: neutral.spawn_points has fewer than 4 points" % tag)
-		for key in ["shop", "sell_bin"]:
-			if not (n.get(key, {}).get("position") is Vector3) or not n.get(key, {}).has("yaw"):
-				_fail("%s: neutral.%s is missing or malformed" % [tag, key])
-		if not (n.get("gold_pile", {}).get("position") is Vector3):
-			_fail("%s: neutral.gold_pile is missing" % tag)
+		if not (n.get("shop", {}).get("position") is Vector3) or not n.get("shop", {}).has("yaw"):
+			_fail("%s: neutral.shop is missing or malformed" % tag)
 		var nr: Rect2 = info.get("neutral_rect", Rect2())
 		var er: Rect2 = info.get("entrance_rect", Rect2())
 		# SWEEP 4A HOOK (fog lot, chunk 2): player spawns and the shop moved indoors.
@@ -594,12 +591,17 @@ class Runner extends Node:
 		var shop_p: Vector3 = n.get("shop", {}).get("position", Vector3.ZERO)
 		if not er.has_point(Vector2(shop_p.x, shop_p.z)):
 			_fail("%s: neutral.shop is outside the entrance building" % tag)
-		for key in ["sell_bin", "gold_pile"]:
-			var p: Vector3 = n.get(key, {}).get("position", Vector3.ZERO)
-			if not nr.has_point(Vector2(p.x, p.z)):
-				_fail("%s: neutral.%s is outside the neutral area" % [tag, key])
-		if not (info.get("safe_zone", {}).get("pharmacy_rect") is Rect2) or not (info.get("safe_zone", {}).get("crematorium_rect") is Rect2):
+		# SWEEP 4A HOOK (pharmacy, chunk 3): the pharmacy and the furnace (crematorium) both sit
+		# inside the reserved lobby rects, which must themselves be inside the entrance building
+		# (the indoor neutral zone) -- not the outdoor lot.
+		var sz: Dictionary = info.get("safe_zone", {})
+		if not (sz.get("pharmacy_rect") is Rect2) or not (sz.get("crematorium_rect") is Rect2):
 			_fail("%s: safe_zone pharmacy/crematorium reservation is missing" % tag)
+		else:
+			for key in ["pharmacy_rect", "crematorium_rect"]:
+				var r: Rect2 = sz[key]
+				if not er.grow(0.1).encloses(r):
+					_fail("%s: safe_zone.%s is not inside the entrance building" % [tag, key])
 		var amb: Vector3 = info.get("ambulance", {}).get("position", Vector3.ZERO)
 		if not nr.grow(0.1).has_point(Vector2(amb.x, amb.z)):
 			_fail("%s: the ambulance spot is not outside" % tag)

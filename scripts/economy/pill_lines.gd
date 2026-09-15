@@ -64,7 +64,7 @@ static var _last := {}
 ## A random line, never the same as the last one shown to this key.
 static func pick(key: int = 0) -> String:
 	var prev: String = String(_last.get(key, ""))
-	var line := LINES[randi() % LINES.size()]
+	var line: String = LINES[randi() % LINES.size()]
 	if LINES.size() > 1:
 		while line == prev:
 			line = LINES[randi() % LINES.size()]

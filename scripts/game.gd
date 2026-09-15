@@ -1193,7 +1193,7 @@ func drop_selected(p: Node, charge: float = 0.0) -> void:
 	var from := Transform3D(p.global_basis, p.head.global_position + fwd * 0.5 + Vector3.DOWN * 0.3)
 	var speed: float = lerpf(THROW_MIN_SPEED, THROW_MAX_SPEED, charge)
 	var up: float = lerpf(THROW_MIN_UP, THROW_MAX_UP, charge)
-	var vel := fwd * speed + Vector3.UP * up + p.velocity * 0.5
+	var vel: Vector3 = fwd * speed + Vector3.UP * up + (p.velocity as Vector3) * 0.5
 	# Placebo pills (3e): a charged throw fires a single pill and leaves the rest of the bottle in
 	# hand; a tap drops the whole bottle like any other item.
 	if String(s.kind) == "placebo_pills" and charge > 0.02 and int(s.count) > 0:
@@ -1363,7 +1363,10 @@ func buy_pills(p: Node) -> bool:
 	add_money(-PILL_PRICE, "pharmacy:placebo_pills")
 	_sound("economy_buy", economy.pharmacy_position())
 	say("%s bought a bottle of pills for $%d." % [p.player_name if p != null else "Someone", PILL_PRICE], 2.5)
+	# The tube-capsule animation plays on every machine; only the host spawns the item once it
+	# lands (economy_props.gd gates that on is_host()).
 	economy.pharmacy.queue_delivery("placebo_pills", PILL_COUNT)
+	_broadcast("pharmacy_deliver", {"kind": "placebo_pills", "count": PILL_COUNT})
 	return true
 
 
@@ -3571,6 +3574,23 @@ func _event(kind: String, data: Dictionary) -> void:
 			message = data.text
 			message_timer = data.secs
 			notice.emit(data.text, data.secs)
+		"pill_player":
+			# SWEEP 4A HOOK (pharmacy, chunk 3): a thrown/eaten pill landed on me specifically.
+			message = String(data.line)
+			message_timer = 2.5
+			notice.emit(String(data.line), 2.5)
+			var me := local_player()
+			if me != null:
+				me.add_warm()
+		"pill_line":
+			# SWEEP 4A HOOK (pharmacy, chunk 3): the floating quoted line over a patient or
+			# monster, for everyone nearby. Purely decorative and local to each machine.
+			_spawn_pill_line(data.pos, String(data.text))
+		"pharmacy_deliver":
+			# SWEEP 4A HOOK (pharmacy, chunk 3): every client plays the tube-capsule animation;
+			# only the host (economy_props.gd) actually spawns the item once it lands.
+			if economy != null and economy.pharmacy != null and is_instance_valid(economy.pharmacy):
+				economy.pharmacy.queue_delivery(String(data.kind), int(data.count))
 		"hit":
 			var p = players.get(data.id)
 			if p != null:
@@ -3619,6 +3639,29 @@ func _event(kind: String, data: Dictionary) -> void:
 				doors.on_event(kind, data)
 			else:
 				dev.on_event(kind, data)  # DEV HOOK: monster_killed and other dev room events
+
+
+## SWEEP 4A HOOK (pharmacy, chunk 3): a small floating quoted line, local to this machine only
+## (every machine that gets the "pill_line" event spawns its own copy; nothing here is tracked in
+## game state). Rises and fades over a couple of seconds, then frees itself.
+func _spawn_pill_line(pos: Vector3, text: String) -> void:
+	if level == null or not is_instance_valid(level):
+		return
+	var l := Label3D.new()
+	l.text = text
+	l.font_size = 34
+	l.pixel_size = 0.0034
+	l.outline_size = 8
+	l.outline_modulate = Color(0, 0, 0, 0.85)
+	l.modulate = Color(0.85, 0.95, 1.0)
+	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	l.no_depth_test = false
+	l.global_position = pos
+	level.add_child(l)
+	var tw := create_tween()
+	tw.tween_property(l, "position:y", l.position.y + 0.6, 1.8)
+	tw.parallel().tween_property(l, "modulate:a", 0.0, 1.8).set_delay(0.6)
+	tw.tween_callback(l.queue_free)
 
 
 static func _shuffle(a: Array, rng: RandomNumberGenerator) -> void:

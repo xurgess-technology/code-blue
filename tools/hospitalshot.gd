@@ -87,11 +87,13 @@ func _look_from(pos: Vector3, at: Vector3) -> void:
 
 func _pose_neutral() -> bool:
 	var n: Dictionary = game.level_info.get("neutral", {})
-	if n.is_empty():
+	if n.is_empty() or (n.get("spawn_points", []) as Array).is_empty():
 		return false
-	var gold: Vector3 = n.gold_pile.position
+	# SWEEP 4A HOOK (pharmacy, chunk 3): the lot is empty asphalt and fog now; the gold pile spot
+	# is gone, so anchor on a spawn point instead.
+	var anchor: Vector3 = (n.spawn_points[0] as Vector3)
 	var ent: Vector3 = game.level_info.entrance.position
-	_look_from(gold + (gold - ent).normalized() * 9.0 + Vector3(-6.0, 0, 0), ent + Vector3(0, 2.0, 0))
+	_look_from(anchor + (anchor - ent).normalized() * 9.0 + Vector3(-6.0, 0, 0), ent + Vector3(0, 2.0, 0))
 	return true
 
 

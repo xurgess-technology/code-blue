@@ -135,6 +135,12 @@ func _physics_process(delta: float) -> void:
 	var g := _game()
 	if g != null and g.is_host():
 		if not freeze:
+			# SWEEP 4A HOOK (pharmacy, chunk 3): a thrown pill checks for a mid-air hit every
+			# physics frame while it flies. A hit consumes it before it ever settles as a pickup.
+			if kind == "placebo_pills" and get_meta("pill_thrown", false) and g.has_method("pill_check_hit") and g.pill_check_hit(self):
+				g.world_items.erase(item_id)
+				queue_free()
+				return
 			_settle -= delta
 			if sleeping or _settle <= 0.0 or (linear_velocity.length() < 0.03 and _settle < SETTLE_MAX - 0.4):
 				freeze = true

@@ -668,15 +668,13 @@ static func _ground_paint(geo: GeoChunks, gen: Dictionary) -> void:
 		for k in 5:
 			var t := -hh + 0.6 + k * 1.4
 			strip.call("paint_yellow", c + Vector2(-hw, t), c + Vector2(hw, t + 0.9), 0.12)
-	if spots.has("entrance") and spots.has("gold_pile"):
+	if spots.has("entrance"):
+		# SWEEP 4A HOOK (pharmacy, chunk 3): the gold pile's marked-off square is gone with the
+		# pile itself; keep the faded crosswalk lines in front of the doors.
 		var e: Vector2 = spots.entrance.pos
 		for k in 7:
 			var x := e.x - 1.8 + k * 0.6
 			strip.call("paint_white", Vector2(x, e.y + 3.4), Vector2(x, e.y + 5.2), 0.3)
-		var g: Vector2 = spots.gold_pile.pos
-		var q := [g + Vector2(-1.5, -1.3), g + Vector2(1.5, -1.3), g + Vector2(1.5, 1.3), g + Vector2(-1.5, 1.3)]
-		for i in 4:
-			strip.call("paint_yellow", q[i], q[(i + 1) % 4], 0.15)
 
 
 static func _is_archway(gen: Dictionary, tx: int, ty: int) -> bool:
@@ -1387,11 +1385,9 @@ static func _fill_contract(gen: Dictionary, info: Dictionary) -> void:
 		spawns.append(_w(p))
 	var neutral := {"spawn_points": spawns}
 	if spots.has("shop"):
+		# SWEEP 4A HOOK (fog lot, chunk 2 / pharmacy, chunk 3): a placeholder spot only; the real
+		# pharmacy and furnace are built off the lobby (info["safe_zone"] below).
 		neutral["shop"] = {"position": _w(spots.shop.pos), "yaw": float(spots.shop.yaw)}
-	if spots.has("sell_bin"):
-		neutral["sell_bin"] = {"position": _w(spots.sell_bin.pos), "yaw": float(spots.sell_bin.yaw), "front": _w(spots.sell_bin.front)}
-	if spots.has("gold_pile"):
-		neutral["gold_pile"] = {"position": _w(spots.gold_pile.pos)}
 	info["neutral"] = neutral
 	# SWEEP 4A HOOK (fog lot, chunk 2): space off the lobby chunk 3's pharmacy and crematorium
 	# build into; reserved now so both have fixed spots.

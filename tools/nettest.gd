@@ -22,9 +22,10 @@ extends Node
 ##   full_shift       host + N clients play a whole shift of the loop: clock in, grace, answer the
 ##                    phone, paramedics deliver, fetch, operate, clock out and get paid (the runner
 ##                    adds lag)
-##   economy          client 1 picks up loot, sells it and buys gold bars; the host and client 2
-##                    see the money and the pile; client 1 keeps one piece of loot through a whole
-##                    shift change; client 3 joins afterwards and sees the pile too
+##   economy          client 1 picks up loot, throws it into the crematorium furnace and buys
+##                    placebo pills at the pharmacy; the host and client 2 see the money; client 1
+##                    keeps one piece of loot through a whole shift change; client 3 joins
+##                    afterwards and sees the money too
 ##   two_patients     host + 2 clients: two patients on two tables; client 1 and client 2 operate
 ##                    on different tables at the same time and each watches the other
 ##   downed           client 1 goes down and crawls; client 2 carries them to the player table and
@@ -59,7 +60,6 @@ extends Node
 ## `--stats` prints bandwidth: bytes each process sent per game second while the shift ran.
 
 const NAMES := ["Host", "Álvaro", "Bea O'Neil", "Surgeon Chris"]
-const EconomyScript := preload("res://scripts/economy/economy.gd")
 const MonsterScript := preload("res://scripts/monster.gd")
 const WindupScript := preload("res://scripts/combat/windup.gd")
 
@@ -515,11 +515,12 @@ func _sc_full_shift():
 	await _finish_together("shift %d clocked out, paid: $%d (%s)" % [game.shift, game.money, game.loop.pay_note])
 
 
-## Inventory (sweep 2): selling and buying replicate, and a late joiner sees the gold pile.
+## SWEEP 4A HOOK (pharmacy, chunk 3): selling (the furnace) and buying (the pharmacy) replicate,
+## and a late joiner sees the money.
 func _sc_economy():
 	const SELL := {"laptop": 250, "gold_watch": 300}
 	const KEEP := "stethoscope"
-	const BARS := 3
+	const PILL_BUYS := 3
 	if role == "host":
 		if not await _until(func(): return Net.names.size() >= 3 and game.players.size() >= 3 and game.economy.placed(), 90.0, "clients 1 and 2"):
 			return
@@ -537,19 +538,16 @@ func _sc_economy():
 		var total := 0
 		for kind in SELL.keys():
 			total += int(SELL[kind])
-		var spent := 0
-		for i in BARS:
-			spent += EconomyScript.bar_price(i)
+		var spent := PILL_BUYS * game.PILL_PRICE
 		var want_money := total - spent
-		if not await _until(func(): return game.gold_bars >= BARS, 120.0, "client 1 to sell and buy"):
+		# loop: client 1 sells, then buys PILL_BUYS bottles, then sends "kept" once it still holds
+		# the item it was never supposed to touch.
+		if not await _until(func(): return _count_msgs("kept") > 0, 120.0, "client 1 to sell, buy and keep its loot"):
 			return
 		await _wall_wait(0.5)
-		if game.money != want_money or game.gold_bars != BARS:
-			return _end(false, "host has $%d and %d bars, expected $%d and %d" % [game.money, game.gold_bars, want_money, BARS])
-		_say("host: $%d, %d bars" % [game.money, game.gold_bars])
-		# loop: a whole shift goes by; client 1's loot must still be in its hands afterwards.
-		if not await _until(func(): return _count_msgs("kept") > 0, 60.0, "client 1 to be holding its loot"):
-			return
+		if game.money != want_money:
+			return _end(false, "host has $%d, expected $%d" % [game.money, want_money])
+		_say("host: $%d" % game.money)
 		if not await _host_clock_in_and_deliver():
 			return
 		game._end_shift(true, "Test: shift over.")
@@ -560,22 +558,23 @@ func _sc_economy():
 			return
 		if game.money != want_money:
 			return _end(false, "an unfinished forced clock-out changed the money: $%d, expected $%d" % [game.money, want_money])
-		_send("check", {"money": want_money, "bars": BARS})
+		_send("check", {"money": want_money})
 		print("[marker] economy_bought")
-		if not await _until(func(): return _count_msgs("late_seen") > 0, 120.0, "the late joiner to see the pile"):
+		if not await _until(func(): return _count_msgs("late_seen") > 0, 120.0, "the late joiner to see the money"):
 			return
-		await _finish_together("client sold $%d of loot and bought %d bars; everyone sees $%d and the pile" % [total, BARS, want_money])
+		await _finish_together("client sold $%d of loot and bought %d pill bottles; everyone sees $%d" % [total, PILL_BUYS, want_money])
 		return
 	if index == 3:
-		# The late joiner: arrives after the purchase, must see the money and the whole pile.
+		# The late joiner: arrives after the purchase, must see the money.
 		if not await _until(func(): return game.phase != Game.Phase.MENU and _me() != null and game.economy.placed(), 90.0, "the world"):
 			return
-		if not await _until(func(): return _count_msgs("check") > 0 or game.gold_bars > 0, 30.0, "the snapshot"):
+		if not await _until(func(): return _count_msgs("check") > 0, 30.0, "the snapshot"):
 			return
-		if not await _until(func(): return game.gold_bars == BARS and int(game.economy.pile.get("_target")) == BARS and game.money > 0, 30.0, "the pile after joining"):
+		var want: Dictionary = _msgs("check")[0].data
+		if not await _until(func(): return game.money == int(want.money), 30.0, "the money after joining"):
 			return
-		_send("late_seen", {"bars": game.gold_bars, "money": game.money})
-		await _finish_together("joined late and see $%d and a pile of %d bars" % [game.money, int(game.economy.pile.get("_target"))])
+		_send("late_seen", {"money": game.money})
+		await _finish_together("joined late and sees $%d" % game.money)
 		return
 	if not await _until(func(): return game.phase != Game.Phase.MENU and _me() != null and game.economy.placed() and _count_msgs("loot") > 0, 90.0, "the loot"):
 		return
@@ -586,11 +585,11 @@ func _sc_economy():
 		if not await _until(func(): return _count_msgs("check") > 0, 150.0, "the purchase"):
 			return
 		var want: Dictionary = _msgs("check")[0].data
-		if not await _until(func(): return game.money == int(want.money) and game.gold_bars == int(want.bars) and int(game.economy.pile.shown) == int(want.bars), 20.0, "money and the pile on client 2"):
+		if not await _until(func(): return game.money == int(want.money), 20.0, "money on client 2"):
 			return
-		await _finish_together("see $%d and %d bars on the pile" % [game.money, int(game.economy.pile.shown)])
+		await _finish_together("sees $%d" % game.money)
 		return
-	# Client 1 does the selling and the buying, through E like a player.
+	# Client 1 does the selling (throwing into the furnace) and the buying, through the real paths.
 	for e in _msgs("loot")[0].data.items:
 		var kind: String = e.kind
 		var item_id := int(e.id)
@@ -601,18 +600,19 @@ func _sc_economy():
 		if not await _do_until(take, func(): return me.holding(kind), 40.0, "picking up " + kind):
 			return
 	for kind in SELL.keys():
-		var sell := func():
+		var burn := func():
 			var i := _slot_of(kind)
 			if i >= 0:
 				me.selected = i
-			_press_at(game.economy.sell_bin.global_position, "sell_bin")
-		if not await _do_until(sell, func(): return not me.holding(kind), 40.0, "selling " + kind):
+			_throw_at(game.economy.furnace.global_position)
+		if not await _do_until(burn, func(): return not me.holding(kind), 40.0, "throwing %s into the furnace" % kind):
 			return
 	_say("sold everything: $%d" % game.money)
-	for i in BARS:
-		if not await _do_until(func(): _press_at(game.economy.shop.global_position, "shop"), func(): return game.gold_bars >= i + 1, 40.0, "buying bar %d" % (i + 1)):
+	for i in PILL_BUYS:
+		var before := game.money
+		if not await _do_until(func(): _press_at(game.economy.pharmacy.global_position, "pharmacy"), func(): return game.money < before, 40.0, "buying pills %d" % (i + 1)):
 			return
-	_say("bought %d bars, $%d left" % [game.gold_bars, game.money])
+	_say("bought %d bottles, $%d left" % [PILL_BUYS, game.money])
 	if not me.holding(KEEP):
 		return _end(false, "lost the %s before the shift even started" % KEEP)
 	_send("kept", {})
@@ -622,7 +622,7 @@ func _sc_economy():
 		return
 	if not me.holding(KEEP):
 		return _end(false, "the %s did not survive the shift change: %s" % [KEEP, str(me.slots)])
-	await _finish_together("sold loot, bought %d bars, and kept the %s through a whole shift" % [game.gold_bars, KEEP])
+	await _finish_together("sold loot into the furnace, bought %d pill bottles, and kept the %s through a whole shift" % [PILL_BUYS, KEEP])
 
 
 ## SWEEP 3 (brains): a client picks up a brain, blends it, uses Hive Eyes and Echo.
@@ -1869,6 +1869,27 @@ func _items_near(kind: String, pos: Vector3, radius: float) -> int:
 		if it.kind == kind and Vector2(it.global_position.x - pos.x, it.global_position.z - pos.z).length() <= radius:
 			n += int(it.count)
 	return n
+
+
+## SWEEP 4A HOOK (pharmacy, chunk 3): stand close to a target, face it dead level and fire one
+## full-charge throw of the selected stack, at most once a wall-clock second. The same
+## drop_selected(charge) path a real charged throw uses.
+func _throw_at(pos: Vector3) -> void:
+	var me := _me()
+	var stand: Vector3 = pos + Vector3(0.0, 0.0, 1.1)
+	if Vector2(stand.x - me.global_position.x, stand.z - me.global_position.z).length() > 0.3:
+		me.teleport(_stand_spot(stand))
+	var to := pos - me.global_position
+	me.bot_yaw = atan2(-to.x, -to.z)
+	me._yaw = me.bot_yaw
+	me.rotation.y = me.bot_yaw
+	me.head.rotation.x = 0.0
+	me._pitch = 0.0
+	me.bot_move = Vector2.ZERO
+	if Time.get_ticks_msec() >= _press_at_ms:
+		me.drop_charge = 1.0
+		me.drop_count += 1
+		_press_at_ms = Time.get_ticks_msec() + 1000
 
 
 ## Stand within reach of a target (the client owns its position, so a teleport is a legal

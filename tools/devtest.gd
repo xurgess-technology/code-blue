@@ -282,7 +282,7 @@ func _run_solo() -> void:
 		me.bot_aim_id = ""
 		_check(me.holding("defibrillator") and me.free_slot_count() == 2 and int(me.selected_stack().get("v", 0)) > 0,
 			"the dispenser hands over a defibrillator worth money, in two slots")
-	_check(game.economy.placed() and game.economy.mode == "economy", "the dev room has its sell bin, shop and pile (mode %s)" % game.economy.mode)
+	_check(game.economy.placed() and game.economy.mode == "economy", "the dev room has its pharmacy and furnace (mode %s)" % game.economy.mode)
 	await _key(KEY_F1)
 	var money_before: int = game.money
 	for b in main.dev_panel.find_children("*", "Button", true, false):
@@ -290,25 +290,31 @@ func _run_solo() -> void:
 			b.pressed.emit()
 	_check(game.money == money_before + 1000, "the panel's +$1000 button gives money ($%d)" % game.money)
 	await _key(KEY_F1)
-	var bin: Node3D = game.economy.sell_bin
-	_stand(bin.global_position + bin.global_basis.z * 1.2, 0.0)
-	me.bot_aim_id = "sell_bin"
-	await _frames(3)
+	# SWEEP 4A HOOK (pharmacy, chunk 3): selling is throwing into the furnace, not an E-press.
+	var furn: Node3D = game.economy.furnace
 	var value: int = int(me.selected_stack().get("v", 0))
-	me.bot_press += 1
-	await _frames(4)
-	_check(not me.holding("defibrillator") and game.money == money_before + 1000 + value, "the dev room's sell bin buys the defibrillator for $%d" % value)
-	var shop: Node3D = game.economy.shop
-	_stand(shop.global_position + shop.global_basis.z * 1.3, 0.0)
-	me.bot_aim_id = "shop"
+	me.teleport(furn.global_position + furn.global_basis.z * 1.1)
+	_look_at(furn.global_position)
+	me._yaw = me.bot_yaw
+	me.rotation.y = me.bot_yaw
+	me.head.rotation.x = 0.0
+	me._pitch = 0.0
 	await _frames(3)
-	var bars: int = game.gold_bars
+	game.drop_selected(me, 1.0)
+	await _until(func(): return not me.holding("defibrillator"), 3.0)
+	await _frames(6)
+	_check(not me.holding("defibrillator") and game.money == money_before + 1000 + value, "the dev room's furnace burns the defibrillator for $%d" % value)
+	var pharm: Node3D = game.economy.pharmacy
+	_stand(pharm.global_position + pharm.global_basis.z * 1.3, 0.0)
+	me.bot_aim_id = "pharmacy"
+	await _frames(3)
+	var money_before_pills: int = game.money
 	me.bot_press += 1
 	await _frames(4)
 	me.bot_aim_id = ""
-	_check(game.gold_bars == bars + 1, "the dev room's shop sells a gold bar")
+	_check(game.money == money_before_pills - game.PILL_PRICE, "the dev room's pharmacy sells a bottle of pills")
 	dev.request("money", {"reset": true})
-	_check(game.money == 0 and game.gold_bars == 0, "the panel's money reset clears money and bars")
+	_check(game.money == 0, "the panel's money reset clears money")
 
 	await _nurse_watch_solo()
 

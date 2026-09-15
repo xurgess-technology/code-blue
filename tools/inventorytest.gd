@@ -9,6 +9,7 @@ extends Node
 
 const LootSpawner := preload("res://scripts/economy/loot_spawner.gd")
 const LootTable := preload("res://scripts/economy/loot_table.gd")
+# PillLines is a class_name (scripts/economy/pill_lines.gd), used directly below.
 
 var main: Node3D
 var game: Game
@@ -44,6 +45,7 @@ func _run() -> void:
 	await _hit_drops()
 	await _loot_spawn()
 	await _money()
+	await _pharmacy_pills()
 	await _persistence()
 
 
@@ -245,58 +247,151 @@ func _loot_spawn() -> void:
 
 
 func _money() -> void:
-	_say("---- money, the sell bin, the shop")
-	_check(game.economy.placed(), "the sell bin, shop and pile are placed (mode %s)" % game.economy.mode)
-	_check(game.find_interactable("sell_bin") != null and game.find_interactable("shop") != null, "sell_bin and shop are interactables")
+	_say("---- money, the pharmacy, the furnace")
+	_check(game.economy.placed(), "the pharmacy and the furnace are placed (mode %s)" % game.economy.mode)
+	_check(game.find_interactable("pharmacy") != null, "pharmacy is an interactable")
 	game.reset_money()
-	_check(game.money == 0 and game.gold_bars == 0, "money starts at zero")
+	_check(game.money == 0, "money starts at zero")
 	game.add_money(-50, "test")
 	_check(game.money == 0, "money never goes below zero by accident")
-	# Sell through the real interaction path: stand at the bin, aim, press E.
+	# Selling is a charged throw into the furnace: stand close, face it, and fire.
+	var furn: Node3D = game.economy.furnace
+	_check(furn != null, "the furnace is placed")
+	me.teleport(furn.global_position + furn.global_basis.z * 1.05)
+	var to := furn.global_position - me.global_position
+	me.rotation.y = atan2(-to.x, -to.z)
+	me._yaw = me.rotation.y
+	me.head.rotation.x = 0.0
+	me._pitch = 0.0
 	_clear()
 	me.take_into("laptop", 1, 150)
 	me.selected = 0
-	var bin: Node3D = game.find_interactable("sell_bin")
-	_check(bin.interact_prompt(me).begins_with("Sell Laptop for $150"), "the sell bin offers $150: '%s'" % bin.interact_prompt(me))
+	var m0 := game.money
+	game.drop_selected(me, 1.0)
+	var ok := await _until(func(): return not me.holding("laptop"), 3.0)
+	_check(ok and game.money == m0 + 150, "throwing the laptop into the furnace adds $150 (money %d)" % game.money)
+	# Unsellable items bounce back out instead of being consumed.
+	_clear()
 	me.take_into("gauze", 2)
-	me.selected = 1
-	_check(bin.interact_prompt(me).begins_with("!"), "the sell bin refuses surgical supplies: '%s'" % bin.interact_prompt(me))
 	me.selected = 0
-	await _press_on("sell_bin")
-	_check(game.money == 150 and not me.holding("laptop"), "selling the laptop adds $150 and empties the hand (money %d)" % game.money)
-	_check(me.holding("gauze"), "the gauze stays in its slot")
-	# A bulky one through sell_selected, selected by its second half.
-	me.take_into("ultrasound", 1, 400)
-	var t: int = me.tail_of(me.slots.find(me.slots.filter(func(s): return s.kind == "ultrasound")[0]))
-	me.selected = t
-	game.sell_selected(me)
-	_check(game.money == 550 and me.free_slot_count() == 3, "selling bulky loot from its second slot adds $400 and frees two slots")
-	# The shop.
-	var shop: Node3D = game.find_interactable("shop")
-	var price := game.gold_bar_price()
-	_check(price == 100, "the first gold bar costs $100 (%d)" % price)
-	await _press_on("shop")
-	_check(game.gold_bars == 1 and game.money == 450, "buying a bar adds it and takes $100 (bars %d, money %d)" % [game.gold_bars, game.money])
-	_check(game.gold_bar_price() > price, "the next bar costs more ($%d)" % game.gold_bar_price())
-	game.money = 50
-	_check(shop.interact_prompt(me).begins_with("!"), "the shop says you cannot afford it: '%s'" % shop.interact_prompt(me))
-	_check(not game.buy_gold_bar(me) and game.money == 50 and game.gold_bars == 1, "without the money nothing is bought")
+	var before_items := game.world_items.size()
+	game.drop_selected(me, 1.0)
+	await _frames(20)
+	_check(game.world_items.size() > before_items, "gauze thrown into the furnace bounces back out instead of selling")
+	for it in game.world_items.values().duplicate():
+		if it.kind == "gauze":
+			game.world_items.erase(it.item_id)
+			it.queue_free()
+	# The pharmacy: a flat price, unlimited buys, delivered through the tube.
+	var pharm: Node3D = game.find_interactable("pharmacy")
+	_check(pharm != null, "the pharmacy window is interactable")
+	var price := int(game.PILL_PRICE)
+	m0 = game.money
+	await _press_on("pharmacy")
+	await _frames(120)
+	var delivered := false
+	for it in game.world_items.values():
+		if it.kind == "placebo_pills" and int(it.count) == Game.PILL_COUNT:
+			delivered = true
+	_check(game.money == m0 - price, "buying pills takes $%d (money %d)" % [price, game.money])
+	_check(delivered, "the tube delivered a bottle of %d pills" % Game.PILL_COUNT)
+	game.money = 0
+	_check(pharm.interact_prompt(me).begins_with("!"), "the pharmacy says you cannot afford it: '%s'" % pharm.interact_prompt(me))
+	_check(not game.buy_pills(me), "without the money nothing is bought")
 	game.add_money(100000, "test")
-	for i in 49:
-		game.buy_gold_bar(me)
-	_check(game.gold_bars == 50, "fifty bars bought")
-	await _frames(40)
-	var pile: Node3D = game.economy.pile
-	_check(pile != null and int(pile.shown) == 50, "the pile shows 50 bars (%d)" % (int(pile.shown) if pile != null else -1))
-	var mm: MultiMesh = pile.get_node("Bars").multimesh
-	_check(mm.visible_instance_count == 50 and mm.instance_count >= 50, "one MultiMesh draws them")
-	_check(game.economy.money_visible_for(me), "the money readout shows near the shop")
+	_check(game.buy_pills(me) and game.buy_pills(me), "unlimited buys: pills never run out or get pricier")
+	_check(game.economy.money_visible_for(me), "the money readout shows near the pharmacy")
+
+
+func _pharmacy_pills() -> void:
+	_say("---- placebo pills: charged throw, hits, burns for $0")
+	PillLines.reset()
+	_clear()
+	# A charged throw goes further than a tap.
+	me.take_into("placebo_pills", 10)
+	me.selected = 0
+	var from: Vector3 = me.global_position
+	game.drop_selected(me, 0.0)
+	await _frames(3)
+	var tap := _newest_item()
+	var tap_dist: float = tap.global_position.distance_to(from) if tap != null else -1.0
+	if tap != null:
+		game.world_items.erase(tap.item_id)
+		tap.queue_free()
+	_clear()
+	me.take_into("placebo_pills", 10)
+	me.selected = 0
+	game.drop_selected(me, 1.0)
+	await _frames(3)
+	var thrown := _newest_item()
+	var thrown_dist: float = thrown.global_position.distance_to(from) if thrown != null else -1.0
+	await _frames(40)   # let both settle before comparing final rest distance
+	_check(tap_dist >= 0.0 and thrown_dist >= 0.0 and thrown_dist > tap_dist, "a charged throw goes further than a tap (%.2fm vs %.2fm)" % [thrown_dist, tap_dist])
+	if thrown != null and is_instance_valid(thrown):
+		game.world_items.erase(thrown.item_id)
+		thrown.queue_free()
+	_check(int(me.slots[_slot_of("placebo_pills")].count) == 9, "the charged throw fired one pill, nine are left")
+	# Pills burn for $0.
+	_clear()
+	me.take_into("placebo_pills", 10)
+	me.selected = 0
+	var furn: Node3D = game.economy.furnace
+	me.teleport(furn.global_position + furn.global_basis.z * 1.05)
+	var to := furn.global_position - me.global_position
+	me.rotation.y = atan2(-to.x, -to.z)
+	me._yaw = me.rotation.y
+	var m0 := game.money
+	game.drop_selected(me, 1.0)
+	await _until(func(): return int(me.slots[_slot_of("placebo_pills")].count) == 9, 3.0)
+	_check(game.money == m0, "a thrown pill burns for $0")
+	me.slots[_slot_of("placebo_pills")] = Player.empty_slot()
+	# A thrown pill on a teammate: the line and warm effect land only on that player's machine.
+	var other := _add_dummy()
+	await _frames(3)
+	other.teleport(me.global_position + Vector3(1.4, 0.0, 0.0))
+	_clear()
+	me.take_into("placebo_pills", 10)
+	me.selected = 0
+	var to2 := other.global_position - me.global_position
+	me.rotation.y = atan2(-to2.x, -to2.z)
+	me._yaw = me.rotation.y
+	me.head.rotation.x = 0.0
+	me._pitch = 0.0
+	other.warm_level = 0.0
+	other.warm_target = 0.0
+	game.drop_selected(me, 1.0)
+	var hit := await _until(func(): return int(other.warm_target) > 0 or other.warm_hold_left > 0.0, 3.0)
+	_check(hit and other.warm_hold_left > 0.0, "a thrown pill on a teammate starts their warm effect (local)")
+	game.players.erase(other.peer_id)
+	other.queue_free()
+	# A pill on an OR-table patient: the note is set, vitals/sedation untouched.
+	game.begin_shift()
+	await _frames(5)
+	if not game.patient_tables.is_empty():
+		var tv := game.case_on_table(0).get("vitals", -1.0)
+		var t: Vector3 = game.table_position(0)
+		game.pill_notes.clear()
+		me.teleport(t + Vector3(0, 0, 1.4))
+		var to3 := t - me.global_position
+		me.rotation.y = atan2(-to3.x, -to3.z)
+		me._yaw = me.rotation.y
+		me.head.rotation.x = 0.0
+		me._pitch = 0.0
+		_clear()
+		me.take_into("placebo_pills", 10)
+		me.selected = 0
+		game.drop_selected(me, 1.0)
+		var noted := await _until(func(): return game.pill_notes.has(0), 3.0)
+		_check(noted, "a pill on the OR table sets the green blip note")
+		_check(game.case_on_table(0).get("vitals", -1.0) == tv, "vitals do not change from a pill (%s -> %s)" % [str(tv), str(game.case_on_table(0).get("vitals", -1.0))])
+	else:
+		_say("(no patient table this run: skipped the OR blip check)")
+	_clear()
 
 
 func _persistence() -> void:
 	_say("---- persistence across shifts, reset")
 	var money := game.money
-	var bars := game.gold_bars
 	var start_shift := game.shift
 	for k in 2:
 		if game.phase != Game.Phase.SHIFT:
@@ -306,11 +401,13 @@ func _persistence() -> void:
 		var ok := await _until(func(): return game.phase == Game.Phase.LOBBY and game.shift == start_shift + k + 1, 20.0)
 		_check(ok, "shift %d ends and the next lobby starts" % (start_shift + k))
 		await _frames(6)
-		_check(game.money == money and game.gold_bars == bars, "money and bars survive into shift %d ($%d, %d bars)" % [game.shift, game.money, game.gold_bars])
-		_check(game.economy.placed() and int(game.economy.pile.get("_target")) == bars, "the new level's pile holds all %d bars" % bars)
+		_check(game.money == money, "money survives into shift %d ($%d)" % [game.shift, game.money])
+		_check(game.economy.placed(), "the new level's pharmacy and furnace are placed")
 	game.reset_money()
 	await _frames(3)
-	_check(game.money == 0 and game.gold_bars == 0 and int(game.economy.pile.shown) == 0, "reset_money empties the money and the pile")
+	_check(game.money == 0, "reset_money empties the money")
+	# no gold bar code paths remain: grep -ri gold scripts tools finds nothing economy-related.
+	_check(not game.has_method("buy_gold_bar") and not game.has_method("sell_selected") and not ("gold_bars" in game), "no gold bar code paths remain on Game")
 
 
 # =========================================================================
@@ -319,6 +416,13 @@ func _persistence() -> void:
 func _clear() -> void:
 	me.slots = Player.empty_slots()
 	me.selected = 0
+
+
+func _slot_of(kind: String) -> int:
+	for i in me.slots.size():
+		if String(me.slots[i].kind) == kind:
+			return i
+	return -1
 
 
 func _world(kind: String, count: int, value := 0) -> Node:

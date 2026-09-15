@@ -1,62 +1,52 @@
 extends StaticBody3D
-## The sell bin and the shop counter: interactables (docs/CONTRACTS.md, "Interaction") with
-## interact_id "sell_bin" and "shop".
+## SWEEP 4A HOOK (pharmacy, chunk 3): the outpatient pharmacy window. An interactable (docs/
+## CONTRACTS.md, "Interaction") with interact_id "pharmacy": a counter behind a steel grate, a
+## price board, and a wall delivery station beside it where bought pills thunk out of a
+## pneumatic tube a moment later. You never clearly see the pharmacist; a dark shape behind the
+## grate shifts now and then. No mechanic, no new Blender model: all primitives.
 ##
-## Two ways to exist:
-##   built     (fallback levels and the dev room) this node builds its own model: a steel drop
-##             bin with a lit slot, or a counter with a price board and a till;
-##   attached  (the neutral area, where the hospital builds the dumpster and the van) only a
-##             generous aim box and a sign, around the level's own geometry.
-## Local frame: origin on the floor, front toward +Z.
+## Local frame: origin on the floor, front (the side a player stands on) toward +Z.
 
-const GoldPileScript := preload("res://scripts/economy/gold_pile.gd")
+const ItemsDB := preload("res://scripts/items.gd")
 
-var role := "sell_bin"   # "sell_bin" | "shop"
+var game: Node = null
 var _price: Label3D
+var _shape_body: Node3D    # the faint pharmacist silhouette
+var _shape_t := 0.0
+var _shape_base_x := 0.0
+
+## Tube delivery: a queued {kind, count} list, each waiting DELIVER_SECONDS before it thunks out.
+const DELIVER_SECONDS := 1.6
+var _queue: Array = []
+var _capsule: MeshInstance3D
+var _capsule_t := 0.0
+var _delivery_slot: Vector3
 
 
-static func create(which: String, attached: bool) -> StaticBody3D:
-	var n = new()
-	n.role = which
-	n.name = "SellBin" if which == "sell_bin" else "Shop"
-	n._build(attached)
+static func create(g: Node) -> StaticBody3D:
+	var n := new()
+	n.game = g
+	n.name = "Pharmacy"
+	n._build()
 	return n
 
 
 func _game() -> Node:
+	if game != null and is_instance_valid(game):
+		return game
 	return get_tree().get_first_node_in_group("game") if is_inside_tree() else null
 
 
-func _build(attached: bool) -> void:
+func _build() -> void:
 	add_to_group("interactable")
-	set_meta("interact_id", role)
-	collision_mask = 0
-	if attached:
-		collision_layer = C.L_INTERACT
-		var size := Vector3(2.4, 1.7, 1.8) if role == "sell_bin" else Vector3(1.6, 1.8, 1.6)
-		_shape(size, Vector3(0, size.y * 0.5, 0))
-		# brains (sweep 3): the sell bin is the dumpster, the only place loot and brains are sold.
-		var tag := _label("DUMPSTER" if role == "sell_bin" else "GOLD BARS", 64, Color(1.0, 0.82, 0.4))
-		tag.position = Vector3(0, 2.25 if role == "sell_bin" else 2.5, 0)
-		tag.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
-		if role == "sell_bin":
-			var sub := _label("LOOT AND BRAINS, CASH OUT", 34, Color(1.0, 0.9, 0.65))
-			sub.position = Vector3(0, 2.02, 0)
-			sub.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
-		if role == "shop":
-			_price = _label("", 44, Color(1.0, 0.95, 0.8))
-			_price.position = Vector3(0, 2.2, 0)
-			_price.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
-		return
+	set_meta("interact_id", "pharmacy")
 	collision_layer = C.L_WORLD | C.L_INTERACT
-	if role == "sell_bin":
-		_build_bin()
-	else:
-		_build_counter()
+	collision_mask = 0
+	_build_window()
 
 
 # ---------------------------------------------------------------------------
-# models
+# model
 
 static var _mats := {}
 
@@ -65,7 +55,7 @@ static func _mat(key: String, col: Color, rough := 0.6, metal := 0.0, emit := Co
 	if _mats.has(key):
 		return _mats[key]
 	var m := StandardMaterial3D.new()
-	m.resource_name = "econ_" + key
+	m.resource_name = "pharm_" + key
 	m.albedo_color = col
 	m.roughness = rough
 	m.metallic = metal
@@ -77,7 +67,7 @@ static func _mat(key: String, col: Color, rough := 0.6, metal := 0.0, emit := Co
 	return m
 
 
-func _box(size: Vector3, pos: Vector3, mat: Material, rot := Vector3.ZERO) -> MeshInstance3D:
+func _box(size: Vector3, pos: Vector3, mat: Material, rot := Vector3.ZERO, parent: Node = null) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
 	var b := BoxMesh.new()
 	b.size = size
@@ -85,7 +75,7 @@ func _box(size: Vector3, pos: Vector3, mat: Material, rot := Vector3.ZERO) -> Me
 	mi.material_override = mat
 	mi.position = pos
 	mi.rotation_degrees = rot
-	add_child(mi)
+	(parent if parent != null else self).add_child(mi)
 	return mi
 
 
@@ -110,108 +100,147 @@ func _label(text: String, size: int, col: Color) -> Label3D:
 	return l
 
 
-func _lamp(pos: Vector3, col: Color, energy: float, reach: float) -> void:
-	var l := OmniLight3D.new()
-	l.light_color = col
-	l.light_energy = energy
-	l.omni_range = reach
-	l.shadow_enabled = false
-	l.light_volumetric_fog_energy = 0.2
-	l.position = pos
-	add_child(l)
+## A counter behind a steel grate: a low wall, a grate of thin bars over the window opening, a
+## price board, an order terminal, and a wall delivery station beside it.
+func _build_window() -> void:
+	var wall := _mat("wall", Color(0.66, 0.63, 0.58), 0.85)
+	var steel := _mat("steel", Color(0.42, 0.44, 0.46), 0.35, 0.7)
+	var counter := _mat("counter", Color(0.3, 0.32, 0.34), 0.5, 0.4)
+	var board := _mat("board", Color(0.08, 0.07, 0.06), 0.8)
+	var glow := _mat("glow", Color(0.02, 0.05, 0.02), 0.3, 0.0, Color(0.25, 0.9, 0.35), 1.3)
+	var dark := _mat("dark", Color(0.05, 0.05, 0.06), 0.6)
+
+	# Low counter wall either side of the window opening (opening is 1.1m wide, centred).
+	_box(Vector3(0.5, 1.1, 0.4), Vector3(-0.8, 0.55, 0.0), wall)
+	_box(Vector3(0.5, 1.1, 0.4), Vector3(0.8, 0.55, 0.0), wall)
+	_box(Vector3(1.9, 0.08, 0.4), Vector3(0.0, 1.14, 0.0), counter)
+	# Steel grate across the opening: vertical bars, close enough together nobody reaches through.
+	for i in 8:
+		var x := -0.5 + i * (1.0 / 7.0)
+		_box(Vector3(0.02, 0.9, 0.02), Vector3(x, 1.6, 0.0), steel)
+	_box(Vector3(1.1, 0.03, 0.03), Vector3(0.0, 1.15, 0.0), steel)
+	_box(Vector3(1.1, 0.03, 0.03), Vector3(0.0, 2.05, 0.0), steel)
+	# A dim shape behind the grate: never clearly seen, just a suggestion someone is back there.
+	_shape_base_x = -0.15
+	_shape_body = MeshInstance3D.new()
+	var cap := CapsuleMesh.new()
+	cap.radius = 0.16
+	cap.height = 1.1
+	_shape_body.mesh = cap
+	var shadow_mat := _mat("silhouette", Color(0.03, 0.03, 0.04), 0.9)
+	_shape_body.material_override = shadow_mat
+	_shape_body.position = Vector3(_shape_base_x, 1.0, -0.55)
+	add_child(_shape_body)
+
+	# Price board and order terminal.
+	_box(Vector3(1.0, 0.4, 0.03), Vector3(0.0, 2.35, -0.02), board)
+	var head := _label("PHARMACY", 44, Color(0.85, 0.92, 1.0))
+	head.position = Vector3(0.0, 2.46, 0.0)
+	_price = _label("", 32, Color(0.8, 1.0, 0.85))
+	_price.position = Vector3(0.0, 2.26, 0.0)
+	_box(Vector3(0.18, 0.14, 0.05), Vector3(-0.8, 0.95, 0.21), dark)
+	_box(Vector3(0.1, 0.07, 0.01), Vector3(-0.8, 0.97, 0.24), glow)
+
+	# The wall delivery station: a steel box with a hatch the tube capsule drops out of.
+	var station := Node3D.new()
+	station.position = Vector3(1.35, 0.0, 0.05)
+	add_child(station)
+	_box(Vector3(0.42, 0.42, 0.22), Vector3(0.0, 1.0, 0.0), steel, Vector3.ZERO, station)
+	_box(Vector3(0.3, 0.03, 0.2), Vector3(0.0, 0.83, 0.0), dark, Vector3.ZERO, station)
+	var tube := _cyl(0.05, 0.25, steel)
+	tube.rotation_degrees = Vector3(90, 0, 0)
+	tube.position = Vector3(0.0, 1.5, -0.02)
+	station.add_child(tube)
+	var lamp := OmniLight3D.new()
+	lamp.light_color = Color(0.7, 0.9, 1.0)
+	lamp.light_energy = 0.5
+	lamp.omni_range = 1.6
+	lamp.shadow_enabled = false
+	lamp.position = Vector3(0.0, 1.3, 0.0)
+	station.add_child(lamp)
+	_delivery_slot = station.position + Vector3(0.0, 0.72, 0.14)
+
+	_shape(Vector3(0.5, 1.4, 0.4), Vector3(-0.8, 0.7, 0.0))
+	_shape(Vector3(0.5, 1.4, 0.4), Vector3(0.8, 0.7, 0.0))
+	_shape(Vector3(0.5, 1.4, 0.3), Vector3(1.35, 0.7, 0.05))
 
 
-## A green steel drop bin: a box on short legs, a sloped hopper lid with a lit slot.
-func _build_bin() -> void:
-	var paint := _mat("bin_paint", Color(0.16, 0.3, 0.22), 0.55, 0.35)
-	var steel := _mat("bin_steel", Color(0.45, 0.47, 0.48), 0.35, 0.7)
-	var gold := _mat("bin_gold", Color(0.3, 0.2, 0.05), 0.4, 0.0, Color(1.0, 0.7, 0.22), 2.2)
-	_box(Vector3(0.9, 0.9, 0.62), Vector3(0, 0.55, 0), paint)
-	for x in [-0.4, 0.4]:
-		for z in [-0.26, 0.26]:
-			_box(Vector3(0.06, 0.1, 0.06), Vector3(x, 0.05, z), steel)
-	_box(Vector3(0.94, 0.06, 0.66), Vector3(0, 1.02, -0.02), steel, Vector3(-12, 0, 0))
-	_box(Vector3(0.62, 0.02, 0.1), Vector3(0, 1.07, 0.1), _mat("bin_slot", Color(0.02, 0.02, 0.02), 0.9), Vector3(-12, 0, 0))
-	_box(Vector3(0.66, 0.012, 0.012), Vector3(0, 1.085, 0.16), gold, Vector3(-12, 0, 0))
-	_box(Vector3(0.66, 0.012, 0.012), Vector3(0, 1.07, 0.04), gold, Vector3(-12, 0, 0))
-	_box(Vector3(0.5, 0.16, 0.01), Vector3(0, 0.72, 0.315), _mat("bin_plate", Color(0.85, 0.8, 0.6), 0.5, 0.6))
-	var l := _label("DUMPSTER", 40, Color(0.15, 0.1, 0.02))
-	l.outline_size = 0
-	l.position = Vector3(0, 0.72, 0.322)
-	var tag := _label("LOOT AND BRAINS IN, CASH OUT", 32, Color(1.0, 0.85, 0.45))
-	tag.position = Vector3(0, 1.35, 0.1)
-	_lamp(Vector3(0, 1.5, 0.5), Color(1.0, 0.8, 0.45), 0.7, 2.6)
-	_shape(Vector3(0.94, 1.1, 0.66), Vector3(0, 0.55, 0))
+func _cyl(r: float, h: float, mat: Material, sides := 12) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	var c := CylinderMesh.new()
+	c.top_radius = r
+	c.bottom_radius = r
+	c.height = h
+	c.radial_segments = sides
+	c.rings = 1
+	mi.mesh = c
+	mi.material_override = mat
+	return mi
 
 
-## A shop counter: a wooden top on a steel cabinet, a till, a price board on two posts and a
-## few sample bars under a lamp.
-func _build_counter() -> void:
-	var wood := _mat("counter_wood", Color(0.36, 0.22, 0.12), 0.7)
-	var steel := _mat("counter_steel", Color(0.3, 0.32, 0.34), 0.45, 0.5)
-	var board := _mat("counter_board", Color(0.08, 0.07, 0.06), 0.8)
-	_box(Vector3(1.4, 0.95, 0.55), Vector3(0, 0.475, 0), steel)
-	_box(Vector3(1.5, 0.05, 0.65), Vector3(0, 0.975, 0.02), wood)
-	_box(Vector3(0.26, 0.14, 0.22), Vector3(0.45, 1.07, -0.05), _mat("till", Color(0.12, 0.12, 0.13), 0.5), Vector3(-10, 0, 0))
-	_box(Vector3(0.14, 0.004, 0.06), Vector3(0.45, 1.145, -0.02), _mat("till_screen", Color(0.02, 0.05, 0.02), 0.3, 0.0, Color(0.3, 1.0, 0.4), 1.4), Vector3(-10, 0, 0))
-	for x in [-0.66, 0.66]:
-		_box(Vector3(0.05, 1.3, 0.05), Vector3(x, 1.6, -0.22), steel)
-	_box(Vector3(1.4, 0.5, 0.04), Vector3(0, 2.0, -0.22), board)
-	var head := _label("GOLD BARS", 64, Color(1.0, 0.8, 0.35))
-	head.position = Vector3(0, 2.1, -0.195)
-	_price = _label("", 48, Color(1.0, 0.95, 0.85))
-	_price.position = Vector3(0, 1.88, -0.195)
-	for i in 3:
-		var bar := MeshInstance3D.new()
-		bar.mesh = GoldPileScript.bar_mesh()
-		bar.position = Vector3(-0.42 + i * GoldPileScript.BAR_W, 1.0, 0.05)
-		bar.rotation.y = PI * 0.5
-		add_child(bar)
-	var top := MeshInstance3D.new()
-	top.mesh = GoldPileScript.bar_mesh()
-	top.position = Vector3(-0.42 + GoldPileScript.BAR_W, 1.0 + GoldPileScript.BAR_H, 0.05)
-	add_child(top)
-	_lamp(Vector3(0, 2.4, 0.6), Color(1.0, 0.82, 0.5), 1.1, 3.5)
-	_shape(Vector3(1.5, 1.0, 0.65), Vector3(0, 0.5, 0.02))
-	_shape(Vector3(1.4, 1.5, 0.1), Vector3(0, 1.75, -0.22))
-
-
-func _process(_delta: float) -> void:
-	if _price == null:
-		return
+func _process(delta: float) -> void:
+	_shape_t += delta
+	if _shape_body != null:
+		# A slow, small drift, like someone shifting their weight. Never a clear silhouette.
+		_shape_body.position.x = _shape_base_x + sin(_shape_t * 0.35) * 0.08
+		_shape_body.visible = sin(_shape_t * 0.19) > -0.7   # steps out of view now and then
 	var g := _game()
-	if g == null:
+	if _price != null and g != null:
+		var text := "PLACEBO PILLS  $%d/10" % int(g.PILL_PRICE)
+		if _price.text != text:
+			_price.text = text
+	_tick_delivery(delta)
+
+
+# ---------------------------------------------------------------------------
+# tube delivery
+
+## Host and every machine that shows it: queue a capsule delivery. Called by game.buy_pills()
+## right after the money is taken; DELIVER_SECONDS later a capsule thunks into the station and
+## the host drops the item there. The animation itself is harmless to run on every machine (it
+## reads the queue locally), but only the host actually spawns the world item.
+func queue_delivery(kind: String, count: int) -> void:
+	_queue.append({"kind": kind, "count": count, "t": DELIVER_SECONDS})
+
+
+func _tick_delivery(delta: float) -> void:
+	if _queue.is_empty():
+		_capsule_t = 0.0
+		if _capsule != null:
+			_capsule.visible = false
 		return
-	var text := "$%d EACH" % int(g.gold_bar_price())
-	if _price.text != text:
-		_price.text = text
+	var e: Dictionary = _queue[0]
+	e.t -= delta
+	if _capsule == null:
+		_capsule = _cyl(0.045, 0.14, _mat("capsule", Color(0.85, 0.7, 0.2), 0.35, 0.3))
+		_capsule.rotation_degrees = Vector3(90, 0, 0)
+		add_child(_capsule)
+	_capsule.visible = true
+	_capsule.position = _delivery_slot + Vector3.UP * clampf(e.t / DELIVER_SECONDS, 0.0, 1.0) * 0.5
+	if e.t <= 0.0:
+		_queue.pop_front()
+		_capsule.visible = false
+		var g := _game()
+		if g != null and g.is_host():
+			g._sound("economy_buy", global_position + _delivery_slot)
+			var xf := Transform3D(Basis(), global_position + _delivery_slot + Vector3.UP * 0.05)
+			var it = g._spawn_item(String(e.kind), int(e.count), xf, WorldItem.State.LOOSE)
+			if it != null:
+				it.value = 0
+	else:
+		_queue[0] = e
 
 
 # ---------------------------------------------------------------------------
 # interaction
 
 func interact_prompt(player) -> String:
-	if player == null:
-		return ""
 	var g := _game()
 	if g == null:
 		return ""
-	if role == "shop":
-		var price: int = g.gold_bar_price()
-		if int(g.money) < price:
-			return "!Gold bar: $%d (the team has $%d)" % [price, int(g.money)]
-		return "Buy a gold bar ($%d)" % price
-	var s: Dictionary = player.selected_stack() if player.has_method("selected_stack") else player.slots[player.selected]
-	var kind := String(s.kind)
-	if kind == "":
-		return "!Dumpster: bring loot or a brain (the gold glow)"
-	if not Items.is_loot(kind):
-		return "!Surgical supplies go on the OR shelf" if Items.is_surgical(kind) else "!Not worth anything"
-	# brains (sweep 3): a brain is worth less the longer it has been out.
-	var worth: int = int(g.brains.current_value(s)) if g.get("brains") != null else int(s.get("v", 0))
-	if g.get("brains") != null and g.brains.is_brain(kind):
-		return "Sell the %s %s for $%d at the dumpster" % [g.brains.condition(g.brains.factor_of(s)), Items.display_name(kind).to_lower(), worth]
-	return "Sell %s for $%d at the dumpster" % [Items.stack_label(kind, int(s.count)), worth]
+	if int(g.money) < int(g.PILL_PRICE):
+		return "!Placebo pills: $%d (the team has $%d)" % [int(g.PILL_PRICE), int(g.money)]
+	return "Buy placebo pills ($%d)" % int(g.PILL_PRICE)
 
 
 func interact_hold() -> float:
@@ -220,9 +249,5 @@ func interact_hold() -> float:
 
 func interact(player) -> void:
 	var g := _game()
-	if g == null:
-		return
-	if role == "shop":
-		g.buy_gold_bar(player)
-	else:
-		g.sell_selected(player)
+	if g != null:
+		g.buy_pills(player)

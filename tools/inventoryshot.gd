@@ -1,15 +1,14 @@
 extends Node
 ## Windowed screenshots for the inventory work: the slot bar with normal and bulky stacks, teal
-## supplies against gold loot in a dark room and in hand, the sell bin, the shop, gold piles of
-## 5, 50 and 500 bars (indoors, capped by the ceiling, and in an open outdoor stand-in with no
-## cap), and the dev room's loot rack and shop corner.
+## supplies against gold loot in a dark room and in hand, the pharmacy window and the furnace
+## (SWEEP 4A HOOK, pharmacy chunk 3: gold bars and the gold pile are gone), and the dev room's
+## loot rack and shop corner.
 ##
-##   godot --path . --resolution 1280x720 tools/inventoryshot.tscn -- [--seed=N] [--only=pile]
+##   godot --path . --resolution 1280x720 tools/inventoryshot.tscn -- [--seed=N] [--only=game]
 ##
 ## Writes tools/inventory_shots/<name>.png.
 
 const OUT_DIR := "res://tools/inventory_shots"
-const GoldPileScript := preload("res://scripts/economy/gold_pile.gd")
 const DevRoomScript := preload("res://scripts/dev/dev_room.gd")
 
 var main: Node3D
@@ -36,8 +35,6 @@ func _run() -> void:
 		await _game_shots()
 	if _only == "" or _only == "dev":
 		await _dev_shots()
-	if _only == "" or _only == "pile":
-		await _outdoor_piles()
 	print("[inventoryshot] done")
 	get_tree().quit(0)
 
@@ -128,113 +125,42 @@ func _game_shots() -> void:
 		await _shot("04_held_%s_dark" % k[0])
 		bot.set_flashlight(true)
 
-	# ---- the sell bin and the shop
-	var bin: Node3D = game.economy.sell_bin
-	var shop: Node3D = game.economy.shop
-	print("[inventoryshot] economy mode %s, bin %s, shop %s, pile %s" % [game.economy.mode, str(bin.global_position), str(shop.global_position), str(game.economy.pile.global_position)])
+	# ---- the pharmacy window and the furnace (SWEEP 4A HOOK, pharmacy chunk 3)
+	var pharm: Node3D = game.economy.pharmacy
+	var furn: Node3D = game.economy.furnace
+	print("[inventoryshot] economy mode %s, pharmacy %s, furnace %s" % [game.economy.mode, str(pharm.global_position), str(furn.global_position)])
 	_clear()
-	bot.take_into("laptop", 1, 184)
-	_look_from(bin.global_position + bin.global_basis.z * 1.7, bin.global_position + Vector3.UP * 0.7)
-	bot.bot_aim_id = "sell_bin"
-	await _frames(30)
-	await _shot("05_sell_bin_prompt")
-	bot.bot_press += 1
-	await _frames(12)
-	await _shot("06_sold_money_flash")
-	bot.bot_aim_id = ""
 	game.add_money(1500, "test")
-	_look_from(shop.global_position + shop.global_basis.z * 2.3, shop.global_position + Vector3.UP * 1.3)
-	bot.bot_aim_id = "shop"
+	_look_from(pharm.global_position + pharm.global_basis.z * 2.0, pharm.global_position + Vector3.UP * 1.2)
+	bot.bot_aim_id = "pharmacy"
 	await _frames(30)
-	await _shot("07_shop_prompt")
+	await _shot("05_pharmacy_prompt")
 	bot.bot_press += 1
-	await _frames(40)
+	await _frames(60)
+	await _shot("06_pharmacy_delivery")
 	bot.bot_aim_id = ""
-
-	# ---- the indoor pile (capped by the ceiling)
-	var pile: Node3D = game.economy.pile
-	for n in [5, 50, 500]:
-		game.gold_bars = n
-		await _frames(10)
-		var d := 1.6 if n == 5 else (2.6 if n == 50 else 4.2)
-		var p := pile.global_position
-		var dir := (bot.global_position - p)
-		dir.y = 0.0
-		dir = dir.normalized() if dir.length() > 0.1 else Vector3(0, 0, 1)
-		_look_from(_clear_floor_toward(p, dir, d), p + Vector3.UP * (0.3 if n == 5 else 0.9))
-		await _frames(30)
-		await _shot("08_pile_indoor_%03d" % n)
+	bot.take_into("laptop", 1, 184)
+	_look_from(furn.global_position + furn.global_basis.z * 2.4, furn.global_position + Vector3.UP * 0.9)
+	await _frames(20)
+	await _shot("07_furnace")
+	game.drop_selected(bot, 1.0)
+	await _frames(30)
+	await _shot("08_furnace_burn")
 
 
 func _dev_shots() -> void:
 	await _start(DevRoomScript.SEED)
 	await _frames(40)
 	var info: Dictionary = game.level_info
-	var econ: Dictionary = info.get("economy", {})
 	_look_from(Vector3(3.8, 0, 14.2), Vector3(3.8, 1.0, 18.0))
 	await _frames(40)
 	await _shot("10_dev_loot_rack")
 	game.add_money(5000, "test")
-	game.gold_bars = 60
 	await _frames(30)
-	_look_from(Vector3(16.0, 0, 13.0), econ.gold_pile.position + Vector3(1.2, 0.8, 1.5))
+	var furn: Node3D = game.economy.furnace
+	_look_from(furn.global_position + Vector3(0, 0.8, 1.8), furn.global_position + Vector3.UP * 0.8)
 	await _frames(40)
 	await _shot("11_dev_shop_corner")
-
-
-## An open, dark outdoor stand-in (no level, no ceiling) for the neutral area's uncapped pile.
-func _outdoor_piles() -> void:
-	if main != null:
-		main.queue_free()
-		main = null
-		await _frames(3)
-	var root := Node3D.new()
-	add_child(root)
-	var env := WorldEnvironment.new()
-	var e := Environment.new()
-	e.background_mode = Environment.BG_COLOR
-	e.background_color = Color(0.02, 0.025, 0.035)
-	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	e.ambient_light_color = Color(0.25, 0.28, 0.33)
-	e.ambient_light_energy = 0.35
-	e.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	e.glow_enabled = true
-	env.environment = e
-	root.add_child(env)
-	var ground := MeshInstance3D.new()
-	var pm := PlaneMesh.new()
-	pm.size = Vector2(40, 40)
-	ground.mesh = pm
-	var gm := StandardMaterial3D.new()
-	gm.albedo_color = Color(0.2, 0.2, 0.21)
-	gm.roughness = 0.95
-	ground.material_override = gm
-	root.add_child(ground)
-	for p in [Vector3(-4, 5, 3), Vector3(5, 5, -2)]:
-		var l := OmniLight3D.new()
-		l.light_color = Color(1.0, 0.86, 0.62)
-		l.light_energy = 2.2
-		l.omni_range = 14.0
-		l.shadow_enabled = true
-		l.position = p
-		root.add_child(l)
-	var cam := Camera3D.new()
-	cam.fov = 78
-	root.add_child(cam)
-	cam.current = true
-	for n in [5, 50, 500]:
-		var pile := GoldPileScript.create(1000.0)
-		root.add_child(pile)
-		pile.set_count(n, false)
-		var top: float = pile.top_position().y
-		var dist: float = 1.6 if n == 5 else (2.8 if n == 50 else maxf(6.0, top * 1.15))
-		cam.position = Vector3(dist * 0.8, 1.7, dist * 0.6)
-		cam.look_at(Vector3(0, top * 0.45 if n == 500 else 0.2, 0))
-		await _frames(20)
-		await _shot("09_pile_outdoor_%03d" % n)
-		pile.queue_free()
-		await _frames(2)
-	root.queue_free()
 
 
 # =========================================================================

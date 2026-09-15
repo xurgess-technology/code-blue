@@ -126,26 +126,32 @@ func _items() -> void:
 	var cracked = _newest("brain_discharged")
 	_check(me.hands_empty() and cracked != null and int(cracked.value) == maxi(1, roundi(300 * Game.LOOT_CRACK_KEEPS)), "a hit drops the brain and it cracks ($%s)" % (str(cracked.value) if cracked != null else "?"))
 	_check(cracked != null and absf(float(cracked.bt) - bt1) < 0.001, "the cracked brain keeps its spoil clock")
-	# The dumpster pays the spoiled value.
+	# SWEEP 4A HOOK (pharmacy, chunk 3): the furnace pays the spoiled value; selling is throwing.
 	me.revive_full()
 	_clear()
 	await _until(func(): return game.economy.placed(), 5.0)
-	var bin: Node3D = game.economy.sell_bin
+	var furn: Node3D = game.economy.furnace
 	me.take_into("brain_discharged", 1, 300)
 	i = _slot_of("brain_discharged")
 	me.slots[i]["bt"] = game.world_time - 135.0
 	me.selected = i
-	var want: int = b.current_value(me.slots[i])
-	_check(bin.interact_prompt(me).contains("dumpster") and bin.interact_prompt(me).contains("$%d" % want), "the dumpster offers the spoiled price: '%s'" % bin.interact_prompt(me))
-	_check(bin.interact_prompt(null) == "" and game.find_interactable("sell_bin") == bin, "the sell bin is still interactable sell_bin")
-	me.slots[_slot_of("brain_discharged")].erase("bt")
 	await _frames(20)
-	_check(me.slots[_slot_of("brain_discharged")].has("bt"), "a brain in hand without bt gets a spoil clock (host stamp)")
+	_check(me.slots[_slot_of("brain_discharged")].has("bt"), "a brain in hand keeps its spoil clock (host stamp)")
 	me.slots[_slot_of("brain_discharged")]["bt"] = game.world_time - 135.0
-	want = b.current_value(me.slots[_slot_of("brain_discharged")])
+	var want: int = b.current_value(me.slots[_slot_of("brain_discharged")])
 	var m0 := game.money
-	await _press_on("sell_bin")
-	_check(absi(game.money - m0 - want) <= 1 and not me.holding("brain_discharged"), "selling it at the dumpster pays the spoiled price, about $%d (got %d)" % [want, game.money - m0])
+	me.teleport(furn.global_position + furn.global_basis.z * 1.1)
+	var to := furn.global_position - me.global_position
+	me.bot_yaw = atan2(-to.x, -to.z)
+	me._yaw = me.bot_yaw
+	me.rotation.y = me.bot_yaw
+	me.head.rotation.x = 0.0
+	me._pitch = 0.0
+	await _frames(3)
+	game.drop_selected(me, 1.0)
+	await _until(func(): return not me.holding("brain_discharged"), 3.0)
+	await _frames(10)
+	_check(absi(game.money - m0 - want) <= 1 and not me.holding("brain_discharged"), "throwing it into the furnace pays the spoiled price, about $%d (got %d)" % [want, game.money - m0])
 	# Clean the floor of test brains.
 	for node in game.world_items.values().duplicate():
 		if Brains.is_brain(String(node.kind)):

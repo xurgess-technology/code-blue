@@ -118,9 +118,9 @@ func _ready() -> void:
 		{"name": "OR, patient + stocked shelf", "setup": _or_view},
 		{"name": "OR, the seal close up", "setup": _or_seal},  # SEAL HOOK
 		{"name": "operating: bone saw, bloody", "setup": _operating_saw},
-		# INVENTORY HOOK: the same view of the gold pile empty and with 500 bars.
-		{"name": "gold pile, 0 bars", "setup": func(): await _pile_view(0)},
-		{"name": "gold pile, 500 bars", "setup": func(): await _pile_view(500)},
+		# SWEEP 4A HOOK (pharmacy, chunk 3): the crematorium fire (a few emissive cards + a
+		# flickering light), the worst case at the mouth up close.
+		{"name": "crematorium, fire up close", "setup": _furnace_view},
 		{"name": "neutral area outside", "setup": _neutral},  # HOSPITAL HOOK: sweep 2 neutral area
 		{"name": "lot, facing the fog", "setup": _fog_lot},  # SWEEP 4A HOOK (fog lot, chunk 2)
 	]
@@ -220,34 +220,31 @@ func _or_seal() -> void:
 	_look(t + Vector3(0.9, 0, 1.6), t + Vector3.UP * 0.95)
 
 
-## INVENTORY HOOK: look at the gold pile (and the sell bin and shop behind it) with `n` bars.
-func _pile_view(n: int) -> void:
+## SWEEP 4A HOOK (pharmacy, chunk 3): standing right at the crematorium furnace, looking into the
+## open door at the fire -- the worst case for the flame cards and the flickering light.
+func _furnace_view() -> void:
 	if game.surgery.is_local_operating():
 		game.surgery.end(bot)
-	game.gold_bars = n
-	for i in 30:
+	for i in 10:
 		await get_tree().process_frame
-	var pile: Node3D = game.economy.pile
-	if pile == null:
+	var furn: Node3D = game.economy.furnace
+	if furn == null:
 		return
-	var p := pile.global_position
-	var to_clock: Vector3 = game.clock_pos() - p
-	to_clock.y = 0.0
-	var from := game._floor_at(p + to_clock.normalized() * minf(3.5, to_clock.length()))
-	_look(from, p + Vector3.UP * 1.6)
+	var p := furn.global_position
+	_look(p + furn.global_basis.z * 1.4 + Vector3.UP * 0.2, p + Vector3.UP * 0.7)
 
 
 ## HOSPITAL HOOK: the parking lot outside the main doors, looking back at the building across
-## the lot (street lights, cars, the van). Skipped on levels without a neutral area.
+## the lot (street lights, the ambulance lane). Skipped on levels without a neutral area.
 func _neutral() -> void:
 	var n: Dictionary = game.level_info.get("neutral", {})
-	if n.is_empty():
+	if n.is_empty() or (n.get("spawn_points", []) as Array).is_empty():
 		return
 	if game.surgery.camera() != null:
 		game.surgery.end(bot)
-	var gold: Vector3 = n.gold_pile.position
+	var anchor: Vector3 = (n.spawn_points[0] as Vector3)
 	var ent: Vector3 = game.level_info.entrance.position
-	_look(gold + (gold - ent).normalized() * 8.0 + Vector3(-5.0, 0, 0), ent + Vector3(0, 2.0, 0))
+	_look(anchor + (anchor - ent).normalized() * 8.0 + Vector3(-5.0, 0, 0), ent + Vector3(0, 2.0, 0))
 
 
 ## SWEEP 4A HOOK (fog lot, chunk 2): standing on the lot, right at the clear area's edge, looking

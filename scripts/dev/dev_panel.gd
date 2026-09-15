@@ -435,7 +435,7 @@ func _refresh() -> void:
 	if main != null and "quality" in main and gfx.selected != int(main.quality):
 		gfx.select(int(main.quality))
 	(_c["monster_count"] as Label).text = "%d alive" % game.monsters.size()
-	(_c["money_label"] as Label).text = "Team money $%d, %d gold bars (next $%d)." % [int(game.money), int(game.gold_bars), int(game.gold_bar_price())]
+	(_c["money_label"] as Label).text = "Team money $%d. Pills $%d/bottle at the pharmacy." % [int(game.money), int(game.PILL_PRICE)]
 	# loop: every case, one line each.
 	var lines := []
 	for c in game.cases:
