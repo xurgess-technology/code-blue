@@ -114,6 +114,10 @@ func _ready() -> void:
 	settings_ui.menu = menu
 	add_child(settings_ui)
 	menu.chose_settings.connect(settings_ui.open)
+	# Pause-only buttons: tear the session down and return to the menu (same path Q already
+	# uses to walk out mid-shift), or quit the app outright.
+	settings_ui.exit_to_menu_requested.connect(func(): _back_to_menu(""))
+	settings_ui.exit_to_desktop_requested.connect(func(): get_tree().quit())
 
 	Audio.set_ambience(true)
 	_set_mouse(false)

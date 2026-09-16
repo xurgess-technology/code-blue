@@ -1,12 +1,18 @@
 extends CanvasLayer
-## The settings screen, over the title menu or the pause overlay, plus the "Settings" button
-## shown while paused in a shift. main.gd creates one and connects Menu.chose_settings to
-## open(). Every control writes straight to the Settings autoload, so a change applies the
-## moment it is made; the screen follows Settings.changed, so F2 / F11 stay in sync.
+## The settings screen, over the title menu or the pause overlay, plus the "Settings",
+## "Exit to Main Menu" and "Exit to Desktop" buttons shown while paused in a shift (stacked
+## under the HUD's "PAUSED" text). main.gd creates one and connects Menu.chose_settings to
+## open(), and the two exit signals below to tearing the session down / quitting. Every
+## settings control writes straight to the Settings autoload, so a change applies the moment
+## it is made; the screen follows Settings.changed, so F2 / F11 stay in sync.
 ##
-##     open() / close() / is_open(), signal closed
+##     open() / close() / is_open(), signal closed, exit_to_menu_requested, exit_to_desktop_requested
 
 signal closed
+## Pause-only buttons (see _build_pause_button): main.gd connects these to tear the session
+## down and return to the menu, or quit the app outright.
+signal exit_to_menu_requested
+signal exit_to_desktop_requested
 
 const LAYER := 6
 
@@ -31,6 +37,9 @@ var menu: Control = null
 var _root: Control
 var _first_focus: Control
 var _pause_button: Button
+## Pause-only, under the Settings button: end the session and go to the menu, or quit outright.
+var _exit_menu_button: Button
+var _exit_desktop_button: Button
 
 
 func _ready() -> void:
@@ -47,6 +56,8 @@ func open() -> void:
 	_sync_all()
 	_root.visible = true
 	_pause_button.visible = false
+	_exit_menu_button.visible = false
+	_exit_desktop_button.visible = false
 	if _first_focus != null:
 		_first_focus.grab_focus()
 
@@ -94,7 +105,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _process(_delta: float) -> void:
-	# The pause overlay is drawn by the HUD; this adds the one button it needs.
+	# The pause overlay is drawn by the HUD; this adds the buttons it needs (Settings, and the
+	# two exit buttons below it).
 	var game := get_tree().get_first_node_in_group("game")
 	var show_pause := false
 	if game != null and not is_open():
@@ -102,6 +114,10 @@ func _process(_delta: float) -> void:
 		show_pause = game.paused and game.phase != Game.Phase.MENU and not menu_up
 	if _pause_button.visible != show_pause:
 		_pause_button.visible = show_pause
+	if _exit_menu_button.visible != show_pause:
+		_exit_menu_button.visible = show_pause
+	if _exit_desktop_button.visible != show_pause:
+		_exit_desktop_button.visible = show_pause
 
 
 # ------------------------------------------------------------------ building
@@ -195,21 +211,36 @@ func _build() -> void:
 
 func _build_pause_button() -> void:
 	# Sits under the HUD's "PAUSED / Esc to resume, Q to walk out" lines (drawn at 40% height).
-	_pause_button = _button("Settings")
+	_pause_button = _pause_menu_button("Settings", 84, 128)
 	_pause_button.name = "PauseSettingsButton"
-	_pause_button.size_flags_horizontal = Control.SIZE_FILL
-	_pause_button.custom_minimum_size = Vector2(200, 44)
-	_pause_button.anchor_left = 0.5
-	_pause_button.anchor_right = 0.5
-	_pause_button.anchor_top = 0.4
-	_pause_button.anchor_bottom = 0.4
-	_pause_button.offset_left = -100
-	_pause_button.offset_right = 100
-	_pause_button.offset_top = 84
-	_pause_button.offset_bottom = 128
-	_pause_button.visible = false
 	_pause_button.pressed.connect(open)
-	add_child(_pause_button)
+
+	_exit_menu_button = _pause_menu_button("Exit to Main Menu", 138, 182)
+	_exit_menu_button.name = "PauseExitToMenuButton"
+	_exit_menu_button.pressed.connect(func(): exit_to_menu_requested.emit())
+
+	_exit_desktop_button = _pause_menu_button("Exit to Desktop", 192, 236)
+	_exit_desktop_button.name = "PauseExitToDesktopButton"
+	_exit_desktop_button.pressed.connect(func(): exit_to_desktop_requested.emit())
+
+
+## One of the pause-only buttons stacked under the "PAUSED" text (see _build_pause_button):
+## same width/position as the Settings button, offset vertically by the caller.
+func _pause_menu_button(text: String, top: int, bottom: int) -> Button:
+	var b := _button(text)
+	b.size_flags_horizontal = Control.SIZE_FILL
+	b.custom_minimum_size = Vector2(200, 44)
+	b.anchor_left = 0.5
+	b.anchor_right = 0.5
+	b.anchor_top = 0.4
+	b.anchor_bottom = 0.4
+	b.offset_left = -100
+	b.offset_right = 100
+	b.offset_top = top
+	b.offset_bottom = bottom
+	b.visible = false
+	add_child(b)
+	return b
 
 
 func _section(text: String) -> Control:
