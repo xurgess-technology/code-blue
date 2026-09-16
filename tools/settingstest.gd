@@ -124,7 +124,10 @@ func _run() -> void:
 	_check(_near(AudioServer.get_bus_volume_db(AudioServer.get_bus_index("Master")), -12.04), "Master bus at -12 dB for 0.5")
 	_check(_near(AudioServer.get_bus_volume_db(AudioServer.get_bus_index("SFX")), -24.08), "SFX bus at -24 dB for 0.25")
 	_check(AudioServer.get_bus_send(AudioServer.get_bus_index("Ambience")) == &"SFX", "Ambience sends to SFX")
-	_check(Audio._ambience_player.bus == &"Ambience" and Audio._pool_2d[0].bus == &"SFX", "Audio players on their buses")
+	# Pool players take whatever bus their last cue asked for (the loading screen's beeps use UI), so
+	# check a plain cue lands on SFX rather than a particular pool slot.
+	var cue_player: Node = Audio.play("click", null, -80.0)
+	_check(Audio._ambience_player.bus == &"Ambience" and cue_player != null and cue_player.bus == &"SFX", "Audio players on their buses")
 	_check((Audio._stem_players["dread"] as AudioStreamPlayer).bus == &"Music", "music stems on the Music bus")
 	_check(_near(Audio.music_volume_db, -80.0), "Audio music trim at -80 dB for 0")
 	_check(AudioServer.is_bus_mute(AudioServer.get_bus_index("Music")), "Music bus muted at 0")

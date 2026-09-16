@@ -16,6 +16,7 @@ Assets="*res://scripts/assets.gd"
 Audio="*res://scripts/audio_manager.gd"
 Settings="*res://scripts/settings.gd"
 Net="*res://scripts/net.gd"
+Loading="*res://scripts/loading_screen.gd"
 
 [display]
 

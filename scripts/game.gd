@@ -108,6 +108,7 @@ var spectating: int = 0
 var paused: bool = false
 ## DEV HOOK (scripts/dev): true while the session is in the secret dev room (seed DevRoom.SEED).
 var dev_mode: bool = false
+var _new_run_pending := false
 ## DEV HOOK: the dev room controller (scripts/dev/dev_room.gd), idle outside the dev room.
 var dev: Node = null
 
@@ -518,10 +519,27 @@ func dev_skip_grace() -> void:
 	loop.skip_grace()
 
 
-## Host: after game over, a new run: broke, shift 1, a new hospital.
+## Client: the host started a new hospital. The build has to happen now (the snapshots that follow
+## are for it), so the screen can't draw before it; it comes up right after and hides the pop into
+## the new level for a moment instead.
+func _client_rebuild_cover() -> void:
+	Loading.begin("rebuild", "NEW HOSPITAL...")
+	Loading.end.call_deferred("rebuild")
+
+
+## Host: after game over, a new run: broke, shift 1, a new hospital. The loading screen goes up and
+## draws first; the game-over tick keeps calling this while it waits, hence the guard.
 func _new_run() -> void:
-	reset_money()
-	start_lobby(seed_value + 7919, 1)
+	if _new_run_pending:
+		return
+	_new_run_pending = true
+	Loading.begin("new_run", "NEW HOSPITAL...")
+	await Loading.drawn()
+	_new_run_pending = false
+	if phase == Phase.LOST and is_host():
+		reset_money()
+		start_lobby(seed_value + 7919, 1)
+	Loading.end("new_run")
 
 
 func say(text: String, seconds: float = 3.0) -> void:
@@ -3406,6 +3424,7 @@ func _repl_apply() -> void:
 		if _cl_seed_wait:
 			return   # _rpc_shift already built the newer hospital; this is an older value
 		wing_loader.next_generation = int(g.get("wg", -1))   # DOORS HOOK
+		_client_rebuild_cover()
 		start_lobby(int(g.sd), int(g.sh))
 	else:
 		_cl_seed_wait = false
@@ -3541,6 +3560,8 @@ func _set_container_open(id: String, open: bool) -> void:
 @rpc("authority", "reliable", "call_remote")
 func _rpc_shift(new_seed: int, new_shift: int, new_phase: int, _net_seq_unused: int = 0) -> void:
 	if new_seed != seed_value:
+		if phase != Phase.MENU:
+			_client_rebuild_cover()
 		start_lobby(new_seed, new_shift)
 		_cl_seed_wait = true
 	shift = new_shift

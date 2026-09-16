@@ -186,34 +186,59 @@ func _basic_environment() -> WorldEnvironment:
 # =========================================================================
 
 func _start_solo(player_name: String) -> void:
+	if not await _loading_screen_up():
+		return
 	Net.start_solo(player_name)
 	game.start_session(randi())
 	hud.host_info = ""
 	_enter_game()
+	Loading.end("session")
+
+
+## Put the loading screen up and let it draw before the level build blocks the main thread.
+## False if a session start is already underway (a double click).
+func _loading_screen_up() -> bool:
+	if Loading.is_active():
+		return false
+	Loading.begin("session", "SCRUBBING IN...")
+	await Loading.drawn()
+	return true
 
 
 func _start_host(player_name: String) -> void:
+	if Loading.is_active():
+		return
 	var err := Net.host(player_name)
 	if not err.is_empty():
 		menu.show_menu(err)
 		return
+	await _loading_screen_up()
 	game.start_session(randi())
 	var addresses := Net.local_addresses()
 	hud.host_info = "Friends join at: %s" % ", ".join(addresses.map(func(a): return "%s:%d" % [a, C.DEFAULT_PORT])) \
 		if not addresses.is_empty() else "Hosting on port %d" % C.DEFAULT_PORT
 	_enter_game()
+	Loading.end("session")
 
 
+## Joining: the screen stays up from the click until the host's hospital is built here (or the
+## join fails / is abandoned).
 func _start_join(player_name: String, address: String) -> void:
+	if Loading.is_active():
+		return
 	var parsed := Net.parse_address(address)
 	menu.set_status("Joining %s:%d..." % [parsed.address, parsed.port])
+	Loading.begin("join", "CONNECTING...")
 	var err := Net.join(parsed.address, parsed.port, player_name)
 	if not err.is_empty():
+		Loading.end("join")
 		menu.show_menu(err)
 
 
 ## DEV HOOK: into the dev room, alone or hosting (friends then join it like any hosted game).
 func start_dev(player_name: String, host: bool) -> void:
+	if Loading.is_active():
+		return
 	if host:
 		var err := Net.host(player_name)
 		if not err.is_empty():
@@ -225,8 +250,10 @@ func start_dev(player_name: String, host: bool) -> void:
 	else:
 		Net.start_solo(player_name)
 		hud.host_info = ""
+	await _loading_screen_up()
 	game.start_session(DevRoomScript.SEED)
 	_enter_game()
+	Loading.end("session")
 
 
 
@@ -238,9 +265,11 @@ func _start_host_steam(_player_name: String) -> void:
 
 
 func _on_steam_hosted() -> void:
+	await _loading_screen_up()
 	game.start_session(randi())
 	hud.host_info = "Steam lobby open (friends only). Esc, then Invite friends, or invite from the Steam overlay."
 	_enter_game()
+	Loading.end("session")
 
 
 ## Accepted an invite or clicked "Join game" on a friend: leave whatever we were doing and go.
@@ -249,8 +278,10 @@ func _on_steam_invite(lobby: int) -> void:
 		_back_to_menu("")
 	menu.set_enabled(false)
 	menu.set_status("Joining your friend's Steam lobby...")
+	Loading.begin("join", "CONNECTING...")
 	var err := Net.join_steam(lobby)
 	if not err.is_empty():
+		Loading.end("join")
 		menu.show_menu(err)
 
 
@@ -284,6 +315,7 @@ func _on_joined() -> void:
 
 
 func _on_join_failed(reason: String) -> void:
+	Loading.end("join")
 	menu.show_menu(reason)
 
 
@@ -298,6 +330,7 @@ func _back_to_menu(reason: String) -> void:
 	game.end_session("")
 	game.paused = false
 	_set_mouse(false)
+	Loading.end("join")
 	menu.show_menu(reason)
 	Audio.set_music_intensity(0.0)
 
@@ -417,6 +450,8 @@ func _process(_delta: float) -> void:
 	if _fps_label.visible:
 		_fps_label.text = "%d fps  %s" % [Engine.get_frames_per_second(), QUALITY_NAMES[quality]]
 	_update_mouse()
+	if game.phase != Game.Phase.MENU and Loading.has_reason("join"):
+		Loading.end("join")   # the host's hospital is built here (its warmup, if any, keeps the screen up)
 	_invite_button.visible = game.paused and Net.backend == "steam" and game.phase != Game.Phase.MENU
 	# While operating, the surgery view's camera wins; otherwise whoever we are watching.
 	var surgery_cam: Camera3D = game.surgery_camera() if game.phase != Game.Phase.MENU else null  # downed hook: either table

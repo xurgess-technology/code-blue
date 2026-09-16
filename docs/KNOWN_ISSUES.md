@@ -1543,3 +1543,31 @@ Touchdown adds a camera shake (`DIVE_LAND_SHAKE` 0.35, trauma ~0.46 measured) an
 "thud" sound on top of the landing dip. `controlstest` 50/50. Its scanner block now clears the
 database first: `user://database.save` is shared with any open copy of the game, and a live
 playtest running alongside the test left the Walk-In already scanned.
+
+## Loading screen (2026-09-16, user request)
+
+A catch-all loading screen: the `Loading` autoload (`scripts/loading_screen.gd`), a heart monitor
+whose ECG trace sweeps across a grid and beeps (`surgery_beep`) on every R spike, with a pulsing
+heart, "HR 70-75" and a label ("SCRUBBING IN...", "CONNECTING...", "NEW HOSPITAL..."). Callers
+`Loading.begin(reason, text)` / `Loading.end(reason)`; overlapping reasons keep it up; it stays at
+least 0.9 s and fades over 0.3 s. It replaces the warmup's old static "SCRUBBING IN..." cover.
+- **Covered:** Solo, Host, Steam host and the dev room (main.gd puts it up and waits two frames
+  before `start_session`, so it's on screen before the build blocks); the first-session warmup;
+  joining (from the click until the host's hospital is built here); the host's new run after game
+  over (`_new_run`, now guarded and deferred two frames); a client receiving a new hospital (shown
+  right after the build, since that build can't wait, to hide the pop). Double-clicking a start
+  button while it's up does nothing.
+- **Audio:** beeps go to a new `UI` bus straight to Master. The warmup now mutes SFX, Hall and
+  Ambience instead of Master, so the beeps stay audible while the game's own sounds are silenced.
+- **Warmup** takes a frame between its big build sections so the trace keeps moving; tools that
+  wait on the `WarmupCover` node still work (it's now a plain marker node).
+- **Known: two stalls where the monitor freezes on a first Solo start** (measured, Radeon 890M):
+  the level build itself (`_build_level`, ~2.2 s, one synchronous call) and the first frame drawn
+  after the warmup starts (~2.8 s: the GPU compiling shaders for the whole level). The trace jumps
+  ahead when each ends (it's driven by the wall clock). Fixing the first means building the level off
+  the main thread like the wing loader does; the second is shader compilation on the render thread.
+- `tools/loadingshot.tscn` (windowed) screenshots the screen through a real Solo start.
+- `settingstest`'s "Audio players on their buses" now checks a played cue's bus rather than pool
+  slot 0, which the loading beep can leave on UI.
+- Verified: `devtest`, `controlstest` 50/50, `settingstest` 97/97, `looptest` (only the known
+  furnace-throw flake; its game-over -> new run checks pass).

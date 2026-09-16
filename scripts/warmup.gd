@@ -11,7 +11,7 @@ extends RefCounted
 ## shows it to the camera for a few frames, then keeps it all alive but hidden. After that
 ## the same things build in a millisecond or two and draw without compiling.
 
-const COVER_LAYER := 120
+
 const RENDER_FRAMES := 8
 
 const BodyScript := preload("res://scripts/patient_body.gd")
@@ -38,11 +38,19 @@ static func run(game: Node) -> void:
 	var tree := game.get_tree()
 	var started := Time.get_ticks_msec()
 
-	var cover := _make_cover()
+	Loading.begin("warmup", "SCRUBBING IN...")
+	# tools/*.gd wait for this node to go away before they start driving the game.
+	var cover := Node.new()
+	cover.name = "WarmupCover"
 	game.get_parent().add_child(cover)
-	var master := AudioServer.get_bus_index("Master")
-	var was_muted := AudioServer.is_bus_mute(master)
-	AudioServer.set_bus_mute(master, true)
+	# Every game sound goes quiet (the look-alike phone rings, minigames make noise); the loading
+	# screen's beeps are on their own UI bus and stay audible.
+	var muted := {}
+	for bus_name in [Audio.BUS_SFX, Audio.BUS_HALL, Audio.BUS_AMBIENCE]:
+		var bi := AudioServer.get_bus_index(bus_name)
+		if bi >= 0:
+			muted[bi] = AudioServer.is_bus_mute(bi)
+			AudioServer.set_bus_mute(bi, true)
 
 	var root := Node3D.new()
 	root.name = "WarmupKeepAlive"
@@ -92,6 +100,8 @@ static func run(game: Node) -> void:
 	shelf.add_child(fp_torch)
 	fp_torch.position = Vector3(x + 0.4, 0.3, 0.3)
 
+	# A frame between sections keeps the loading screen's monitor moving.
+	await tree.process_frame
 	# Patients, each showing every visual state a case can reach
 	var bodies := {}
 	var bx := -0.6
@@ -159,6 +169,8 @@ static func run(game: Node) -> void:
 	ptable.position = Vector3(0.0, -1.4, -2.2)
 	ptable.scale = Vector3.ONE * 0.5
 
+	# A frame between sections keeps the loading screen's monitor moving.
+	await tree.process_frame
 	# Monsters: the visual model only, so nothing starts thinking or moving. NURSE HOOK: "night_nurse"
 	# builds her Blender model (monster/night_nurse: its two skinned materials, shadow mesh and the
 	# first load of its six maps), so the first Night Nurse of a session does not hitch.
@@ -192,6 +204,8 @@ static func run(game: Node) -> void:
 	shelf.add_child(ph)
 	ph.set_ringing(true)
 
+	# A frame between sections keeps the loading screen's monitor moving.
+	await tree.process_frame
 	# DOORS HOOK: every furniture kind's shared meshes (the first level only built the kinds it uses;
 	# the wing loader's thread needs them all), then one door of every kind (the laminate, steel and glass leaves, the frames, the gate's
 	# lamp in each state), as look-alikes: no collision, not interactable.
@@ -221,6 +235,8 @@ static func run(game: Node) -> void:
 				lens.material_override = DoorModels.lamp_material(state)
 				door.add_child(lens)
 
+	# A frame between sections keeps the loading screen's monitor moving.
+	await tree.process_frame
 	# Every surgery minigame, set up on a patient the way the surgery system does it
 	var games := []
 	for ail in Procedures.AILMENTS.keys():
@@ -266,26 +282,10 @@ static func run(game: Node) -> void:
 	# Keep everything alive so its shaders stay compiled, but out of sight and asleep.
 	shelf.visible = false
 	root.process_mode = Node.PROCESS_MODE_DISABLED
-	AudioServer.set_bus_mute(master, was_muted)
+	for bi in muted.keys():
+		AudioServer.set_bus_mute(bi, muted[bi])
 	cover.queue_free()
+	Loading.end("warmup")
 	print("[warmup] built and drew everything once in %d ms (furniture kinds %d ms)" % [Time.get_ticks_msec() - started, warm_parts_ms])
 
 
-static func _make_cover() -> CanvasLayer:
-	var layer := CanvasLayer.new()
-	layer.name = "WarmupCover"
-	layer.layer = COVER_LAYER
-	var bg := ColorRect.new()
-	bg.color = Color("06080c")
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	layer.add_child(bg)
-	var label := Label.new()
-	label.text = "SCRUBBING IN..."
-	label.add_theme_font_size_override("font_size", 28)
-	label.add_theme_color_override("font_color", Color("8a9aa0"))
-	label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	layer.add_child(label)
-	return layer

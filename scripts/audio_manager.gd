@@ -32,6 +32,9 @@ const BUS_SFX := "SFX"
 const BUS_MUSIC := "Music"
 const BUS_AMBIENCE := "Ambience"
 const BUS_HALL := "Hall"
+## Loading-screen beeps: straight to Master, so the warmup can mute every game sound (SFX, Hall,
+## Ambience) without muting the screen that covers it.
+const BUS_UI := "UI"
 
 const MUSIC_BASE_DB := -4.0
 const AMBIENCE_BASE_DB := -8.0
@@ -129,6 +132,7 @@ func _setup_buses() -> void:
 	# stings into one space, and SFX can opt in per cue via play(..., bus).
 	_ensure_bus(BUS_MUSIC, BUS_HALL)
 	_ensure_bus(BUS_AMBIENCE, "Master")
+	_ensure_bus(BUS_UI, "Master")
 	AudioServer.set_bus_volume_db(AudioServer.get_bus_index(BUS_MUSIC), MUSIC_BASE_DB)
 	AudioServer.set_bus_volume_db(AudioServer.get_bus_index(BUS_AMBIENCE), AMBIENCE_BASE_DB)
 	_ensure_fog_filters()
