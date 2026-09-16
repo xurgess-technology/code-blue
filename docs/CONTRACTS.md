@@ -1415,9 +1415,10 @@ p.body_hands                                 # scripts/hands/body_hands.gd: clip
 p.body_hands.hand_r / hand_l                 # BoneAttachment3D on the arm bones
 p.body_hands.set_active(on) / has_rig()
 p.carry_cam                                  # scripts/camera/carry_camera.gd, local player only (else null)
-p.carry_cam.active / blend / offset / arm_length / hides_hands() / aim_segment()
+p.carry_cam.active / blend / offset / arm_length / hides_hands() / aim_segment(range)
 p.bot_charge                                 # test seam: true holds the shove, false lets go
-Settings "carry_camera": "shoulder" (default) | "first_person"
+Settings "default_camera": "shoulder" (default) | "first_person"   # ordinary play, small offset
+Settings "carry_camera": "shoulder" (default) | "first_person"     # carrying/dragging, bigger offset
 ```
 
 - **Socket axes** (every hand, first and third person): origin in the palm, -Z the fingers, +Y out

@@ -1298,3 +1298,77 @@ they're rarely both blocked at once, but worth widening to per-slot placement if
 ever ships. The new icon shapes (concentric arcs / almond eye) are a first pass at "read clearly
 at 26-52px" -- fine at both the idle and Alt-held sizes in the screenshots above, but not tested
 against colourblind palettes or at ultra-low resolutions.
+
+## Default over-the-shoulder camera (2026-09-16)
+
+- **Made the default walking-around camera over-the-shoulder, generalizing the existing
+  `scripts/camera/carry_camera.gd`** (previously only active while carrying a downed teammate or
+  dragging a monster). `CarryCameraScript.wants()` now returns true by default too (a new
+  `DEFAULT_OFFSET := Vector3(0.38, 0.12, 0.85)`, head-space x right/y up/z back), falling back to
+  carrying/dragging's bigger `CARRY_OFFSET`/`DRAG_OFFSET` when those are active, and to true first
+  person only when the new `Settings` key `default_camera` is set to `"first_person"` (mirrors the
+  existing `carry_camera` key's plumbing end to end: `DEFAULTS`, `_sanitize`, `settings_screen.gd`'s
+  choice row, and `settingstest.gd`'s coverage). `DEFAULT_OFFSET` is deliberately modest next to
+  `CARRY_OFFSET` (arm length 2.28 m) and `DRAG_OFFSET` (arm length 3.76 m): about 0.93 m open,
+  tuned by eye with `tools/hospitalshot.gd` (entrance lobby, a `WARD` doorway, the longest hallway)
+  and a one-off wall-backed shot (see below) so it reads as "just over the shoulder" rather than a
+  pulled-back third-person view, and so its own `HIDE_BODY_BELOW` (0.55 m) margin survives a modest
+  wall pull-in without immediately flipping back to first-person hands.
+- **The existing wall-avoidance, aim-segment correction and hands/body swap all now run for the
+  default state too**, since it is active almost all the time rather than a rare carry/drag state:
+  - `aim_segment()` took a `range` parameter (was hardcoded to `C.INTERACT_RANGE`) so
+    `Player._update_scan_progress` (the scanner's local, cosmetic progress ring) applies the same
+    "ignore what's between the camera and the head, reach measured from the head" correction with
+    `C.SCAN_RANGE` that `_update_aim_core` already applied for interact. `game.gd`'s host-side
+    authoritative `_scan_aim`/`_tick_scan` got the same correction, but only for whichever player is
+    the host's own local player (`p.carry_cam != null and p.carry_cam.active`) -- the shoulder
+    camera is local-only and not replicated (per this file's own doc comment: "nothing new on the
+    wire"), so a remote client's shoulder offset still isn't known to the host. That mismatch is
+    not new: it already existed for the rare carry/drag case; this just makes it come up far more
+    often. Left unfixed (see gap below).
+  - `hides_hands()` used to be `blend > 0.02` (hides the instant easing starts). Changed to mirror
+    `_show_body`'s own condition (`_body_shown`) instead: a wall pulling the shoulder camera in
+    close enough to hide the third-person body (now a routine occurrence in a corridor, not just a
+    rare carry-into-a-corner case) hands the first-person hands/held item back rather than leaving
+    both hidden. This is a behavior change for the carry/drag case too, but a strictly more correct
+    one (no more both-hidden gap), and `tools/carrycamtest.tscn` still passes with it.
+- **Test bots that aim from the player's own body position, not the camera, needed updating** --
+  a shoulder-offset camera means "face the target with your body yaw" is no longer the same ray as
+  "look at the target," exactly like a real player has to use the reticle rather than their
+  shoulders. Found this via `tools/databasetest.gd`'s scan test (`_scan_unlocks_tier2`), which
+  aimed by computing yaw from `me.global_position` and left pitch at a fixed 0.0 -- with the
+  default offset's 0.38 m lateral parallax and 0.12 m raised height, the ray missed the monster's
+  collider (it hit a wall past it) instead of undershooting onto its floor-level origin once pitch
+  was naively corrected too. Fixed by aiming from the real `me.camera.global_position` toward the
+  monster's centre (`+Vector3.UP*1.0`, matching how `game.gd`'s own `_scan_aim` measures distance),
+  correcting both yaw and pitch every frame, the same idea `tools/carrycamtest.gd`'s `_aim_camera`
+  helper already uses for the carry/drag case. `tools/carrycamtest.gd` also got two new checks
+  (default play eases to the small offset and hides FP hands/shows the body; the `first_person`
+  setting keeps it in true first person) and now sets `default_camera` to `first_person` for its
+  own carry/drag-specific assertions, so "not carrying or dragging" still means true first person
+  there.
+- **Verified:** re-imported and ran the full mandated suite after the change --
+  `tools/inventorytest.tscn` (92 checks, 0 failures), `tools/devtest.tscn` (0 failures),
+  `tools/databasetest.tscn` (12 checks, 0 failures, after the scan-aim fix above),
+  `tools/looptest.tscn` (0 failures except the pre-existing, already-documented furnace-throw
+  flake above), plus `tools/carrycamtest.tscn` and `tools/settingstest.tscn` (both compared against
+  the unmodified code on the same machine: `carrycamtest`'s 3 pre-existing failures in its
+  wall-pull-in block -- "backed against a wall the camera pulls in," "never ends up behind the
+  wall," "stays pulled in" -- reproduce identically before this change, so they are not a
+  regression from it; every other check, including the two new default-camera checks, passes).
+  Took real windowed screenshots (`tools/hospitalshot.tscn`, not headless, which only gives a dummy
+  renderer): the entrance lobby, a `WARD` room doorway and the longest hallway all show the new
+  default shoulder view clearly offset from dead centre, the crosshair still reading sensibly on
+  the door/hallway centreline, and no wall clipping. Confirmed the `default_camera=first_person`
+  opt-out with the same lobby pose: a true centred first-person view with the flashlight-holding
+  hand back on screen. Confirmed the wall pull-in itself with a one-off scratch scene (reusing
+  `carrycamtest.gd`'s own `_wall_spot()` finder, not committed): arm length pulled in from the
+  open 0.94 m to 0.83 m backed into a corner, camera still outside the wall, no clipping.
+- **Gaps not covered by this sweep:** the host-authoritative scan-aim mismatch for *remote*
+  players' shoulder offset noted above (pre-existing, now more frequent); no dedicated screenshot
+  of the wall pull-in was kept (the scratch scene's PNG was deleted after visual confirmation) --
+  worth a permanent shot next time `tools/hospitalshot.gd` or a similar tool is touched; the tight
+  wall-pull-in checks in `tools/carrycamtest.tscn` were already failing before this change and were
+  not investigated further (out of scope here, see that test's own failures for what to reproduce);
+  multiplayer with more than one real client was not tested (this is local-only per the file's own
+  doc comment, so nothing changes there, but it also was not re-verified with `nettest.gd`).

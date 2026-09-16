@@ -27,6 +27,10 @@ func _ready() -> void:
 	game = main.game
 	main.menu.hide_menu()
 	Settings.use_path("user://carrycamtest_settings.cfg")
+	# This file is specifically about the carry/drag offsets; keep the default-play shoulder
+	# camera off so "not carrying/dragging" still means true first person for these checks (the
+	# default camera itself is covered by _run's first block below and by settingstest.gd).
+	Settings.set_value("default_camera", "first_person")
 	Net.start_solo("Tester")
 	game.start_session(DevRoomScript.SEED)
 	await _frames(8)
@@ -47,6 +51,19 @@ func _physics_process(delta: float) -> void:
 func _run() -> void:
 	var cc = me.carry_cam
 	_check(cc != null and String(Settings.get_value("carry_camera")) == "shoulder", "the local player has a carry camera, setting 'shoulder' by default")
+
+	# ---- default_camera: ordinary play defaults to a small shoulder offset too
+	Settings.set_value("default_camera", "shoulder")
+	await _seconds(0.5)
+	_check(cc.active and cc.blend >= 1.0 and cc.arm_length < 1.2 and cc.arm_length > 0.4,
+		"default play eases into a small shoulder offset (arm %.2f m, %s)" % [cc.arm_length, str(cc.offset.snappedf(0.01))])
+	_check(me.camera.cull_mask & HandsFP.HANDS_LAYER == 0 and me.body_visual.visible,
+		"default shoulder view also hides first-person hands and shows the body")
+	Settings.set_value("default_camera", "first_person")
+	await _seconds(0.5)
+	_check(not cc.active and me.fx.position == Vector3.ZERO and me.camera.cull_mask & HandsFP.HANDS_LAYER != 0,
+		"setting 'first_person': ordinary play stays first person (blend %.2f)" % cc.blend)
+
 	for m in game.monsters.values():
 		game.kill_monster(m)
 	await _frames(2)

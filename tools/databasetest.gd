@@ -67,10 +67,21 @@ func _scan_unlocks_tier2() -> void:
 	me.bot_pitch = 0.0
 	me.bot_scan = true
 	var pin: Vector3 = wi.global_position
+	# HANDS HOOK: the local player's default camera may sit over the shoulder (Settings
+	# "default_camera"), offset from the body's own yaw-to-target line, so nudge by the angular
+	# error of the real camera ray (same idea as carrycamtest.gd's _aim_camera) instead of aiming
+	# from the player's own position.
 	var track := func():
 		wi.global_position = pin
-		var d: Vector3 = pin - me.global_position
-		me.bot_yaw = atan2(-d.x, -d.z)
+		var cam: Vector3 = me.camera.global_position
+		# Aim at the monster's centre (game.gd's own `_scan_aim` measures distance the same way),
+		# not its floor-level origin, or a raised camera would pitch down onto its feet and miss.
+		var d: Vector3 = (pin + Vector3.UP * 1.0) - cam
+		var fwd: Vector3 = -me.camera.global_transform.basis.z
+		var yaw_err := wrapf(atan2(-d.x, -d.z) - atan2(-fwd.x, -fwd.z), -PI, PI)
+		me.bot_yaw += yaw_err
+		var pitch_err := atan2(d.y, Vector2(d.x, d.z).length()) - atan2(fwd.y, Vector2(fwd.x, fwd.z).length())
+		me.bot_pitch = clampf(me.bot_pitch + pitch_err, -1.2, 1.2)
 		return game.db_record("walk_in").scanned
 	var done := await _until(track, 8.0)
 	me.bot_scan = false
