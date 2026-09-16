@@ -66,6 +66,7 @@ static func run(game: Node) -> void:
 		tm.position = Vector3(x, 0.05, 0.3)
 		x += 0.2
 	EconomyScript.warm(shelf)
+	AimHighlight.warm(shelf)   # AFFORDANCE HOOK: the aim-highlight rim shader (scripts/aim_highlight.gd)
 	OrScreenScript.warm(shelf)  # ORSCREEN HOOK: the wall monitor's glass shader and viewport
 	# SWEEP 3 HOOK (combat): the syringe the jab draws (its glass is alpha-blended).
 	var syringe: Node3D = preload("res://scripts/combat/combat.gd").make_syringe()

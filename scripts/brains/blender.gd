@@ -134,17 +134,10 @@ func _build() -> void:
 	_jar.add_child(_cyl(0.016, 0.02, lid, 10, 0.016, Vector3(0, 0.03 + JAR_H + 0.028, 0)))
 	# A handle on the jar.
 	_jar.add_child(_box(Vector3(0.014, 0.14, 0.022), Vector3(JAR_R + 0.03, 0.03 + JAR_H * 0.55, 0), glass))
-	# A label so it reads in the dark.
-	var tag := Label3D.new()
-	tag.text = "BLENDER"
-	tag.font_size = 30
-	tag.pixel_size = 0.002
-	tag.modulate = Color(0.95, 0.72, 0.75)
-	tag.outline_size = 8
-	tag.outline_modulate = Color(0, 0, 0, 0.8)
-	tag.position = Vector3(0, top + 0.47, 0)
-	tag.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
-	add_child(tag)
+	# AFFORDANCE HOOK: the always-on "BLENDER" label is gone (scripts/aim_highlight.gd now supplies
+	# the "you can interact with this" cue as an aim rim, docs/CONTRACTS.md "Interaction"); the
+	# swirling jar of brains reads as a blender on sight, and the crosshair prompt still names the
+	# action when aimed at.
 	# The aim target for E.
 	var area := Area3D.new()
 	area.name = "Aim"

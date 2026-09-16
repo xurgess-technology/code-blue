@@ -46,13 +46,10 @@ func _build() -> void:
 			leg.material_override = steel
 			leg.position = Vector3(x, 0.8, z)
 			add_child(leg)
-	var tag := Label3D.new()
-	tag.text = "SUPPLY - SURGICAL"
-	tag.font_size = 32
-	tag.pixel_size = 0.004
-	tag.modulate = Color(0.85, 0.95, 0.9)
-	tag.position = Vector3(0, 1.52, d * 0.5 + 0.01)
-	add_child(tag)
+	# AFFORDANCE HOOK: no more permanently-visible label here (it duplicated the aim highlight,
+	# scripts/aim_highlight.gd, docs/CONTRACTS.md "Interaction"). The shelf is unmistakable on
+	# sight (steel rack, tinted surgical stock on it) and the crosshair prompt still names it
+	# ("Put <item> on the shelf" / the reasons you cannot) whenever a player aims at it.
 
 	var cs := CollisionShape3D.new()
 	var box := BoxShape3D.new()
