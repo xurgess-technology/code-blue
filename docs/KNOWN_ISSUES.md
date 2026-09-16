@@ -1244,3 +1244,57 @@ would hang the bot, and the whole shift, forever. Added a generic recovery: afte
 any target, warp the bot to it and force a repath, same as a player would eventually route around
 after strafing off a wedge. Re-verified: 7 of 8 runs clean after the fix; the one remaining
 failure was the already-documented furnace-throw flake below, not this death cascade.
+
+## Circular ability hotbar (2026-09-16)
+
+Rebuilt the Alt+1..4 ability bar (`scripts/hud.gd` `_draw_ability_bar`) from flat rectangles to
+circular icon slots, matching the vector/procedural style the rest of the HUD already uses
+(`_draw_scan_ring`'s `draw_arc`, the hearts' `draw_circle`/`draw_colored_polygon`, etc. -- there
+are still no raster HUD icons anywhere). Each slot is a filled circle with a per-ability glyph
+drawn in a new `_draw_ability_icon()`: Echo is three concentric partial arcs plus a centre dot (a
+sound pulse), Hive Eyes is an almond eye outline with a pupil. The old bottom cooldown bar is now
+a radial arc that drains clockwise from the top; level pips sit in a row just under the circle;
+the Hive Eyes "Walk-In in range" border pulse is now a ring drawn with `draw_arc` instead of
+`draw_rect`; empty/unusable slots dim the same way as before, just on a circle. `_draw_ability_card`
+(the unlock popup) doesn't reference the bar's shape and was left alone.
+
+While rebuilding this I found and fixed a real, pre-existing bug in the big/small Alt-hold blend
+(`_alt_t`): the ability bar was lerping its rect with the *same* `t` direction as the hands bar
+(`_draw_hands`), so at `t=0` (Alt not held) it rendered at full/"big" size directly on top of the
+hand-slot boxes instead of shrinking into its own small idle corner -- the two bars were meant to
+swap spots, not overlap, per the hands bar's own comment ("cross-fade into each other's spot...
+rather than overlapping"), but the ability bar's lerp was never actually inverted to do that. Fixed
+by swapping which rect is the `t=0` vs `t=1` end for the ability bar only; the hands bar itself was
+untouched. Also nudged the big-mode vertical anchor and the ability name label's offset, since the
+new circles combined with the name/reason text were bumping into the bottom control-hint line at
+1600x900 in the first pass.
+
+Verified:
+- `godot --headless --path . --import` re-imported clean after the script changes.
+- No existing HUD-specific headless test tool exists (grepped `tools/*.gd` for `hud`/`ability_bar`/
+  `_draw_ability_bar`; the closest is `tools/orscreentest.gd`, which covers the OR wall monitor, a
+  different HUD layer, not this one).
+- Added two poses to `tools/gameshot.gd` (`_pose_ability_bar_idle`, `_pose_ability_bar_alt`,
+  shots `40_ability_bar_idle` / `41_ability_bar_alt`) that give the bot Echo/Hive Eyes via
+  `game.brains.set_level()`, force one ability onto a cooldown, and toggle the `ability_alt`
+  input action to capture both the idle-small and Alt-held-big states. Ran windowed (not
+  `--headless`, which returns a null viewport texture) with `-- --only=ability_bar --tag=t3` and
+  actually looked at the resulting screenshots
+  (`tools/game_shots/40_ability_bar_idle_t3.png`, `tools/game_shots/41_ability_bar_alt_t3.png`,
+  gitignored, not committed): circular slots, the Echo/Hive Eyes glyphs, the radial cooldown
+  sweep, level pips, the dimmed empty slots, and the Alt-held big/small swap all render correctly
+  with no overlap or off-screen elements after the `_alt_t` direction fix above.
+- `tools/devtest.tscn` and `tools/inventorytest.tscn` headless: both still `result=PASS
+  failures=0` (devtest) and `result=PASS checks=92 failures=0` (inventorytest), unchanged from
+  before this change, confirming the HUD rework didn't touch anything those exercise.
+
+Known gaps: the per-slot "why can't I use this" reason text (`_slot_reason`) is still drawn
+centred on the *full* screen width per slot (`HORIZONTAL_ALIGNMENT_CENTER, w`), unchanged from the
+original rectangle code -- if two slots ever have a reason at once (e.g. Echo cooling down and
+Hive Eyes out of range simultaneously) their texts stack on top of each other at the same spot
+instead of appearing over their own slot. Not introduced by this rework (the original rectangle
+version had the exact same call shape) and not hit in the two abilities that exist today since
+they're rarely both blocked at once, but worth widening to per-slot placement if a third ability
+ever ships. The new icon shapes (concentric arcs / almond eye) are a first pass at "read clearly
+at 26-52px" -- fine at both the idle and Alt-held sizes in the screenshots above, but not tested
+against colourblind palettes or at ultra-low resolutions.

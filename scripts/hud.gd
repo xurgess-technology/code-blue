@@ -269,10 +269,13 @@ func _draw_hands(w: float, h: float, me) -> void:
 			_text(r.position + Vector2(box.x - 34, 13), "$%d" % int(s.v), 10, Color(SLOT_GOLD, 0.95))
 
 
-## SWEEP 4A HOOK (controls): the 4 ability slots. Small top-left of the hands bar normally; while
-## Alt is held they slide/grow into the bar itself (~0.12 s, `_alt_t`) and the item icons shrink to
-## a small row where the abilities were. Each icon: the key, a cooldown sweep, level pips, a cost
-## tag, and (Alt held) the ability's name and, when it cannot fire, why.
+## SWEEP 4A HOOK (controls): the 4 ability slots, drawn as circular icon slots (rebuilt from the
+## original flat rectangles). Small top-left of the hands bar normally; while Alt is held they
+## slide/grow into the bar itself (~0.12 s, `_alt_t`) and the item icons shrink to a small row
+## where the abilities were -- the same big/small blend the rectangles used, just applied to a
+## square bounding box that a circle is inscribed in. Each slot: a per-ability vector glyph, a
+## cooldown sweep (now a radial arc instead of a bottom bar), level pips, a cost tag, the key hint,
+## and (Alt held) the ability's name and, when it cannot fire, why.
 func _draw_ability_bar(w: float, h: float, me) -> void:
 	var b := game.brains
 	if b == null:
@@ -280,47 +283,90 @@ func _draw_ability_bar(w: float, h: float, me) -> void:
 	drawn.append("abilities")
 	var slots: Array = b.slots_for(me.peer_id)
 	var n: int = slots.size()
-	var box := Vector2(112, 40)
-	var gap := 6.0
+	var box := Vector2(52, 52)
+	var gap := 14.0
 	var x0 := w * 0.5 - (box.x * n + gap * (n - 1)) * 0.5
-	var big_y := h - 66.0
-	var small := Vector2(30, 20)
-	var small_y := big_y - small.y - 6.0
+	# Big (Alt-held) circles centre on the old hands-bar top edge, leaving room below for the pip
+	# row and the ability name/reason text without crowding the bottom control-hint line.
+	var big_y := h - 66.0 - box.y * 0.5
+	var small := Vector2(26, 26)
+	var small_y := (h - 66.0) - small.y - 6.0
 	var t := clampf(_alt_t, 0.0, 1.0)
 	for i in n:
 		var big_r := Rect2(x0 + i * (box.x + gap), big_y, box.x, box.y)
 		var small_r := Rect2(x0 + i * (small.x + 4.0), small_y, small.x, small.y)
-		var r := Rect2(big_r.position.lerp(small_r.position, t), big_r.size.lerp(small_r.size, t))
+		# Inverted from the hands bar's own t: idle (t=0, Alt not held) is the SMALL corner row and
+		# Alt held (t=1) grows into the BIG bottom row -- the two bars swap spots rather than
+		# overlapping (see _draw_hands's comment on the shared `_alt_t`).
+		var r := Rect2(small_r.position.lerp(big_r.position, t), small_r.size.lerp(big_r.size, t))
+		var c := r.get_center()
+		var rad := r.size.x * 0.5
 		var id := String(slots[i])
 		var name: String = String(ABILITY_LABEL.get(id, ""))
 		var lvl: int = b.level(me.peer_id, String(b.ABILITY_ID_TO_PATH.get(id, ""))) if id != "" else 0
 		var cd: float = b.cooldown_left(me.peer_id, String(b.ABILITY_ID_TO_PATH.get(id, ""))) if id != "" else 0.0
 		var reason := _slot_reason(me, id, cd)
 		var usable := id != "" and reason == ""
-		draw_rect(r, Color(0, 0, 0, 0.55))
-		draw_rect(r, Color("f0e6c8", 0.85) if id != "" else Color(0.5, 0.55, 0.6, 0.4), false, 1.5)
+		draw_circle(c, rad, Color(0, 0, 0, 0.55))
+		var ready_pulse := 0.0
+		# SWEEP 4A HOOK (Hive Eyes, chunk 4): a subtle pulse on the ring while a Walk-In is in range
+		# and the slot is otherwise idle, so you know it is worth pressing.
+		if id == "hive_in" and cd <= 0.0 and not me.get("hive_view") and b.nearest_walk_in(me, b.hive_range(lvl)) != null:
+			ready_pulse = 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.006)
+			draw_arc(c, rad + 3.0, 0.0, TAU, 28, Color("9fe8a0", 0.35 + 0.35 * ready_pulse), 2.0 + ready_pulse * 1.5)
+		var border := Color("f0e6c8", 0.85) if id != "" else Color(0.5, 0.55, 0.6, 0.4)
+		draw_arc(c, rad - 0.75, 0.0, TAU, 28, border, 1.5)
 		if id == "":
 			continue
-		# SWEEP 4A HOOK (Hive Eyes, chunk 4): a subtle pulse on the border while a Walk-In is in
-		# range and the slot is otherwise idle, so you know it is worth pressing.
-		if id == "hive_in" and cd <= 0.0 and not me.get("hive_view") and b.nearest_walk_in(me, b.hive_range(lvl)) != null:
-			var pulse := 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.006)
-			draw_rect(r, Color("9fe8a0", 0.35 + 0.35 * pulse), false, 2.0 + pulse * 1.5)
+		_draw_ability_icon(id, c, rad, usable)
 		if not usable:
-			draw_rect(r, Color(0, 0, 0, 0.45))
-		_text(r.position + Vector2(4, 12), "Alt+%d" % (i + 1), 9, Color("8a9aa0"))
+			draw_circle(c, rad, Color(0, 0, 0, 0.45))
 		if cd > 0.0:
-			var sweep: float = clampf(cd / (20.0 if id == "echo" else 12.0), 0.0, 1.0)
-			draw_rect(Rect2(r.position.x, r.end.y - 4, r.size.x * sweep, 4), Color("5ce0d0", 0.85))
+			# A radial sweep standing in for the old bottom cooldown bar: it drains clockwise from
+			# the top as the ability comes back off cooldown.
+			var frac: float = clampf(cd / (20.0 if id == "echo" else 12.0), 0.0, 1.0)
+			draw_arc(c, rad - 3.0, -PI * 0.5, -PI * 0.5 + TAU * frac, 24, Color("5ce0d0", 0.85), 3.0)
+		if t < 0.7:
+			_text(Vector2(c.x - rad, r.position.y - 2), "Alt+%d" % (i + 1), 9, Color("8a9aa0"))
 		for pip in lvl:
-			draw_circle(r.position + Vector2(10 + pip * 8, r.size.y - 8), 2.5, Color("9fe8a0"))
+			draw_circle(c + Vector2((pip - (lvl - 1) * 0.5) * 8.0, rad + 8.0), 2.5, Color("9fe8a0"))
 		var cost := String(ABILITY_COST.get(id, ""))
-		if cost != "":
-			_text(Vector2(r.end.x - 34, r.position.y + 12), cost, 9, Color("e0a020"))
+		if cost != "" and t < 0.7:
+			_text(Vector2(c.x + rad - 30.0, r.position.y + 10.0), cost, 9, Color("e0a020"))
 		if t > 0.4:
-			_text(r.position + Vector2(0, r.size.y * 0.5 + 4), _fit(name, 11, box.x - 8), 11, Color("eeeeee"), HORIZONTAL_ALIGNMENT_CENTER, box.x)
+			_text(Vector2(c.x - box.x, c.y + rad + 16.0), _fit(name, 11, box.x * 2.0), 11, Color("eeeeee"), HORIZONTAL_ALIGNMENT_CENTER, box.x * 2.0)
 			if reason != "":
 				_text(Vector2(0, r.position.y - 6), reason, 11, Color("e0a020"), HORIZONTAL_ALIGNMENT_CENTER, w)
+
+
+## A small procedural glyph per ability, centered at `c` and scaled off the slot radius `rad`.
+## Echo: concentric arcs opening upward, like a sound pulse. Hive Eyes: a simple almond eye with
+## a pupil. Dimmed (usable == false) glyphs draw at lower alpha, same spirit as the old dim tint.
+func _draw_ability_icon(id: String, c: Vector2, rad: float, usable: bool) -> void:
+	var a := 1.0 if usable else 0.45
+	match id:
+		"echo":
+			var col := Color("5ce0d0", a)
+			draw_circle(c, rad * 0.12, col)
+			for ring in 3:
+				var r2: float = rad * (0.32 + ring * 0.22)
+				draw_arc(c, r2, -PI * 0.62, -PI * 0.38, 10, col, 2.0)
+				draw_arc(c, r2, PI * 0.38, PI * 0.62, 10, col, 2.0)
+		"hive_in":
+			var col := Color("9fe8a0", a)
+			var pts := PackedVector2Array()
+			var k := rad * 0.62
+			for i in 13:
+				var u: float = lerpf(-1.0, 1.0, float(i) / 12.0)
+				pts.append(c + Vector2(u * k, -sqrt(maxf(0.0, 1.0 - u * u)) * k * 0.55))
+			for i in 13:
+				var u: float = lerpf(1.0, -1.0, float(i) / 12.0)
+				pts.append(c + Vector2(u * k, sqrt(maxf(0.0, 1.0 - u * u)) * k * 0.55))
+			draw_polyline(pts, col, 1.75, true)
+			draw_circle(c, rad * 0.22, col)
+			draw_circle(c - Vector2(rad * 0.06, rad * 0.06), rad * 0.07, Color("0a0c0e", a))
+		_:
+			pass
 
 
 ## Why a slot cannot fire right now, "" when it can (or it is empty / not the local player's).

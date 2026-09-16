@@ -79,6 +79,8 @@ func _ready() -> void:
 		{"name": "15_hud_walking", "fn": _pose_hud_walking, "settle": 50},
 		{"name": "16_hud_holding", "fn": _pose_hud_holding, "settle": 30},
 		{"name": "17_orscreen_amputation", "fn": _pose_screen_amputation, "settle": 40},
+		{"name": "40_ability_bar_idle", "fn": _pose_ability_bar_idle, "settle": 30},
+		{"name": "41_ability_bar_alt", "fn": _pose_ability_bar_alt, "settle": 30},
 	]
 	# HANDS HOOK (docs/HANDS_AND_FEEDBACK.md "Done when"): hands, wind-ups, the stun window and the
 	# carry camera. `--only=hands` runs just these (plus the lobby shots that set the scene up).
@@ -430,6 +432,34 @@ func _pose_hud_holding() -> void:
 	var fwd: Vector3 = game.shelf_node.global_basis.z.normalized() if game.shelf_node != null else Vector3.BACK
 	_look_from(sh + fwd * 1.6, sh + Vector3(0, 0.9, 0))
 	bot.bot_aim_id = "shelf"
+
+
+## SWEEP 4A HOOK (controls): the circular ability bar, small top-left and idle -- Echo ready at
+## level 2, Hive Eyes on a cooldown (so both the ready-pulse-free state and a dim/cooling slot show).
+func _pose_ability_bar_idle() -> void:
+	Input.action_release("ability_alt")
+	_ensure_shift()
+	game.brains.set_level(bot.peer_id, "echo", 2)
+	game.brains.set_level(bot.peer_id, "hive_in", 1)
+	game.brains._cd["hive:%d" % bot.peer_id] = game.world_time + 6.0
+	var t := game.table_pos()
+	_look_from(t + Vector3(0.6, 0, 3.4), t + Vector3(0, 1.0, 0))
+	bot.bot_aim_id = ""
+
+
+## The same ability bar with Alt held: big circles centred at the bottom, names and reasons shown.
+## Hive Eyes is kept ready but out of range (no Walk-In nearby) so its "No Walk-In in range" reason
+## renders; Echo is kept on a partial cooldown so its radial sweep and pip levels are visible.
+func _pose_ability_bar_alt() -> void:
+	_ensure_shift()
+	game.brains.set_level(bot.peer_id, "echo", 3)
+	game.brains.set_level(bot.peer_id, "hive_in", 2)
+	game.brains._cd["echo:%d" % bot.peer_id] = game.world_time + 9.0
+	game.brains._cd.erase("hive:%d" % bot.peer_id)
+	var t := game.table_pos()
+	_look_from(t + Vector3(0.6, 0, 3.4), t + Vector3(0, 1.0, 0))
+	bot.bot_aim_id = ""
+	Input.action_press("ability_alt")
 
 
 ## Actually operating: the surgery camera, the minigame and the surgery HUD together.
