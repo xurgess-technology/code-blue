@@ -94,8 +94,10 @@ var _sprint_grace: float = 0.0
 ## Slide-out after landing, not counting the time in the air.
 const DIVE_DURATION := 0.4
 const DIVE_SPEED_MULT := 1.45
-## Upward launch speed: ~0.25 m peak, ~0.33 s airborne under the 18 m/s^2 gravity below.
-const DIVE_HOP_VELOCITY := 3.0
+## Upward launch speed: ~0.44 m peak, ~0.44 s airborne under the 18 m/s^2 gravity below. The body
+## stays upright in the air (so the rise is felt) and only goes prone on touchdown.
+const DIVE_HOP_VELOCITY := 4.0
+const DIVE_LAND_THUD := 0.8
 const DIVE_SPRINT_GRACE := 0.2
 ## Stamina (0..1) spent per dive; stamina also doesn't recover mid-dive. About five back-to-back
 ## dives from a full bar.
@@ -783,7 +785,12 @@ func _local_step(delta: float) -> void:
 	var was_air := not is_on_floor()
 	var fall_speed := velocity.y
 	move_and_slide()
-	if was_air and is_on_floor() and fall_speed < -4.0 and fx.has_method("land"):
+	if diving and _dive_airborne and was_air and is_on_floor():
+		# Touchdown: hit the floor prone, with a thud.
+		_dive_airborne = false
+		if fx.has_method("land"):
+			fx.land(DIVE_LAND_THUD)
+	elif was_air and is_on_floor() and fall_speed < -4.0 and fx.has_method("land"):
 		fx.land(clampf(-fall_speed / 14.0, 0.0, 1.0))
 
 	if can_move and not bot_active and not hive_view:   # SWEEP 3 HOOK (brains): helpless in Hive Eyes
@@ -857,7 +864,7 @@ func _local_step(delta: float) -> void:
 	if fx.has_method("set_motion"):
 		fx.set_motion(clampf(Vector2(velocity.x, velocity.z).length() / C.SPRINT_SPEED, 0.0, 1.0), sprinting, is_on_floor())
 	if fx.has_method("set_fov_kick"):
-		fx.set_fov_kick(0.5 if sprinting else 0.0)
+		fx.set_fov_kick(0.5 if sprinting or (diving and _dive_airborne) else 0.0)
 	if fx.has_method("set_breathing") and game != null:
 		fx.set_breathing(game.danger)
 
@@ -871,7 +878,7 @@ func _local_step(delta: float) -> void:
 ## ceiling" refusal; a remote copy just follows the replicated bit and only resizes visually.
 func _apply_crouch(delta: float, authoritative: bool = true) -> void:
 	if authoritative:
-		var want: int = PRONE if diving else _stance_want
+		var want: int = (STAND if _dive_airborne else PRONE) if diving else _stance_want
 		if downed or carried_by != 0 or on_table:
 			want = STAND
 			_stance_want = STAND
@@ -1607,7 +1614,9 @@ func _update_down_pose(delta: float) -> void:
 		elif crouching:   # SWEEP 4A HOOK (controls)
 			eye = C.CROUCH_EYE_H
 		if not is_equal_approx(head.position.y, eye):
-			head.position.y = eye if carried_by != 0 or on_table else move_toward(head.position.y, eye, delta * 6.0)
+			# Hitting the floor out of a dive drops the view fast; everything else eases.
+			var eye_rate := 14.0 if diving else 6.0
+			head.position.y = eye if carried_by != 0 or on_table else move_toward(head.position.y, eye, delta * eye_rate)
 		# Carried, your view hangs back over the carrier's shoulder instead of inside their head.
 		var back := 1.0 if carried_by != 0 else 0.0
 		if not is_equal_approx(head.position.z, back):

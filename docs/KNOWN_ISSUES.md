@@ -1525,3 +1525,11 @@ stand -> crouch -> prone -> stand (`_stance_want`), and a sprinting press dives 
 - Gaps: not checked with two real clients (`nettest`). Melee hit checks against players
   (`combat.gd` ~367) still test a standing-height capsule, so a prone player can be hit as if
   standing. Prone uses the downed crawl pose, so a prone teammate looks the same as a downed one.
+
+**Dive airtime (2026-09-16, playtest):** the hop was there but didn't read -- the view dropped to
+prone height the instant the dive fired, cancelling the 0.25 m rise, so it felt like a slide. Now
+the body stays standing through the air (`_apply_crouch` wants STAND while `_dive_airborne`), the
+hop is `DIVE_HOP_VELOCITY` 4.0 (~0.41 m peak, ~0.47 s airborne measured), the sprint FOV kick holds
+through the air, and touchdown goes prone with a camera thud (`fx.land(DIVE_LAND_THUD)` 0.8) and a
+fast eye drop (14 m/s while diving vs the usual 6). `controlstest` 48/48; the low-ceiling check now
+drops its ceiling after touchdown, since an upright body in the air would otherwise overlap it.

@@ -148,23 +148,31 @@ func _sprint_dive() -> void:
 	me.bot_crouch_press += 1   # the real crouch key, mid-sprint
 	await _frames(1)
 	_check(me.diving, "pressing crouch mid-sprint dives")
-	_check(me.prone, "the body goes prone the instant the dive starts")
+	_check(not me.prone and not me.crouching, "the body stays upright as it launches")
 	_check(me.stamina < stamina_before - me.DIVE_STAMINA_COST * 0.9,
 			"a dive costs stamina (%.2f -> %.2f)" % [stamina_before, me.stamina])
 	var burst_speed: float = Vector2(me.velocity.x, me.velocity.z).length()
 	_check(burst_speed > C.SPRINT_SPEED * 1.15,
 			"burst speed clears sprint speed (%.2f > %.2f*1.15)" % [burst_speed, C.SPRINT_SPEED])
+	var ground_y: float = me.global_position.y
+	me.bot_press += 1   # E must do nothing while diving
 	var left_ground := await _until(func(): return not me.is_on_floor(), 0.3)
 	_check(left_ground, "the dive launches the player off the ground")
-
-	me.bot_press += 1   # E must do nothing while diving
-	await _frames(2)
 	_check(me.interact_count == before_interact, "E does nothing while diving")
-
-	var landed := await _until(func(): return not me._dive_airborne, 1.5)
-	_check(landed and me.diving, "the dive lands and is still going (sliding out)")
+	var peak := [0.0]
+	var air_frames := [0]
+	var landed := await _until(func():
+		peak[0] = maxf(peak[0], me.global_position.y - ground_y)
+		air_frames[0] += 1
+		return not me._dive_airborne
+	, 1.5)
 	var land_speed: float = Vector2(me.velocity.x, me.velocity.z).length()
+	_check(peak[0] > 0.3, "real airtime: rises %.2f m" % peak[0])
+	_check(air_frames[0] >= 18, "in the air for %d frames (~%.2f s)" % [air_frames[0], air_frames[0] / 60.0])
+	_check(landed and me.diving, "the dive lands and is still going (sliding out)")
 	_check(land_speed > C.SPRINT_SPEED * 1.15, "no speed lost in the air (%.2f at touchdown)" % land_speed)
+	await _frames(2)
+	_check(me.prone, "hits the floor prone")
 	await _frames(12)   # partway through the ~0.4s slide-out
 	var mid_speed: float = Vector2(me.velocity.x, me.velocity.z).length()
 	_check(mid_speed < land_speed, "speed decays after touchdown (%.2f -> %.2f)" % [land_speed, mid_speed])
@@ -211,7 +219,7 @@ func _sprint_dive() -> void:
 	me.bot_move = Vector2.ZERO
 	await _frames(3)
 
-	# Low ceiling: dive, drop a ceiling in above the lying body (between crouch and standing height,
+	# Low ceiling: dive, land, drop a ceiling in above the lying body (between crouch and standing height,
 	# elongated along the dive's -Z travel), then ask to stand. There's room to crouch but not to
 	# stand, so it stops at a crouch, and finishes standing up by itself once the ceiling is gone.
 	me.bot_move = Vector2(0, -1)
@@ -219,7 +227,9 @@ func _sprint_dive() -> void:
 	await _until(func(): return me.sprinting, 2.0)
 	me.bot_dive += 1
 	await _frames(1)
-	_check(me.diving and me.prone, "the dive starts prone, ready for the low-ceiling check")
+	await _until(func(): return not me._dive_airborne, 1.5)
+	await _frames(2)
+	_check(me.diving and me.prone, "landed prone, ready for the low-ceiling check")
 	var ceiling := StaticBody3D.new()
 	ceiling.collision_layer = C.L_WORLD
 	ceiling.collision_mask = 0
