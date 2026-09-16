@@ -42,7 +42,11 @@ const LINTEL_Y := 2.25
 const FENCE_H := 1.9
 const CANOPY_Y := 3.15
 
-const OUTDOOR_LIGHT_RANGE := 19.0
+## SWEEP 4A FOLLOW-UP (fog lot, chunk 2): was 19.0 -- easily reaching the border wall from any
+## reasonable lamp position on the lot (chunk 2 already pulled the lamps in from the old
+## parking-lot edge placements; a 19 m range still lit the wall well past that). Cut down so the
+## lamps read as pools of light over the walkway, not a wash all the way to the fog belt.
+const OUTDOOR_LIGHT_RANGE := 9.0
 const OUTDOOR_LIGHT_ENERGY := 3.6
 
 const TILE_FLOOR_ROOMS := ["restroom", "morgue", "or", "janitor_closet", "lab", "radiology", "locker_room"]
