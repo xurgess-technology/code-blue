@@ -839,7 +839,8 @@ func _add_landmarks() -> void:
 	# terminal opens instantly, client-side, no host round trip); interact() itself is a no-op.
 	var tinfo: Dictionary = level_info.get("lectern", {})
 	if not tinfo.is_empty():
-		_add_proxy("terminal", (tinfo.position as Vector3) + Vector3.UP * 0.95, 1.1, 0.0,
+		# HUB REDESIGN: the terminal is a full standing desk now, wider than the old lectern spot.
+		_add_proxy("terminal", (tinfo.position as Vector3) + Vector3.UP * 0.95, 1.5, 0.0,
 			func(_p): return "Use the database terminal")
 
 

@@ -213,7 +213,7 @@ func _run() -> void:
 	ok = await _do_until(func(): _go_throw(game.economy.furnace), func(): return game.money != m0, 90.0)
 	_check(ok and game.money == m0 + value, "the bot threw the loot into the furnace and sold it for $%d" % value)
 	m0 = game.money
-	ok = await _do_until(func(): _go_use("pharmacy", game.economy.pharmacy.global_position, false), func(): return game.money < m0, 60.0)
+	ok = await _do_until(func(): _go_use("pharmacy_kiosk", game.economy.pharmacy.kiosk.global_position, false), func(): return game.money < m0, 60.0)
 	_check(ok, "and bought a bottle of pills at the pharmacy")
 	var pills_delivered := func() -> bool:
 		for it in game.world_items.values():

@@ -5,7 +5,8 @@ extends RefCounted
 ##   rows 1-2   main hall, doorways to the west and east wings at either end
 ##   rows 4-8   break room (time clock, phone, lectern, player spawns) | spine | OR | scrub room
 ##   rows 10-12 locker room                                                 | spine | OR | scrub room
-##   rows 14-18 lobby, reception, waiting chairs
+##   rows 14-18 pharmacy (x 1-6, its own room+door) | lobby, reception, waiting chairs (x 8-19) |
+##              crematorium (x 21-26, its own room+door)
 ##   row 19     south wall with the main doors (cols 12-15) onto the neutral area
 ##
 ## Monsters never spawn here and nothing a case needs is ever placed here.
@@ -45,7 +46,21 @@ static func build(st: S, ox: int, oy: int, north_wings: int) -> void:
 	var lockers := st.add_room(Rect2i(ox + 1, oy + 10, 8, 3), "locker_room", z, "entrance", 0)
 	var or_room := st.add_room(Rect2i(ox + 14, oy + 4, 9, 9), "or", z, "entrance", 0)
 	var scrub := st.add_room(Rect2i(ox + 24, oy + 4, 3, 9), "scrub_room", z, "entrance", 0)
-	var lobby := st.add_room(Rect2i(ox + 1, oy + 14, 26, 5), "lobby", z, "entrance", 0)
+	# HUB REDESIGN (2026-09-15): the lobby used to be one open 26 x 5 room with the pharmacy and
+	# crematorium's reserved rects just marked on its floor (docs/KNOWN_ISSUES.md: lobby furniture
+	# could land in those rects). Now the pharmacy and the crematorium are real walled-off rooms at
+	# the lobby's west and east ends (their own add_room, their own single door), a corridor strip
+	# along row 18 links their doors to the open centre lobby, and nothing else is placed inside
+	# their footprints, so the overlap known issue cannot happen any more.
+	# "hub_pharmacy" (not plain "pharmacy") on purpose: `scripts/level/room_furnish.gd`'s
+	# `REQUIRED`/`KINDS` tables key off room kind for the procedurally-generated WING rooms only,
+	# and a wing "pharmacy" room requires `pharmacy_counter`/`med_shelf` furniture entries that
+	# this hand-built room never places that way (economy.gd builds the counter as one object, not
+	# `put()` furniture pieces) -- sharing the exact kind string made `tools/mapcheck.gd` fail every
+	# seed. Kept distinct from the wing room kind entirely.
+	var lobby := st.add_room(Rect2i(ox + 8, oy + 14, 12, 5), "lobby", z, "entrance", 0)
+	var pharmacy := st.add_room(Rect2i(ox + 1, oy + 14, 6, 3), "hub_pharmacy", z, "entrance", 0)
+	var crematorium := st.add_room(Rect2i(ox + 21, oy + 14, 6, 3), "hub_crematorium", z, "entrance", 0)
 
 	var door := func(x: int, y: int, room: int, entry: Vector2i) -> void:
 		st.set_c(ox + x, oy + y, S.CH_DOOR)
@@ -66,6 +81,16 @@ static func build(st: S, ox: int, oy: int, north_wings: int) -> void:
 	for c in MAIN_DOORS:
 		door.call(c, 19, lobby, Vector2i(c, 18))
 	st.rooms[lobby]["entry"] = Vector2i(ox + 13, oy + 18)
+	# HUB REDESIGN: a corridor strip along row 18 (unregistered, plain "entrance" zone floor, same
+	# as the main hall) runs the width of the lobby floor and carries each side room's one door
+	# into the open centre. Each room keeps its own single door in its south wall (row 17); nothing
+	# else in either room is walkable outside that doorway, so they read as real, separate rooms.
+	carve.call(1, 18, 7, 1)
+	carve.call(20, 18, 7, 1)
+	door.call(3, 17, pharmacy, Vector2i(3, 18))
+	door.call(24, 17, crematorium, Vector2i(24, 18))
+	st.set_keep(ox + 3, oy + 17)
+	st.set_keep(ox + 24, oy + 17)
 	# Wing doorways: the wing side of each is carved by the wing generator.
 	for y in SIDE_DOOR_ROWS:
 		st.set_c(ox, oy + y, S.CH_DOOR)
@@ -165,7 +190,10 @@ static func build(st: S, ox: int, oy: int, north_wings: int) -> void:
 	put.call("gurney", 24.55, 11.4, N, scrub)
 	put.call("wall_clock", 25.5, 4.0, SOUTH, scrub)
 
-	# ---- lobby (x 1-26, y 14-18) ---------------------------------------------------------
+	# ---- lobby (x 8-19, y 14-18), pharmacy (x 1-6, y 14-16) and crematorium (x 21-26, y 14-16) --
+	# HUB REDESIGN: the pharmacy and the crematorium got their own walled rooms off the lobby's
+	# west and east ends (row 17 is their south wall, one door tile each, docs/CONTRACTS.md
+	# "Hospital"); a corridor along row 18 carries each doorway into the open centre lobby below.
 	# SWEEP 4A HOOK (fog lot, chunk 2): the run's start and every respawn move inside the main
 	# doors, into the lobby. Reserve the tiles before any lobby furniture claims them.
 	var lobby_spawn_tiles: Array[Vector2i] = [
@@ -177,26 +205,27 @@ static func build(st: S, ox: int, oy: int, north_wings: int) -> void:
 		st.set_keep(ox + t.x, oy + t.y)
 		lobby_spawns.append(Vector2(ox + t.x + 0.5, oy + t.y + 0.5))
 	st.spots["lobby_spawns"] = lobby_spawns
-	# Space off the lobby for chunk 3's pharmacy and crematorium: two fixed rectangles chunk 3
-	# builds into. Not furniture-cleared (chunk 3 redesigns what is there today); just recorded.
+	# HUB REDESIGN: the pharmacy and the crematorium are now real rooms (walls, one door each,
+	# built above); these rects are their interior floor, still called "reserve" since mapgen
+	# validation and the economy worker's fallback placement (docs/CONTRACTS.md "Hospital" /
+	# "The pharmacy and the crematorium furnace") both key off that name. Nothing else is placed
+	# inside these rects any more, so the old furniture-overlap known issue cannot recur.
 	st.spots["reserve"] = {
-		"pharmacy": Rect2i(ox + 2, oy + 14, 5, 4),
-		"crematorium": Rect2i(ox + 21, oy + 14, 5, 4),
+		"pharmacy": Rect2i(ox + 1, oy + 14, 6, 3),
+		"crematorium": Rect2i(ox + 21, oy + 14, 6, 3),
 	}
-	put.call("reception_desk", 20.5, 15.25, SOUTH, lobby)
-	put.call("office_chair", 20.5, 14.5, SOUTH, lobby)
-	for x in [2.4, 3.7, 5.0, 6.3]:
+	put.call("reception_desk", 18.0, 15.25, SOUTH, lobby)
+	put.call("office_chair", 18.0, 14.5, SOUTH, lobby)
+	for x in [8.6, 9.3, 16.7, 18.0]:
 		put.call("chair_row", x, 15.9, N, lobby)
 		put.call("chair_row", x, 17.3, N, lobby)
-	put.call("tv_wall", 4.4, 14.0, SOUTH, lobby)
+	put.call("tv_wall", 11.0, 14.0, SOUTH, lobby)
 	put.call("magazine_table", 8.3, 16.6, N, lobby)
-	put.call("plant", 1.4, 14.45, SOUTH, lobby)
-	put.call("plant", 26.6, 14.45, SOUTH, lobby)
 	put.call("plant", 11.4, 18.5, N, lobby)
 	put.call("plant", 16.6, 18.5, N, lobby)
 	put.call("vending", 8.6, 14.0 + depth.call("vending"), SOUTH, lobby)
 	put.call("directory_board", 15.0, 14.0, SOUTH, lobby)
-	put.call("wall_clock", 23.5, 14.0, SOUTH, lobby)
+	put.call("wall_clock", 17.5, 14.0, SOUTH, lobby)
 	put.call("doormat", DOOR_X, 18.55, N, lobby)
 	st.spots["entrance"] = {"pos": Vector2(ox + DOOR_X, oy + 19.5), "yaw": Defs.yaw_facing(SOUTH)}
 

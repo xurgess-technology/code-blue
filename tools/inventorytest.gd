@@ -245,7 +245,7 @@ func _loot_spawn() -> void:
 func _money() -> void:
 	_say("---- money, the pharmacy, the furnace")
 	_check(game.economy.placed(), "the pharmacy and the furnace are placed (mode %s)" % game.economy.mode)
-	_check(game.find_interactable("pharmacy") != null, "pharmacy is an interactable")
+	_check(game.find_interactable("pharmacy_kiosk") != null, "the pharmacy kiosk is an interactable")
 	game.reset_money()
 	_check(game.money == 0, "money starts at zero")
 	game.add_money(-50, "test")
@@ -285,12 +285,13 @@ func _money() -> void:
 		if it.kind == "gauze":
 			game.world_items.erase(it.item_id)
 			it.queue_free()
-	# The pharmacy: a flat price, unlimited buys, delivered through the tube.
-	var pharm: Node3D = game.find_interactable("pharmacy")
-	_check(pharm != null, "the pharmacy window is interactable")
+	# The pharmacy: a flat price, unlimited buys, delivered through the tube. Ordering is at the
+	# kiosk (HUB REDESIGN); the window itself is set dressing now.
+	var pharm: Node3D = game.find_interactable("pharmacy_kiosk")
+	_check(pharm != null, "the pharmacy kiosk is interactable")
 	var price := int(game.PILL_PRICE)
 	m0 = game.money
-	await _press_on("pharmacy")
+	await _press_on("pharmacy_kiosk")
 	await _frames(120)
 	var delivered := false
 	for it in game.world_items.values():

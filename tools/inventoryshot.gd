@@ -132,7 +132,7 @@ func _game_shots() -> void:
 	_clear()
 	game.add_money(1500, "test")
 	_look_from(pharm.global_position + pharm.global_basis.z * 2.0, pharm.global_position + Vector3.UP * 1.2)
-	bot.bot_aim_id = "pharmacy"
+	bot.bot_aim_id = "pharmacy_kiosk"
 	await _frames(30)
 	await _shot("05_pharmacy_prompt")
 	bot.bot_press += 1
