@@ -1,5 +1,8 @@
 # Godot cache (regenerated on import)
 .godot/
+
+# Exported builds (build.bat)
+builds/
 *.tmp
 *.translation
 

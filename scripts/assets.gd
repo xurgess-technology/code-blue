@@ -690,7 +690,9 @@ func has(key: String) -> bool:
 	if MODELS.has(key):
 		return ResourceLoader.exists(MODELS[key]["path"])
 	if MATERIALS.has(key):
-		return FileAccess.file_exists("%s/%s" % [MATERIALS[key]["dir"], _MAP_FILES["albedo"]])
+		# ResourceLoader, not FileAccess: an exported build ships only the imported texture,
+		# so the raw .jpg isn't there.
+		return ResourceLoader.exists("%s/%s" % [MATERIALS[key]["dir"], _MAP_FILES["albedo"]])
 	return false
 
 
@@ -948,7 +950,7 @@ func material_maps(key: String) -> Array:
 	if not MATERIALS.has(key):
 		return out
 	for slot in _MAP_FILES:
-		if FileAccess.file_exists("%s/%s" % [MATERIALS[key]["dir"], _MAP_FILES[slot]]):
+		if ResourceLoader.exists("%s/%s" % [MATERIALS[key]["dir"], _MAP_FILES[slot]]):
 			out.append(slot)
 	return out
 
