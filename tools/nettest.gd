@@ -600,12 +600,24 @@ func _sc_economy():
 		if not await _do_until(take, func(): return me.holding(kind), 40.0, "picking up " + kind):
 			return
 	for kind in SELL.keys():
+		# A charged throw can miss the grate (design intent -- "missed throws bounce off the
+		# frame"), same as a real player's; if it bounces back onto the floor, pick it up and
+		# throw again rather than treating one miss as fatal. not-holding fires the instant the
+		# throw releases, but the sale only lands a moment later once the item has actually flown
+		# into the FireZone, so wait for the money to change (same fix as tools/looptest.gd and
+		# tools/inventorytest.gd's furnace checks).
 		var burn := func():
 			var i := _slot_of(kind)
 			if i >= 0:
 				me.selected = i
-			_throw_at(game.economy.furnace.global_position)
-		if not await _do_until(burn, func(): return not me.holding(kind), 40.0, "throwing %s into the furnace" % kind):
+				_throw_at(game.economy.furnace.global_position, game.economy.furnace.global_basis.z)
+				return
+			for it in game.world_items.values():
+				if it.kind == kind:
+					_press_at(it.global_position, "it_retry_%s" % kind)
+					return
+		var m_before := game.money
+		if not await _do_until(burn, func(): return game.money != m_before, 40.0, "throwing %s into the furnace" % kind):
 			return
 	_say("sold everything: $%d" % game.money)
 	for i in PILL_BUYS:
@@ -709,7 +721,12 @@ func _sc_brains():
 			if not await _until(func(): return me.hive_view and bs.local_hive_active() and bs.camera() != null, 20.0, "Hive Eyes on my machine"):
 				return
 			_say("hive view on at t=%.1f: %s" % [game.world_time, str(bs._hive)])
-			await _frames(30)   # game time: the view lasts 7 game seconds at level 1
+			# SWEEP 4A HOOK (Hive Eyes fly-through, chunk 4): the camera doesn't land at the
+			# Walk-In the instant hive_view turns on -- it flies there over FLIGHT_IN seconds
+			# first (docs/SWEEP4A.md, "the flight takes about 1-1.5s"). 30 frames (0.5s) was
+			# timed for the old instant-snap behaviour; wait out the flight the same way
+			# braintest.gd does before checking where the camera actually is.
+			await _frames(int(bs.hive_view.FLIGHT_IN * 60) + 6)
 			var cam: Camera3D = bs.camera()
 			var wm = game.monsters.get(int(ids.walk_in))
 			if cam == null or wm == null or cam.global_position.distance_to(wm.global_position) > 2.5:
@@ -718,9 +735,16 @@ func _sc_brains():
 			if not await _until(func(): return not me.hive_view and not bs.local_hive_active(), 20.0, "coming back from Hive Eyes"):
 				return
 			_say("looked through the Walk-In and came back")
-	# 1.00 Walk-In against 1.25 Discharged: R is Echo now.
-	if bs.best_path(Net.my_id()) != "discharged":
-		return _end(false, "expected Echo to be the stronger path (walk_in %.2f discharged %.2f)" % [bs.points(Net.my_id(), "walk_in"), bs.points(Net.my_id(), "discharged")])
+	# 1.00 Walk-In against 1.25+ Discharged: Hive Eyes landed in the first slot (walk_in drunk
+	# first), Echo in the second (SWEEP 4A HOOK, chunk 1: best_path()/single-R-ability is gone,
+	# replaced by fixed per-slot abilities -- Alt+2 fires whichever landed second, not "whichever
+	# path has more points").
+	if bs.points(Net.my_id(), "discharged") <= bs.points(Net.my_id(), "walk_in"):
+		return _end(false, "expected discharged points ahead of walk_in (walk_in %.2f discharged %.2f)" % [bs.points(Net.my_id(), "walk_in"), bs.points(Net.my_id(), "discharged")])
+	var echo_slot: int = bs.slot_of(Net.my_id(), "echo")
+	if echo_slot < 0:
+		return _end(false, "Echo never landed in a slot")
+	me.bot_ability_slot = echo_slot
 	await _wall_wait(0.5)
 	me.bot_ability += 1
 	if not await _until(func(): return bs.echo_view.active and float(bs.last_echo.get("r", 0.0)) >= 18.0, 20.0, "Echo on my machine"):
@@ -1874,9 +1898,13 @@ func _items_near(kind: String, pos: Vector3, radius: float) -> int:
 ## SWEEP 4A HOOK (pharmacy, chunk 3): stand close to a target, face it dead level and fire one
 ## full-charge throw of the selected stack, at most once a wall-clock second. The same
 ## drop_selected(charge) path a real charged throw uses.
-func _throw_at(pos: Vector3) -> void:
+## `furn_basis_z` is the furnace's own forward direction (its mouth's local +Z rotated into world
+## space) -- economy.gd's `_rect_spot()` faces the furnace back toward the lobby's centre line,
+## not always world +Z, so a fixed world-space stand-offset can put the bot on the wrong side of
+## it (see the same fix in tools/looptest.gd's `_go_throw`).
+func _throw_at(pos: Vector3, furn_basis_z: Vector3 = Vector3(0.0, 0.0, 1.0)) -> void:
 	var me := _me()
-	var stand: Vector3 = pos + Vector3(0.0, 0.0, 1.1)
+	var stand: Vector3 = pos + furn_basis_z * 1.1
 	if Vector2(stand.x - me.global_position.x, stand.z - me.global_position.z).length() > 0.3:
 		me.teleport(_stand_spot(stand))
 	var aim: Vector3 = pos + Vector3.UP * 1.0   # the furnace fire zone's height, not the floor
