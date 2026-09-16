@@ -403,7 +403,59 @@ function build_skitter(variant) {
   return t;
 }
 
+// Launch printout (scripts/launch_screen.gd): a dot-matrix head printing one line. Needle strikes
+// grouped into characters and words, over the carriage motor.
+function build_print_line(variant) {
+  const rnd = rngFor(`print_line${variant}`);
+  const len = rnd.range(0.24, 0.36);
+  const t = sfxTrack(len + 0.15), b = new Bus(t, null, 0);
+  let at = 0.005;
+  while (at < len) {
+    const chars = 2 + Math.floor(rnd() * 5);
+    for (let c = 0; c < chars && at < len; c++) {
+      for (let k = 0; k < 4; k++) {
+        b.noise(at, { dur: 0.0035, vol: rnd.range(0.09, 0.15), freq: rnd.range(2600, 3800), q: 2.2, attack: 0.0004, rnd });
+        at += rnd.range(0.004, 0.0058);
+      }
+      at += rnd.range(0.003, 0.008);
+    }
+    at += rnd.range(0.014, 0.03);
+  }
+  b.tone(0, { freq: rnd.range(92, 110), type: 'sawtooth', dur: len, vol: 0.02, attack: 0.02, release: 0.03, filter: 380 });
+  return t;
+}
+
 const SFX_BUILDERS = {
+  print_feed: () => {
+    const rnd = rngFor('print_feed');
+    const t = sfxTrack(0.4), b = new Bus(t, null, 0);
+    for (let i = 0; i < 5; i++) b.noise(i * 0.03, { dur: 0.01, vol: 0.12, freq: 1300, q: 2, attack: 0.001, rnd });
+    b.tone(0, { freq: 64, end: 86, type: 'triangle', dur: 0.16, vol: 0.07, attack: 0.01 });
+    return t;
+  },
+  print_stamp: () => {
+    const rnd = rngFor('print_stamp');
+    const t = sfxTrack(0.5), b = new Bus(t, null, 0);
+    b.noise(0, { dur: 0.018, vol: 0.4, freq: 2400, q: 1, attack: 0.0005, rnd });
+    b.tone(0.004, { freq: 110, end: 48, type: 'sine', dur: 0.16, vol: 0.5, attack: 0.001 });
+    b.noise(0.004, { dur: 0.09, vol: 0.25, freq: 380, type: 'lowpass', rnd });
+    return t;
+  },
+  // A fax machine connecting: calling tones, the answer tone, the negotiation warble, line hiss.
+  fax_connect: () => {
+    const rnd = rngFor('fax_connect');
+    const t = sfxTrack(3.6), b = new Bus(t, null, 0);
+    b.tone(0.0, { freq: 1100, type: 'sine', dur: 0.45, vol: 0.06, attack: 0.005, release: 0.02 });
+    b.tone(0.95, { freq: 2100, type: 'sine', dur: 0.9, vol: 0.055, attack: 0.01, release: 0.05 });
+    let at = 1.95;
+    for (let i = 0; i < 26; i++) {
+      b.tone(at, { freq: rnd.chance(0.5) ? 1650 : 1850, type: 'sine', dur: 0.034, vol: 0.045, attack: 0.002, release: 0.004 });
+      at += 0.0333;
+    }
+    b.noise(2.85, { dur: 0.7, vol: 0.05, freq: 1500, endFreq: 2600, q: 0.8, attack: 0.03, rnd });
+    b.tone(2.85, { freq: 1300, type: 'sine', dur: 0.5, vol: 0.02, attack: 0.02, release: 0.1 });
+    return t;
+  },
   pickup: () => {
     const t = sfxTrack(0.4), b = new Bus(t, null, 0);
     b.tone(0, { freq: 620, type: 'square', dur: 0.07, vol: 0.07 });
@@ -812,6 +864,7 @@ function main() {
   for (let v = 1; v <= 4; v++) emitFile(OUT_SFX, `step_0${v}.wav`, trim(build_step(v, false)), SFX_TARGET_DB);
   for (let v = 1; v <= 4; v++) emitFile(OUT_SFX, `sprint_0${v}.wav`, trim(build_step(v, true)), SFX_TARGET_DB);
   for (let v = 1; v <= 3; v++) emitFile(OUT_SFX, `skitter_0${v}.wav`, trim(build_skitter(v)), SFX_TARGET_DB);
+  for (let v = 1; v <= 4; v++) emitFile(OUT_SFX, `print_line_0${v}.wav`, trim(build_print_line(v)), SFX_TARGET_DB);
   for (const [name, fn] of Object.entries(SFX_BUILDERS)) {
     emitFile(OUT_SFX, `${name}.wav`, trim(fn()), SFX_TARGET_DB);
   }

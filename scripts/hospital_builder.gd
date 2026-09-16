@@ -85,31 +85,46 @@ static func build(gen: Dictionary, info: Dictionary) -> Node3D:
 	if not gen.has("furniture"):
 		return Legacy.build(gen, info)
 	warm_parts(gen)
+	var prepared := prepare_level(gen)
+	for step in assemble_steps(gen, info, prepared):
+		step.call()
+	return prepared.root
+
+
+## The whole level as data: both parts and the navigation mesh. Thread-safe after `warm_parts()`
+## (all kinds, since the thread can't know which ones the map will use).
+static func prepare_level(gen: Dictionary) -> Dictionary:
+	return {"base": prepare(gen, PART_BASE), "wings": prepare(gen, PART_WINGS), "nav": bake_nav(gen)}
+
+
+## Main thread: callables that create the level's nodes from `prepare_level`, each a few
+## milliseconds at most. After the last one, `prepared.root` is the level and `info` is filled.
+static func assemble_steps(gen: Dictionary, info: Dictionary, prepared: Dictionary) -> Array:
+	var base: Dictionary = prepared.base
+	var wings: Dictionary = prepared.wings
 	var root := Node3D.new()
 	root.name = "Hospital"
-	var base := prepare(gen, PART_BASE)
-	var wings := prepare(gen, PART_WINGS)
-	for step in commit_steps(base, root):
-		step.call()
+	prepared["root"] = root
 	var wings_root := Node3D.new()
 	wings_root.name = "Wings"
-	root.add_child(wings_root)
-	for step in commit_steps(wings, wings_root):
-		step.call()
-	finish_info(gen, info, base, wings)
-	_build_fog_belt(info, root)
-	# The base part is kept (the wing loader merges its lists with every new set of wings); its
-	# mesh data is not needed any more.
-	for key in ["geo", "faces", "furn", "colliders", "signs", "lights", "containers", "doors", "occluder"]:
-		base[key] = {} if (base[key] is Dictionary) else []
-	var nav := NavigationRegion3D.new()
-	nav.name = "Nav"
-	nav.navigation_mesh = bake_nav(gen)
-	root.add_child(nav)
-	info["nav_region"] = nav
-	info["wings_root"] = wings_root
-	info["base_part"] = base
-	return root
+	var steps: Array = commit_steps(base, root)
+	steps.append(func(): root.add_child(wings_root))
+	steps.append_array(commit_steps(wings, wings_root))
+	steps.append(func():
+		finish_info(gen, info, base, wings)
+		_build_fog_belt(info, root)
+		# The base part is kept (the wing loader merges its lists with every new set of wings); its
+		# mesh data is not needed any more.
+		for key in ["geo", "faces", "furn", "colliders", "signs", "lights", "containers", "doors", "occluder"]:
+			base[key] = {} if (base[key] is Dictionary) else []
+		var nav := NavigationRegion3D.new()
+		nav.name = "Nav"
+		nav.navigation_mesh = prepared.nav
+		root.add_child(nav)
+		info["nav_region"] = nav
+		info["wings_root"] = wings_root
+		info["base_part"] = base)
+	return steps
 
 
 ## SWEEP 4A HOOK (fog lot, chunk 2): a real local FogVolume over the outdoor lot, so the fog is
@@ -196,9 +211,19 @@ static func warm_parts(gen: Dictionary = {}) -> void:
 		for e in gen.furniture:
 			Factory.parts("canopy_post" if e.get("canopy_post", false) else String(e.kind))
 		return
-	for kind in Defs.P.keys():
+	for kind in part_kinds():
 		Factory.parts(kind)
-	Factory.parts("canopy_post")
+
+
+## Every furniture kind whose shared parts warm_parts() builds, so a caller can spread them out.
+static func part_kinds() -> Array:
+	var kinds: Array = Defs.P.keys()
+	kinds.append("canopy_post")
+	return kinds
+
+
+static func warm_part(kind: String) -> void:
+	Factory.parts(kind)
 
 
 ## Everything one part needs, as data. Thread-safe after `warm_parts()`.

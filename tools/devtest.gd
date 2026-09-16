@@ -62,6 +62,9 @@ func _physics_process(delta: float) -> void:
 # =========================================================================
 
 func _run_solo() -> void:
+	# The title menu is usable once the launch printout is done, same as for a player.
+	if main.launching:
+		await main.launched
 	# The secret code on the title screen arms Solo.
 	# Real key events, through the same input path the keyboard uses. Typing into the name
 	# field must not count; typing on the bare menu must.

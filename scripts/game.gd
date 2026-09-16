@@ -299,6 +299,7 @@ func start_session(first_seed: int) -> void:
 
 
 func end_session(reason: String) -> void:
+	_discard_prebuilt()
 	_clear_case()
 	loop.reset()
 	_clear_items()
@@ -535,10 +536,14 @@ func _new_run() -> void:
 	_new_run_pending = true
 	Loading.begin("new_run", "NEW HOSPITAL...")
 	await Loading.drawn()
+	var new_seed := seed_value + 7919
+	await prebuild_level(new_seed, 1)
 	_new_run_pending = false
 	if phase == Phase.LOST and is_host():
 		reset_money()
-		start_lobby(seed_value + 7919, 1)
+		start_lobby(new_seed, 1)
+	else:
+		_discard_prebuilt()
 	Loading.end("new_run")
 
 
@@ -577,21 +582,80 @@ func _sound(cue: String, at = null) -> void:
 # level
 # =========================================================================
 
+const MAPGEN_PATH := "res://scripts/mapgen.gd"
+const BUILDER_PATH := "res://scripts/hospital_builder.gd"
+## A hospital built ahead of start_lobby by prebuild_level: {seed, shift, wing_gen, level, info}.
+var _prebuilt := {}
+
+
+## Build the hospital for (seed, shift) without blocking frames, so the loading screen keeps
+## animating: map generation, mesh data and the navigation bake on a worker thread, then the nodes
+## a few milliseconds per frame. The next start_lobby for the same seed and shift uses the result
+## instead of building it again. Does nothing for the dev room (it builds its own small room).
+func prebuild_level(for_seed: int, for_shift: int) -> void:
+	_discard_prebuilt()
+	if for_seed == DevRoomScript.SEED or not ResourceLoader.exists(MAPGEN_PATH) or not ResourceLoader.exists(BUILDER_PATH):
+		return
+	var MapGenScript: GDScript = load(MAPGEN_PATH)
+	var BuilderScript: GDScript = load(BUILDER_PATH)
+	# The same wing generation _build_level will ask the wing loader for, without consuming it.
+	var wing_gen: int = wing_loader.next_generation if wing_loader.next_generation > 0 else for_shift
+	BuilderScript.warm_parts()   # the thread reads the furniture mesh cache
+	var job := {}
+	var task := WorkerThreadPool.add_task(func():
+		var gen: Dictionary = MapGenScript.generate(for_seed, MapGenScript.wing_seed_for(for_seed, wing_gen))
+		job["gen"] = gen
+		if gen.has("furniture"):
+			job["prepared"] = BuilderScript.prepare_level(gen)
+	, false, "level")
+	while not WorkerThreadPool.is_task_completed(task):
+		await get_tree().process_frame
+	WorkerThreadPool.wait_for_task_completion(task)
+	if not job.has("prepared"):
+		return   # an old-style map: start_lobby builds it the old way
+	var info := {}
+	var t0 := Time.get_ticks_msec()
+	for step in BuilderScript.assemble_steps(job.gen, info, job.prepared):
+		step.call()
+		if Time.get_ticks_msec() - t0 >= PREBUILD_FRAME_MS:
+			await get_tree().process_frame
+			t0 = Time.get_ticks_msec()
+	_prebuilt = {"seed": for_seed, "shift": for_shift, "wing_gen": wing_gen, "level": job.prepared.root, "info": info}
+
+
+## Main-thread work per frame while prebuilding, milliseconds.
+const PREBUILD_FRAME_MS := 12
+
+
+func _discard_prebuilt() -> void:
+	if not _prebuilt.is_empty() and is_instance_valid(_prebuilt.level):
+		(_prebuilt.level as Node).free()
+	_prebuilt = {}
+
+
 func _build_level(for_seed: int) -> void:
 	_clear_level()
 	level_info = {}
 	var gen: Dictionary = {}
-	var mapgen_path := "res://scripts/mapgen.gd"
-	var builder_path := "res://scripts/hospital_builder.gd"
+	var mapgen_path := MAPGEN_PATH
+	var builder_path := BUILDER_PATH
 	if dev_mode:
+		_discard_prebuilt()
 		level = dev.build_level(level_info)  # DEV HOOK: the dev room instead of a hospital
 	elif ResourceLoader.exists(mapgen_path) and ResourceLoader.exists(builder_path):
 		var MapGenScript: GDScript = load(mapgen_path)
 		var BuilderScript: GDScript = load(builder_path)
 		# DOORS HOOK: the run's entrance building with this shift's wings (a joining client: the host's).
 		var wing_gen: int = wing_loader.generation_for_build(shift)
-		gen = MapGenScript.generate(for_seed, MapGenScript.wing_seed_for(for_seed, wing_gen))
-		level = BuilderScript.build(gen, level_info)
+		if not _prebuilt.is_empty() and int(_prebuilt.seed) == for_seed and int(_prebuilt.shift) == shift \
+				and int(_prebuilt.wing_gen) == wing_gen:
+			level = _prebuilt.level   # built behind the loading screen
+			level_info = _prebuilt.info
+			_prebuilt = {}
+		else:
+			_discard_prebuilt()
+			gen = MapGenScript.generate(for_seed, MapGenScript.wing_seed_for(for_seed, wing_gen))
+			level = BuilderScript.build(gen, level_info)
 		level_info["wing_gen"] = wing_gen
 	# A level missing its landmarks is worse than no level; fall back rather than ship a broken shift.
 	if not dev_mode and (level == null or not _level_info_usable()):

@@ -121,6 +121,54 @@ func _ready() -> void:
 
 	Audio.set_ambience(true)
 	_set_mouse(false)
+	_launch()
+
+
+const LaunchScreenScript := preload("res://scripts/launch_screen.gd")
+## True until the launch warmup and its printout are done; session starts wait for it.
+var launching := true
+signal launched
+
+
+## The one-time launch work: build and draw one of everything (scripts/warmup.gd) behind the
+## admission-chart printout (scripts/launch_screen.gd). The warmup starts inside _ready, so the
+## game's very first frame is a lit 3D frame of its first models: the renderer's one-time setup
+## (seconds, and it can't be split up) happens while Godot's boot splash is still on screen.
+func _launch() -> void:
+	var screen := LaunchScreenScript.new()
+	screen.name = "LaunchScreen"
+	add_child(screen)
+	var rig := Node3D.new()
+	rig.name = "LaunchRig"
+	add_child(rig)
+	var cam := Camera3D.new()
+	rig.add_child(cam)
+	cam.position = Vector3(0.0, 0.3, 2.4)
+	cam.current = true
+	var sun := DirectionalLight3D.new()
+	sun.rotation_degrees = Vector3(-50.0, 30.0, 0.0)
+	sun.shadow_enabled = true
+	rig.add_child(sun)
+	var lamp := OmniLight3D.new()
+	lamp.position = Vector3(0.6, 1.2, 1.0)
+	lamp.shadow_enabled = true
+	rig.add_child(lamp)
+	var spot := SpotLight3D.new()
+	spot.position = Vector3(-0.5, 0.6, 2.0)
+	spot.shadow_enabled = true
+	rig.add_child(spot)
+	await Warmup.run(game, screen.report, screen.can_draw, screen.may_work)
+	rig.queue_free()
+	if screen.is_processing():
+		await screen.done
+	screen.queue_free()
+	launching = false
+	launched.emit()
+
+
+func _after_launch() -> void:
+	if launching:
+		await launched
 
 
 ## Apply a quality preset: the look pass's environment toggles plus the render scale.
@@ -188,16 +236,19 @@ func _basic_environment() -> WorldEnvironment:
 func _start_solo(player_name: String) -> void:
 	if not await _loading_screen_up():
 		return
+	var run_seed := randi()
+	await game.prebuild_level(run_seed, 1)
 	Net.start_solo(player_name)
-	game.start_session(randi())
+	game.start_session(run_seed)
 	hud.host_info = ""
 	_enter_game()
 	Loading.end("session")
 
 
-## Put the loading screen up and let it draw before the level build blocks the main thread.
+## Put the loading screen up and let it draw before any loading work starts.
 ## False if a session start is already underway (a double click).
 func _loading_screen_up() -> bool:
+	await _after_launch()
 	if Loading.is_active():
 		return false
 	Loading.begin("session", "SCRUBBING IN...")
@@ -206,14 +257,18 @@ func _loading_screen_up() -> bool:
 
 
 func _start_host(player_name: String) -> void:
-	if Loading.is_active():
+	if not await _loading_screen_up():
 		return
+	# The hospital first, then open the server: nobody can connect to a session that isn't there yet.
+	var run_seed := randi()
+	await game.prebuild_level(run_seed, 1)
 	var err := Net.host(player_name)
 	if not err.is_empty():
+		game._discard_prebuilt()
+		Loading.end("session")
 		menu.show_menu(err)
 		return
-	await _loading_screen_up()
-	game.start_session(randi())
+	game.start_session(run_seed)
 	var addresses := Net.local_addresses()
 	hud.host_info = "Friends join at: %s" % ", ".join(addresses.map(func(a): return "%s:%d" % [a, C.DEFAULT_PORT])) \
 		if not addresses.is_empty() else "Hosting on port %d" % C.DEFAULT_PORT
@@ -224,6 +279,7 @@ func _start_host(player_name: String) -> void:
 ## Joining: the screen stays up from the click until the host's hospital is built here (or the
 ## join fails / is abandoned).
 func _start_join(player_name: String, address: String) -> void:
+	await _after_launch()
 	if Loading.is_active():
 		return
 	var parsed := Net.parse_address(address)
@@ -237,6 +293,7 @@ func _start_join(player_name: String, address: String) -> void:
 
 ## DEV HOOK: into the dev room, alone or hosting (friends then join it like any hosted game).
 func start_dev(player_name: String, host: bool) -> void:
+	await _after_launch()
 	if Loading.is_active():
 		return
 	if host:
@@ -266,7 +323,9 @@ func _start_host_steam(_player_name: String) -> void:
 
 func _on_steam_hosted() -> void:
 	await _loading_screen_up()
-	game.start_session(randi())
+	var run_seed := randi()
+	await game.prebuild_level(run_seed, 1)
+	game.start_session(run_seed)
 	hud.host_info = "Steam lobby open (friends only). Esc, then Invite friends, or invite from the Steam overlay."
 	_enter_game()
 	Loading.end("session")
@@ -274,6 +333,7 @@ func _on_steam_hosted() -> void:
 
 ## Accepted an invite or clicked "Join game" on a friend: leave whatever we were doing and go.
 func _on_steam_invite(lobby: int) -> void:
+	await _after_launch()
 	if game.phase != Game.Phase.MENU:
 		_back_to_menu("")
 	menu.set_enabled(false)
