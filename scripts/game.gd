@@ -58,8 +58,11 @@ var shelf: Dictionary = {}
 ## Team money in dollars (inventory, sweep 2). Host authoritative, replicated, survives shifts;
 ## change it through add_money() and reset_money().
 var money: int = 0
-## Gold bars bought at the shop so far this run; the gold pile shows this many. Replicated.
-var gold_bars: int = 0
+## SWEEP 4A HOOK (pharmacy, chunk 3): a patient/monster/OR blip note from a thrown placebo pill,
+## for the OR screen's green blip (scripts/orscreen/or_screen_model.gd). Host authoritative,
+## replicated as g "pn" (table index -> world_time it landed); a panel shows the note for a few
+## seconds after. Vitals and sedation never change.
+var pill_notes: Dictionary = {}
 
 # ---- local ----
 var level: Node3D = null
@@ -131,6 +134,8 @@ const SpawnerScript := preload("res://scripts/item_spawner.gd")
 const SurgeryScript := preload("res://scripts/surgery/surgery_system.gd")
 const DevRoomScript := preload("res://scripts/dev/dev_room.gd")
 const EconomyScript := preload("res://scripts/economy/economy.gd")
+# SWEEP 4A HOOK (pharmacy, chunk 3): PillLines is a class_name (scripts/economy/pill_lines.gd),
+# used directly below.
 const LootSpawnerScript := preload("res://scripts/economy/loot_spawner.gd")
 const LoopScript := preload("res://scripts/loop/shift_loop.gd")
 const TablesScript := preload("res://scripts/loop/tables.gd")
@@ -138,7 +143,9 @@ const HospitalZones := preload("res://scripts/hospital_builder.gd")
 ## A fragile piece of loot that gets dropped violently keeps this share of its value.
 const LOOT_CRACK_KEEPS := 0.55
 
-## Sell bin, shop and gold pile in the world (scripts/economy/economy.gd), child "Economy".
+## The pharmacy window and the crematorium furnace in the world (scripts/economy/economy.gd),
+## child "Economy". SWEEP 4A HOOK (pharmacy, chunk 3): gold bars, the sell bin and the shop are
+## gone; buying is the pharmacy, selling is throwing into the furnace.
 var economy: Node = null
 ## ORSCREEN HOOK: the OR wall monitor (scripts/orscreen/or_screen.gd), child "ORScreen".
 const OrScreenScript := preload("res://scripts/orscreen/or_screen.gd")
@@ -450,8 +457,8 @@ func finish_shift(text: String, seconds: float) -> void:
 		_rpc_shift.rpc(seed_value, shift, phase, _net_seq)
 
 
-## Host: everyone is down or dead during a shift. Game over: after the screen, money and the gold
-## pile reset and a new run starts in a new hospital.
+## Host: everyone is down or dead during a shift. Game over: after the screen, money resets and a
+## new run starts in a new hospital.
 func game_over(text: String) -> void:
 	if not is_host() or phase == Phase.LOST:
 		return
@@ -812,7 +819,7 @@ func _add_landmarks() -> void:
 	if not dev_mode:
 		loop.on_level_built(level, level_info)
 
-	# inventory: the sell bin, the shop and the gold pile (placed once physics has the level).
+	# pharmacy (chunk 3): the pharmacy window and the furnace (placed once physics has the level).
 	economy.on_level_built(level, level_info)
 
 	_add_proxy("clock", clock_pos() + Vector3.UP * 1.1, 0.7, C.PUNCH_SECONDS,
@@ -1164,20 +1171,49 @@ func pickup_item(p: Node, it: Node) -> void:
 	emit_noise(pos, 0.15, "pickup")
 
 
-## G: set the selected stack down gently in front of you. Nothing breaks.
-func drop_selected(p: Node) -> void:
+## SWEEP 4A HOOK (pharmacy, chunk 3): a tap (charge ~0) still sets the selected stack down
+## gently, same as before. Holding the drop key charges a real throw: the host runs the physics
+## (toss()) and the item replicates like any other drop. A charged placebo pill is special: only
+## one pill leaves the bottle (the rest stays in hand) and it is tracked for a mid-air hit.
+const THROW_MIN_SPEED := 1.2
+const THROW_MAX_SPEED := 11.0
+const THROW_MIN_UP := 0.6
+const THROW_MAX_UP := 2.6
+
+
+func drop_selected(p: Node, charge: float = 0.0) -> void:
 	if not is_host():
 		return
 	var head: int = p.selected_head()
 	var s: Dictionary = p.slots[head]
 	if s.kind == "":
 		return
+	charge = clampf(charge, 0.0, 1.0)
 	var fwd: Vector3 = -p.camera.global_transform.basis.z
 	var from := Transform3D(p.global_basis, p.head.global_position + fwd * 0.5 + Vector3.DOWN * 0.3)
+	var speed: float = lerpf(THROW_MIN_SPEED, THROW_MAX_SPEED, charge)
+	var up: float = lerpf(THROW_MIN_UP, THROW_MAX_UP, charge)
+	var vel: Vector3 = fwd * speed + Vector3.UP * up + (p.velocity as Vector3) * 0.5
+	# Placebo pills (3e): a charged throw fires a single pill and leaves the rest of the bottle in
+	# hand; a tap drops the whole bottle like any other item.
+	if String(s.kind) == "placebo_pills" and charge > 0.02 and int(s.count) > 0:
+		var it := _spawn_item("placebo_pills", 1, from, WorldItem.State.LOOSE)
+		it.value = 0
+		it.set_meta("pill_thrown", true)
+		it.set_meta("pill_thrower", p.peer_id)
+		it.set_meta("pill_spawn_t", world_time)
+		it.toss(from, vel)
+		var left: int = int(s.count) - 1
+		if left <= 0:
+			p.clear_slot(head)
+		else:
+			p.slots[head].count = left
+		_sound("thud", from.origin)
+		return
 	var it := _spawn_item(s.kind, s.count, from, WorldItem.State.LOOSE)
 	it.value = int(s.get("v", 0))
 	it.bt = float(s.get("bt", -1000000.0))   # SWEEP 3 HOOK (brains)
-	it.toss(from, fwd * 1.2 + Vector3.UP * 0.6 + p.velocity * 0.5)
+	it.toss(from, vel)
 	p.clear_slot(head)
 	_sound("thud", from.origin)
 	emit_noise(from.origin, 0.4, "drop")
@@ -1298,56 +1334,70 @@ func add_money(amount: int, reason: String) -> void:
 	economy.on_money_changed(amount, reason)
 
 
-## Host: game over. Money and the gold pile go back to nothing.
+## Host: game over. Money goes back to nothing.
 func reset_money() -> void:
 	if not is_host():
 		return
 	money = 0
-	gold_bars = 0
 	if economy != null:
 		economy.on_reset()
 	if brains != null:
 		brains.on_reset()   # SWEEP 3 HOOK: absorbed brains go with the money
 
 
-## What the next gold bar costs (the n-th bar bought costs more than the last).
-func gold_bar_price() -> int:
-	return EconomyScript.bar_price(gold_bars)
+## SWEEP 4A HOOK (pharmacy, chunk 3): the flat price of one bottle of placebo pills. Never
+## climbs, unlike the old gold bar (there is nothing else to buy yet).
+const PILL_PRICE := 15
+const PILL_COUNT := 10
 
 
-## Host: the selected loot goes into the sell bin and its value into the team's money.
-func sell_selected(p: Node) -> void:
-	if not is_host() or p == null:
-		return
-	var head: int = p.selected_head()
-	var s: Dictionary = p.slots[head]
-	if s.kind == "" or not Items.is_loot(s.kind):
-		return
-	# SWEEP 3 HOOK (brains): a brain pays what it is worth now (spoilage); the sell bin is the dumpster.
-	var value: int = maxi(0, int(brains.current_value(s))) if brains != null else maxi(0, int(s.get("v", 0)))
-	var label := Items.stack_label(s.kind, int(s.count))
-	p.clear_slot(head)
-	add_money(value, "sell:%s" % s.kind)
-	var at: Vector3 = economy.sell_bin_position()
-	_sound("economy_sell", at)
-	say("%s tossed %s in the dumpster for $%d." % [p.player_name, label.to_lower(), value], 2.5)
-
-
-## Host: buy one gold bar at the shop. False (and a message) without the money.
-func buy_gold_bar(p: Node) -> bool:
-	if not is_host():
+## Host: buy one bottle of placebo pills at the pharmacy window. False (and a message) without
+## the money. The item does not appear in hand: a tube capsule thunks into the delivery station a
+## moment later and drops it there (economy.gd's pharmacy node runs the timer/visual).
+func buy_pills(p: Node) -> bool:
+	if not is_host() or economy == null or economy.pharmacy == null:
 		return false
-	var price := gold_bar_price()
-	if money < price:
-		tell(p, "A gold bar costs $%d. The team has $%d." % [price, money])
+	if money < PILL_PRICE:
+		tell(p, "Pills cost $%d. The team has $%d." % [PILL_PRICE, money])
 		return false
-	add_money(-price, "shop:gold_bar")
-	gold_bars += 1
-	economy.on_bar_bought()
-	_sound("economy_buy", economy.shop_position())
-	_sound("economy_bar", economy.pile_top())
-	say("%s bought gold bar #%d for $%d." % [p.player_name if p != null else "Someone", gold_bars, price], 2.5)
+	add_money(-PILL_PRICE, "pharmacy:placebo_pills")
+	_sound("economy_buy", economy.pharmacy_position())
+	say("%s bought a bottle of pills for $%d." % [p.player_name if p != null else "Someone", PILL_PRICE], 2.5)
+	# The tube-capsule animation plays on every machine; only the host spawns the item once it
+	# lands (economy_props.gd gates that on is_host()).
+	economy.pharmacy.queue_delivery("placebo_pills", PILL_COUNT)
+	_broadcast("pharmacy_deliver", {"kind": "placebo_pills", "count": PILL_COUNT})
 	return true
+
+
+## SWEEP 4A HOOK (pharmacy, chunk 3): the crematorium furnace (scripts/economy/furnace.gd) calls
+## this once a thrown item lands in the fire. Sellable (loot, brains) pays out; anything else
+## (surgical tools, the guide, pill bottles) is not sellable and the furnace bounces it back out
+## instead of calling this. Placebo pills ARE sellable, for exactly $0 (3e).
+func furnace_sell(kind: String, count: int, value: int, at: Vector3) -> void:
+	if not is_host():
+		return
+	add_money(value, "furnace:%s" % kind)
+	_sound("economy_sell", at)
+	if value > 0:
+		say("%s went into the furnace for $%d." % [Items.stack_label(kind, count), value], 2.5)
+
+
+## SWEEP 4A HOOK (pharmacy, chunk 3): whether the furnace can sell a stack at all. Loot (including
+## brains) and placebo pills are sellable; everything else (surgical tools, the guide) bounces
+## back out unsold.
+func furnace_can_sell(kind: String) -> bool:
+	return Items.is_loot(kind) or kind == "placebo_pills"
+
+
+## SWEEP 4A HOOK (pharmacy, chunk 3): what a stack is worth burned. Brains pay what they are worth
+## now (spoilage); placebo pills always burn for $0; other loot pays its carried value.
+func furnace_value(kind: String, s: Dictionary) -> int:
+	if kind == "placebo_pills":
+		return 0
+	if brains != null and brains.is_brain(kind):
+		return maxi(0, int(brains.current_value(s)))
+	return maxi(0, int(s.get("v", 0)))
 
 
 func _floor_at(p: Vector3) -> Vector3:
@@ -2546,9 +2596,101 @@ func player_shoved(p: Node, charge: float = -1.0) -> void:
 
 
 ## SWEEP 3 HOOK, host: the player pressed left mouse with a usable item in hand.
+## SWEEP 4A HOOK (pharmacy, chunk 3): a held bottle of placebo pills swallows one instead of
+## routing to combat (it has no windup, no charge, nothing to strike).
 func player_used(p: Node) -> void:
-	if is_host() and combat != null:
+	if not is_host():
+		return
+	if String(p.selected_stack().kind) == "placebo_pills":
+		eat_pill(p)
+		return
+	if combat != null:
 		combat.use(p)
+
+
+## Host: take one pill from the held bottle. Nothing mechanical; the local line and warm effect
+## are the same reaction a thrown pill gives, minus the miss chance.
+func eat_pill(p: Node) -> void:
+	if not is_host() or p == null:
+		return
+	var head: int = p.selected_head()
+	var s: Dictionary = p.slots[head]
+	if String(s.kind) != "placebo_pills" or int(s.count) <= 0:
+		return
+	var left: int = int(s.count) - 1
+	if left <= 0:
+		p.clear_slot(head)
+	else:
+		p.slots[head].count = left
+	_pill_hit_player(p, p)
+
+
+# ---------------------------------------------------------------------------
+# SWEEP 4A HOOK (pharmacy, chunk 3): placebo pill hit resolution. Host authoritative; who a
+# thrown pill hits (or that it missed) is decided here and replicated over `_event` so every
+# machine shows the right thing. The warm effect and the personal line are local presentation on
+# the affected player's own machine; the floating quote and the OR blip are for everyone nearby.
+const PILL_HIT_RADIUS := 0.85
+
+
+## Host, called every physics frame by an in-flight thrown pill (world_item.gd) while it has not
+## yet settled. True once resolved: the caller (world_item.gd) frees the projectile.
+func pill_check_hit(it: Node) -> bool:
+	if not is_host():
+		return false
+	var pos: Vector3 = it.global_position
+	var thrower: int = int(it.get_meta("pill_thrower", 0))
+	var airborne: float = world_time - float(it.get_meta("pill_spawn_t", world_time))
+	for p in players.values():
+		if p == null or not is_instance_valid(p) or not p.alive or p.downed:
+			continue
+		if p.peer_id == thrower and airborne < 0.2:
+			continue   # a beat of grace so it does not hit its own thrower's hand on release
+		if pos.distance_to(p.global_position + Vector3.UP * 1.0) <= PILL_HIT_RADIUS:
+			_pill_hit_player(players.get(thrower), p)
+			return true
+	for i in patient_tables.size():
+		var c := case_on_table(i)
+		if c.is_empty() or String(c.get("state", "")) == "incoming":
+			continue
+		var at: Vector3 = table_position(i) + Vector3.UP * 0.6
+		if pos.distance_to(at) <= PILL_HIT_RADIUS:
+			_pill_hit_case(i, c, at)
+			return true
+	for m in monsters.values():
+		if m != null and is_instance_valid(m) and pos.distance_to(m.global_position + Vector3.UP * 0.9) <= PILL_HIT_RADIUS:
+			_pill_hit_creature(m.global_position)
+			return true
+	return false
+
+
+## A player (self or a teammate): the line and the warm effect show only on their own machine.
+func _pill_hit_player(_thrower, target: Node) -> void:
+	if target == null or not is_instance_valid(target):
+		return
+	var line := PillLines.pick(target.peer_id)
+	if target.is_local:
+		message = line
+		message_timer = 2.5
+		notice.emit(line, 2.5)
+		target.add_warm()
+	elif Net.active:
+		_event.rpc_id(target.peer_id, "pill_player", {"line": line})
+
+
+## A patient (or player) on a table: the line floats over them in quotes for everyone nearby; an
+## OR-table patient's monitor also gets a green blip. Vitals and sedation never change.
+func _pill_hit_case(table_index: int, c: Dictionary, at: Vector3) -> void:
+	var line := "\"%s\"" % PillLines.pick(0)
+	_broadcast("pill_line", {"pos": at, "text": line})
+	if String(c.get("patient_id", "")) != "player":
+		pill_notes[table_index] = world_time   # the OR screen (or_screen_model.gd) reads this directly
+
+
+## A monster: the line floats over it in quotes for everyone nearby.
+func _pill_hit_creature(at: Vector3) -> void:
+	var line := "\"%s\"" % PillLines.pick(0)
+	_broadcast("pill_line", {"pos": at + Vector3.UP * 1.6, "text": line})
 
 
 ## SWEEP 4A HOOK, host: the player pressed Alt+(slot_idx+1).
@@ -3043,7 +3185,8 @@ func _global_fields() -> Dictionary:
 		"et": snappedf(end_timer, 0.1), "sf": shelf.duplicate(),
 		"wp": waiting_peers.keys(),
 		"dv": dev.net_state() if dev_mode else {},  # DEV HOOK
-		"mn": money, "gb": gold_bars,  # inventory: team money and the gold pile
+		"mn": money,  # inventory: team money
+		"pn": pill_notes.duplicate(),  # SWEEP 4A HOOK (pharmacy, chunk 3): OR green blip notes
 		# SWEEP 3 HOOK: small dictionaries of quantized values only (see docs/SWEEP3.md)
 		"cb": combat.net_state(), "dx": dissection.net_state(), "br": brains.net_state(),
 	}
@@ -3264,13 +3407,13 @@ func _apply_state(state: Dictionary, msg: Dictionary, keyframe: bool) -> void:
 		if String(k).begins_with("lp."):
 			lp[String(k).substr(3)] = g[k]
 	loop.apply_net_state(lp)
-	# inventory: money and the gold pile (the pile rebuilds itself from the count).
+	# inventory: money.
 	var new_money := int(g.get("mn", money))
 	if new_money != money:
 		var delta := new_money - money
 		money = new_money
 		economy.on_money_changed(delta, "")
-	gold_bars = int(g.get("gb", gold_bars))
+	pill_notes = (g.get("pn", pill_notes) as Dictionary).duplicate()   # SWEEP 4A HOOK (pharmacy, chunk 3)
 	# SWEEP 3 HOOK
 	combat.apply_net_state(g.get("cb", {}))
 	dissection.apply_net_state(g.get("dx", {}))
@@ -3431,6 +3574,23 @@ func _event(kind: String, data: Dictionary) -> void:
 			message = data.text
 			message_timer = data.secs
 			notice.emit(data.text, data.secs)
+		"pill_player":
+			# SWEEP 4A HOOK (pharmacy, chunk 3): a thrown/eaten pill landed on me specifically.
+			message = String(data.line)
+			message_timer = 2.5
+			notice.emit(String(data.line), 2.5)
+			var me := local_player()
+			if me != null:
+				me.add_warm()
+		"pill_line":
+			# SWEEP 4A HOOK (pharmacy, chunk 3): the floating quoted line over a patient or
+			# monster, for everyone nearby. Purely decorative and local to each machine.
+			_spawn_pill_line(data.pos, String(data.text))
+		"pharmacy_deliver":
+			# SWEEP 4A HOOK (pharmacy, chunk 3): every client plays the tube-capsule animation;
+			# only the host (economy_props.gd) actually spawns the item once it lands.
+			if economy != null and economy.pharmacy != null and is_instance_valid(economy.pharmacy):
+				economy.pharmacy.queue_delivery(String(data.kind), int(data.count))
 		"hit":
 			var p = players.get(data.id)
 			if p != null:
@@ -3479,6 +3639,29 @@ func _event(kind: String, data: Dictionary) -> void:
 				doors.on_event(kind, data)
 			else:
 				dev.on_event(kind, data)  # DEV HOOK: monster_killed and other dev room events
+
+
+## SWEEP 4A HOOK (pharmacy, chunk 3): a small floating quoted line, local to this machine only
+## (every machine that gets the "pill_line" event spawns its own copy; nothing here is tracked in
+## game state). Rises and fades over a couple of seconds, then frees itself.
+func _spawn_pill_line(pos: Vector3, text: String) -> void:
+	if level == null or not is_instance_valid(level):
+		return
+	var l := Label3D.new()
+	l.text = text
+	l.font_size = 34
+	l.pixel_size = 0.0034
+	l.outline_size = 8
+	l.outline_modulate = Color(0, 0, 0, 0.85)
+	l.modulate = Color(0.85, 0.95, 1.0)
+	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	l.no_depth_test = false
+	l.global_position = pos
+	level.add_child(l)
+	var tw := create_tween()
+	tw.tween_property(l, "position:y", l.position.y + 0.6, 1.8)
+	tw.parallel().tween_property(l, "modulate:a", 0.0, 1.8).set_delay(0.6)
+	tw.tween_callback(l.queue_free)
 
 
 static func _shuffle(a: Array, rng: RandomNumberGenerator) -> void:

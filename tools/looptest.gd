@@ -11,12 +11,12 @@ extends Node
 ##          and leave; the extra call rings, the bot answers, the second patient lands on the
 ##          other table; the bot fetches supplies and operates both to stable; it cannot clock out
 ##          before that; clock out pays exactly both cases; the loot is still in hand in the next
-##          lobby; the bot sells it at the sell bin and buys a gold bar.
+##          lobby; the bot sells it at the crematorium furnace and buys pills at the pharmacy.
 ## Shift 2  clock in again in the same hospital: fresh loot, last shift's untouched loot gone,
 ##          containers closed, grace restarted. Nobody answers: the answering machine takes the
 ##          call. The patient dies on the table; the extra call is ignored and declines itself;
 ##          clock out costs the dead patient's penalty and nothing for the declined one.
-## Shift 3  clock in, everyone goes down: game over, then a new run (shift 1, money and gold reset,
+## Shift 3  clock in, everyone goes down: game over, then a new run (shift 1, money reset,
 ##          a new hospital).
 ##
 ## Exits 0 when every check passes.
@@ -203,19 +203,27 @@ func _run() -> void:
 	_check(game.cases.is_empty() and game.shelf.is_empty(), "no cases or shelf stock between shifts")
 	_check(game.doors.gates_locked, "the wing gates are locked between shifts")
 
-	# Walk out and sell, buy a bar.
-	_say("---- between shifts: sell, shop")
+	# Walk out and sell at the furnace (throwing), buy pills at the pharmacy.
+	_say("---- between shifts: the furnace, the pharmacy")
 	var value: int = int(bot.slots[_slot_of(loot_kind)].get("v", 0))
 	var m0: int = game.money
-	ok = await _do_until(func():
-		bot.selected = maxi(0, _slot_of(loot_kind))
-		_go_use("sell_bin", game.economy.sell_bin.global_position, false), func(): return not bot.holding(loot_kind), 90.0)
-	_check(ok and game.money == m0 + value, "the bot walked to the sell bin and sold the loot for $%d" % value)
-	if game.level_info.has("zones"):
-		_check(Zones.zone_of(game.level_info, bot.global_position) == "neutral", "selling happened outside, in the neutral area (%s)" % Zones.zone_of(game.level_info, bot.global_position))
-	var bars: int = game.gold_bars
-	ok = await _do_until(func(): _go_use("shop", game.economy.shop.global_position, false), func(): return game.gold_bars > bars, 60.0)
-	_check(ok, "and bought a gold bar")
+	bot.selected = maxi(0, _slot_of(loot_kind))
+	# Not-holding fires the instant the bot releases the throw; the sale only lands a moment later
+	# once the item has actually flown into the furnace's FireZone, so wait for the money itself.
+	ok = await _do_until(func(): _go_throw(game.economy.furnace), func(): return game.money != m0, 90.0)
+	_check(ok and game.money == m0 + value, "the bot threw the loot into the furnace and sold it for $%d" % value)
+	m0 = game.money
+	ok = await _do_until(func(): _go_use("pharmacy", game.economy.pharmacy.global_position, false), func(): return game.money < m0, 60.0)
+	_check(ok, "and bought a bottle of pills at the pharmacy")
+	var pills_delivered := func() -> bool:
+		for it in game.world_items.values():
+			if it.kind == "placebo_pills":
+				return true
+		return false
+	ok = pills_delivered.call()
+	if not ok:
+		ok = await _until(pills_delivered, 5.0)
+	_check(ok, "the tube delivered the pill bottle")
 
 	# ------------------------------------------------------------------ shift 2
 	_say("---- shift 2: same run, new wings, answering machine, a death, a declined call")
@@ -276,7 +284,6 @@ func _run() -> void:
 	# ------------------------------------------------------------------ shift 3
 	_say("---- shift 3: game over")
 	game.add_money(500, "test")
-	game.buy_gold_bar(bot)
 	ok = await _do_until(func(): _go_use("clock", game.clock_pos(), true), func(): return game.phase == Game.Phase.SHIFT, 120.0)
 	_check(ok, "clock in for shift 3")
 	bot.bot_invulnerable = false
@@ -291,7 +298,7 @@ func _run() -> void:
 	await _frames(3)
 	bot = game.local_player()
 	bot.bot_active = true
-	_check(ok and game.shift == 1 and game.money == 0 and game.gold_bars == 0, "a new run: shift 1, no money, no gold (shift %d, $%d, %d bars)" % [game.shift, game.money, game.gold_bars])
+	_check(ok and game.shift == 1 and game.money == 0, "a new run: shift 1, no money (shift %d, $%d)" % [game.shift, game.money])
 	_check(game.seed_value != old_seed, "a new hospital")
 	_check(bot.alive, "back on your feet")
 
@@ -403,6 +410,36 @@ func _go_use(id: String, pos: Vector3, hold: bool) -> void:
 	elif _press_cd <= 0.0 and bot.aim_id == id and not bot.aim_prompt.begins_with("!"):
 		bot.bot_press += 1
 		_press_cd = 0.5
+
+
+## SWEEP 4A HOOK (pharmacy, chunk 3): walk up close to the furnace, face it and fire a full
+## charge throw of the selected stack. Standing close and aiming dead level makes the pill/loot
+## clear the grate reliably; this exercises the same drop_selected(charge) path a real charged
+## throw uses, not a shortcut into the fire zone.
+##
+## The furnace is rotated to face back toward the lobby's centre line (economy.gd's `_rect_spot`),
+## not always world +Z, so "in front of the mouth" has to go through its own basis, the same way
+## tools/inventorytest.gd's manual furnace test does -- a fixed world-space offset stood the bot
+## wherever that happened to line up with the map, not necessarily lined up with the grate gaps.
+func _go_throw(furn: Node3D) -> void:
+	var target_pos: Vector3 = furn.global_position
+	var stand: Vector3 = target_pos + furn.global_basis.z * 1.1
+	var d := Vector2(stand.x - bot.global_position.x, stand.z - bot.global_position.z).length()
+	if d > 0.5:
+		_walk_to(stand)
+		return
+	bot.bot_move = Vector2.ZERO
+	var aim: Vector3 = target_pos + Vector3.UP * 1.0   # the fire zone's height, not the floor
+	var to := aim - bot.head.global_position
+	bot.bot_yaw = atan2(-to.x, -to.z)
+	bot._yaw = bot.bot_yaw
+	bot.rotation.y = bot.bot_yaw
+	bot.head.rotation.x = clampf(atan2(to.y, Vector2(to.x, to.z).length()), -1.2, 1.2)
+	bot._pitch = bot.head.rotation.x
+	if _press_cd <= 0.0:
+		bot.drop_charge = 1.0
+		bot.drop_count += 1
+		_press_cd = 1.0
 
 
 func _walk_to(target: Vector3) -> void:

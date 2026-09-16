@@ -1,9 +1,9 @@
 extends RefCounted
 ## The neutral area outside the main doors (sweep 4A chunk 2: the fog lot). Sidewalk and canopy,
-## the ambulance bay, faded stall lines, the sell bin (dumpster) and the gold pile (chunk 3
-## removes the last two). Nothing else: past the lot's edge is thick fog
-## (`scripts/level/fog_ring.gd`), not a fence, and the ambulance is a driven vehicle
-## (`scripts/loop/shift_loop.gd`), not a parked prop.
+## the ambulance bay and faded stall lines. Nothing else: the dumpster and the gold pile are gone
+## (chunk 3: selling is the crematorium furnace and buying is the pharmacy, both off the lobby,
+## not out here). Past the lot's edge is thick fog (`scripts/level/fog_ring.gd`), not a fence, and
+## the ambulance is a driven vehicle (`scripts/loop/shift_loop.gd`), not a parked prop.
 ##
 ## A rectangle of outdoor ground, OUT_W x OUT_H tiles, centred on the main doors. Lit by street
 ## lights, never dark, never a monster spawn.
@@ -45,11 +45,6 @@ static func build(st: S, door_x: float, oy: int, rng: Rng) -> Rect2i:
 	for c in [12.4, 18.6, 25.4, 31.6]:
 		put.call("bollard", c, 3.4, SOUTH, {"canopy_post": true})
 
-	# ---- sell bin: a steel dumpster against the facade east of the canopy (chunk 3 removes) --
-	put.call("dumpster", 34.8, Defs.size("dumpster").z * 0.5 / Defs.TILE + 0.05, SOUTH)
-	var bin_pos: Vector2 = at.call(34.8, Defs.size("dumpster").z / Defs.TILE + 0.45)
-	st.spots["sell_bin"] = {"pos": at.call(34.8, Defs.size("dumpster").z * 0.5 / Defs.TILE + 0.05), "yaw": Defs.yaw_facing(SOUTH), "front": bin_pos}
-
 	# ---- ambulance bay: a marking and a lane, no parked prop --------------------------------
 	# The ambulance itself is a driven vehicle now (shift_loop.gd / ambulance.gd), not a static
 	# piece. `ambulance.position` is the bay parking spot; the lane runs south into the fog.
@@ -66,12 +61,6 @@ static func build(st: S, door_x: float, oy: int, rng: Rng) -> Rect2i:
 	for s in stalls:
 		(st.spots["stalls"] as Array).append({"pos": at.call(s.pos.x, s.pos.y), "yaw": Defs.yaw_facing(s.face)})
 
-	# ---- plaza: where the gold bars stack (chunk 3 removes) ---------------------------------
-	st.spots["gold_pile"] = {"pos": at.call(25.0, 12.5), "yaw": 0.0}
-	put.call("pallet", 25.0, 12.5, N)
-	for c in range(23, 28):
-		for r in range(11, 15):
-			st.set_keep(ox + c, oy + r)
 
 	# ---- street lights: bright, warm, steady -------------------------------------------------
 	# SWEEP 4A FOLLOW-UP (fog lot, chunk 2): kept within FogRing.inner_rect's clear area (roughly

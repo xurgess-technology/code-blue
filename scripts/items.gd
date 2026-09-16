@@ -109,6 +109,21 @@ const ITEMS := {
 		"where": "On the lectern in the clock-in room, unless somebody walked off with it.",
 		"handling": "Takes a hand. Press R while holding it, or while looking at it, to read.",
 	},
+	# SWEEP 4A HOOK (pharmacy, chunk 3): does nothing mechanically. Only ever bought at the
+	# pharmacy window (`found` empty keeps it out of the wings and the supply spawner).
+	"placebo_pills": {
+		"name": "Placebo pills",
+		"short": "Placebo pill bottles",
+		"surgical": false,
+		"consumable": true,
+		"batch": [10, 10],
+		"fragile": false,
+		"found": {},
+		"loose_surfaces": [],
+		"real_use": "A bottle of sugar pills. Efficacy: disputed. Side effects: optimism.",
+		"where": "Only sold at the pharmacy window. Never turns up loose in the wings.",
+		"handling": "Consumable, 10 to a bottle. Use to swallow one; charge a throw to lob a single pill.",
+	},
 }
 
 ## Tabs the guide shows as locked, so it is obvious the pool will grow.

@@ -571,9 +571,14 @@ static func validate(gen: Dictionary) -> PackedStringArray:
 
 	# Landmarks.
 	var spots: Dictionary = gen.get("spots", {})
-	for key in ["clock", "phone", "lectern", "shelf", "or_screen", "entrance", "ambulance", "shop", "sell_bin", "gold_pile"]:
+	for key in ["clock", "phone", "lectern", "shelf", "or_screen", "entrance", "ambulance", "shop"]:
 		if not spots.has(key):
 			problems.append("spot '%s' was never placed" % key)
+	# SWEEP 4A HOOK (pharmacy, chunk 3): the lobby space chunk 2 reserved for the pharmacy window
+	# and the crematorium furnace (buying and selling both moved off the outdoor lot).
+	var reserve: Dictionary = spots.get("reserve", {})
+	if not reserve.has("pharmacy") or not reserve.has("crematorium"):
+		problems.append("reserve.pharmacy/crematorium was never placed")
 	var room_of := func(p: Vector2) -> Dictionary:
 		var ri: int = st.room_at[int(floor(p.y)) * w + int(floor(p.x))] if Rect2i(0, 0, w, h).has_point(Vector2i(int(floor(p.x)), int(floor(p.y)))) else -1
 		return rooms[ri] if ri >= 0 else {}
@@ -594,9 +599,8 @@ static func validate(gen: Dictionary) -> PackedStringArray:
 			problems.append("%s is not in the break room" % key)
 	if spots.has("phone") and String(room_of.call(spots.phone.pos + Vector2(0.3, 0.0)).get("kind", "")) != "break_room":
 		problems.append("phone is not on a break room wall")
-	for key in ["sell_bin", "gold_pile", "ambulance"]:
-		if spots.has(key) and not Rect2(nr).grow(0.01).has_point(spots[key].pos):
-			problems.append("%s is outside the neutral area" % key)
+	if spots.has("ambulance") and not Rect2(nr).grow(0.01).has_point(spots.ambulance.pos):
+		problems.append("ambulance is outside the neutral area")
 	# SWEEP 4A HOOK (fog lot, chunk 2): the shop moved indoors (the van it stood behind is gone);
 	# "neutral_spawns" is now the lobby's spawn points, also indoors.
 	if spots.has("shop") and not Rect2(er).grow(0.01).has_point(spots.shop.pos):

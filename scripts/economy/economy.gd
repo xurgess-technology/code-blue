@@ -1,33 +1,33 @@
 extends Node
-## The sell bin, the shop and the gold pile in the world, one per level. A child of Game named
-## "Economy", on every machine. Money itself lives on the game (`game.money`, `game.gold_bars`,
-## `game.add_money()`); this node places and shows things and answers where they are.
+## The pharmacy window and the crematorium furnace in the world, one of each per level. A child
+## of Game named "Economy", on every machine. Money itself lives on the game (`game.money`,
+## `game.add_money()`); this node places the pharmacy and the furnace and shows things.
+##
+## SWEEP 4A HOOK (pharmacy, chunk 3): gold bars, the sell bin and the shop van are gone. Buying is
+## the pharmacy window (placebo pills only, for now); selling is throwing loot into the furnace.
 ##
 ## Where things go, first match wins:
-##   level_info.neutral {shop, sell_bin, gold_pile}   the hospital's neutral area: the level has
-##                                                    built the van and the dumpster, we attach
-##   level_info.economy {shop, sell_bin, gold_pile}   a hand-placed spot set (the dev room)
-##   otherwise                                        free floor in the clock-in room, found by a
-##                                                    deterministic search around the time clock
+##   level_info.safe_zone {pharmacy_rect, crematorium_rect}   the hospital's lobby: the rects
+##                                          chunk 2 reserved off the lobby (docs/CONTRACTS.md,
+##                                          "Hospital"). The pharmacy and the furnace go at the
+##                                          centre of their rect.
+##   level_info.economy {shop, furnace}     a hand-placed spot set (the dev room)
+##   otherwise                              free floor in the clock-in room, found by a
+##                                          deterministic search around the time clock
 ## Placement waits two physics frames after the level is built so shape queries see it; the
 ## search only looks at static level geometry, so every machine finds the same spots.
 
-const PropsScript := preload("res://scripts/economy/economy_props.gd")
-const GoldPileScript := preload("res://scripts/economy/gold_pile.gd")
+const PharmacyScript := preload("res://scripts/economy/economy_props.gd")
+const FurnaceScript := preload("res://scripts/economy/furnace.gd")
 
-## Gold bar prices: the n-th bar (0-based) costs BAR_BASE + n * BAR_STEP, rounded to $5.
-const BAR_BASE := 100
-const BAR_STEP := 5
-## Indoors (fallback and dev room) columns of bars stop short of a 3 m ceiling.
-const INDOOR_PILE_CAP := 2.6
 const NEAR_METRES := 9.0
 const FLASH_SECONDS := 4.0
 
 var game: Node = null
-var sell_bin: Node3D = null
-var shop: Node3D = null
-var pile: Node3D = null
-## "", "neutral", "economy" (hand-placed) or "search": how this level's spots were chosen.
+var pharmacy: Node3D = null
+var furnace: Node3D = null
+## "", "reserve" (the lobby spots), "economy" (hand-placed) or "search": how this level's spots
+## were chosen.
 var mode := ""
 
 ## For the HUD: seconds the money readout stays up after a change, and the last change.
@@ -43,17 +43,12 @@ func setup(g: Node) -> void:
 	game = g
 
 
-static func bar_price(bars_bought: int) -> int:
-	return int(round(float(BAR_BASE + maxi(0, bars_bought) * BAR_STEP) / 5.0)) * 5
-
-
 ## game._add_landmarks: a new level exists. Everything from the old one went with it.
 func on_level_built(level: Node3D, info: Dictionary) -> void:
 	_level = level
 	_info = info
-	sell_bin = null
-	shop = null
-	pile = null
+	pharmacy = null
+	furnace = null
 	mode = ""
 	_wait = 2
 
@@ -63,48 +58,33 @@ func on_money_changed(delta: int, _reason: String) -> void:
 	flash = FLASH_SECONDS
 
 
-func on_bar_bought() -> void:
-	if pile != null and is_instance_valid(pile):
-		pile.set_count(game.gold_bars)
-
-
 func on_reset() -> void:
 	flash = 0.0
 	last_delta = 0
-	if pile != null and is_instance_valid(pile):
-		pile.set_count(0, false)
 
 
 func placed() -> bool:
-	return sell_bin != null and is_instance_valid(sell_bin)
+	return pharmacy != null and is_instance_valid(pharmacy) and furnace != null and is_instance_valid(furnace)
 
 
-func sell_bin_position() -> Vector3:
-	return sell_bin.global_position + Vector3.UP * 0.9 if placed() else game.clock_pos()
+func pharmacy_position() -> Vector3:
+	return pharmacy.global_position + Vector3.UP * 1.0 if pharmacy != null and is_instance_valid(pharmacy) else game.clock_pos()
 
 
-func shop_position() -> Vector3:
-	return shop.global_position + Vector3.UP * 1.0 if shop != null and is_instance_valid(shop) else game.clock_pos()
+func furnace_position() -> Vector3:
+	return furnace.global_position if furnace != null and is_instance_valid(furnace) else game.clock_pos()
 
 
-func pile_position() -> Vector3:
-	return pile.global_position if pile != null and is_instance_valid(pile) else game.clock_pos()
-
-
-func pile_top() -> Vector3:
-	return pile.top_position() if pile != null and is_instance_valid(pile) else game.clock_pos()
-
-
-## Whether the money readout should show for this player: near the sell bin, the shop or the
-## pile, aiming at one of them, or right after the money changed.
+## Whether the money readout should show for this player: near the pharmacy or the furnace,
+## aiming at the pharmacy, or right after the money changed.
 func money_visible_for(p: Node) -> bool:
 	if flash > 0.0:
 		return true
 	if p == null or not placed():
 		return false
-	if p.aim_id == "sell_bin" or p.aim_id == "shop":
+	if p.aim_id == "pharmacy":
 		return true
-	for n in [sell_bin, shop, pile]:
+	for n in [pharmacy, furnace]:
 		if n != null and is_instance_valid(n) and (n as Node3D).global_position.distance_to(p.global_position) < NEAR_METRES:
 			return true
 	return false
@@ -112,8 +92,6 @@ func money_visible_for(p: Node) -> bool:
 
 func _process(delta: float) -> void:
 	flash = maxf(0.0, flash - delta)
-	if pile != null and is_instance_valid(pile) and game != null and pile.get("_target") != game.gold_bars:
-		pile.set_count(game.gold_bars)
 
 
 func _physics_process(_delta: float) -> void:
@@ -132,16 +110,12 @@ func _physics_process(_delta: float) -> void:
 # placement
 
 func _place() -> void:
-	var neutral: Dictionary = _info.get("neutral", {}) if _info.get("neutral") is Dictionary else {}
+	var safe_zone: Dictionary = _info.get("safe_zone", {}) if _info.get("safe_zone") is Dictionary else {}
 	var spots: Dictionary = {}
-	var attached := false
-	var cap := INDOOR_PILE_CAP
-	if neutral.has("sell_bin") and neutral.has("shop") and neutral.has("gold_pile"):
-		mode = "neutral"
-		spots = neutral
-		attached = true
-		cap = 1000.0
-	elif _info.get("economy") is Dictionary and (_info.economy as Dictionary).has("sell_bin"):
+	if safe_zone.has("pharmacy_rect") and safe_zone.has("crematorium_rect"):
+		mode = "reserve"
+		spots = {"shop": _rect_spot(safe_zone.pharmacy_rect), "furnace": _rect_spot(safe_zone.crematorium_rect)}
+	elif _info.get("economy") is Dictionary and (_info.economy as Dictionary).has("shop"):
 		mode = "economy"
 		spots = _info.economy
 	else:
@@ -151,35 +125,33 @@ func _place() -> void:
 	root.name = "Economy"
 	_level.add_child(root)
 
-	sell_bin = PropsScript.create("sell_bin", attached)
-	root.add_child(sell_bin)
-	_put(sell_bin, spots.sell_bin, false)
-	shop = PropsScript.create("shop", attached)
-	root.add_child(shop)
-	_put(shop, spots.shop, false)
-	pile = GoldPileScript.create(cap)
-	root.add_child(pile)
-	_put(pile, spots.gold_pile, attached)
-	if not attached:
-		# A warm lamp over the pile indoors; the neutral area has street lights.
-		var lamp := OmniLight3D.new()
-		lamp.light_color = Color(1.0, 0.85, 0.55)
-		lamp.light_energy = 0.9
-		lamp.omni_range = 3.2
-		lamp.shadow_enabled = false
-		lamp.light_volumetric_fog_energy = 0.15
-		lamp.position = Vector3(0, 2.5, 0)
-		pile.add_child(lamp)
-	pile.set_count(game.gold_bars, false)
+	pharmacy = PharmacyScript.create(game)
+	root.add_child(pharmacy)
+	_put(pharmacy, spots.get("shop"))
+	furnace = FurnaceScript.create(game)
+	root.add_child(furnace)
+	_put(furnace, spots.get("furnace"))
 
 
-## Put a node at a {position, yaw} spot. `on_surface` lifts it onto whatever is under the spot
-## (the neutral area's pallet).
-func _put(n: Node3D, spot, on_surface: bool) -> void:
+## The centre of a reserved world-space rect (Rect2, x/z plane), floor height found by a ray, and
+## a yaw facing back toward the lobby's centre line (south, the same wall row every reserved rect
+## sits against).
+func _rect_spot(r: Rect2) -> Dictionary:
+	var cx: float = r.position.x + r.size.x * 0.5
+	var cz: float = r.position.y + r.size.y * 0.5
+	# BUGFIX: game._floor_at() casts from probe.y + 1.5, so a probe at y=2.0 starts the ray at
+	# y=3.5 -- above a lobby ceiling at C.WALL_H (3.0), which the ray can hit first and report as
+	# the "floor" (this put the crematorium a full storey up, on top of the lobby ceiling, with
+	# nothing able to reach it). Probe low enough that +1.5 stays under any normal room ceiling.
+	var probe := Vector3(cx, 0.3, cz)
+	var pos: Vector3 = game._floor_at(probe) if game != null else probe
+	return {"position": pos, "yaw": 0.0}
+
+
+## Put a node at a {position, yaw} spot.
+func _put(n: Node3D, spot) -> void:
 	var s: Dictionary = spot if spot is Dictionary else {"position": spot}
 	var pos: Vector3 = s.get("position", s.get("pos", game.clock_pos()))
-	if pos is Vector3 and on_surface:
-		pos = game._surface_below(pos + Vector3.UP * 2.5, pos)
 	n.global_position = pos
 	n.rotation.y = float(s.get("yaw", 0.0))
 
@@ -188,7 +160,7 @@ func _put(n: Node3D, spot, on_surface: bool) -> void:
 func _search_spots() -> Dictionary:
 	var clock_raw: Vector3 = game.clock_pos()
 	var clock: Vector3 = game._floor_at(clock_raw)
-	var keep_clear: Array = [clock, game.table_pos()]  # downed: the Re-Gen Pod is gone
+	var keep_clear: Array = [clock, game.table_pos()]
 	for key in ["lectern", "shelf"]:
 		var e = _info.get(key)
 		if e is Dictionary and e.has("position"):
@@ -197,7 +169,7 @@ func _search_spots() -> Dictionary:
 		keep_clear.append(sp)
 	var out := {}
 	var taken: Array = []
-	for want in [["sell_bin", 0.6], ["shop", 0.95], ["gold_pile", 0.75]]:
+	for want in [["shop", 1.1], ["furnace", 1.1]]:
 		var best = null
 		for ring in range(0, 12):
 			var r := 1.8 + ring * 0.5
@@ -227,18 +199,15 @@ func _spot_ok(p: Vector3, radius: float, clock: Vector3, keep_clear: Array, take
 		if Vector2(p.x - q.x, p.z - q.z).length() < radius + 1.3:
 			return false
 	var space: PhysicsDirectSpaceState3D = game.get_world_3d().direct_space_state
-	# Floor under it.
 	var down := PhysicsRayQueryParameters3D.create(p + Vector3.UP * 1.2, p + Vector3.DOWN * 0.5)
 	down.collision_mask = C.L_WORLD
 	var hit := space.intersect_ray(down)
 	if hit.is_empty() or absf((hit.position as Vector3).y - clock.y) > 0.25:
 		return false
-	# In the same room: nothing solid between the clock and the spot.
 	var los := PhysicsRayQueryParameters3D.create(clock + Vector3.UP * 1.3, p + Vector3.UP * 1.3)
 	los.collision_mask = C.L_WORLD
 	if not space.intersect_ray(los).is_empty():
 		return false
-	# Room to stand in: a box from knee to head height, a little wider than the thing.
 	var q := PhysicsShapeQueryParameters3D.new()
 	var box := BoxShape3D.new()
 	box.size = Vector3(radius * 2.0 + 0.3, 1.6, radius * 2.0 + 0.3)
@@ -250,13 +219,9 @@ func _spot_ok(p: Vector3, radius: float, clock: Vector3, keep_clear: Array, take
 
 ## Warmup hook: build and show one of each economy visual so nothing compiles later.
 static func warm(parent: Node3D) -> void:
-	var bin := PropsScript.create("sell_bin", false)
-	parent.add_child(bin)
-	bin.position = Vector3(-1.2, -1.2, -1.5)
-	var counter := PropsScript.create("shop", false)
-	parent.add_child(counter)
-	counter.position = Vector3(0.4, -1.6, -2.2)
-	var p := GoldPileScript.create(INDOOR_PILE_CAP)
-	parent.add_child(p)
-	p.position = Vector3(1.4, -0.8, -1.2)
-	p.set_count(40, false)
+	var win := PharmacyScript.create(null)
+	parent.add_child(win)
+	win.position = Vector3(-1.2, -1.2, -1.5)
+	var f := FurnaceScript.create(null)
+	parent.add_child(f)
+	f.position = Vector3(1.6, -1.2, -1.2)

@@ -100,7 +100,7 @@ func _draw() -> void:
 		_overlay(w, h, "PAUSED", "Esc to resume, Q to walk out." if not Net.solo else "The night shift waits for no one.", "", Color("c9d1d9"))
 	elif game.phase == Game.Phase.LOST:
 		# loop: a team failure ends the run.
-		_overlay(w, h, "GAME OVER", game.message, "Money and gold reset. A new run starts in %d" % ceili(game.end_timer), Color("ff2a2a"))
+		_overlay(w, h, "GAME OVER", game.message, "Money reset. A new run starts in %d" % ceili(game.end_timer), Color("ff2a2a"))
 	elif game.phase == Game.Phase.WON:
 		# loop: clocked out, the paycheck.
 		_overlay(w, h, "SHIFT %d COMPLETE" % game.shift, String(game.loop.pay_note),

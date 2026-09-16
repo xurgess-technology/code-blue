@@ -793,34 +793,80 @@ loot, null otherwise; one cached shader, applied as `material_overlay` on a mode
 meshes). Use it for anything that shows an item in the world, in hands or on a shelf; minigames
 keep the plain `make()`. `soft` is the fainter rim for first-person held stacks.
 
-Money (host authoritative, replicated as `g.mn` / `g.gb`, survives `start_lobby`):
+Money (host authoritative, replicated as `g.mn`, survives `start_lobby`):
 
 ```gdscript
 game.money: int                               # team money
-game.gold_bars: int                           # bars bought this run
 game.add_money(amount: int, reason: String)   # host; clamps at 0 unless reason starts with "debt:"
-game.reset_money()                            # host; money and bars to 0 (game over; start_session calls it)
-game.gold_bar_price() -> int                  # next bar: 100 + 5 * bars, rounded to $5
-game.sell_selected(p) / game.buy_gold_bar(p) -> bool   # host; what the sell bin and shop call
+game.reset_money()                            # host; money to 0 (game over; start_session calls it)
 game.economy                                  # scripts/economy/economy.gd, child "Economy"
-game.economy.sell_bin / .shop / .pile         # nodes once placed (placed() true); positions helpers
-game.economy.money_visible_for(p) -> bool     # HUD: near an economy spot, aiming at one, or just changed
+game.economy.pharmacy / .furnace              # nodes once placed (placed() true); positions helpers
+game.economy.money_visible_for(p) -> bool     # HUD: near the pharmacy/furnace, aiming at the
+                                              # pharmacy, or just changed
 ```
 
-Interactables `sell_bin` (sells the selected loot stack) and `shop` (buys one gold bar).
-Placement, first match: `level_info.neutral {sell_bin, shop, gold_pile}` (attach: an aim box and a
-sign around the level's own dumpster and van; the pile is lifted onto whatever is under
-`gold_pile.position`), `level_info.economy` (same shape, built models; the dev room), else a
-deterministic search for free floor around the time clock. Placement runs two physics frames after
-`_add_landmarks`. The gold pile (`gold_pile.gd`) is a MultiMesh whose layout is a pure function of
-the count and a height cap (indoors 2.6 m, then side columns). Sounds `economy_sell`,
-`economy_buy`, `economy_bar` (`tools/gen_audio_economy.mjs`).
+### The pharmacy and the crematorium furnace (pharmacy worker, sweep 4A chunk 3, 2026-09-15)
+
+Gold bars, the sell bin and the shop van are gone. Buying is the pharmacy window (an interactable,
+`scripts/economy/economy_props.gd`); selling is throwing into the crematorium furnace (a thrown-item
+Area3D, `scripts/economy/furnace.gd`), off the lobby. Placement, first match:
+`level_info.safe_zone {pharmacy_rect, crematorium_rect}` (the lobby rects `entrance.gd`'s
+`spots["reserve"]` fixed, chunk 2), `level_info.economy {shop, furnace}` (hand-placed; the dev
+room), else a deterministic search for free floor around the time clock (`economy.gd`'s `_search_spots`).
+Placement runs two physics frames after `_add_landmarks`.
+
+```gdscript
+game.buy_pills(p) -> bool           # host; $PILL_PRICE, unlimited buys, no price climb
+game.eat_pill(p)                    # host; take one from the held bottle, same hit reaction as a throw
+game.furnace_sell(kind, count, value, at)   # host; the furnace calls this once a sale resolves
+game.furnace_can_sell(kind) -> bool  # loot (incl. brains) and placebo_pills; nothing else
+game.furnace_value(kind, slot) -> int  # brains: spoiled value; placebo_pills: 0; else slot.v
+game.PILL_PRICE / game.PILL_COUNT    # $15, 10 pills a bottle
+```
+
+- **The pharmacy**: a counter behind a steel grate, a price board, an order terminal (E on the
+  grate). You never clearly see the pharmacist, just a shape that drifts and steps out of view.
+  Buying takes the money immediately; `economy.pharmacy.queue_delivery(kind, count)` starts a
+  ~1.6 s capsule animation (played on every machine) and the host drops the item at the wall
+  delivery station once it lands (`game._spawn_item`, a normal `WorldItem` pickup). Sells one item
+  today: `placebo_pills`.
+- **The furnace**: a grate of vertical steel bars across the mouth blocks players, monsters and
+  carried bodies like any `C.L_WORLD` wall (a real collider, not a special case), while a thrown
+  item small enough to clear a gap reaches `FireZone`, an `Area3D` monitoring `C.L_PICKUP` only.
+  `furnace._on_body_entered` resolves the sale host-side: sellable stacks are consumed and
+  `furnace_sell` pays out (a flame-card burst + `economy_sell` + the amount floating up);
+  unsellable stacks (surgical tools, the guide) get `toss()`ed back out instead of freed. A miss
+  (hits a bar, or nothing) just settles on the floor as an ordinary drop.
+- **Charged throw** (`scripts/player.gd`, `game.drop_selected(p, charge)`): holding Drop charges
+  0..1 over `Player.DROP_CHARGE_FULL` seconds (client-owned, replicated as the 15th element of
+  `report_state()`); releasing fires `toss()` at a charge-scaled velocity (`Game.THROW_MIN/MAX_SPEED`,
+  `_UP`). A tap (`charge <= Player.DROP_TAP_MAX`) is the old gentle set-down. A charged throw of a
+  `placebo_pills` stack fires exactly one pill (`WorldItem` meta `pill_thrown`/`pill_thrower`/
+  `pill_spawn_t`) and leaves the rest of the bottle in hand.
+- **Placebo pills** (3e): `Items.ITEMS.placebo_pills`, a consumable not in `found` (never spawns in
+  the wings), stacks like any consumable (count = pills, not bottles). `game.pill_check_hit(it)`
+  (host, called every physics frame a thrown pill is airborne, `world_item.gd`) checks players (not
+  downed), `patient_tables`/`case_on_table`, then `monsters`, in that order, radius
+  `Game.PILL_HIT_RADIUS`. A hit is resolved and replicated over `_event`:
+  - a **player** (self or a teammate): `_event "pill_player"` to that peer only -- the personal
+    line (`PillLines.pick(peer_id)`, `scripts/economy/pill_lines.gd`, the exact 50-line list, never
+    repeated back to back for that player) and `Player.add_warm()` (local-only fade in ~2 s / hold
+    ~15 s / fade out ~3 s, stacks up to `Player.WARM_CAP`, drawn by `hud.gd`).
+  - a **patient/monster**: `_event "pill_line"` to everyone -- a floating quoted line
+    (`game._spawn_pill_line`, a local `Label3D`, decorative, not replicated state). An OR-table
+    patient also gets `game.pill_notes[table] = world_time`, replicated in `g.pn`, read by
+    `OrScreenModel._pill_note()` for a green "Patient appears comforted" blip
+    (`or_screen_canvas.gd`'s `_pill_note`) for `OrScreenModel.PILL_NOTE_SECONDS`; vitals/sedation
+    never change.
+  - a **miss**: the pill settles as an ordinary floor pickup, same as any dropped item.
+  - Chunk 4 adds the database entry for placebo pills (`docs/SWEEP4A.md` 3e).
 
 Dev room: `dev_disp_<loot kind>` cubbies (a rack on the south wall, `DispenserScript.create(kind,
 true)`), `game.dev.request("money", {amount})` / `{reset: true}` (panel "Money" section), and
-`level_info.economy` spots. Tests: `tools/inventorytest.tscn` (headless), `tools/inventoryshot.tscn`
-(windowed shots to `tools/inventory_shots/`), nettest scenario `economy`, devtest inventory checks,
-perfprobe `gold pile, 0 / 500 bars` and `--ab` rows `no item rims` / `loot hidden`.
+`level_info.economy {shop, furnace}` spots. Tests: `tools/inventorytest.tscn` (headless, including
+the pharmacy/furnace/pill checks), `tools/inventoryshot.tscn` (windowed shots to
+`tools/inventory_shots/`), nettest scenario `economy`, devtest inventory checks, perfprobe
+`crematorium, fire up close` and `--ab` rows `no item rims` / `loot hidden`.
 
 ## Shift loop and patients (loop worker, sweep 2 wave 2)
 

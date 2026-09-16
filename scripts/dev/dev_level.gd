@@ -36,9 +36,8 @@ const SHELF := Vector3(5.2, 0.0, 11.5)
 const LECTERN := Vector3(13.0, 0.0, 17.3)
 ## inventory (sweep 2): the loot rack's first cubby x, and the economy spots.
 const RACK_X0 := 1.4
-const SELL_BIN := Vector3(21.2, 0.0, 17.3)
 const SHOP := Vector3(17.6, 0.0, 17.25)
-const GOLD_PILE := Vector3(19.4, 0.0, 15.2)
+const FURNACE := Vector3(21.2, 0.0, 17.3)   # SWEEP 4A HOOK (pharmacy, chunk 3): was SELL_BIN
 const LootTableScript := preload("res://scripts/economy/loot_table.gd")
 
 ## Every nav obstacle as [centre, size] on the floor; filled while building.
@@ -231,7 +230,7 @@ static func build(info: Dictionary) -> Node3D:
 		disp_root.add_child(d)
 		_obstacles.append([d.position, Vector3(0.7, 0, 0.9)])
 
-	# ---- inventory (sweep 2): the loot rack, the sell bin, the shop and the gold pile ----
+	# ---- inventory (sweep 2): the loot rack; pharmacy chunk 3: the pharmacy and the furnace ----
 	# A rack of cubbies on the south wall, west of the spawn line: one dispenser per loot kind,
 	# bulky ones on the bottom row. The economy spots are read by scripts/economy/economy.gd.
 	var loot_kinds: Array = LootTableScript.kinds()
@@ -261,13 +260,11 @@ static func build(info: Dictionary) -> Node3D:
 	rack_lamp.position = Vector3(RACK_X0 + (cols - 1) * 0.4, 2.6, D - 1.6)
 	rack.add_child(rack_lamp)
 	info["economy"] = {
-		"sell_bin": {"position": SELL_BIN, "yaw": PI},
 		"shop": {"position": SHOP, "yaw": PI},
-		"gold_pile": {"position": GOLD_PILE},
+		"furnace": {"position": FURNACE, "yaw": PI},
 	}
-	_obstacles.append([SELL_BIN, Vector3(1.0, 0, 0.8)])
 	_obstacles.append([SHOP, Vector3(1.6, 0, 0.8)])
-	_obstacles.append([GOLD_PILE, Vector3(0.9, 0, 0.9)])
+	_obstacles.append([FURNACE, Vector3(1.6, 0, 1.4)])
 
 	# ---- lights ------------------------------------------------------------------
 	var lights_root := Node3D.new()
