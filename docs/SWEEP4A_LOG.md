@@ -65,3 +65,14 @@ Known issues logged: Hive Eyes cycling and the hold-to-exit key (level 2+) were 
 (scope-trimmed, `hive_view.gd` has a ready `_begin_cycle()` for later); the Monsters list is
 hand-written, not from a shared registry; the X-ray is a 2D silhouette, not a real model render;
 the terminal's look is plain, no CRT/scanline styling.
+
+## Final integration
+Fresh import; `playtest --god` on seeds 1, 2 and 3 (all PASS). `nettest_run.gd --lag=120
+--jitter=40 --loss=0.03`: found and fixed three real breaks in `tools/nettest.gd` (a removed API
+call, an un-updated Hive Eyes flight timing, and the same throw-timing/orientation/miss-recovery
+bugs already fixed in inventorytest/looptest, now fixed there too) — `brains` and `economy` both
+pass under lag afterward. `combat`'s own lag failure confirmed pre-existing and unrelated to any
+of the four chunks (clean with no lag); logged rather than expanded into new scope. `perfprobe`
+across the lobby, the fog lot and the crematorium holds 60fps/60fps 1% low on every quality tier.
+`DESIGN.md` updated for the sweep: the ability bar, the database terminal, the fog lot and driven
+ambulance, the pharmacy and crematorium, placebo pills, no gold bars.

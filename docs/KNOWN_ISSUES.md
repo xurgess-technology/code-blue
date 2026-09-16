@@ -1028,3 +1028,26 @@ Players, Bob, the paramedics and the downed player on the table use the Blender 
   `request_database_sync`) was only exercised by direct function calls, not over real ENet/Steam
   with lag** -- this chunk was told not to run `nettest_run.gd`; that is the final integration
   step's job.
+
+## Sweep 4A final integration (docs/SWEEP4A.md, 2026-09-15)
+
+- **`tools/nettest.gd` had three real breaks against the merged sweep**, none caught by any
+  individual chunk (each was told not to run `nettest_run.gd` to keep its own token budget down):
+  the `brains` scenario called the removed `best_path()` API and asserted on the Hive Eyes camera
+  before its new fly-through (chunk 4) had time to land; the `economy` scenario asserted on money
+  before a furnace sale could register, aimed throws with a fixed world-space offset instead of
+  the furnace's actual (rotated) facing, and had no recovery from a throw physically missing the
+  grate. All three fixed; `brains` and `economy` now pass under `--lag=120 --jitter=40 --loss=0.03`
+  (economy correctly reaches $505 after selling a laptop and a gold watch and buying 3 pill
+  bottles).
+- **`combat`'s nettest scenario fails under injected lag** (`--lag=120 --jitter=40 --loss=0.03`):
+  the host times out waiting to see a client's over-long melee-charge claim get capped. Confirmed
+  pre-existing and unrelated to any of the four chunks -- passes cleanly with no lag, and nothing
+  in `docs/SWEEP4A.md`'s scope touches `combat.gd`/`windup.gd`. Nobody had run this scenario with
+  lag before (only `full_shift_lag` gets lag by default); left as a known issue for whoever owns
+  the melee/windup system rather than expanded sweep 4A scope.
+- **The `economy` scenario also lost its connection once, separately from the throw-handling
+  fixes above**, during the shift-1-to-shift-2 transition under the same lag settings (client rtt
+  spiked to ~1.8s before disconnecting). Only seen once, not reproduced on a second run in this
+  pass; flagged in case it recurs for whoever next runs nettest under heavy lag around a wing
+  rebuild.
