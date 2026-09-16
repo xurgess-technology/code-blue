@@ -68,20 +68,21 @@ var ability_slot_press: Array = [0, 0, 0, 0]
 ## SWEEP 4A HOOK (controls): crouch (client-owned, replicated: report bit 16 / report_full "cr")
 ## and the scanner (client-owned aim/hold, report bit 32; the host checks range/LOS and records).
 var crouching: bool = false
+## Lying flat and crawling (replicated: report bit 64 / report_full "pr"). `crouching` is also true
+## while prone, so everything gated on crouching (no sprint, no jump, silent steps) covers prone too.
+var prone: bool = false
+const STAND := 0
+const CROUCH := 1
+const PRONE := 2
 var scan_holding: bool = false
-## SPRINT-DIVE HOOK: pressing crouch while sprinting forward triggers a short diving lunge. Purely
-## client-owned local movement, like the rest of _local_step (see docs/KNOWN_ISSUES.md "Sprint +
-## crouch-dive"). Deliberately NOT replicated as its own field: it forces `crouching` true for its
-## duration (through the same _apply_crouch() capsule-resize / low-ceiling-safe path everyone
-## already uses), and `crouching` already replicates (bit 16 / "cr"), so every other machine sees
-## the same flattened posture and torso-lean pose automatically. Human players trigger it with the
-## crouch key itself (edge-detected via _crouch_prev); bots trigger it with bot_dive, a one-shot
-## bump counter edge-detected via _bot_dive_seen, same pattern as bot_jump/_bot_jump_seen.
+## SPRINT-DIVE HOOK: pressing crouch while sprinting forward launches a dive that lands prone.
+## Purely client-owned local movement, like the rest of _local_step (see docs/KNOWN_ISSUES.md
+## "Sprint + crouch-dive"). Not replicated as its own field: it forces `prone` for its duration
+## through the same _apply_crouch() capsule-resize path, and `prone` replicates.
 var diving: bool = false
 var _dive_t: float = 0.0
 var _dive_airborne: bool = false
 var _dive_dir: Vector3 = Vector3.ZERO
-var _crouch_prev: bool = false
 var _bot_dive_seen: int = 0
 var _bot_dive_fire: bool = false
 ## Toggle sprint: the sprint key flips this on/off instead of having to be held (Settings
@@ -142,12 +143,16 @@ var bot_use: int = 0
 var bot_ability: int = 0
 ## SWEEP 4A HOOK: which slot bot_ability fires (default 0, back-compat with older bot scripts).
 var bot_ability_slot: int = 0
+## Bot stance: bot_prone wins over bot_crouch, neither means stand. Applied only when one of them
+## changes, so a bot that dives stays prone until its script asks for something else.
 var bot_crouch: bool = false
+var bot_prone: bool = false
 var bot_jump: int = 0
 var bot_scan: bool = false
-## SPRINT-DIVE HOOK: bump to fire the sprint+crouch-dive once, same edge-triggered pattern as
-## bot_jump/_bot_jump_seen just above (a bot script sprinting forward bumps this instead of
-## toggling bot_crouch, since bot_crouch alone still means an ordinary hold-to-crouch).
+## Bump = one press of the crouch key, exactly as a human's: cycles stand -> crouch -> prone ->
+## stand, or dives when pressed mid-sprint.
+var bot_crouch_press: int = 0
+## SPRINT-DIVE HOOK: bump to fire the sprint+crouch-dive once (only the dive, never a stance step).
 var bot_dive: int = 0
 
 ## DEV HOOK (scripts/dev): a dev room bot or target dummy. The host simulates it like a local
@@ -212,7 +217,11 @@ var _bot_jump_fire: bool = false
 ## SWEEP 4A HOOK (controls): the collision capsule, resized crouched/standing.
 var _capsule: CapsuleShape3D
 var _coll_shape: CollisionShape3D
-var _want_crouch: bool = false
+## Requested stance, client-owned: STAND / CROUCH / PRONE. The actual `crouching`/`prone` can sit
+## lower than this while there's no headroom to rise.
+var _stance_want: int = STAND
+var _bot_crouch_press_seen: int = 0
+var _bot_stance_prev: int = STAND
 var _held_key: String = ""
 var _held_fp: Node3D
 var _held_tp: Node3D
@@ -558,6 +567,7 @@ func _local_step(delta: float) -> void:
 
 	var input_dir := Vector2.ZERO
 	var want_sprint := false
+	var crouch_pressed := false
 	if can_move and bot_active:
 		input_dir = bot_move
 		wants_interact = bot_interact
@@ -589,7 +599,13 @@ func _local_step(delta: float) -> void:
 			if not diving:
 				var bi: int = clampi(bot_ability_slot, 0, ability_slot_press.size() - 1)
 				ability_slot_press[bi] = int(ability_slot_press[bi]) + 1
-		_want_crouch = bot_crouch
+		var bot_stance: int = PRONE if bot_prone else (CROUCH if bot_crouch else STAND)
+		if bot_stance != _bot_stance_prev:
+			_bot_stance_prev = bot_stance
+			_stance_want = bot_stance
+		if bot_crouch_press != _bot_crouch_press_seen:
+			_bot_crouch_press_seen = bot_crouch_press
+			crouch_pressed = true
 		scan_holding = bot_scan and not hive_view and not downed and not diving
 		if bot_jump != _bot_jump_seen:
 			_bot_jump_seen = bot_jump
@@ -610,7 +626,10 @@ func _local_step(delta: float) -> void:
 			if input_dir.length() < 0.1:
 				_sprint_toggle = false
 			want_sprint = _sprint_toggle
-		_want_crouch = Input.is_action_pressed("crouch")
+		# Starting a sprint from a crouch or prone gets you up (once there's room).
+		if Input.is_action_just_pressed("sprint") and want_sprint and not diving:
+			_stance_want = STAND
+		crouch_pressed = Input.is_action_just_pressed("crouch")
 		scan_holding = Input.is_action_pressed("scan") and not hive_view and not downed and not diving
 	else:
 		wants_interact = false
@@ -675,16 +694,10 @@ func _local_step(delta: float) -> void:
 	var winding: bool = g != null and g.combat != null and g.combat.is_winding(self)
 	var dir := (transform.basis * Vector3(input_dir.x, 0.0, input_dir.y)).normalized()
 
-	# SPRINT-DIVE HOOK: pressing crouch (edge: not-held -> held, not an already-held crouch that
-	# happens to overlap a later sprint) while sprinting and moving roughly forward triggers a short
-	# diving lunge instead of dropping straight into a normal crouch-walk. Checked against last
-	# frame's `sprinting`/`crouching` (both are only reassigned further down), so this is the exact
-	# instant the crouch key transitions while still mid-sprint. A bot fires the same move with a
-	# dedicated one-shot bump (bot_dive, edge-detected into _bot_dive_fire above) rather than the
-	# continuous bot_crouch, which still means an ordinary hold-to-crouch for bot scripts.
-	var crouch_pressed: bool = _want_crouch and not _crouch_prev
-	_crouch_prev = _want_crouch
-	var dive_fire: bool = (crouch_pressed and not bot_active) or (bot_active and _bot_dive_fire)
+	# The crouch key: mid-sprint (or within the grace window just after) it dives, landing prone;
+	# otherwise it steps stand -> crouch -> prone -> stand. `sprinting`/`crouching` here are still
+	# last frame's (both are reassigned further down), i.e. the state the key was pressed in.
+	var dive_fire: bool = crouch_pressed or _bot_dive_fire
 	_bot_dive_fire = false
 	_sprint_grace = DIVE_SPRINT_GRACE if sprinting else maxf(0.0, _sprint_grace - delta)
 	var dive_hop := false
@@ -697,12 +710,19 @@ func _local_step(delta: float) -> void:
 		_dive_airborne = true
 		_dive_dir = dir
 		_sprint_grace = 0.0
+		_sprint_toggle = false
+		_stance_want = PRONE
 		stamina -= DIVE_STAMINA_COST
 		dive_hop = true
 		# Instant burst, not a ramp-up: the acceleration-chase below would otherwise take several
 		# frames to catch up to sprint*MULT, which reads as a slow speed-up rather than a lunge.
 		velocity.x = dir.x * C.SPRINT_SPEED * DIVE_SPEED_MULT
 		velocity.z = dir.z * C.SPRINT_SPEED * DIVE_SPEED_MULT
+	elif crouch_pressed and not diving and not downed:
+		var cur: int = PRONE if prone else (CROUCH if crouching else STAND)
+		_stance_want = (cur + 1) % 3
+		if _stance_want != STAND:
+			_sprint_toggle = false
 	if diving:
 		# Airborne: full launch speed, no decay. The slide-out clock only starts on touchdown.
 		if _dive_airborne:
@@ -730,7 +750,9 @@ func _local_step(delta: float) -> void:
 		# SPRINT-DIVE HOOK: an instant burst beyond sprint speed that decays back down to crouch
 		# speed over DIVE_DURATION, so the dive reads as a lunge-then-slide rather than a teleport.
 		var dive_k: float = 1.0 if _dive_airborne else 1.0 - clampf(_dive_t / DIVE_DURATION, 0.0, 1.0)
-		speed = lerpf(C.CROUCH_SPEED, C.SPRINT_SPEED * DIVE_SPEED_MULT, dive_k)
+		speed = lerpf(C.PRONE_SPEED, C.SPRINT_SPEED * DIVE_SPEED_MULT, dive_k)
+	elif prone:
+		speed = C.PRONE_SPEED
 	elif crouching:
 		speed = C.CROUCH_SPEED   # SWEEP 4A HOOK (controls): crouching is slow, on top of everything else
 	elif carrying != 0:
@@ -849,24 +871,39 @@ func _local_step(delta: float) -> void:
 ## ceiling" refusal; a remote copy just follows the replicated bit and only resizes visually.
 func _apply_crouch(delta: float, authoritative: bool = true) -> void:
 	if authoritative:
-		# SPRINT-DIVE HOOK: `diving` forces the capsule down through this same path for its whole
-		# window, even if the crouch key is released mid-dive, so the low-ceiling refusal-to-stand
-		# check below still runs once and only once the dive actually ends.
-		var want_down: bool = (_want_crouch or diving) and not downed and carried_by == 0 and not on_table
-		if crouching and not want_down:
-			var from: Vector3 = global_position + Vector3.UP * C.CROUCH_HEIGHT
-			var to: Vector3 = global_position + Vector3.UP * C.PLAYER_HEIGHT
-			var space := get_world_3d().direct_space_state
-			var q := PhysicsRayQueryParameters3D.create(from, to)
-			q.collision_mask = C.L_WORLD
-			q.exclude = [get_rid()]
-			if not space.intersect_ray(q).is_empty():
-				want_down = true   # blocked overhead: stay crouched even though the key is up
-		crouching = want_down
+		var want: int = PRONE if diving else _stance_want
+		if downed or carried_by != 0 or on_table:
+			want = STAND
+			_stance_want = STAND
+		# Rising needs headroom: go as high as fits, up to what's wanted. The rest of the request
+		# stays pending, so the body finishes getting up by itself once the ceiling clears.
+		var cur: int = PRONE if prone else (CROUCH if crouching else STAND)
+		if want < cur:
+			var top: float = _stance_height(cur)
+			var got := cur
+			for s in range(cur - 1, want - 1, -1):
+				if not _headroom(top, _stance_height(s)):
+					break
+				got = s
+			want = got
+		crouching = want != STAND
+		prone = want == PRONE
 	if _capsule != null:
-		var target_h: float = C.CROUCH_HEIGHT if crouching else C.PLAYER_HEIGHT
+		var target_h: float = C.PRONE_HEIGHT if prone else (C.CROUCH_HEIGHT if crouching else C.PLAYER_HEIGHT)
 		_capsule.height = target_h
 		_coll_shape.position.y = target_h * 0.5
+
+
+static func _stance_height(s: int) -> float:
+	return C.PRONE_HEIGHT if s == PRONE else (C.CROUCH_HEIGHT if s == CROUCH else C.PLAYER_HEIGHT)
+
+
+## Nothing solid between the top of the current capsule and `to_h` above the feet.
+func _headroom(from_h: float, to_h: float) -> bool:
+	var q := PhysicsRayQueryParameters3D.create(global_position + Vector3.UP * from_h, global_position + Vector3.UP * to_h)
+	q.collision_mask = C.L_WORLD
+	q.exclude = [get_rid()]
+	return get_world_3d().direct_space_state.intersect_ray(q).is_empty()
 
 
 ## SWEEP 4A HOOK (Echo polish, chunk 4): 0..1 while this player's shriek pose should show, driven
@@ -1465,6 +1502,8 @@ func revive_full() -> void:
 	dragging_monster = -1   # SWEEP 3 HOOK (combat)
 	hive_view = false   # SWEEP 3 HOOK (brains)
 	crouching = false   # SWEEP 4A HOOK (controls)
+	prone = false
+	_stance_want = STAND
 	scan_holding = false
 	diving = false   # SPRINT-DIVE HOOK
 	_dive_airborne = false
@@ -1548,7 +1587,8 @@ func refresh_downed_visuals() -> void:
 ## Knocked down (dev stun) or downed you see the floor; everyone else sees you lying on it. Carried,
 ## you hang over the carrier's shoulder. Dead bots lie there too.
 func _update_down_pose(delta: float) -> void:
-	var down := stun > 0.0 or downed or (is_bot and not alive)
+	# Prone lies and crawls with the same body pose as being downed.
+	var down := stun > 0.0 or downed or (is_bot and not alive) or prone
 	# SWEEP 4A HOOK (controls): the third-person crouch pose (body_poser.gd): a torso lean blended
 	# in independently of the hold/carry/wind-up targets body_hands sets every frame.
 	if body_hands != null and "poser" in body_hands and body_hands.poser != null:
@@ -1560,6 +1600,8 @@ func _update_down_pose(delta: float) -> void:
 			eye = 0.28
 		elif carried_by != 0:
 			eye = 0.3
+		elif prone:
+			eye = C.PRONE_EYE_H
 		elif down and alive:
 			eye = 0.45
 		elif crouching:   # SWEEP 4A HOOK (controls)
@@ -1607,11 +1649,11 @@ func _update_down_pose(delta: float) -> void:
 ## Client -> host, 20 Hz: everything about my own surgeon. A positional array rather than a
 ## dictionary: no key strings on the wire, about a third of the size.
 ##   [position, yaw, pitch, flag bits (1 light, 2 sprint, 4 moving, 8 holding E, 16 crouching,
-##    32 scan-holding), shove count, drop count, aim id, interact count, selected hand, use count,
+##    32 scan-holding, 64 prone), shove count, drop count, aim id, interact count, selected hand, use count,
 ##    ability slot 1..4 press counts]
 func report_state() -> Array:
 	var bits := (1 if flashlight_on else 0) | (2 if sprinting else 0) | (4 if moving else 0) | (8 if wants_interact else 0) \
-		| (16 if crouching else 0) | (32 if scan_holding else 0)
+		| (16 if crouching else 0) | (32 if scan_holding else 0) | (64 if prone else 0)
 	return [global_position, rotation.y, head.rotation.x, bits, shove_count, drop_count, aim_id, interact_count, selected, use_count,
 		ability_slot_press[0], ability_slot_press[1], ability_slot_press[2], ability_slot_press[3],
 		snappedf(drop_charge, 0.02)]   # SWEEP 4A HOOK (pharmacy, chunk 3)
@@ -1634,6 +1676,7 @@ func apply_remote_state(s: Array) -> void:
 	wants_interact = bits & 8 != 0
 	crouching = bits & 16 != 0   # SWEEP 4A HOOK (controls): the host trusts the client's own crouch
 	scan_holding = bits & 32 != 0
+	prone = bits & 64 != 0
 	shove_count = int(s[4])
 	drop_count = int(s[5])
 	aim_id = String(s[6])
@@ -1665,6 +1708,7 @@ func report_full() -> Dictionary:
 		"dm": dragging_monster,   # SWEEP 3 HOOK (combat)
 		"hv": hive_view,   # SWEEP 3 HOOK (brains)
 		"cr": crouching,   # SWEEP 4A HOOK (controls)
+		"pr": prone,
 	}
 
 
@@ -1715,4 +1759,5 @@ func apply_remote_full(s: Dictionary) -> void:
 	set_flashlight(s.fl)
 	sprinting = s.sp
 	crouching = bool(s.get("cr", false))   # SWEEP 4A HOOK (controls)
+	prone = bool(s.get("pr", false))
 	moving = s.mv

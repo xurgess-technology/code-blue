@@ -90,6 +90,8 @@ func _ready() -> void:
 		# distance (or through the far wall) before the dive even fires.
 		{"name": "42_sprint_dive_before", "fn": _pose_sprint_dive_prep, "settle": 6},
 		{"name": "43_sprint_dive_mid", "fn": _pose_sprint_dive, "settle": 9},
+		# The same teammate after the dive: landed prone, crawling back toward the camera.
+		{"name": "44_prone_crawl", "fn": _pose_prone_crawl, "settle": 60},
 	]
 	# HANDS HOOK (docs/HANDS_AND_FEEDBACK.md "Done when"): hands, wind-ups, the stun window and the
 	# carry camera. `--only=hands` runs just these (plus the lobby shots that set the scene up).
@@ -534,6 +536,17 @@ func _pose_sprint_dive_prep() -> void:
 func _pose_sprint_dive() -> void:
 	var a := _teammate()
 	a.bot_dive += 1
+
+
+## Called ~9 frames into the dive: the rest of the flight, the slide-out and a moment of crawling
+## carry her roughly 4 m further along the dive. The camera stands in the stretch she already ran
+## through (known open floor), looking after her.
+func _pose_prone_crawl() -> void:
+	var a := _teammate()
+	a.bot_sprint = false
+	var d: Vector3 = a._dive_dir if a._dive_dir.length() > 0.1 else -a.global_basis.z
+	var lands: Vector3 = a.global_position + d * 4.0
+	_look_from(a.global_position - d * 0.5, lands + Vector3(0, 0.2, 0))
 
 
 ## Actually operating: the surgery camera, the minigame and the surgery HUD together.

@@ -1503,3 +1503,25 @@ into an ordinary crouch-walk. Client-owned local movement throughout, same as th
   stamina gate, grace window, low ceiling), `settingstest` 97/97 (new `sprint_mode` coverage),
   `inventorytest` 92/92, `devtest`, `databasetest` 12/12, `looptest` (only the known furnace-throw
   flake).
+
+**Prone + crouch toggle (2026-09-16, user design):** the crouch key is now a toggle that steps
+stand -> crouch -> prone -> stand (`_stance_want`), and a sprinting press dives and lands prone.
+- Prone: capsule `C.PRONE_HEIGHT` 0.8 m (can't go below 2 x `PLAYER_RADIUS`), eye `C.PRONE_EYE_H`
+  0.4 m, crawl `C.PRONE_SPEED` 1.0 m/s. `crouching` stays true while prone, so every existing crouch
+  gate (no sprint, no jump, silent footsteps, no noise events) covers prone for free. The body uses
+  the same lying/crawl pose as a downed player (`_update_down_pose`, `body_hands._human_clip`).
+- Replicated: report bit 64 / `report_full` "pr", alongside crouch's bit 16 / "cr".
+- Getting up needs headroom: `_apply_crouch` rises as far as fits (prone -> crouch under a ceiling
+  between crouch and standing height) and finishes standing up by itself once the ceiling clears.
+- Starting a sprint (pressing sprint) also stands you up; going down clears a toggled sprint.
+- The old hold-to-crouch is gone for humans. Bots: `bot_crouch`/`bot_prone` set the stance when
+  they change; `bot_crouch_press` is one human-style key press; `bot_dive` still fires only a dive.
+- Verified: `controlstest` 45/45 (new stance-cycle checks; dive checks now expect landing prone and
+  getting up to crouch under a low ceiling), `settingstest` 97/97, `inventorytest` 92/92, `devtest`,
+  `databasetest` 12/12, `looptest` clean, `carrycamtest` only its 3 pre-existing wall-pull-in
+  failures. Windowed screenshots (`tools/gameshot.tscn -- --only=sprint_dive,prone`, new shot
+  `44_prone_crawl`): mid-dive the teammate is already down in the crawl pose; after landing she
+  lies flat, arms out.
+- Gaps: not checked with two real clients (`nettest`). Melee hit checks against players
+  (`combat.gd` ~367) still test a standing-height capsule, so a prone player can be hit as if
+  standing. Prone uses the downed crawl pose, so a prone teammate looks the same as a downed one.

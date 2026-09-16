@@ -320,7 +320,7 @@ func _human_clip(delta: float, act: Dictionary) -> void:
 	if _interact_seen < 0:
 		_interact_seen = ic
 	_oneshot_t = maxf(0.0, _oneshot_t - delta)
-	var down: bool = player.downed or (player.is_bot and not player.alive) or player.stun > 0.0
+	var down: bool = player.downed or (player.is_bot and not player.alive) or player.stun > 0.0 or player.prone
 	if player.carried_by != 0:
 		want = "carried"
 		_oneshot_t = 0.0

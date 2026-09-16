@@ -42,6 +42,7 @@ func _run() -> void:
 	await _crouch_and_jump()
 	await _ability_slots()
 	await _scanner()
+	await _stances()
 	await _sprint_dive()
 
 
@@ -87,17 +88,50 @@ func _crouch_and_jump() -> void:
 	_check(landed, "and comes back down to the floor")
 
 
-## SPRINT-DIVE HOOK: bot_dive (bumped like bot_jump) fires the sprint+crouch-dive. Checks the
-## launch (burst speed plus an upward hop), full speed held through the air, the slide-out decay
-## after touchdown, the forced crouch capsule, that interacting is blocked while diving, that there
-## is no cooldown but each dive costs stamina, the short grace window after sprint drops, and that a
-## dive ending under a low ceiling stays crouched (the same refusal-to-stand raycast a normal crouch
-## release goes through).
+## The crouch key as a toggle (bot_crouch_press = one press): stand -> crouch -> prone -> stand,
+## the prone capsule and crawl speed, and getting up refusing to go higher than the ceiling allows.
+func _stances() -> void:
+	_say("---- crouch key: stand -> crouch -> prone -> stand")
+	me.revive_full()
+	me.teleport(game._floor_at(me.global_position))
+	me.bot_crouch = false
+	me.bot_prone = false
+	me.bot_sprint = false
+	me.bot_move = Vector2.ZERO
+	await _frames(5)
+	_check(not me.crouching and not me.prone, "set-up: standing")
+	me.bot_crouch_press += 1
+	await _frames(3)
+	_check(me.crouching and not me.prone, "one press crouches")
+	me.bot_crouch_press += 1
+	await _frames(3)
+	_check(me.prone and me.crouching, "a second press goes prone")
+	_check(is_equal_approx(me._capsule.height, C.PRONE_HEIGHT), "prone capsule is %.2f m (%.2f)" % [C.PRONE_HEIGHT, me._capsule.height])
+	me.bot_move = Vector2(0, -1)
+	me.bot_sprint = true
+	await _frames(40)
+	var crawl: float = Vector2(me.velocity.x, me.velocity.z).length()
+	_check(me.prone and crawl > 0.3 and crawl <= C.PRONE_SPEED + 0.05, "prone crawls, slowly (%.2f m/s)" % crawl)
+	_check(not me.sprinting, "no sprinting while prone")
+	me.bot_move = Vector2.ZERO
+	me.bot_sprint = false
+	await _frames(5)
+	me.bot_crouch_press += 1
+	var up := await _until(func(): return not me.crouching and not me.prone, 1.0)
+	_check(up, "a third press stands straight back up")
+
+
+## SPRINT-DIVE HOOK: pressing crouch mid-sprint dives and lands prone. Checks the launch (burst
+## speed plus an upward hop), full speed held through the air, the slide-out decay after
+## touchdown, the prone capsule, that interacting is blocked while diving, that there is no cooldown
+## but each dive costs stamina, the short grace window after sprint drops, and that getting up after
+## a dive under a low ceiling only rises as far as there's room.
 func _sprint_dive() -> void:
 	_say("---- sprint + crouch-dive")
 	me.revive_full()
 	me.teleport(game._floor_at(me.global_position))
 	me.bot_crouch = false
+	me.bot_prone = false
 	me.bot_move = Vector2.ZERO
 	me.bot_sprint = false
 	me.bot_yaw = 0.0
@@ -111,10 +145,10 @@ func _sprint_dive() -> void:
 
 	var before_interact := me.interact_count
 	var stamina_before: float = me.stamina
-	me.bot_dive += 1
+	me.bot_crouch_press += 1   # the real crouch key, mid-sprint
 	await _frames(1)
-	_check(me.diving, "bot_dive bump enters the dive state")
-	_check(me.crouching, "the capsule flattens (crouching) the instant the dive starts")
+	_check(me.diving, "pressing crouch mid-sprint dives")
+	_check(me.prone, "the body goes prone the instant the dive starts")
 	_check(me.stamina < stamina_before - me.DIVE_STAMINA_COST * 0.9,
 			"a dive costs stamina (%.2f -> %.2f)" % [stamina_before, me.stamina])
 	var burst_speed: float = Vector2(me.velocity.x, me.velocity.z).length()
@@ -137,20 +171,20 @@ func _sprint_dive() -> void:
 
 	var ended := await _until(func(): return not me.diving, 1.0)
 	_check(ended, "the dive ends on its own")
-	var resprint := await _until(func(): return me.sprinting, 0.3)
-	_check(resprint, "back to a normal sprint once the dive ends")
+	await _frames(3)
+	_check(me.prone and not me.sprinting, "and leaves you lying prone")
 
-	# No cooldown: a second dive fires as soon as the first is over.
-	var refired := await _until(func():
-		if not me.diving:
-			me.bot_dive += 1
-		return me.diving
-	, 0.3)
-	_check(refired, "no cooldown: a second dive fires right after the first ends")
+	# No cooldown: get up, sprint, and a second dive fires straight away.
+	await _stand_up()
+	await _until(func(): return me.sprinting, 1.0)
+	me.bot_dive += 1
+	await _frames(1)
+	_check(me.diving, "no cooldown: a second dive fires as soon as you're sprinting again")
 	await _until(func(): return not me.diving, 2.0)
 
 	# Out of breath: not enough stamina, no dive.
-	await _until(func(): return me.sprinting, 0.5)
+	await _stand_up()
+	await _until(func(): return me.sprinting, 1.0)
 	me.stamina = me.DIVE_STAMINA_COST * 0.5
 	me.bot_dive += 1
 	await _frames(3)
@@ -158,7 +192,7 @@ func _sprint_dive() -> void:
 	me.stamina = 1.0
 
 	# Grace window: a dive still fires a moment after sprint drops, but not long after.
-	await _until(func(): return me.sprinting, 0.5)
+	await _until(func(): return me.sprinting, 1.0)
 	me.bot_sprint = false
 	await _frames(4)
 	_check(not me.sprinting, "set-up: sprint has dropped")
@@ -166,8 +200,9 @@ func _sprint_dive() -> void:
 	await _frames(1)
 	_check(me.diving, "a dive still fires just after sprint drops (grace window)")
 	await _until(func(): return not me.diving, 2.0)
+	await _stand_up()
 	me.bot_sprint = true
-	await _until(func(): return me.sprinting, 0.5)
+	await _until(func(): return me.sprinting, 1.0)
 	me.bot_sprint = false
 	await _frames(30)   # 0.5 s, well past the 0.2 s grace
 	me.bot_dive += 1
@@ -176,17 +211,15 @@ func _sprint_dive() -> void:
 	me.bot_move = Vector2.ZERO
 	await _frames(3)
 
-	# Low-ceiling safety: a dive that ends under a low ceiling stays crouched, same as letting go
-	# of an ordinary crouch already does (_apply_crouch's raycast refuses to stand there). Start a
-	# dive on open ground first, then drop the ceiling in (elongated along the dive's -Z travel,
-	# above the crouched capsule plus the hop's ~0.25 m peak, below standing height) only once the
-	# player is already flattened -- same as a real low tunnel the player only ever enters crouched.
+	# Low ceiling: dive, drop a ceiling in above the lying body (between crouch and standing height,
+	# elongated along the dive's -Z travel), then ask to stand. There's room to crouch but not to
+	# stand, so it stops at a crouch, and finishes standing up by itself once the ceiling is gone.
 	me.bot_move = Vector2(0, -1)
 	me.bot_sprint = true
 	await _until(func(): return me.sprinting, 2.0)
 	me.bot_dive += 1
 	await _frames(1)
-	_check(me.diving and me.crouching, "the dive starts crouched, ready for the low-ceiling check")
+	_check(me.diving and me.prone, "the dive starts prone, ready for the low-ceiling check")
 	var ceiling := StaticBody3D.new()
 	ceiling.collision_layer = C.L_WORLD
 	ceiling.collision_mask = 0
@@ -197,15 +230,24 @@ func _sprint_dive() -> void:
 	ceiling.add_child(cs)
 	add_child(ceiling)
 	ceiling.global_position = me.global_position + Vector3(0, 1.6, -3.0)
-	await _until(func(): return not me.diving, 1.0)
+	await _until(func(): return not me.diving, 2.0)
 	me.bot_move = Vector2.ZERO
 	me.bot_sprint = false
-	me.bot_crouch = false
+	await _frames(5)
+	await _stand_up()
 	await _frames(10)
-	_check(me.crouching, "a dive that ends under a low ceiling stays crouched (refuses to stand)")
+	_check(me.crouching and not me.prone, "under a low ceiling, getting up stops at a crouch")
 	ceiling.queue_free()
 	var stood := await _until(func(): return not me.crouching, 2.0)
-	_check(stood, "removing the ceiling lets the same body stand back up")
+	_check(stood, "and stands the rest of the way once the ceiling is gone")
+
+
+## Bot stance changes apply on change, so toggle bot_prone to request standing.
+func _stand_up() -> void:
+	me.bot_prone = true
+	await _frames(1)
+	me.bot_prone = false
+	await _frames(3)
 
 
 func _ability_slots() -> void:

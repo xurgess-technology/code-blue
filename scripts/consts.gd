@@ -15,6 +15,10 @@ const SPRINT_SPEED := 5.6
 const CROUCH_HEIGHT := 1.05
 const CROUCH_EYE_H := 1.0
 const CROUCH_SPEED := 1.8
+## Prone: lying flat, crawling. The capsule can't go below 2 * PLAYER_RADIUS.
+const PRONE_HEIGHT := 0.8
+const PRONE_EYE_H := 0.4
+const PRONE_SPEED := 1.0
 const JUMP_VELOCITY := 5.2
 ## SWEEP 4A HOOK (scanner): hold R aiming at a monster, in range and in sight, for this long.
 const SCAN_RANGE := 14.0
