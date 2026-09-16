@@ -728,6 +728,13 @@ static func slider_to_db(v) -> float     # 0..1 slider to dB (squared amplitude,
   `open()`, `close()`, `is_open()`, `signal closed`. `Menu.chose_settings` opens it; while
   `game.paused` it shows its own "Settings" button under the HUD's PAUSED text. While open it
   eats keys and clicks except F2 / F3 / F11; Esc closes it (back to menu or pause).
+  - The same pause-only stack also carries two exit buttons, `signal exit_to_menu_requested`
+    and `signal exit_to_desktop_requested` (main.gd connects these; nothing else should need
+    to). "Exit to Main Menu" reuses `Main._back_to_menu()` — the same teardown path Q/shove
+    already uses to walk out mid-shift — so a host's exit is an ordinary `Net.leave()` (clients
+    get the existing `Net.host_left` -> "The host left the game." handling) and a client's exit
+    is an ordinary disconnect. "Exit to Desktop" is just `get_tree().quit()`. All three buttons
+    hide together while the settings screen itself is open.
 - Tests: `tools/settingstest.tscn` (headless), `tools/settingsshot.tscn` (windowed screenshots to
   `tools/settings_shots/`, plus the mouse-look sensitivity check that needs a captured mouse).
 
