@@ -23,6 +23,13 @@ title Code Blue
 echo Starting Code Blue from %CD%
 echo Using %GODOT%
 echo.
+rem .godot/ (the import cache: which scripts declare a global class_name, which assets are
+rem imported) is gitignored and local to this checkout, so a git pull that brings in new scripts
+rem or assets can leave it stale -- that shows up as a black screen and "nil" script errors.
+rem Re-running import here is quick when nothing changed, and self-heals when something did.
+echo Checking for anything new to import...
+"%GODOT%" --headless --path . --import
+echo.
 "%GODOT%" --path .
 set RC=%ERRORLEVEL%
 echo.
