@@ -74,6 +74,37 @@ func interact(player) -> void            # HOST ONLY, called after the host vali
 
 `player` is a `Player` node: `peer_id`, `player_name`, `slots` (see below), `global_position`.
 
+## Interactable affordance (interactable-affordance sweep)
+
+R.E.P.O.'s look, cited in DESIGN.md: what you can interact with is signalled primarily by a visual
+cue on the object itself, not a permanently floating label. `scripts/aim_highlight.gd`
+(`AimHighlight`) is the generic version of that: a thin glowing rim on whatever the local player's
+crosshair is currently over, driven straight off the aim system above (`Player.aim_id` /
+`aim_prompt`), local and purely cosmetic — every player highlights only what THEY aim at, no
+network traffic, no interaction-logic change.
+
+```gdscript
+AimHighlight.set_highlighted(node: Node, on: bool)   # add/remove the rim on node's MeshInstance3Ds
+AimHighlight.warm(parent: Node3D)                    # warmup.gd hook: compiles the shader once
+```
+
+`Player._update_aim_highlight()` (called from `_update_aim()`, local player only) turns the rim on
+whenever `aim_id != ""`, the node is in group `"interactable"`, and `aim_prompt` does not begin
+with `"!"` (the existing "can't use this right now" convention) — the same gate the crosshair
+prompt already uses for its own styling. Technique: a duplicated inverted-hull mesh added as a
+child of each of the target's own `MeshInstance3D`s (so it inherits that instance's transform for
+free), pushed out along its own normals in the vertex shader and drawn back-face-only so only the
+sliver of "extra" geometry beyond the real silhouette shows. One shared shader/material; at most a
+handful of extra draws for whatever is currently aimed at (never more than one thing per local
+player).
+
+This replaced a handful of always-on `Label3D` room/prop labels that duplicated this cue (the OR
+supply shelf's "SUPPLY - SURGICAL" tag, the break-room blender's "BLENDER" tag): removed outright,
+since the aim highlight plus the crosshair prompt already say the same thing without covering the
+screen the whole time you are in the room. Navigational signage (the hospital's own room-name
+signs over doorways, `hospital_builder.gd`'s `_sign_node`, "OR" / "EMERGENCY" / wing names) is
+untouched: that is wayfinding, not "you can interact with this," and stays exactly as it was.
+
 ## Containers (containers worker)
 
 Built by `scripts/hospital_builder.gd`. Each container node is in groups `"container"` and
