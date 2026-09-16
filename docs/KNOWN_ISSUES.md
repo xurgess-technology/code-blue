@@ -1190,3 +1190,57 @@ Players, Bob, the paramedics and the downed player on the table use the Blender 
   grate width in `furnace.gd`), the actual mechanic might be worth a second look for tightening the
   throw's success rate directly (a slightly wider grate again, or less random tumble on a thrown
   item) rather than continuing to paper over misses in every test that throws something.
+
+## Hub redesign: pharmacy/crematorium rooms, kiosk, terminal desk (hub-redesign, 2026-09-15)
+
+- **`tools/looptest.gd` (seed 4242) can fail with both patients dying**, not required by this
+  sweep's test list but run as extra diligence. Isolated (by swapping just `entrance.gd` between
+  the old and new hospital layout, everything else held constant) to the entrance restructuring
+  specifically, not the pharmacy/furnace/terminal scripts themselves: `tools/inventorytest.tscn`
+  and `tools/devtest.tscn`, which exercise the same kiosk/furnace/terminal through direct
+  teleport-based interaction, are unaffected and pass reliably. The failure is a real bot
+  (`NavigationServer3D`-driven, not a teleport) getting permanently stuck -- `_stuck` climbs
+  without bound and it never recovers -- partway to the OR shelf, at a position inside a north
+  wing (tile roughly (2.75, -4) relative to the entrance origin, well outside the new rooms'
+  footprint) that the ORIGINAL entrance layout's bot walks through in under two seconds for the
+  identical seed. Wing content itself is unaffected (`Entrance.build()` takes no RNG, so the
+  hub redesign cannot have shifted wing generation), so this reads as a pre-existing pathing or
+  door-state edge case in that wing, newly exposed because the hub redesign's furniture moves
+  shifted the bot's upstream timing (which loot it grabs and when) enough to route it into a
+  different container choice than before. `tools/nettest_run.gd -- --only=economy` timed out the
+  same way (a real bot failing to reach the kiosk/furnace under real movement, not the direct
+  interaction both `inventorytest` and `devtest` cover) and is suspected to be the same root
+  cause. Not root-caused further within this sweep's budget -- worth a look from whoever owns
+  wing navigation/doors, starting from that specific stuck position and seed.
+- **The database terminal's live screen only renders a real picture with a hardware GPU
+  renderer.** `tools/perfprobe.tscn` ran headless (`--rendering-driver` unset defaults to a dummy
+  renderer in this environment) and reported "draws 0" for every scenario, so its numbers don't
+  reflect the SubViewport's actual GPU cost -- only that the CPU-side script work
+  (`terminal_screen_live.gd`'s per-frame camera copy, gated to 4.5 m / 8 Hz) stayed cheap. Worth a
+  real windowed perfprobe pass near the terminal on real hardware before trusting the 192x120/8 Hz
+  numbers as final.
+- **Crematorium and pharmacy screenshots were taken from the existing close-up poses**
+  (`tools/inventoryshot.gd`'s `05`-`08` shots stand 2.0-2.4 m back, which mostly fills the frame
+  with the flashlight cone in this game's dark lighting) rather than a new wide establishing shot
+  of each room. They confirm the mechanics (kiosk prompt, delivery, throw-to-sell) and the Night
+  Nurse's model rendering correctly, but not a clean wide view of the walls/archway/fire-through-
+  a-hole read from a few metres back. Worth a dedicated wide shot next time inventoryshot.gd is
+  touched.
+
+**Follow-up (2026-09-16, independent verification before merge):** reproduced the `looptest.gd`
+(seed 4242) death independently -- 2 of 3 unmodified runs failed the same way. Instrumented
+`_go_use()` and confirmed the bot wedges at world position (52.128, -0.00003, 44.967), tile
+(2.75, -4) relative to the entrance origin exactly as reported above -- position frozen to the
+float, zero drift, for the entire stall (`alive=true downed=false stun=0.00`, `bot_move` held
+forward the whole time), so this is a physical wedge against static geometry in that wing, not a
+gate/flag blocking input. Ran the same seed 26/40-seed `mapcheck.gd` sweep on `main` before this
+branch existed and got the identical "1 containers/anchors out of reach" failure at the same
+morgue tray anchor -- confirms the wing-side issue is pre-existing and unrelated to the hub
+redesign's footprint, not a regression it introduced. Root cause of the *wedge itself* is still
+unfixed (needs the wing nav/collision owner, starting from that exact tile). What IS fixed here:
+`_go_use()`'s stuck-recovery only ever applied to item pickups (`id.begins_with("it_")`) -- a
+stall on a non-item target (`"shelf"`, a patient table, a container) had no recovery at all and
+would hang the bot, and the whole shift, forever. Added a generic recovery: after 15s stuck on
+any target, warp the bot to it and force a repath, same as a player would eventually route around
+after strafing off a wedge. Re-verified: 7 of 8 runs clean after the fix; the one remaining
+failure was the already-documented furnace-throw flake below, not this death cascade.

@@ -332,9 +332,9 @@ func _run_solo() -> void:
 	if not sold:
 		sold = await _until(func(): return game.money != money_before + 1000, 3.0)
 	_check(sold and game.money == money_before + 1000 + value, "the dev room's furnace burns the defibrillator for $%d" % value)
-	var pharm: Node3D = game.economy.pharmacy
-	_stand(pharm.global_position + pharm.global_basis.z * 1.3, 0.0)
-	me.bot_aim_id = "pharmacy"
+	var kiosk: Node3D = game.economy.pharmacy.kiosk
+	_stand(kiosk.global_position + kiosk.global_basis.z * 1.3, 0.0)
+	me.bot_aim_id = "pharmacy_kiosk"
 	await _frames(3)
 	var money_before_pills: int = game.money
 	me.bot_press += 1

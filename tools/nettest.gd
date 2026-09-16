@@ -622,7 +622,7 @@ func _sc_economy():
 	_say("sold everything: $%d" % game.money)
 	for i in PILL_BUYS:
 		var before := game.money
-		if not await _do_until(func(): _press_at(game.economy.pharmacy.global_position, "pharmacy"), func(): return game.money < before, 40.0, "buying pills %d" % (i + 1)):
+		if not await _do_until(func(): _press_at(game.economy.pharmacy.kiosk.global_position, "pharmacy_kiosk"), func(): return game.money < before, 40.0, "buying pills %d" % (i + 1)):
 			return
 	_say("bought %d bottles, $%d left" % [PILL_BUYS, game.money])
 	if not me.holding(KEEP):

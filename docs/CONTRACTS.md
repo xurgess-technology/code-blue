@@ -496,6 +496,24 @@ break room (same reserved spot the lectern used, `level_info.lectern` / `lectern
 `HospitalBuilder._commit_lectern` / `LegacyBuilder._place_shelf_and_lectern`,
 `scripts/database/terminal_model.gd`) replaces it: no carryable version.
 
+- **HUB REDESIGN (2026-09-15)**: it is a full standing desk now (a wide slab, steel legs, a real
+  monitor and keyboard), not a narrow lectern-shaped stand, and its screen faces -Z out into the
+  break room, not into the wall it stands against (the old model's screen was built facing +Z
+  while `entrance.gd` gave it the same yaw every wall-mounted piece gets assuming a -Z front, so
+  at yaw 0 it silently faced away from the room; fixed in the model, not the placement code). The
+  aim proxy (`game._add_proxy("terminal", ...)`) radius grew from 1.1 to 1.5 to match.
+- **The live screen** (`scripts/database/terminal_screen_live.gd`): while nobody has the terminal
+  open, its monitor shows a live mirror of whatever the nearby player is aiming at -- a SubViewport
+  plus a Camera3D that copies `get_viewport().get_camera_3d()`'s transform every frame, drawn onto
+  the screen quad in place of its static idle glow, the same SubViewport-and-screen-quad shape the
+  OR wall monitor already uses (`scripts/orscreen/or_screen.gd`), except that one draws a 2D
+  Control from replicated state and this one renders the real 3D scene from a mirrored camera.
+  Purely local and cosmetic (each machine only ever reads its own live camera, so this needs no
+  network traffic and nothing here is host-authoritative); it only renders within 4.5 m of the
+  terminal, at 8 Hz, at 192x120, and the SubViewport is fully `UPDATE_DISABLED` (no render pass at
+  all) outside that range or before anyone has ever come close, falling back to the static glow
+  material rather than freezing on a stale frame.
+
 ```gdscript
 # scripts/database/terminal_ui.gd, a CanvasLayer main.gd creates (main.terminal_ui)
 func open() -> void
@@ -890,18 +908,20 @@ game.reset_money()                            # host; money to 0 (game over; sta
 game.economy                                  # scripts/economy/economy.gd, child "Economy"
 game.economy.pharmacy / .furnace              # nodes once placed (placed() true); positions helpers
 game.economy.money_visible_for(p) -> bool     # HUD: near the pharmacy/furnace, aiming at the
-                                              # pharmacy, or just changed
+                                              # order kiosk, or just changed
 ```
 
-### The pharmacy and the crematorium furnace (pharmacy worker, sweep 4A chunk 3, 2026-09-15)
+### The pharmacy and the crematorium furnace (pharmacy worker, sweep 4A chunk 3; HUB REDESIGN, 2026-09-15)
 
-Gold bars, the sell bin and the shop van are gone. Buying is the pharmacy window (an interactable,
-`scripts/economy/economy_props.gd`); selling is throwing into the crematorium furnace (a thrown-item
-Area3D, `scripts/economy/furnace.gd`), off the lobby. Placement, first match:
-`level_info.safe_zone {pharmacy_rect, crematorium_rect}` (the lobby rects `entrance.gd`'s
-`spots["reserve"]` fixed, chunk 2), `level_info.economy {shop, furnace}` (hand-placed; the dev
-room), else a deterministic search for free floor around the time clock (`economy.gd`'s `_search_spots`).
-Placement runs two physics frames after `_add_landmarks`.
+Gold bars, the sell bin and the shop van are gone. Buying is at the pharmacy's order kiosk (an
+interactable, `scripts/economy/pharmacy_kiosk.gd`); selling is throwing into the crematorium
+furnace (a thrown-item Area3D, `scripts/economy/furnace.gd`). **HUB REDESIGN**: both are now real
+walled rooms off the lobby, each with its own single door (`scripts/level/entrance.gd`), not just
+open floor. Placement, first match: `level_info.safe_zone {pharmacy_rect, crematorium_rect}` (the
+lobby rects `entrance.gd`'s `spots["reserve"]` fixed, chunk 2, now sized to those rooms'
+interiors), `level_info.economy {shop, furnace}` (hand-placed; the dev room), else a deterministic
+search for free floor around the time clock (`economy.gd`'s `_search_spots`). Placement runs two
+physics frames after `_add_landmarks`.
 
 ```gdscript
 game.buy_pills(p) -> bool           # host; $PILL_PRICE, unlimited buys, no price climb
@@ -912,19 +932,28 @@ game.furnace_value(kind, slot) -> int  # brains: spoiled value; placebo_pills: 0
 game.PILL_PRICE / game.PILL_COUNT    # $15, 10 pills a bottle
 ```
 
-- **The pharmacy**: a counter behind a steel grate, a price board, an order terminal (E on the
-  grate). You never clearly see the pharmacist, just a shape that drifts and steps out of view.
-  Buying takes the money immediately; `economy.pharmacy.queue_delivery(kind, count)` starts a
-  ~1.6 s capsule animation (played on every machine) and the host drops the item at the wall
-  delivery station once it lands (`game._spawn_item`, a normal `WorldItem` pickup). Sells one item
-  today: `placebo_pills`.
+- **The pharmacy** (`scripts/economy/economy_props.gd`): a counter behind a steel grate, a price
+  board, and (**HUB REDESIGN**) the Night Nurse's model standing idle behind the grate, pure set
+  dressing -- no Monster node, no brain, no AI, never watched, never a threat; chosen over the old
+  capsule silhouette because it costs nothing extra (already warmed for the real encounters) and
+  reads as a quiet, deniable foreshadowing beat without adding any mechanic. The counter itself is
+  no longer interactable: ordering is E on the **kiosk** beside it
+  (`scripts/economy/pharmacy_kiosk.gd`, interact_id `"pharmacy_kiosk"`), a catalog-driven podium
+  (`{kind, name, price, count}` entries plus a `_buy` branch per kind) so a second item is one
+  entry away from a rewrite; today there is still only `placebo_pills`. Buying takes the money
+  immediately; `economy.pharmacy.queue_delivery(kind, count)` starts a ~1.6 s capsule animation
+  (played on every machine) and the host drops the item at the wall delivery station once it lands
+  (`game._spawn_item`, a normal `WorldItem` pickup).
 - **The furnace**: a grate of vertical steel bars across the mouth blocks players, monsters and
   carried bodies like any `C.L_WORLD` wall (a real collider, not a special case), while a thrown
   item small enough to clear a gap reaches `FireZone`, an `Area3D` monitoring `C.L_PICKUP` only.
   `furnace._on_body_entered` resolves the sale host-side: sellable stacks are consumed and
   `furnace_sell` pays out (a flame-card burst + `economy_sell` + the amount floating up);
   unsellable stacks (surgical tools, the guide) get `toss()`ed back out instead of freed. A miss
-  (hits a bar, or nothing) just settles on the floor as an ordinary drop.
+  (hits a bar, or nothing) just settles on the floor as an ordinary drop. **HUB REDESIGN**: the
+  brick wings and back wall are built wide and floor-to-ceiling now, so the furnace reads as built
+  into the crematorium room's back wall (a hole with fire behind it) instead of a furnace-shaped
+  box standing in a generic room; the grate/FireZone/selling logic above is unchanged.
 - **Charged throw** (`scripts/player.gd`, `game.drop_selected(p, charge)`): holding Drop charges
   0..1 over `Player.DROP_CHARGE_FULL` seconds (client-owned, replicated as the 15th element of
   `report_state()`); releasing fires `toss()` at a charge-scaled velocity (`Game.THROW_MIN/MAX_SPEED`,

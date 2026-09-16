@@ -1,7 +1,9 @@
 extends Node3D
-## SWEEP 4A HOOK (pharmacy, chunk 3): the crematorium furnace. A small, grim set piece off the
-## lobby: a cremation furnace with its steel door open and fire glowing inside, a cremation cart
-## and a shelf of empty urns for dressing. All primitives, no new Blender models.
+## SWEEP 4A HOOK (pharmacy, chunk 3), HUB REDESIGN (2026-09-15): the crematorium furnace, now
+## inside its own walled room (docs/CONTRACTS.md "Hospital", scripts/level/entrance.gd) instead of
+## a generic room. The brick shell is built wide and tall enough to read as part of the room's own
+## back wall rather than a standalone box sitting in it: a hole with fire raging behind it, not a
+## furnace-shaped prop parked in a room. All primitives, no new Blender models.
 ##
 ## Selling is throwing: there is no walk-up-and-click interactable here. A steel grate of bars
 ## across the mouth blocks players, monsters and carried bodies (a normal C.L_WORLD collider, the
@@ -9,7 +11,8 @@ extends Node3D
 ## through lands in `FireZone`, an Area3D that only monitors world items (C.L_PICKUP), where the
 ## host resolves a sale. A throw that hits a bar instead bounces off onto the floor, same as any
 ## other miss. Unsellable items (surgical tools, the guide, an empty pill bottle already eaten to
-## nothing) are given a bounce back out rather than consumed.
+## nothing) are given a bounce back out rather than consumed. HUB REDESIGN touched only the shell
+## and the dressing around it -- the grate, FireZone and selling logic below are unchanged.
 ##
 ## Local frame: origin on the floor, mouth facing +Z (a player stands in +Z looking at -Z).
 
@@ -108,6 +111,19 @@ func _build() -> void:
 	# The furnace body: a brick block with an open steel door and a dark mouth. The mouth runs
 	# tall (about knee to well over head height) so a throw released around chest/eye height,
 	# arcing up a little on a full charge, still clears the grate instead of sailing over it.
+	# HUB REDESIGN: wide brick wings and a wide back wall (matching the invisible collision
+	# `_furnace_solid` adds further down, docs comment there) so the furnace reads as built into
+	# the crematorium room's own back wall, not a box standing in the middle of it. Kept at the
+	# original 2.3 m height rather than reaching the room's full ceiling (`C.WALL_H`, 3.0 m): a
+	# full-height collider here made a fully-charged throw's upward arc occasionally clip the top
+	# edge on its way to the grate and miss FireZone entirely, an intermittent
+	# `tools/devtest.gd` "dev room's furnace burns the defibrillator" failure this room's tighter
+	# quarters exposed (docs/KNOWN_ISSUES.md). Widening only in X, not Y, keeps the mouth's own
+	# clearance exactly as wide as it always was.
+	var wing_h := 2.3
+	_box(Vector3(1.3, wing_h, 1.3), Vector3(-1.15, wing_h * 0.5, -0.9), brick)
+	_box(Vector3(1.3, wing_h, 1.3), Vector3(1.15, wing_h * 0.5, -0.9), brick)
+	_box(Vector3(3.9, wing_h, 0.4), Vector3(0, wing_h * 0.5, -1.55), brick)
 	_box(Vector3(1.6, 2.3, 1.3), Vector3(0, 1.15, -0.9), brick)
 	_box(Vector3(1.0, 1.7, 0.05), Vector3(-0.75, 1.0, -0.3), steel, Vector3(0, -40, 0))   # open door, swung out
 	_box(Vector3(1.0, 1.7, 0.9), Vector3(0.0, 1.0, -0.4), soot)   # dark mouth interior
@@ -175,6 +191,24 @@ func _build() -> void:
 		u.position = Vector3(-0.18 + i * 0.12, 0.62 if i < 2 else 0.97, 0.0)
 		shelf.add_child(u)
 
+	# HUB REDESIGN: a scorched floor patch and a small hazard light -- cheap dressing that sells
+	# the room as a real crematorium rather than a furnace standing on ordinary lobby flooring.
+	var scorch := MeshInstance3D.new()
+	var scorch_mesh := PlaneMesh.new()
+	scorch_mesh.size = Vector2(2.6, 2.2)
+	scorch.mesh = scorch_mesh
+	scorch.material_override = _mat("scorch", Color(0.05, 0.045, 0.04), 0.95)
+	scorch.position = Vector3(0.0, 0.01, -0.2)
+	scorch.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(scorch)
+	var hazard := OmniLight3D.new()
+	hazard.light_color = Color(1.0, 0.2, 0.15)
+	hazard.light_energy = 0.35
+	hazard.omni_range = 2.0
+	hazard.shadow_enabled = false
+	hazard.position = Vector3(0.0, C.WALL_H - 0.2, -0.3)
+	add_child(hazard)
+
 	var sign := _label("CREMATORIUM: THROW TO SELL", 30, Color(1.0, 0.65, 0.4))
 	sign.position = Vector3(0.0, 2.0, -0.5)
 	sign.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
@@ -203,10 +237,15 @@ func _build() -> void:
 	# spanning the whole body would also block the opening BEHIND the grate, defeating the gaps
 	# the bars leave for a thrown item to reach FireZone through. Side wings, a back wall (set
 	# back past FireZone) and a lid; nothing covers the mouth's own footprint.
-	_furnace_solid(body, Vector3(0.3, 2.3, 1.3), Vector3(-0.65, 1.15, -0.9))    # west wing
-	_furnace_solid(body, Vector3(0.3, 2.3, 1.3), Vector3(0.65, 1.15, -0.9))     # east wing
-	_furnace_solid(body, Vector3(1.6, 2.3, 0.3), Vector3(0, 1.15, -1.4))        # back wall
-	_furnace_solid(body, Vector3(1.6, 0.45, 1.3), Vector3(0, 2.075, -0.9))      # lid
+	# HUB REDESIGN: the wings and back wall are built wide enough to fill most of the crematorium
+	# room's back wall, so the furnace reads as built into the room rather than a box standing in
+	# it, matched to the same (unchanged, 2.3 m) height as the visual brick above -- see that
+	# comment for why this stayed at the mouth's original height instead of reaching the ceiling.
+	# The mouth/grate/FireZone footprint above is untouched.
+	_furnace_solid(body, Vector3(1.3, wing_h, 1.3), Vector3(-1.15, wing_h * 0.5, -0.9))    # west wing
+	_furnace_solid(body, Vector3(1.3, wing_h, 1.3), Vector3(1.15, wing_h * 0.5, -0.9))     # east wing
+	_furnace_solid(body, Vector3(3.9, wing_h, 0.4), Vector3(0, wing_h * 0.5, -1.55))       # back wall
+	_furnace_solid(body, Vector3(1.6, 0.45, 1.3), Vector3(0, 2.075, -0.9))      # lid over the mouth
 
 	# FireZone: only sees world items (C.L_PICKUP). A body that reaches here got through the grate.
 	_fire_zone = Area3D.new()

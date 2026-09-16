@@ -3,8 +3,11 @@ extends Node
 ## of Game named "Economy", on every machine. Money itself lives on the game (`game.money`,
 ## `game.add_money()`); this node places the pharmacy and the furnace and shows things.
 ##
-## SWEEP 4A HOOK (pharmacy, chunk 3): gold bars, the sell bin and the shop van are gone. Buying is
-## the pharmacy window (placebo pills only, for now); selling is throwing loot into the furnace.
+## SWEEP 4A HOOK (pharmacy, chunk 3): gold bars, the sell bin and the shop van are gone. HUB
+## REDESIGN (2026-09-15): both are now real rooms off the lobby (scripts/level/entrance.gd);
+## buying is the order kiosk beside the pharmacy window (placebo pills only, for now, interact_id
+## "pharmacy_kiosk" -- the window itself is set dressing); selling is throwing loot into the
+## furnace.
 ##
 ## Where things go, first match wins:
 ##   level_info.safe_zone {pharmacy_rect, crematorium_rect}   the hospital's lobby: the rects
@@ -82,7 +85,7 @@ func money_visible_for(p: Node) -> bool:
 		return true
 	if p == null or not placed():
 		return false
-	if p.aim_id == "pharmacy":
+	if p.aim_id == "pharmacy_kiosk":
 		return true
 	for n in [pharmacy, furnace]:
 		if n != null and is_instance_valid(n) and (n as Node3D).global_position.distance_to(p.global_position) < NEAR_METRES:

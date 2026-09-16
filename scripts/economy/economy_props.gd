@@ -1,19 +1,23 @@
 extends StaticBody3D
-## SWEEP 4A HOOK (pharmacy, chunk 3): the outpatient pharmacy window. An interactable (docs/
-## CONTRACTS.md, "Interaction") with interact_id "pharmacy": a counter behind a steel grate, a
-## price board, and a wall delivery station beside it where bought pills thunk out of a
-## pneumatic tube a moment later. You never clearly see the pharmacist; a dark shape behind the
-## grate shifts now and then. No mechanic, no new Blender model: all primitives.
+## SWEEP 4A HOOK (pharmacy, chunk 3), HUB REDESIGN (2026-09-15): the outpatient pharmacy window,
+## now inside its own walled room (docs/CONTRACTS.md "Hospital", scripts/level/entrance.gd) with a
+## real order kiosk (pharmacy_kiosk.gd) next to it. The counter itself is pure set dressing: a
+## price board, a steel grate, and the Night Nurse (docs/CONTRACTS.md "The Night Nurse's model")
+## standing idle behind it -- see `_build_pharmacist` for why she replaced the old capsule
+## silhouette. Ordering is E on the kiosk, not on this counter any more.
 ##
 ## Local frame: origin on the floor, front (the side a player stands on) toward +Z.
 
 const ItemsDB := preload("res://scripts/items.gd")
+const KioskScript := preload("res://scripts/economy/pharmacy_kiosk.gd")
+const MonsterModelScript := preload("res://scripts/monsters/monster_model.gd")
 
 var game: Node = null
 var _price: Label3D
-var _shape_body: Node3D    # the faint pharmacist silhouette
+var _nurse: Node3D          # the idle Night Nurse model, pure set dressing behind the grate
+var _nurse_base_x := 0.0
 var _shape_t := 0.0
-var _shape_base_x := 0.0
+var kiosk: StaticBody3D = null
 
 ## Tube delivery: a queued {kind, count} list, each waiting DELIVER_SECONDS before it thunks out.
 const DELIVER_SECONDS := 1.6
@@ -38,11 +42,15 @@ func _game() -> Node:
 
 
 func _build() -> void:
-	add_to_group("interactable")
-	set_meta("interact_id", "pharmacy")
-	collision_layer = C.L_WORLD | C.L_INTERACT
+	# HUB REDESIGN: the counter is no longer itself interactable -- the kiosk beside it is the
+	# order point now (still collides like any wall/counter, C.L_WORLD, so nobody walks through it).
+	collision_layer = C.L_WORLD
 	collision_mask = 0
 	_build_window()
+	_build_pharmacist()
+	kiosk = KioskScript.create(game)
+	add_child(kiosk)
+	kiosk.position = Vector3(1.55, 0.0, 0.9)
 
 
 # ---------------------------------------------------------------------------
@@ -120,17 +128,6 @@ func _build_window() -> void:
 		_box(Vector3(0.02, 0.9, 0.02), Vector3(x, 1.6, 0.0), steel)
 	_box(Vector3(1.1, 0.03, 0.03), Vector3(0.0, 1.15, 0.0), steel)
 	_box(Vector3(1.1, 0.03, 0.03), Vector3(0.0, 2.05, 0.0), steel)
-	# A dim shape behind the grate: never clearly seen, just a suggestion someone is back there.
-	_shape_base_x = -0.15
-	_shape_body = MeshInstance3D.new()
-	var cap := CapsuleMesh.new()
-	cap.radius = 0.16
-	cap.height = 1.1
-	_shape_body.mesh = cap
-	var shadow_mat := _mat("silhouette", Color(0.03, 0.03, 0.04), 0.9)
-	_shape_body.material_override = shadow_mat
-	_shape_body.position = Vector3(_shape_base_x, 1.0, -0.55)
-	add_child(_shape_body)
 
 	# Price board and order terminal.
 	_box(Vector3(1.0, 0.4, 0.03), Vector3(0.0, 2.35, -0.02), board)
@@ -165,6 +162,26 @@ func _build_window() -> void:
 	_shape(Vector3(0.5, 1.4, 0.3), Vector3(1.35, 0.7, 0.05))
 
 
+## HUB REDESIGN: the pharmacist, standing idle behind the grate. Previously a plain capsule
+## silhouette; now the actual Night Nurse model (docs/CONTRACTS.md "The Night Nurse's model"),
+## reused purely as set dressing -- no Monster node, no brain, no AI, never watched, never a
+## threat. Chosen over the capsule for two reasons: it costs nothing extra (her asset and
+## materials are already warmed for the real encounters, `scripts/warmup.gd`) and it plants a
+## quiet, deniable foreshadowing beat ("was that her?") consistent with the design doc's
+## "you never clearly see the pharmacist" line, without adding any mechanic -- she just stands in
+## Idle, dimly lit, and the same drift/duck-out-of-view timing the old silhouette used still hides
+## her most of the time so she never reads as a real encounter.
+func _build_pharmacist() -> void:
+	_nurse_base_x = -0.15
+	_nurse = MonsterModelScript.new()
+	_nurse.name = "Pharmacist"
+	add_child(_nurse)
+	_nurse.setup("night_nurse")
+	# Her rig's front is -Z (docs/CONTRACTS.md); turn her to face the grate/the player's side.
+	_nurse.rotation_degrees.y = 180.0
+	_nurse.position = Vector3(_nurse_base_x, 0.0, -1.05)
+
+
 func _cyl(r: float, h: float, mat: Material, sides := 12) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
 	var c := CylinderMesh.new()
@@ -180,10 +197,11 @@ func _cyl(r: float, h: float, mat: Material, sides := 12) -> MeshInstance3D:
 
 func _process(delta: float) -> void:
 	_shape_t += delta
-	if _shape_body != null:
-		# A slow, small drift, like someone shifting their weight. Never a clear silhouette.
-		_shape_body.position.x = _shape_base_x + sin(_shape_t * 0.35) * 0.08
-		_shape_body.visible = sin(_shape_t * 0.19) > -0.7   # steps out of view now and then
+	if _nurse != null:
+		# A slow, small drift, like someone shifting their weight. Never a clear silhouette: she
+		# ducks out of view (behind the counter wall, out of the grate's sightline) now and then.
+		_nurse.position.x = _nurse_base_x + sin(_shape_t * 0.35) * 0.08
+		_nurse.visible = sin(_shape_t * 0.19) > -0.7
 	var g := _game()
 	if _price != null and g != null:
 		var text := "PLACEBO PILLS  $%d/10" % int(g.PILL_PRICE)
@@ -229,25 +247,3 @@ func _tick_delivery(delta: float) -> void:
 				it.value = 0
 	else:
 		_queue[0] = e
-
-
-# ---------------------------------------------------------------------------
-# interaction
-
-func interact_prompt(player) -> String:
-	var g := _game()
-	if g == null:
-		return ""
-	if int(g.money) < int(g.PILL_PRICE):
-		return "!Placebo pills: $%d (the team has $%d)" % [int(g.PILL_PRICE), int(g.money)]
-	return "Buy placebo pills ($%d)" % int(g.PILL_PRICE)
-
-
-func interact_hold() -> float:
-	return 0.0
-
-
-func interact(player) -> void:
-	var g := _game()
-	if g != null:
-		g.buy_pills(player)

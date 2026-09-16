@@ -27,6 +27,7 @@ const DoorScript := preload("res://scripts/doors/door.gd")  # DOORS HOOK
 const DoorModels := preload("res://scripts/doors/door_models.gd")  # DOORS HOOK
 const HospitalBuilderScript := preload("res://scripts/hospital_builder.gd")  # DOORS HOOK
 const HumanModelScript := preload("res://scripts/human/human_model.gd")  # HUMAN HOOK
+const TerminalModelScript := preload("res://scripts/database/terminal_model.gd")  # HUB REDESIGN
 
 
 ## Run once. Safe to call again; later calls return immediately.
@@ -68,6 +69,12 @@ static func run(game: Node) -> void:
 	EconomyScript.warm(shelf)
 	AimHighlight.warm(shelf)   # AFFORDANCE HOOK: the aim-highlight rim shader (scripts/aim_highlight.gd)
 	OrScreenScript.warm(shelf)  # ORSCREEN HOOK: the wall monitor's glass shader and viewport
+	# HUB REDESIGN: the database terminal's bigger desk, and (the more expensive part) its live
+	# camera-mirror SubViewport and material.
+	var term: Node3D = TerminalModelScript.make_terminal()
+	shelf.add_child(term)
+	term.position = Vector3(x, -0.9, 0.5)
+	x += 1.4
 	# SWEEP 3 HOOK (combat): the syringe the jab draws (its glass is alpha-blended).
 	var syringe: Node3D = preload("res://scripts/combat/combat.gd").make_syringe()
 	shelf.add_child(syringe)
