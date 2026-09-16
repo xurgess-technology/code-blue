@@ -299,13 +299,39 @@ func _run_solo() -> void:
 	me.rotation.y = me.bot_yaw
 	me.head.rotation.x = me.bot_pitch
 	me._pitch = me.bot_pitch
-	await _frames(3)
 	game.drop_selected(me, 1.0)
-	# not-holding fires the instant the throw releases; the sale only lands a moment later once
-	# the item has actually flown into the furnace's FireZone (same fix as inventorytest.gd,
-	# looptest.gd and nettest.gd's furnace checks).
-	await _until(func(): return game.money != money_before + 1000, 5.0)
-	_check(not me.holding("defibrillator") and game.money == money_before + 1000 + value, "the dev room's furnace burns the defibrillator for $%d" % value)
+	# A charged throw can miss the grate (by design -- "missed throws bounce off the frame"),
+	# same as a real player's; if it bounces back onto the floor, pick it up and throw again
+	# rather than treating one miss as fatal (same fix as tools/nettest.gd's economy scenario).
+	# not-holding fires the instant the throw releases, but the sale only lands a moment later
+	# once the item has actually flown into the furnace's FireZone, so wait for the money itself.
+	var sold := false
+	for _attempt in 8:
+		if game.money != money_before + 1000:
+			sold = true
+			break
+		if not me.holding("defibrillator"):
+			var it_id := -1
+			for it in game.world_items.values():
+				if it.kind == "defibrillator":
+					it_id = it.item_id
+					break
+			if it_id >= 0:
+				me.bot_aim_id = "it_%d" % it_id
+				await _frames(3)
+				me.bot_press += 1
+				await _frames(4)
+				me.bot_aim_id = ""
+				if me.holding("defibrillator"):
+					for i in me.slots.size():
+						if String(me.slots[i].get("kind", "")) == "defibrillator":
+							me.selected = i
+							break
+					game.drop_selected(me, 1.0)
+		await _frames(6)
+	if not sold:
+		sold = await _until(func(): return game.money != money_before + 1000, 3.0)
+	_check(sold and game.money == money_before + 1000 + value, "the dev room's furnace burns the defibrillator for $%d" % value)
 	var pharm: Node3D = game.economy.pharmacy
 	_stand(pharm.global_position + pharm.global_basis.z * 1.3, 0.0)
 	me.bot_aim_id = "pharmacy"

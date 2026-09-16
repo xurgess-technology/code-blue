@@ -1174,3 +1174,19 @@ Players, Bob, the paramedics and the downed player on the table use the Blender 
   `scripts/dev/dev_dispenser.gd`), debug gizmos (`scripts/patients/patient_kit.gd`'s axis labels),
   or player name tags (`scripts/player.gd`), none of which are the "bright out of place room/prop
   label" the affordance sweep was about.
+
+## Gameplay tuning (2026-09-15/16, user follow-up): a furnace-throw test flake, again
+
+- **`tools/devtest.gd`'s furnace check (throwing a defibrillator for $408) was flaky** even after
+  the pharmacy chunk's grate-widening fix (0.45m spacing) and the money-timing fix already applied
+  elsewhere -- a charged throw can still, occasionally, physically miss the grate by design ("missed
+  throws bounce off the frame"). This is the same underlying behavior already worked around in
+  `inventorytest.gd`, `looptest.gd` and `nettest.gd`'s furnace checks, just not yet in `devtest.gd`.
+  Added the same retry: if a throw misses and the item bounces back nearby, pick it up and throw
+  again (up to 8 attempts, then one more `_until` wait) instead of treating one miss as fatal.
+  Reproduced the original flake locally, then ran the fixed check clean twice in a row.
+- With five now-independent places carrying a near-identical "wait for money, retry on a miss"
+  workaround (`inventorytest.gd`, `looptest.gd`, `nettest.gd`, `devtest.gd`, and the furnace's own
+  grate width in `furnace.gd`), the actual mechanic might be worth a second look for tightening the
+  throw's success rate directly (a slightly wider grate again, or less random tumble on a thrown
+  item) rather than continuing to paper over misses in every test that throws something.
