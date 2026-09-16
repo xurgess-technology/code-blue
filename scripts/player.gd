@@ -74,13 +74,16 @@ var scan_holding: bool = false
 ## crouch-dive"). Deliberately NOT replicated as its own field: it forces `crouching` true for its
 ## duration (through the same _apply_crouch() capsule-resize / low-ceiling-safe path everyone
 ## already uses), and `crouching` already replicates (bit 16 / "cr"), so every other machine sees
-## the same flattened posture and torso-lean pose automatically. Human-only; see the hook comment
-## on the trigger site in _local_step for why bots don't get it.
+## the same flattened posture and torso-lean pose automatically. Human players trigger it with the
+## crouch key itself (edge-detected via _crouch_prev); bots trigger it with bot_dive, a one-shot
+## bump counter edge-detected via _bot_dive_seen, same pattern as bot_jump/_bot_jump_seen.
 var diving: bool = false
 var _dive_t: float = 0.0
 var _dive_cooldown: float = 0.0
 var _dive_dir: Vector3 = Vector3.ZERO
 var _crouch_prev: bool = false
+var _bot_dive_seen: int = 0
+var _bot_dive_fire: bool = false
 const DIVE_DURATION := 0.4
 const DIVE_SPEED_MULT := 1.45
 const DIVE_COOLDOWN := 2.5
@@ -130,6 +133,10 @@ var bot_ability_slot: int = 0
 var bot_crouch: bool = false
 var bot_jump: int = 0
 var bot_scan: bool = false
+## SPRINT-DIVE HOOK: bump to fire the sprint+crouch-dive once, same edge-triggered pattern as
+## bot_jump/_bot_jump_seen just above (a bot script sprinting forward bumps this instead of
+## toggling bot_crouch, since bot_crouch alone still means an ordinary hold-to-crouch).
+var bot_dive: int = 0
 
 ## DEV HOOK (scripts/dev): a dev room bot or target dummy. The host simulates it like a local
 ## player through the bot_* seam; everyone else sees it like a remote player.
@@ -549,28 +556,36 @@ func _local_step(delta: float) -> void:
 			invuln = 9.0
 		if bot_press != _bot_press_seen:
 			_bot_press_seen = bot_press
-			interact_count += 1
+			# SPRINT-DIVE HOOK: no interacting while diving, same as the human E-press gates below.
+			if not diving:
+				interact_count += 1
 		# SWEEP 3 HOOK: scripted item use and brain ability. HANDS HOOK: a use winds up first.
+		# SPRINT-DIVE HOOK: no using/shoving/ability-firing while diving, same as the human paths.
 		if bot_use != _bot_use_seen:
 			_bot_use_seen = bot_use
-			if g != null and g.combat != null and g.combat.is_usable(selected_stack().kind):
+			if not diving and g != null and g.combat != null and g.combat.is_usable(selected_stack().kind):
 				g.combat.local_try_use(self)
 		# HANDS HOOK: bot_charge true holds the shove, false lets it go.
 		if bot_charge != _bot_charging and g != null and g.combat != null:
 			_bot_charging = bot_charge
-			if bot_charge:
+			if bot_charge and not diving:
 				g.combat.local_shove_begin(self)
 			else:
 				g.combat.local_shove_release(self)
 		if bot_ability != _bot_ability_seen:
 			_bot_ability_seen = bot_ability
-			var bi: int = clampi(bot_ability_slot, 0, ability_slot_press.size() - 1)
-			ability_slot_press[bi] = int(ability_slot_press[bi]) + 1
+			if not diving:
+				var bi: int = clampi(bot_ability_slot, 0, ability_slot_press.size() - 1)
+				ability_slot_press[bi] = int(ability_slot_press[bi]) + 1
 		_want_crouch = bot_crouch
 		scan_holding = bot_scan and not hive_view and not downed and not diving
 		if bot_jump != _bot_jump_seen:
 			_bot_jump_seen = bot_jump
 			_bot_jump_fire = true
+		# SPRINT-DIVE HOOK: same edge-triggered bump pattern as bot_jump just above.
+		if bot_dive != _bot_dive_seen:
+			_bot_dive_seen = bot_dive
+			_bot_dive_fire = true
 	elif can_move:
 		input_dir = Input.get_vector("move_left", "move_right", "move_forward", "move_back")
 		wants_interact = Input.is_action_pressed("interact")
@@ -644,13 +659,14 @@ func _local_step(delta: float) -> void:
 	# happens to overlap a later sprint) while sprinting and moving roughly forward triggers a short
 	# diving lunge instead of dropping straight into a normal crouch-walk. Checked against last
 	# frame's `sprinting`/`crouching` (both are only reassigned further down), so this is the exact
-	# instant the crouch key transitions while still mid-sprint. Human-only: bots go through the
-	# separate bot_active branch above which never touches `_crouch_prev`/`diving`, so a bot's own
-	# crouch input can never edge-trigger this (kept out deliberately to avoid teaching bot scripts
-	# a burst-speed exploit path; nothing about the move needs bot support to be useful/testable).
+	# instant the crouch key transitions while still mid-sprint. A bot fires the same move with a
+	# dedicated one-shot bump (bot_dive, edge-detected into _bot_dive_fire above) rather than the
+	# continuous bot_crouch, which still means an ordinary hold-to-crouch for bot scripts.
 	var crouch_pressed: bool = _want_crouch and not _crouch_prev
 	_crouch_prev = _want_crouch
-	if crouch_pressed and not bot_active and sprinting and not crouching and not diving \
+	var dive_fire: bool = (crouch_pressed and not bot_active) or (bot_active and _bot_dive_fire)
+	_bot_dive_fire = false
+	if dive_fire and sprinting and not crouching and not diving \
 			and _dive_cooldown <= 0.0 and not downed and not winding and input_dir.y < -0.5:
 		diving = true
 		_dive_t = 0.0

@@ -1372,3 +1372,97 @@ against colourblind palettes or at ultra-low resolutions.
   not investigated further (out of scope here, see that test's own failures for what to reproduce);
   multiplayer with more than one real client was not tested (this is local-only per the file's own
   doc comment, so nothing changes there, but it also was not re-verified with `nettest.gd`).
+
+## Sprint + crouch-dive (2026-09-16)
+
+Added a "sprint + crouch-dive" move to `scripts/player.gd`'s `_local_step`: pressing crouch while
+sprinting and moving roughly forward (`input_dir.y < -0.5`, the same forward-input threshold the
+rest of the file's movement code implies) fires a short diving lunge instead of dropping straight
+into an ordinary crouch-walk. Client-owned local movement throughout, same as the rest of
+`_local_step` (each machine simulates its own body from its own input; the host only sees the
+20 Hz position/rotation snapshot, same as any other walk).
+
+- **Numbers chosen:** an instant burst to `C.SPRINT_SPEED * DIVE_SPEED_MULT` (5.6 * 1.45 = 8.12
+  m/s, comfortably faster than a plain sprint but not a teleport), linearly decaying back down to
+  `C.CROUCH_SPEED` (1.8 m/s) over `DIVE_DURATION` = 0.4 s, then normal crouch/sprint movement
+  resumes. `DIVE_COOLDOWN` = 2.5 s prevents chaining dives into a sustained speed boost. All three
+  are new consts on `Player`, picked by feel within the ranges the brief suggested (1.3-1.6x sprint,
+  0.3-0.5s decay, "a couple seconds" cooldown) and confirmed by the burst/decay/cooldown checks
+  below, not derived from any existing constant.
+- **Capsule reuses the existing crouch path, doesn't fork it.** `_apply_crouch()`'s `want_down` is
+  now `(_want_crouch or diving) and not downed and carried_by == 0 and not on_table`, so `diving`
+  forces the capsule to `C.CROUCH_HEIGHT` through the exact same resize call (and the exact same
+  "refuse to stand under a low ceiling" raycast) an ordinary crouch already uses, even if the crouch
+  key is released mid-dive. The instant `diving` clears (key released or `DIVE_DURATION` elapsed),
+  that same raycast re-runs on the very next `_apply_crouch()` call and keeps the player crouched if
+  something is still overhead -- there's no separate "was this a dive" bit to fall out of sync.
+- **Not replicated as a new network field.** `diving` forces `crouching` true, and `crouching`
+  already replicates (report bit 16 / `report_full`'s `"cr"`), so the flattened capsule height, the
+  third-person crouch torso-lean (`_update_down_pose`'s `body_hands.poser.crouch` blend) and the
+  lowered eye height all already show up on every other machine for free, the same way an ordinary
+  crouch does. A remote peer doesn't need to know *why* someone is crouched, only that they are.
+- **Blocked during the dive window:** interacting (E), the shove/use left-mouse actions, starting a
+  charged drop, and Alt+1..4 ability slots -- mirrors how `downed`/`winding`/`dragging_monster`
+  already gate those same call sites, just with an added `not diving`. Switching the selected item
+  slot (plain 1..4 / scroll) was deliberately left allowed, since it's not "interacting" and there's
+  no reason to block it. Jumping is already blocked for free (`want_jump` already requires
+  `not crouching`, and diving forces `crouching`). Footsteps are already silenced for free too
+  (`moving and is_on_floor() and not downed and not crouching` already gates both `_local_step`'s
+  and `_remote_step`'s footstep audio, and diving forces `crouching`).
+- **Bot support: added, via a one-shot bump counter (`bot_dive`), not the continuous `bot_crouch`.**
+  The brief called this optional; went with "add it" because (a) it costs little -- a single
+  edge-detected bump, `_bot_dive_seen`/`_bot_dive_fire`, exactly mirroring the existing
+  `bot_jump`/`_bot_jump_seen`/`_bot_jump_fire` pattern a few lines above it -- and (b) it made real
+  headless verification possible at all (`tools/controlstest.gd`, see below) instead of only being
+  checkable by a human playtester, since bots can't type. `bot_crouch` alone still means an ordinary
+  hold-to-crouch for bot scripts, matching how `bot_jump` firing a jump doesn't change what holding
+  a movement key does; a human triggers the same move by physically pressing crouch (edge-detected
+  via `_crouch_prev`) while sprinting forward, no separate input action added.
+- **Verified:**
+  - `godot --headless --path . --import` re-imported clean.
+  - Added `_sprint_dive()` to `tools/controlstest.gd` (not one of the six mandated regression
+    scenes, but the existing home for crouch/jump checks, so extended rather than duplicated):
+    confirms `bot_dive` enters `diving`/`crouching` the instant it fires, the burst speed clears
+    `C.SPRINT_SPEED * 1.15`, E does nothing while diving, speed measurably decays partway through
+    the window, the dive ends on its own, an immediate second dive is blocked by the cooldown and a
+    later one fires once the cooldown clears, and -- spawning a real `StaticBody3D` ceiling above
+    the player mid-dive (elongated along the travel direction so it's only ever encountered while
+    already crouched, never shoved into a standing capsule) -- a dive that ends under a low ceiling
+    stays crouched exactly like letting go of an ordinary crouch there already does, and standing
+    back up works again once the ceiling is removed. 14 of 14 new checks pass
+    (`godot --headless --fixed-fps 60 --path . tools/controlstest.tscn`); found and fixed a real
+    gating bug along the way (the bot-input path's `bot_press`/`bot_use`/`bot_charge`/`bot_ability`
+    branches weren't checking `not diving` at all -- only the keyboard paths were -- so a bot could
+    still interact/use/shove/ability mid-dive; the human paths were correct from the start).
+  - Ran the full mandated regression suite: `tools/inventorytest.tscn` (92/92), `tools/devtest.tscn`
+    (0 failures), `tools/databasetest.tscn` (12/12), `tools/looptest.tscn` (0 failures),
+    `tools/settingstest.tscn` (97/97), and `tools/carrycamtest.tscn` (0 failures except the same 3
+    pre-existing wall-pull-in failures documented above under "Default over-the-shoulder camera" --
+    reproduced identically, nothing new). All unchanged from before this branch's work.
+  - Real windowed screenshots (`tools/gameshot.tscn`, not `--headless`, which returns a null
+    viewport texture): added `_pose_sprint_dive_prep`/`_pose_sprint_dive` (shots
+    `42_sprint_dive_before` / `43_sprint_dive_mid`), a teammate bot sprinting then diving, watched
+    by the local bot from a few metres back. First attempt used the same entrance-corridor spawn
+    `_pose_human_gait` uses (`_open_ground()`), but that nook turned out too short: the dive's burst
+    velocity reached a wall/door within a few frames and the collision visibly killed the very
+    motion the shot was supposed to show. Factored `_pose_corridor`'s "longest clear sightline"
+    raycast search out into a reusable `_longest_sightline()` and used that instead, which finds a
+    real long ward corridor. Actually looked at the resulting screenshots: the "before" shot shows
+    the teammate mid-stride, upright; the "mid" shot (9 frames / ~0.15s into the dive) shows her
+    visibly leaning forward and lowered -- a clear posture change, not a teleport or a glitch, and
+    debug prints during iteration (since removed) confirmed the underlying state matched what the
+    picture shows (`sprinting=true` before the bump; `diving=true crouching=true` after).
+- **Known gaps:** the dive's direction is locked to the heading at the moment it fires
+  (`_dive_dir`, read once) rather than following the player's rotation for the rest of the window,
+  so mouse-turning mid-dive doesn't curve it -- this was a deliberate design choice ("keeps its
+  launch heading fixed" per the code comment), not a bug, but worth a second look if a playtest
+  wants steerable dives. `tools/controlstest.gd`'s pre-existing scanner checks
+  (`_scanner()`, holding R aimed at a Walk-In) fail on this branch (`holding R aimed at it builds
+  progress`, `looking away resets progress`, `a full hold marks the species scanned`) -- confirmed
+  unrelated to this work (nothing in this change touches `_update_scan_progress` or the scanner
+  path, and `tools/databasetest.tscn`'s own scanner-adjacent checks pass clean); most likely the
+  same "aim from body position instead of the real camera" gap the "Default over-the-shoulder
+  camera" entry above already flagged for `databasetest.gd`, just not yet fixed in
+  `controlstest.gd`'s older, unmigrated scan test. Not investigated further here since
+  `tools/controlstest.tscn` isn't one of this task's mandated regression scenes and nothing in this
+  diff touches scanning.
