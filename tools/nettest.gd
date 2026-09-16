@@ -1879,12 +1879,13 @@ func _throw_at(pos: Vector3) -> void:
 	var stand: Vector3 = pos + Vector3(0.0, 0.0, 1.1)
 	if Vector2(stand.x - me.global_position.x, stand.z - me.global_position.z).length() > 0.3:
 		me.teleport(_stand_spot(stand))
-	var to := pos - me.global_position
+	var aim: Vector3 = pos + Vector3.UP * 1.0   # the furnace fire zone's height, not the floor
+	var to := aim - me.head.global_position
 	me.bot_yaw = atan2(-to.x, -to.z)
 	me._yaw = me.bot_yaw
 	me.rotation.y = me.bot_yaw
-	me.head.rotation.x = 0.0
-	me._pitch = 0.0
+	me.head.rotation.x = clampf(atan2(to.y, Vector2(to.x, to.z).length()), -1.2, 1.2)
+	me._pitch = me.head.rotation.x
 	me.bot_move = Vector2.ZERO
 	if Time.get_ticks_msec() >= _press_at_ms:
 		me.drop_charge = 1.0

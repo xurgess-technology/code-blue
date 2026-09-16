@@ -968,3 +968,18 @@ Players, Bob, the paramedics and the downed player on the table use the Blender 
   `inventorytest.gd`, `mapcheck.gd`, `devtest.gd`, `looptest.gd` and one `playtest --god` were
   actually run this pass per the sweep's token budget; `nettest`'s `economy` scenario, `braintest`,
   `brainshot` and `inventoryshot` were updated by inspection only and not executed.
+- **Follow-up (still chunk 3): the crematorium was unreachable on some seeds.**
+  `economy.gd`'s `_rect_spot()` finds the furnace/pharmacy's floor height by casting a ray down
+  from `probe.y + 1.5`; with `probe.y = 2.0` that ray started at world y=3.5, which is *above* a
+  normal lobby ceiling (`C.WALL_H` = 3.0) wherever the reserved rect's centre has full ceiling
+  coverage. The ray hit the ceiling's underside first and reported that as "the floor," so the
+  furnace was actually built a full storey up, floating on top of the lobby ceiling with nothing
+  able to reach it -- `looptest.gd`'s bot-driven furnace throw timed out every run (0/90s) even
+  though `inventorytest.gd`'s manual furnace check passed, because that test's own `teleport()`
+  put the player directly at the (wrong, elevated) furnace position rather than walking there from
+  the real floor. Fixed by lowering the probe to y=0.3 (`probe.y + 1.5` stays under any normal
+  ceiling). Also widened the grate from 6 bars/~0.13 m gaps to 3 bars/~0.37 m gaps
+  (`furnace.gd`) -- the narrow gaps meant a few centimetres of aim/position drift, well within
+  normal player variance, was enough to clip a bar instead of scoring; this was a real usability
+  gap independent of the placement bug. The lobby-furniture overlap noted above is unrelated and
+  still open.

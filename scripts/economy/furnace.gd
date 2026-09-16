@@ -105,17 +105,21 @@ func _build() -> void:
 	var urn := _mat("urn", Color(0.35, 0.32, 0.24), 0.55, 0.2)
 	var cart := _mat("cart", Color(0.3, 0.3, 0.32), 0.45, 0.5)
 
-	# The furnace body: a brick block with an open steel door and a dark mouth.
-	_box(Vector3(1.6, 1.9, 1.3), Vector3(0, 0.95, -0.9), brick)
-	_box(Vector3(1.0, 1.2, 0.05), Vector3(-0.75, 0.75, -0.3), steel, Vector3(0, -40, 0))   # open door, swung out
-	_box(Vector3(1.0, 1.2, 0.9), Vector3(0.0, 0.75, -0.4), soot)   # dark mouth interior
+	# The furnace body: a brick block with an open steel door and a dark mouth. The mouth runs
+	# tall (about knee to well over head height) so a throw released around chest/eye height,
+	# arcing up a little on a full charge, still clears the grate instead of sailing over it.
+	_box(Vector3(1.6, 2.3, 1.3), Vector3(0, 1.15, -0.9), brick)
+	_box(Vector3(1.0, 1.7, 0.05), Vector3(-0.75, 1.0, -0.3), steel, Vector3(0, -40, 0))   # open door, swung out
+	_box(Vector3(1.0, 1.7, 0.9), Vector3(0.0, 1.0, -0.4), soot)   # dark mouth interior
 	# Steel grate across the mouth: bars close enough nobody (and no bulky item) fits between them,
-	# with gaps a thrown pill or a small stack of loot can sail through.
-	for i in 6:
-		var x := -0.4 + i * 0.16
-		_box(Vector3(0.03, 1.05, 0.03), Vector3(x, 0.75, -0.02), steel)
+	# with gaps generous enough that a reasonably-aimed thrown pill or stack of loot reliably sails
+	# through (a narrower grate looked right but meant a few centimetres of throw drift -- from a
+	# walked-up player, not just a test bot -- was enough to clip a bar instead of scoring).
+	for i in 3:
+		var x := -0.4 + i * 0.4
+		_box(Vector3(0.03, 1.55, 0.03), Vector3(x, 1.0, -0.02), steel)
 	_box(Vector3(0.9, 0.03, 0.03), Vector3(0.0, 0.24, -0.02), steel)
-	_box(Vector3(0.9, 0.03, 0.03), Vector3(0.0, 1.26, -0.02), steel)
+	_box(Vector3(0.9, 0.03, 0.03), Vector3(0.0, 1.76, -0.02), steel)
 
 	# A handful of emissive cards for the fire glow, cheap and billboard-ish (perfprobe target).
 	for i in 4:
@@ -124,7 +128,7 @@ func _build() -> void:
 		pm.size = Vector2(0.5 - i * 0.06, 0.55 - i * 0.06)
 		card.mesh = pm
 		card.material_override = fire if i % 2 == 0 else fire2
-		card.position = Vector3((i - 1.5) * 0.14, 0.35 + i * 0.03, -0.55 + i * 0.05)
+		card.position = Vector3((i - 1.5) * 0.14, 0.75 + i * 0.03, -0.55 + i * 0.05)
 		card.rotation_degrees = Vector3(0, 25.0 * i, 0)
 		add_child(card)
 		_flame_cards.append(card)
@@ -135,7 +139,7 @@ func _build() -> void:
 	fire_light.omni_range = 3.2
 	fire_light.shadow_enabled = false
 	fire_light.light_volumetric_fog_energy = 0.2
-	fire_light.position = Vector3(0.0, 0.55, -0.5)
+	fire_light.position = Vector3(0.0, 0.95, -0.5)
 	fire_light.set_meta("mode", LightFlickerScript.MODE_FLICKER)
 	fire_light.set_meta("seed", 4177)
 	fire_light.set_meta("base_energy", 1.4)
@@ -174,7 +178,7 @@ func _build() -> void:
 	add_child(sign)
 
 	_amount_label = _label("", 40, Color(0.55, 1.0, 0.6))
-	_amount_label.position = Vector3(0.0, 1.4, -0.4)
+	_amount_label.position = Vector3(0.0, 1.8, -0.4)
 	_amount_label.visible = false
 	add_child(_amount_label)
 
@@ -184,15 +188,22 @@ func _build() -> void:
 	body.collision_layer = C.L_WORLD
 	body.collision_mask = 0
 	add_child(body)
-	for i in 6:
-		var x := -0.4 + i * 0.16
+	for i in 3:
+		var x := -0.4 + i * 0.4
 		var cs := CollisionShape3D.new()
 		var bs := BoxShape3D.new()
-		bs.size = Vector3(0.05, 1.1, 0.05)
+		bs.size = Vector3(0.05, 1.6, 0.05)
 		cs.shape = bs
-		cs.position = Vector3(x, 0.75, -0.02)
+		cs.position = Vector3(x, 1.0, -0.02)
 		body.add_child(cs)
-	_furnace_solid(body, Vector3(1.6, 1.9, 1.3), Vector3(0, 0.95, -0.9))
+	# The brick shell, as a frame around the mouth rather than one solid block: a solid block
+	# spanning the whole body would also block the opening BEHIND the grate, defeating the gaps
+	# the bars leave for a thrown item to reach FireZone through. Side wings, a back wall (set
+	# back past FireZone) and a lid; nothing covers the mouth's own footprint.
+	_furnace_solid(body, Vector3(0.3, 2.3, 1.3), Vector3(-0.65, 1.15, -0.9))    # west wing
+	_furnace_solid(body, Vector3(0.3, 2.3, 1.3), Vector3(0.65, 1.15, -0.9))     # east wing
+	_furnace_solid(body, Vector3(1.6, 2.3, 0.3), Vector3(0, 1.15, -1.4))        # back wall
+	_furnace_solid(body, Vector3(1.6, 0.45, 1.3), Vector3(0, 2.075, -0.9))      # lid
 
 	# FireZone: only sees world items (C.L_PICKUP). A body that reaches here got through the grate.
 	_fire_zone = Area3D.new()
@@ -203,9 +214,9 @@ func _build() -> void:
 	_fire_zone.monitorable = false
 	var fz_shape := CollisionShape3D.new()
 	var fz_box := BoxShape3D.new()
-	fz_box.size = Vector3(0.85, 1.0, 0.7)
+	fz_box.size = Vector3(0.85, 1.7, 0.8)
 	fz_shape.shape = fz_box
-	fz_shape.position = Vector3(0.0, 0.7, -0.55)
+	fz_shape.position = Vector3(0.0, 1.0, -0.5)
 	_fire_zone.add_child(fz_shape)
 	add_child(_fire_zone)
 	_fire_zone.body_entered.connect(_on_body_entered)

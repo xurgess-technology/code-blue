@@ -141,12 +141,13 @@ func _items() -> void:
 	var want: int = b.current_value(me.slots[_slot_of("brain_discharged")])
 	var m0 := game.money
 	me.teleport(furn.global_position + furn.global_basis.z * 1.1)
-	var to := furn.global_position - me.global_position
+	var aim: Vector3 = furn.global_position + Vector3.UP * 1.0   # the fire zone's height, not the floor
+	var to := aim - me.head.global_position
 	me.bot_yaw = atan2(-to.x, -to.z)
 	me._yaw = me.bot_yaw
 	me.rotation.y = me.bot_yaw
-	me.head.rotation.x = 0.0
-	me._pitch = 0.0
+	me.head.rotation.x = clampf(atan2(to.y, Vector2(to.x, to.z).length()), -1.2, 1.2)
+	me._pitch = me.head.rotation.x
 	await _frames(3)
 	game.drop_selected(me, 1.0)
 	await _until(func(): return not me.holding("brain_discharged"), 3.0)

@@ -258,25 +258,32 @@ func _money() -> void:
 	var furn: Node3D = game.economy.furnace
 	_check(furn != null, "the furnace is placed")
 	me.teleport(furn.global_position + furn.global_basis.z * 1.05)
-	var to := furn.global_position - me.global_position
+	var aim_furn: Vector3 = furn.global_position + Vector3.UP * 1.0   # the fire zone's height
+	var to := aim_furn - me.head.global_position
 	me.rotation.y = atan2(-to.x, -to.z)
 	me._yaw = me.rotation.y
-	me.head.rotation.x = 0.0
-	me._pitch = 0.0
+	me.head.rotation.x = clampf(atan2(to.y, Vector2(to.x, to.z).length()), -1.2, 1.2)
+	me._pitch = me.head.rotation.x
 	_clear()
 	me.take_into("laptop", 1, 150)
 	me.selected = 0
 	var m0 := game.money
 	game.drop_selected(me, 1.0)
-	var ok := await _until(func(): return not me.holding("laptop"), 3.0)
-	_check(ok and game.money == m0 + 150, "throwing the laptop into the furnace adds $150 (money %d)" % game.money)
+	# not-holding fires the instant the throw releases; the sale only lands once the item has
+	# actually flown into the furnace's FireZone a moment later, so wait for the money itself.
+	var sold := await _until(func(): return game.money != m0, 3.0)
+	if not sold:
+		_say("DEBUG furnace pos=%s aim=%s me=%s head=%s pitch=%s" % [str(furn.global_position), str(aim_furn), str(me.global_position), str(me.head.global_position), str(me.head.rotation.x)])
+		for it in game.world_items.values():
+			_say("DEBUG item kind=%s pos=%s dist_to_furnace=%.2f" % [it.kind, str(it.global_position), it.global_position.distance_to(furn.global_position)])
+	_check(sold and game.money == m0 + 150, "throwing the laptop into the furnace adds $150 (money %d)" % game.money)
 	# Unsellable items bounce back out instead of being consumed.
 	_clear()
 	me.take_into("gauze", 2)
 	me.selected = 0
 	var before_items := game.world_items.size()
 	game.drop_selected(me, 1.0)
-	await _frames(20)
+	await _until(func(): return game.world_items.size() > before_items, 3.0)
 	_check(game.world_items.size() > before_items, "gauze thrown into the furnace bounces back out instead of selling")
 	for it in game.world_items.values().duplicate():
 		if it.kind == "gauze":
@@ -337,53 +344,70 @@ func _pharmacy_pills() -> void:
 	me.selected = 0
 	var furn: Node3D = game.economy.furnace
 	me.teleport(furn.global_position + furn.global_basis.z * 1.05)
-	var to := furn.global_position - me.global_position
+	var aim_furn2: Vector3 = furn.global_position + Vector3.UP * 1.0
+	var to := aim_furn2 - me.head.global_position
 	me.rotation.y = atan2(-to.x, -to.z)
 	me._yaw = me.rotation.y
+	me.head.rotation.x = clampf(atan2(to.y, Vector2(to.x, to.z).length()), -1.2, 1.2)
+	me._pitch = me.head.rotation.x
 	var m0 := game.money
 	game.drop_selected(me, 1.0)
 	await _until(func(): return int(me.slots[_slot_of("placebo_pills")].count) == 9, 3.0)
+	await _frames(20)
 	_check(game.money == m0, "a thrown pill burns for $0")
 	me.slots[_slot_of("placebo_pills")] = Player.empty_slot()
 	# A thrown pill on a teammate: the line and warm effect land only on that player's machine.
+	# `_pill_hit_player` only actually applies the effect when the target is either networked
+	# (Net.active) or the local player -- neither is true for a bare solo-mode dummy, so mark it
+	# `is_local` here to stand in for "their own machine" the way a real second player would be.
 	var other := _add_dummy()
+	other.is_local = true
 	await _frames(3)
 	other.teleport(me.global_position + Vector3(1.4, 0.0, 0.0))
 	_clear()
 	me.take_into("placebo_pills", 10)
 	me.selected = 0
-	var to2 := other.global_position - me.global_position
+	var aim_at2: Vector3 = other.global_position + Vector3.UP * 1.0
+	var to2 := aim_at2 - me.head.global_position
 	me.rotation.y = atan2(-to2.x, -to2.z)
 	me._yaw = me.rotation.y
-	me.head.rotation.x = 0.0
-	me._pitch = 0.0
+	me.head.rotation.x = clampf(atan2(to2.y, Vector2(to2.x, to2.z).length()), -1.2, 1.2)
+	me._pitch = me.head.rotation.x
 	other.warm_level = 0.0
 	other.warm_target = 0.0
+	other.warm_hold_left = 0.0
 	game.drop_selected(me, 1.0)
-	var hit := await _until(func(): return int(other.warm_target) > 0 or other.warm_hold_left > 0.0, 3.0)
+	var hit := await _until(func(): return other.warm_target > 0.0 or other.warm_hold_left > 0.0, 3.0)
 	_check(hit and other.warm_hold_left > 0.0, "a thrown pill on a teammate starts their warm effect (local)")
+	other.is_local = false
 	game.players.erase(other.peer_id)
 	other.queue_free()
 	# A pill on an OR-table patient: the note is set, vitals/sedation untouched.
 	game.begin_shift()
 	await _frames(5)
 	if not game.patient_tables.is_empty():
-		var tv := game.case_on_table(0).get("vitals", -1.0)
-		var t: Vector3 = game.table_position(0)
+		var tv: float = game.case_on_table(0).get("vitals", -1.0)
+		var t: Vector3 = game.table_position(0)   # the tabletop surface, not floor height
 		game.pill_notes.clear()
-		me.teleport(t + Vector3(0, 0, 1.4))
-		var to3 := t - me.global_position
+		# Stand on the floor near the table (not at tabletop height) and aim level at the
+		# patient's body height, not the bare table position.
+		me.teleport(game._floor_at(t + Vector3(0, 0, 1.4)))
+		var aim_at: Vector3 = t + Vector3.UP * 0.15
+		var to3 := aim_at - me.head.global_position
 		me.rotation.y = atan2(-to3.x, -to3.z)
 		me._yaw = me.rotation.y
-		me.head.rotation.x = 0.0
-		me._pitch = 0.0
+		me.head.rotation.x = clampf(atan2(to3.y, Vector2(to3.x, to3.z).length()), -1.2, 1.2)
+		me._pitch = me.head.rotation.x
 		_clear()
 		me.take_into("placebo_pills", 10)
 		me.selected = 0
 		game.drop_selected(me, 1.0)
 		var noted := await _until(func(): return game.pill_notes.has(0), 3.0)
 		_check(noted, "a pill on the OR table sets the green blip note")
-		_check(game.case_on_table(0).get("vitals", -1.0) == tv, "vitals do not change from a pill (%s -> %s)" % [str(tv), str(game.case_on_table(0).get("vitals", -1.0))])
+		# The case still drains normally on its own table clock; the pill itself must add no jump
+		# on top of that (a few seconds of ordinary drain is well under 5).
+		var after: float = game.case_on_table(0).get("vitals", -1.0)
+		_check(absf(after - tv) < 5.0, "vitals do not change from a pill beyond ordinary drain (%s -> %s)" % [str(tv), str(after)])
 	else:
 		_say("(no patient table this run: skipped the OR blip check)")
 	_clear()

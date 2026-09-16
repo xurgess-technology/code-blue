@@ -208,7 +208,9 @@ func _run() -> void:
 	var value: int = int(bot.slots[_slot_of(loot_kind)].get("v", 0))
 	var m0: int = game.money
 	bot.selected = maxi(0, _slot_of(loot_kind))
-	ok = await _do_until(func(): _go_throw(game.economy.furnace.global_position), func(): return not bot.holding(loot_kind), 90.0)
+	# Not-holding fires the instant the bot releases the throw; the sale only lands a moment later
+	# once the item has actually flown into the furnace's FireZone, so wait for the money itself.
+	ok = await _do_until(func(): _go_throw(game.economy.furnace), func(): return game.money != m0, 90.0)
 	_check(ok and game.money == m0 + value, "the bot threw the loot into the furnace and sold it for $%d" % value)
 	m0 = game.money
 	ok = await _do_until(func(): _go_use("pharmacy", game.economy.pharmacy.global_position, false), func(): return game.money < m0, 60.0)
@@ -414,19 +416,26 @@ func _go_use(id: String, pos: Vector3, hold: bool) -> void:
 ## charge throw of the selected stack. Standing close and aiming dead level makes the pill/loot
 ## clear the grate reliably; this exercises the same drop_selected(charge) path a real charged
 ## throw uses, not a shortcut into the fire zone.
-func _go_throw(target_pos: Vector3) -> void:
-	var stand: Vector3 = target_pos + Vector3(0.0, 0.0, 1.1)
+##
+## The furnace is rotated to face back toward the lobby's centre line (economy.gd's `_rect_spot`),
+## not always world +Z, so "in front of the mouth" has to go through its own basis, the same way
+## tools/inventorytest.gd's manual furnace test does -- a fixed world-space offset stood the bot
+## wherever that happened to line up with the map, not necessarily lined up with the grate gaps.
+func _go_throw(furn: Node3D) -> void:
+	var target_pos: Vector3 = furn.global_position
+	var stand: Vector3 = target_pos + furn.global_basis.z * 1.1
 	var d := Vector2(stand.x - bot.global_position.x, stand.z - bot.global_position.z).length()
 	if d > 0.5:
 		_walk_to(stand)
 		return
 	bot.bot_move = Vector2.ZERO
-	var to := target_pos - bot.global_position
+	var aim: Vector3 = target_pos + Vector3.UP * 1.0   # the fire zone's height, not the floor
+	var to := aim - bot.head.global_position
 	bot.bot_yaw = atan2(-to.x, -to.z)
 	bot._yaw = bot.bot_yaw
 	bot.rotation.y = bot.bot_yaw
-	bot.head.rotation.x = 0.0
-	bot._pitch = 0.0
+	bot.head.rotation.x = clampf(atan2(to.y, Vector2(to.x, to.z).length()), -1.2, 1.2)
+	bot._pitch = bot.head.rotation.x
 	if _press_cd <= 0.0:
 		bot.drop_charge = 1.0
 		bot.drop_count += 1

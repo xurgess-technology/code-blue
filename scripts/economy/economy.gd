@@ -139,7 +139,11 @@ func _place() -> void:
 func _rect_spot(r: Rect2) -> Dictionary:
 	var cx: float = r.position.x + r.size.x * 0.5
 	var cz: float = r.position.y + r.size.y * 0.5
-	var probe := Vector3(cx, 2.0, cz)
+	# BUGFIX: game._floor_at() casts from probe.y + 1.5, so a probe at y=2.0 starts the ray at
+	# y=3.5 -- above a lobby ceiling at C.WALL_H (3.0), which the ray can hit first and report as
+	# the "floor" (this put the crematorium a full storey up, on top of the lobby ceiling, with
+	# nothing able to reach it). Probe low enough that +1.5 stays under any normal room ceiling.
+	var probe := Vector3(cx, 0.3, cz)
 	var pos: Vector3 = game._floor_at(probe) if game != null else probe
 	return {"position": pos, "yaw": 0.0}
 

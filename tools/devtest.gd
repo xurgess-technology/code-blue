@@ -294,11 +294,11 @@ func _run_solo() -> void:
 	var furn: Node3D = game.economy.furnace
 	var value: int = int(me.selected_stack().get("v", 0))
 	me.teleport(furn.global_position + furn.global_basis.z * 1.1)
-	_look_at(furn.global_position)
+	_look_at(furn.global_position + Vector3.UP * 1.0)   # the fire zone's height, not the floor
 	me._yaw = me.bot_yaw
 	me.rotation.y = me.bot_yaw
-	me.head.rotation.x = 0.0
-	me._pitch = 0.0
+	me.head.rotation.x = me.bot_pitch
+	me._pitch = me.bot_pitch
 	await _frames(3)
 	game.drop_selected(me, 1.0)
 	await _until(func(): return not me.holding("defibrillator"), 3.0)

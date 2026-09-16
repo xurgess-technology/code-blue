@@ -2630,7 +2630,7 @@ func eat_pill(p: Node) -> void:
 # thrown pill hits (or that it missed) is decided here and replicated over `_event` so every
 # machine shows the right thing. The warm effect and the personal line are local presentation on
 # the affected player's own machine; the floating quote and the OR blip are for everyone nearby.
-const PILL_HIT_RADIUS := 0.55
+const PILL_HIT_RADIUS := 0.85
 
 
 ## Host, called every physics frame by an in-flight thrown pill (world_item.gd) while it has not
