@@ -405,6 +405,10 @@ func _to_strike(p: Node, s: Dictionary, c: float) -> void:
 	match String(s.k):
 		"saw":
 			Audio.play("combat_swing", at, -2.0, 0.1)
+			# The saw is the one melee action with no camera reaction at all (the shove already
+			# recoils); a small kick at the strike sells its weight without touching any timing.
+			if p.is_local and p.fx != null and p.fx.has_method("recoil"):
+				p.fx.recoil(Vector3(-0.35, -0.05, -0.4))
 		"jab":
 			Audio.play("combat_jab_swish", at, -6.0, 0.1)
 		"shove":

@@ -200,9 +200,10 @@ func update(delta: float) -> void:
 	if action_pose != "" and action_w > 0.0:
 		var ap: Dictionary = RigMap.pose_of(rig, action_pose)
 		if from_pose != "":
-			# Strike: sweep from the wind-up pose to the strike pose.
+			# Strike: sweep from the wind-up pose to the strike pose, decelerating all the way to
+			# the strike pose (matches fp_hands/hand_poses.gd: no leftover velocity into recover).
 			var fp: Dictionary = RigMap.pose_of(rig, from_pose)
-			var su := sqrt(clampf(float(act.u), 0.0, 1.0))
+			var su := 1.0 - pow(1.0 - clampf(float(act.u), 0.0, 1.0), 2.0)
 			ap = _mix(fp, ap, su)
 		ar = _toward(ar, arw, ap.get("arm_r"), action_w)
 		arw = maxf(arw, action_w * (float(ap.arm_r[1]) if ap.has("arm_r") else 0.0))
