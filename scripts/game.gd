@@ -69,9 +69,11 @@ var level: Node3D = null
 var level_info: Dictionary = {}
 var players: Dictionary = {}      # peer id -> Player
 var monsters: Dictionary = {}     # monster id -> Monster
-## SWEEP 4A HOOK (scanner): host-only, in memory. kind -> DbRecord (sighted / scanned). Chunk 4
-## (docs/backlog/SWEEP4B.md) extends DbRecord and saves it; for now it is lost on restart.
+## SWEEP 4A HOOK (database terminal, chunk 4): host-only. kind -> DbRecord (sighted / scanned /
+## harvested). Loaded from disk in _ready(), saved through mark_db() whenever a field flips, so
+## it survives a wipe (game.reset_money) and a full reload (docs/CONTRACTS.md "Brains").
 const DbRecordScript := preload("res://scripts/database/db_record.gd")
+const DatabaseStoreScript := preload("res://scripts/database/database_store.gd")
 var database: Dictionary = {}
 var _scan_progress: Dictionary = {}   # peer id -> 0..1
 var _scan_target: Dictionary = {}     # peer id -> monster id being scanned
@@ -198,6 +200,10 @@ func _ready() -> void:
 	_entities.name = "Entities"
 	add_child(_entities)
 	_ensure_surgeries(1)
+	# SWEEP 4A HOOK (database terminal, chunk 4): loaded once per process, before anything can
+	# mark a record. Harmless for a client: it never reads its own copy (the terminal fetches
+	# the host's live database over the wire), only the host's file on disk matters.
+	DatabaseStoreScript.load_into(database)
 	loop = LoopScript.new()
 	loop.name = "Loop"
 	add_child(loop)
@@ -341,8 +347,6 @@ func start_lobby(new_seed: int, new_shift: int) -> void:
 	_sync_players()
 	for p in players.values():
 		_respawn_at_start(p)
-	if is_host():
-		_spawn_guide()
 	# First lobby of the session: build and draw one of everything behind a short cover so
 	# nothing hitches the first time it appears later.
 	Warmup.run(self)
@@ -830,6 +834,14 @@ func _add_landmarks() -> void:
 			func(p): return _table_prompt(p, ti))
 	_add_player_table()  # downed: the OR's player table
 
+	# SWEEP 4A HOOK (database terminal, chunk 4): the break-room terminal replaces the old guide
+	# lectern spot. Its aim/prompt is purely for the HUD and local "use" detection (main.gd,
+	# terminal opens instantly, client-side, no host round trip); interact() itself is a no-op.
+	var tinfo: Dictionary = level_info.get("lectern", {})
+	if not tinfo.is_empty():
+		_add_proxy("terminal", (tinfo.position as Vector3) + Vector3.UP * 0.95, 1.1, 0.0,
+			func(_p): return "Use the database terminal")
+
 
 class Proxy extends Area3D:
 	var hold: float = 0.0
@@ -1131,27 +1143,6 @@ func _spawn_from_plan_inner(e: Dictionary) -> Node:
 	var spots: Array = level_info.get("tool_spawns", [])
 	var pos: Vector3 = spots[_rng.randi_range(0, spots.size() - 1)] if spots.size() > 0 else table_pos() + Vector3(4, 0, 0)
 	return _spawn_item(e.kind, int(e.count), Transform3D(Basis(Vector3.UP, _rng.randf() * TAU), _floor_at(pos)), WorldItem.State.LOOSE)
-
-
-func _spawn_guide() -> void:
-	for it in world_items.values():
-		if it.kind == "guide":
-			return
-	for p in players.values():
-		for s in p.slots:
-			if s.kind == "guide":
-				return
-	# The lectern knows where a book rests on its tilted desk; use that when it is there.
-	var lectern = level_info.get("lectern_node")
-	if lectern != null and is_instance_valid(lectern) and lectern.is_inside_tree() and lectern.has_meta("book_rest"):
-		var rest: Transform3D = lectern.global_transform * (lectern.get_meta("book_rest") as Transform3D)
-		_spawn_item("guide", 1, rest, WorldItem.State.ON_LECTERN)
-		return
-	var info: Dictionary = level_info.get("lectern", {})
-	var base: Vector3 = info.get("position", clock_pos() + Vector3(1.6, 0.0, 0.0))
-	var top := _surface_below(base + Vector3.UP * 2.0, base)
-	var xf := Transform3D(Basis(Vector3.UP, float(info.get("yaw", 0.0))), top)
-	_spawn_item("guide", 1, xf, WorldItem.State.ON_LECTERN)
 
 
 func pickup_item(p: Node, it: Node) -> void:
@@ -1896,6 +1887,38 @@ func db_record(kind: String) -> DbRecord:
 	return database[kind]
 
 
+## Host: set a database field ("sighted" / "scanned" / "harvested") the first time it becomes
+## true, saving to disk only on that transition (docs/CONTRACTS.md "Brains" -> the database
+## terminal). Called for both the host's own players and remote guests: whoever sights, scans or
+## harvests a species, the record it lands in is always the host's.
+func mark_db(kind: String, field: String) -> void:
+	if not is_host():
+		return
+	var rec := db_record(kind)
+	if not bool(rec.get(field)):
+		rec.set(field, true)
+		DatabaseStoreScript.save(database)
+		_broadcast("db_update", {"kind": kind, "field": field})
+
+
+## Client: the terminal wants a full copy of the host's database (only sent on request, not
+## replicated continuously -- it barely ever changes and can be arbitrarily large).
+func request_database_sync() -> void:
+	if not is_host() and Net.active:
+		_rpc_request_database.rpc_id(Net.HOST_ID)
+
+
+@rpc("any_peer", "reliable", "call_remote")
+func _rpc_request_database() -> void:
+	if not is_host():
+		return
+	var sender := multiplayer.get_remote_sender_id()
+	var out := {}
+	for k in database.keys():
+		out[k] = (database[k] as DbRecord).to_dict()
+	_event.rpc_id(sender, "db_full", {"all": out})
+
+
 ## Host: is `p` aiming at `m`, in scan range, with a clear shot (a straight raycast from the
 ## camera: if a wall is in the way, the ray hits the wall first, not the monster)?
 func _scan_aim(p: Node, m: Node) -> bool:
@@ -1923,7 +1946,7 @@ func _tick_scan(delta: float) -> void:
 		for p in alive_players():
 			if p.camera != null and p.camera.global_position.distance_to(m.global_position) <= C.SCAN_RANGE \
 					and Perception.in_view(p, m.global_position) and _scan_aim(p, m):
-				db_record(String(m.kind)).sighted = true
+				mark_db(String(m.kind), "sighted")
 				break
 	for p in alive_players():
 		var peer: int = p.peer_id
@@ -1945,7 +1968,7 @@ func _tick_scan(delta: float) -> void:
 		var prog: float = float(_scan_progress.get(peer, 0.0)) + delta / C.SCAN_SECONDS
 		if prog >= 1.0:
 			_scan_progress[peer] = 0.0
-			db_record(String(target.kind)).scanned = true
+			mark_db(String(target.kind), "scanned")
 			tell(p, "Entry updated", 2.0)
 		else:
 			_scan_progress[peer] = prog
@@ -3564,6 +3587,18 @@ func _drop_hands_in_place(p: Node) -> bool:
 @rpc("authority", "reliable", "call_remote")
 func _event(kind: String, data: Dictionary) -> void:
 	match kind:
+		"db_update":
+			# SWEEP 4A HOOK (database terminal, chunk 4): a client's own mirror of game.database,
+			# used only so its terminal can show the same tiers the host just unlocked. Never
+			# saved to disk on a client (DatabaseStore.save is only ever called from mark_db(),
+			# which is a no-op off the host).
+			db_record(String(data.kind)).set(String(data.field), true)
+		"db_full":
+			database.clear()
+			for k in (data.get("all", {}) as Dictionary).keys():
+				var rec := DbRecordScript.new(String(k))
+				rec.from_dict(data.all[k])
+				database[String(k)] = rec
 		"sound":
 			Audio.play(data.cue, data.get("at"))
 		"sting":

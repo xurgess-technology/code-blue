@@ -32,8 +32,6 @@ const GRIPS := {
 	"forceps": {"pos": Vector3(-0.05, 0.016, 0.0), "fwd": Vector3(1, 0, 0), "up": Vector3(0, -1, 0), "style": "fist"},
 	"tourniquet": {"pos": Vector3(0.0, 0.0, 0.0), "fwd": Vector3(0, 0, -1), "up": Vector3(0, 1, 0), "style": "palm"},
 	"suture_kit": {"pos": Vector3(0.0, 0.0, 0.0), "fwd": Vector3(1, 0, 0), "up": Vector3(0, 1, 0), "style": "palm", "bundle": 2},
-	# The binder: clutched in both hands in front, spine down.
-	"guide": {"pos": Vector3(0.0, 0.03, 0.0), "fwd": Vector3(0, 0, -1), "up": Vector3(0, 1, 0), "style": "palm", "hands": 2},
 	# Loot with a handle (lying models, handle along their long side).
 	"reflex_hammer": {"pos": Vector3(-0.06, 0.02, 0.0), "fwd": Vector3(1, 0, 0), "up": Vector3(0, -1, 0), "style": "fist"},
 	"thermometer": {"pos": Vector3(0.03, 0.02, 0.0), "fwd": Vector3(-1, 0, 0), "up": Vector3(0, -1, 0), "style": "fist"},

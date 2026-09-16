@@ -223,21 +223,17 @@ func _loot_spawn() -> void:
 	_check(LootTable.roll_value("laptop", 3, 0.5) > LootTable.roll_value("laptop", 0, 0.5), "deeper loot rolls higher values")
 	_check(LootTable.weight("gold_watch", "waiting_room", 3) / LootTable.weight("stethoscope", "waiting_room", 3) \
 		> LootTable.weight("gold_watch", "waiting_room", 0) / LootTable.weight("stethoscope", "waiting_room", 0), "rare loot is likelier deeper")
-	# Colour coding: gold rim on loot, teal on supplies, nothing on the guide.
+	# Colour coding: gold rim on loot, teal on supplies.
 	var gold = ItemModels.tint_material("laptop")
 	var teal = ItemModels.tint_material("gauze")
-	_check(gold != null and teal != null and gold != teal and ItemModels.tint_material("guide") == null, "gold and teal tints exist, the guide has none")
+	_check(gold != null and teal != null and gold != teal, "gold and teal tints exist")
 	var sample_loot = loot[0] if not loot.is_empty() else null
 	_check(sample_loot != null and _overlay_of(sample_loot) == gold, "a loot world item wears the gold rim")
 	var supply = null
-	var guide = null
 	for it in game.world_items.values():
 		if Items.is_surgical(it.kind) and supply == null:
 			supply = it
-		if it.kind == "guide":
-			guide = it
 	_check(supply != null and _overlay_of(supply) == teal, "a supply world item wears the teal rim")
-	_check(guide == null or _overlay_of(guide) == null, "the guide wears no rim")
 	me.take_into("laptop", 1, 100)
 	await _frames(3)
 	var held: Node3D = me.get_node("Head/FX/Camera/HeldFirstPerson")

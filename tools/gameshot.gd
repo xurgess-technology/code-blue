@@ -74,7 +74,7 @@ func _ready() -> void:
 		{"name": "19_orscreen_incoming", "fn": _pose_screen_incoming, "settle": 40},
 		{"name": "20_orscreen_flatline", "fn": _pose_screen_flatline, "settle": 40},
 		{"name": "07_dark_no_light", "fn": _pose_dark},
-		{"name": "08_lectern_guide", "fn": _pose_lectern},
+		{"name": "08_break_room_terminal", "fn": _pose_lectern},
 		{"name": "09_container_open", "fn": _pose_container},
 		{"name": "15_hud_walking", "fn": _pose_hud_walking, "settle": 50},
 		{"name": "16_hud_holding", "fn": _pose_hud_holding, "settle": 30},
@@ -424,7 +424,6 @@ func _pose_hud_holding() -> void:
 		bot.clear_slot(i)
 	bot.take_into("anesthetic", 2)
 	bot.take_into("forceps", 1)
-	bot.take_into("guide", 1)
 	bot.selected = 0
 	bot.hp = maxi(1, bot.max_hp - 1)
 	var sh: Vector3 = game.shelf_node.global_position if game.shelf_node != null else game.table_pos()
@@ -454,7 +453,7 @@ var _shot_monster: Node = null
 
 
 static func _hand_kinds() -> Array:
-	var out: Array = ["anesthetic", "gauze", "forceps", "tourniquet", "bone_saw", "suture_kit", "guide"]
+	var out: Array = ["anesthetic", "gauze", "forceps", "tourniquet", "bone_saw", "suture_kit"]
 	for k in preload("res://scripts/economy/loot_table.gd").kinds():
 		out.append(k)
 	return out

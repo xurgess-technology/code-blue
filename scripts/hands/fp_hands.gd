@@ -1,7 +1,7 @@
 extends Node3D
 ## The local player's first-person hands (node "Hands" under the camera; docs/HANDS_AND_FEEDBACK.md
 ## "Held items in the hands"). The right hand holds the torch, the left hand the selected stack;
-## bulky loot and the guide take both hands and the torch tucks under the right arm. Every frame it
+## bulky loot takes both hands and the torch tucks under the right arm. Every frame it
 ## poses both hands (rest pose for what is held, the wind-up / strike / recover of combat.action_of,
 ## walk bob, sway lagging the mouse, lower-and-raise on a new stack, lowered while sprinting, pulled
 ## in near walls) and puts HeldFirstPerson on the palm with the kind's grip (grips.gd).

@@ -31,7 +31,7 @@ var invuln: float = 0.0
 ## dollars) for loot; kind "" is an empty slot. Bulky loot fills its slot and a second one: that
 ## second slot is {kind: "", count: 0, of: <index of the stack>}, so it is not empty but code
 ## that walks slots for stacks never sees the bulky item twice. Host authoritative, replicated
-## in the snapshot. `selected` is the slot G, the shelf, the sell bin and the guide act on (a
+## in the snapshot. `selected` is the slot G, the shelf and the sell bin act on (a
 ## selected second half acts on its stack); the player chooses it locally.
 ## Change slots through take_into() / clear_slot(); _fix_links() tidies anything else.
 var slots: Array = empty_slots()
@@ -191,6 +191,7 @@ var _was_on_floor: bool = true
 
 var head: Node3D
 var fx: Node3D
+var _hive_glaze: MeshInstance3D   # SWEEP 4A HOOK (Hive Eyes, chunk 4): glazed eyes, teammates only
 var camera: Camera3D
 var flashlight: SpotLight3D
 var body_visual: Node3D
@@ -260,6 +261,28 @@ func _build() -> void:
 	head.name = "Head"
 	head.position.y = C.EYE_H
 	add_child(head)
+
+	# SWEEP 4A HOOK (Hive Eyes, chunk 4): a glazed-eyes glow teammates see on the existing head
+	# while this player is in Hive Eyes (docs/SWEEP4A.md "Teammates can see it"). A material swap
+	# on the exact eye geometry would need the specific rig (Blender human or the primitive
+	# fallback); an emissive quad at eye height reads the same at a glance on either body.
+	_hive_glaze = MeshInstance3D.new()
+	_hive_glaze.name = "HiveGlaze"
+	var glaze_q := QuadMesh.new()
+	glaze_q.size = Vector2(0.16, 0.06)
+	_hive_glaze.mesh = glaze_q
+	var glaze_mat := StandardMaterial3D.new()
+	glaze_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	glaze_mat.albedo_color = Color(0.7, 1.0, 0.85, 0.8)
+	glaze_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	glaze_mat.emission_enabled = true
+	glaze_mat.emission = Color(0.55, 1.0, 0.7)
+	glaze_mat.emission_energy_multiplier = 2.2
+	glaze_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	_hive_glaze.material_override = glaze_mat
+	_hive_glaze.position = Vector3(0.0, 0.0, 0.09)
+	_hive_glaze.visible = false
+	head.add_child(_hive_glaze)
 
 	# The camera-feel node comes from the look pass; a plain pivot works without it.
 	var fx_path := "res://scripts/camera_fx.gd"
@@ -491,7 +514,7 @@ func _physics_process(delta: float) -> void:
 
 func _local_step(delta: float) -> void:
 	var g: Node = game
-	# The mouse is only free while a menu, the guide or the surgery view has it,
+	# The mouse is only free while a menu, the terminal or the surgery view has it,
 	# and then the surgeon stands still.
 	var can_move: bool = alive and (g == null or not g.paused) and stun <= 0.0 \
 		and (bot_active or Input.mouse_mode == Input.MOUSE_MODE_CAPTURED)
@@ -649,7 +672,7 @@ func _local_step(delta: float) -> void:
 				if g.combat.local_shove_begin(self):
 					_charging_with = "shove"
 			# SWEEP 3 HOOK: left mouse uses the held item when it has a use (saw, anesthetic), else it
-			# shoves like Q. R triggers the brain ability unless R would open the guide.
+			# shoves like Q.
 			if Input.is_action_just_pressed("use") and not gun_out and not downed and carrying == 0 and dragging_monster < 0:
 				if g.combat.is_usable(selected_stack().kind):
 					g.combat.local_try_use(self)
@@ -686,7 +709,7 @@ func _local_step(delta: float) -> void:
 			if Input.is_action_just_pressed("slot_prev"):
 				select_step(-1)
 
-	# HANDS HOOK: the mouse was freed (a menu, the guide) mid-charge: the shove goes off.
+	# HANDS HOOK: the mouse was freed (a menu, the terminal) mid-charge: the shove goes off.
 	if _charging_with != "" and not (can_move and not hive_view) and g != null and g.combat != null:
 		_charging_with = ""
 		g.combat.local_shove_release(self)
@@ -733,6 +756,16 @@ func _apply_crouch(delta: float, authoritative: bool = true) -> void:
 		_coll_shape.position.y = target_h * 0.5
 
 
+## SWEEP 4A HOOK (Echo polish, chunk 4): 0..1 while this player's shriek pose should show, driven
+## by game.brains._echo_pose_until (peer -> world_time), a local one-shot timer every machine sets
+## the same way from the reliable br_echo event (not a replicated Player field).
+func _echo_pose_weight() -> float:
+	if game == null or game.brains == null:
+		return 0.0
+	var until := float(game.brains._echo_pose_until.get(peer_id, -1.0))
+	return clampf((until - float(game.world_time)) / 0.5, 0.0, 1.0) if until > 0.0 else 0.0
+
+
 func _remote_step(delta: float) -> void:
 	_apply_crouch(delta, false)
 	var k := clampf(delta * 12.0, 0.0, 1.0)
@@ -742,6 +775,8 @@ func _remote_step(delta: float) -> void:
 	global_position = global_position.lerp(_target_pos, k)
 	rotation.y = lerp_angle(rotation.y, _target_yaw, k)
 	head.rotation.x = lerpf(head.rotation.x, -0.95 if hive_view else _pitch, k)   # SWEEP 3 HOOK (brains): head droops
+	if _hive_glaze != null:
+		_hive_glaze.visible = hive_view   # SWEEP 4A HOOK (Hive Eyes, chunk 4): glazed eyes for teammates
 	if moving and not downed and not crouching:
 		_step_accum += delta * (3.0 if sprinting else 1.9)
 		if _step_accum >= 1.0:
@@ -1356,7 +1391,10 @@ func _update_down_pose(delta: float) -> void:
 	if not is_zero_approx(body_visual.position.z):
 		body_visual.rotation = Vector3.ZERO
 		body_visual.position = Vector3.ZERO
-	var tilt := -PI * 0.47 if down else (-0.2 if hive_view else 0.0)   # SWEEP 3 HOOK (brains): slumped in Hive Eyes
+	# SWEEP 4A HOOK (Echo polish, chunk 4): a brief lean-back as the shriek goes out, so it visibly
+	# comes from whoever used it (docs/SWEEP4A.md "Echo"), on every machine's copy of that player.
+	var echo_tilt := -0.4 * _echo_pose_weight()
+	var tilt := -PI * 0.47 if down else (-0.2 if hive_view else echo_tilt)   # SWEEP 3 HOOK (brains): slumped in Hive Eyes
 	if not is_equal_approx(body_visual.rotation.x, tilt):
 		body_visual.rotation.x = move_toward(body_visual.rotation.x, tilt, delta * 6.0)
 		body_visual.position.y = 0.3 * (body_visual.rotation.x / (-PI * 0.47))

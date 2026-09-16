@@ -1,7 +1,7 @@
 class_name WorldItem
 extends RigidBody3D
-## A stack of one item kind lying somewhere in the world: inside a container, loose on a
-## surface, or resting on the lectern. Picking it up removes it and fills a hand slot.
+## A stack of one item kind lying somewhere in the world: inside a container, or loose on a
+## surface. Picking it up removes it and fills a hand slot.
 ##
 ## The host owns items. When one is dropped the host lets real physics tumble it until it
 ## settles; clients never simulate it, they glide toward the host's transform from the
@@ -9,7 +9,7 @@ extends RigidBody3D
 
 const FogRingScript := preload("res://scripts/level/fog_ring.gd")   # SWEEP 4A HOOK (fog lot, chunk 2)
 
-enum State { IN_CONTAINER, LOOSE, ON_LECTERN }
+enum State { IN_CONTAINER, LOOSE }
 
 const SETTLE_MAX := 3.0
 
@@ -89,7 +89,7 @@ func _game() -> Node:
 	return get_tree().get_first_node_in_group("game")
 
 
-## Put the stack somewhere at rest (container slot, anchor, lectern). No physics.
+## Put the stack somewhere at rest (container slot, anchor). No physics.
 func place(xf: Transform3D, new_state: int) -> void:
 	state = new_state
 	freeze = true

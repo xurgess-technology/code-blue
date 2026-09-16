@@ -9,7 +9,7 @@ extends Node
 ##
 ##   1. evict   (host) anyone still in a wing is put in the entrance hall in front of that wing's
 ##              gate (a reliable "dr_evict" to a client, which owns its position); items left in
-##              the wings are gone (the guide goes back to its lectern).
+##              the wings are gone.
 ##   2. tear    the old wings leave level_info at once (containers, lights, anchors, spawns, doors),
 ##      down    `wings_torn_down` fires (POCKETS HOOK: extra per-shift wing content tears down here)
 ##              and their nodes are freed a few at a time.
@@ -379,7 +379,6 @@ func _clear_wing_monsters() -> void:
 
 ## Host: what was left lying in the wings (and in their containers) is gone with them.
 func _clear_wing_items() -> void:
-	var guide_gone := false
 	for id in game.world_items.keys():
 		var it = game.world_items[id]
 		if it == null or not is_instance_valid(it):
@@ -387,10 +386,6 @@ func _clear_wing_items() -> void:
 			continue
 		if _wing_zone(it.global_position) == "":
 			continue
-		if String(it.kind) == "guide":
-			guide_gone = true
 		it.queue_free()
 		game.world_items.erase(id)
 		game._shift_item_ids.erase(id)
-	if guide_gone:
-		game.call_deferred("_spawn_guide")

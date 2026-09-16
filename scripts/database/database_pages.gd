@@ -1,11 +1,20 @@
 extends RefCounted
-## What the guide says, derived from the shared data. No layout here, only content, so it can
-## be checked headlessly and so a new entry in Items.ITEMS, Procedures.AILMENTS or Items.LOCKED
-## shows up in the binder (tab, contents line, page) without touching the UI.
+## What the database terminal's Items & Procedures section says, derived from the shared data.
+## No layout here, only content, so it can be checked headlessly and so a new entry in
+## Items.ITEMS, Procedures.AILMENTS or Items.LOCKED shows up in the terminal (contents line,
+## page) without touching the UI. Moved here from the old medical guide binder (sweep 4a chunk 4).
 
 const ItemsDB := preload("res://scripts/items.gd")
 const ProceduresDB := preload("res://scripts/procedures.gd")
-const Art := preload("res://scripts/guide/guide_art.gd")
+
+## A standalone entry not backed by Items.ITEMS (sweep 4a chunk 3 adds the real "placebo" item
+## kind separately; this keeps the terminal's copy independent of that item's exact shape).
+const PLACEBO := {
+	"name": "Placebo (sugar pill)",
+	"real_use": "Efficacy: disputed. Side effects: optimism.",
+	"where": "Sold at the pharmacy window. Flat price, always in stock.",
+	"handling": "Take one, or throw one at a teammate, a patient or a monster. Does nothing mechanically.",
+}
 
 ## One line per minigame id: what the step asks of your hands.
 const GAME_HOW := {
@@ -25,7 +34,6 @@ const ITEM_NOTES := {
 	"forceps": ["DON'T touch the sides!!"],
 	"tourniquet": ["ABOVE the line. above."],
 	"bone_saw": ["slow. slower than that."],
-	"guide": ["who keeps taking this??", "chain cut AGAIN. - facilities"],
 }
 
 const PROCEDURE_NOTES := {
@@ -42,26 +50,21 @@ const LOCKED_SCRAWLS := [
 ]
 
 
-## Every page of the binder, in order. Each entry is one two-page spread and one tab.
-## {id, type: "index"|"item"|"procedure"|"locked", key, title, tab, colour, page}
+## Every entry in the terminal's Items & Procedures section, in order.
+## {id, type: "item"|"procedure"|"locked"|"placebo", key, title, page}
 static func entries() -> Array:
 	var out: Array = []
-	out.append({"id": "", "type": "index", "key": "", "title": "Contents", "tab": "Index", "colour": Art.INDEX_TAB})
-	var i := 0
 	for kind in item_order():
-		out.append({"id": kind, "type": "item", "key": kind, "title": ItemsDB.display_name(kind),
-			"tab": ItemsDB.display_name(kind), "colour": Art.tab_colour(i)})
-		i += 1
+		out.append({"id": kind, "type": "item", "key": kind, "title": ItemsDB.display_name(kind)})
+	out.append({"id": "placebo", "type": "placebo", "key": "placebo", "title": PLACEBO.name})
 	for ailment_id in ProceduresDB.AILMENTS.keys():
 		var a: Dictionary = ProceduresDB.AILMENTS[ailment_id]
 		out.append({"id": "procedure:" + ailment_id, "type": "procedure", "key": ailment_id,
-			"title": a.get("name", ailment_id.capitalize()), "tab": a.get("name", ailment_id.capitalize()),
-			"colour": Art.PROCEDURE_TAB})
+			"title": a.get("name", ailment_id.capitalize())})
 	for locked_name in ItemsDB.LOCKED:
-		out.append({"id": "locked:" + locked_name, "type": "locked", "key": locked_name, "title": locked_name,
-			"tab": locked_name, "colour": Art.LOCKED_TAB})
+		out.append({"id": "locked:" + locked_name, "type": "locked", "key": locked_name, "title": locked_name})
 	for n in out.size():
-		out[n]["page"] = n * 2 + 1
+		out[n]["page"] = n + 1
 	return out
 
 
@@ -291,3 +294,7 @@ static func procedure_page(ailment_id: String) -> Dictionary:
 static func locked_page(locked_name: String) -> Dictionary:
 	var pick := posmod(hash(locked_name), LOCKED_SCRAWLS.size())
 	return {"name": locked_name, "scrawl": LOCKED_SCRAWLS[pick]}
+
+
+static func placebo_page() -> Dictionary:
+	return PLACEBO.duplicate()

@@ -15,7 +15,7 @@ const DrawerUnitScript := preload("res://scripts/containers/drawer_unit.gd")
 const StationScript := preload("res://scripts/containers/station_drawers.gd")
 const TraumaBagScript := preload("res://scripts/containers/trauma_bag.gd")
 const PegboardScript := preload("res://scripts/containers/pegboard.gd")
-const GUIDE_MODELS_PATH := "res://scripts/guide/guide_models.gd"
+const TERMINAL_MODEL_PATH := "res://scripts/database/terminal_model.gd"
 
 ## Rooms where nothing is ever placed loose and nothing needed may spawn.
 const SAFE_ROOMS := ["or", "anteroom", "clockin"]
@@ -935,34 +935,34 @@ static func _place_shelf_and_lectern(root: Node3D, gen: Dictionary, info: Dictio
 			if best_tile.x >= 0:
 				var spot := _spot(best_tile, best_wall, 0.3)
 				info["lectern"] = spot
-				var lectern := _make_lectern()
+				var terminal := _make_lectern()
 				var sb := StaticBody3D.new()
-				sb.name = "Lectern"
+				sb.name = "Terminal"
 				sb.collision_layer = C.L_WORLD
 				sb.collision_mask = 0
 				sb.position = spot.position
 				sb.rotation.y = spot.yaw
-				sb.add_child(lectern)
-				_fit_collider(lectern)
-				var size: Vector3 = lectern.get_meta("collider_size")
-				sb.add_child(_box_shape(size, Vector3(0.0, lectern.get_meta("collider_y"), 0.0), "Shape"))
+				sb.add_child(terminal)
+				_fit_collider(terminal)
+				var size: Vector3 = terminal.get_meta("collider_size")
+				sb.add_child(_box_shape(size, Vector3(0.0, terminal.get_meta("collider_y"), 0.0), "Shape"))
 				root.add_child(sb)
 				info["lectern_node"] = sb
 
 
-## The guide worker's lectern when it exists, else a simple wooden reading stand.
+## The database terminal (sweep 4a chunk 4) when it exists, else a simple primitive stand.
 static func _make_lectern() -> Node3D:
-	if ResourceLoader.exists(GUIDE_MODELS_PATH):
-		var s = load(GUIDE_MODELS_PATH)
+	if ResourceLoader.exists(TERMINAL_MODEL_PATH):
+		var s = load(TERMINAL_MODEL_PATH)
 		if s is GDScript:
 			for m in (s as GDScript).get_script_method_list():
-				if m.name == "make_lectern":
-					var n = s.call("make_lectern")
+				if m.name == "make_terminal":
+					var n = s.call("make_terminal")
 					if n is Node3D:
 						return n
 					break
 	var n := Node3D.new()
-	n.name = "LecternFallback"
+	n.name = "TerminalFallback"
 	var wood := Color(0.29, 0.2, 0.13)
 	n.add_child(_box(Vector3(0.45, 0.05, 0.4), Vector3(0, 0.025, 0), wood))
 	n.add_child(_box(Vector3(0.12, 1.0, 0.12), Vector3(0, 0.52, 0), wood))

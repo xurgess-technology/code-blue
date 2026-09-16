@@ -179,12 +179,6 @@ func _draw_prompt(w: float, h: float, me) -> void:
 			var text: String = me.aim_prompt if me.aim_prompt.begins_with("Hold E") or me.aim_prompt.begins_with("[") else "%s %s" % [key, me.aim_prompt]
 			_text(Vector2(0, y), text, 16, Color("f0e6c8"), HORIZONTAL_ALIGNMENT_CENTER, w)
 		y += 20.0
-	var guide_here: bool = me.holding("guide")
-	if not guide_here and me.aim_id.begins_with("it_"):
-		var node := game.find_interactable(me.aim_id)
-		guide_here = node != null and node.get("kind") == "guide"
-	if guide_here:
-		_text(Vector2(0, y), "[E] Read the medical guide", 13, Color("c9d1d9"), HORIZONTAL_ALIGNMENT_CENTER, w)
 
 
 const SLOT_TEAL := Color(0.3, 0.9, 0.82)
@@ -307,6 +301,11 @@ func _draw_ability_bar(w: float, h: float, me) -> void:
 		draw_rect(r, Color("f0e6c8", 0.85) if id != "" else Color(0.5, 0.55, 0.6, 0.4), false, 1.5)
 		if id == "":
 			continue
+		# SWEEP 4A HOOK (Hive Eyes, chunk 4): a subtle pulse on the border while a Walk-In is in
+		# range and the slot is otherwise idle, so you know it is worth pressing.
+		if id == "hive_in" and cd <= 0.0 and not me.get("hive_view") and b.nearest_walk_in(me, b.hive_range(lvl)) != null:
+			var pulse := 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.006)
+			draw_rect(r, Color("9fe8a0", 0.35 + 0.35 * pulse), false, 2.0 + pulse * 1.5)
 		if not usable:
 			draw_rect(r, Color(0, 0, 0, 0.45))
 		_text(r.position + Vector2(4, 12), "Alt+%d" % (i + 1), 9, Color("8a9aa0"))

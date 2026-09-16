@@ -22,7 +22,7 @@ const DrawerUnitScript := preload("res://scripts/containers/drawer_unit.gd")
 const StationScript := preload("res://scripts/containers/station_drawers.gd")
 const TraumaBagScript := preload("res://scripts/containers/trauma_bag.gd")
 const PegboardScript := preload("res://scripts/containers/pegboard.gd")
-const GUIDE_MODELS_PATH := "res://scripts/guide/guide_models.gd"
+const TERMINAL_MODEL_PATH := "res://scripts/database/terminal_model.gd"
 
 ## Places where nothing a case needs is placed and monsters never spawn.
 const SAFE_ROOMS := ["or", "break_room", "locker_room", "lobby", "entrance", "neutral", "anteroom", "clockin"]
@@ -1147,33 +1147,36 @@ static func _fill_landmarks(gen: Dictionary, info: Dictionary) -> void:
 		info["lectern"] = {"position": _w(spots.lectern.pos), "yaw": float(spots.lectern.yaw)}
 
 
+## Builds at the "lectern" spot MapGen reserved in the break room (docs/CONTRACTS.md "Hospital"
+## still calls the anchor `lectern`/`lectern_node`; sweep 4a chunk 4 puts a database terminal
+## there instead of the old guide's binder and reading stand).
 static func _commit_lectern(p: Dictionary, root: Node3D) -> void:
 	var spots: Dictionary = p.gen.spots
 	if not spots.has("lectern"):
 		return
-	var lectern := _make_lectern()
+	var terminal := _make_lectern()
 	var sb := StaticBody3D.new()
-	sb.name = "Lectern"
+	sb.name = "Terminal"
 	sb.collision_layer = C.L_WORLD
 	sb.collision_mask = 0
 	sb.position = _w(spots.lectern.pos)
 	sb.rotation.y = float(spots.lectern.yaw)
-	sb.add_child(lectern)
-	Legacy._fit_collider(lectern)
-	var size: Vector3 = lectern.get_meta("collider_size")
-	sb.add_child(_box_shape(size, Transform3D(Basis.IDENTITY, Vector3(0.0, lectern.get_meta("collider_y"), 0.0)), "Shape"))
+	sb.add_child(terminal)
+	Legacy._fit_collider(terminal)
+	var size: Vector3 = terminal.get_meta("collider_size")
+	sb.add_child(_box_shape(size, Transform3D(Basis.IDENTITY, Vector3(0.0, terminal.get_meta("collider_y"), 0.0)), "Shape"))
 	root.add_child(sb)
 	p.out.lectern_node = sb
 
 
-## The guide worker's lectern when it exists, else the legacy wooden stand.
+## The database terminal (sweep 4a chunk 4) when it exists, else the legacy wooden stand.
 static func _make_lectern() -> Node3D:
-	if ResourceLoader.exists(GUIDE_MODELS_PATH):
-		var s = load(GUIDE_MODELS_PATH)
+	if ResourceLoader.exists(TERMINAL_MODEL_PATH):
+		var s = load(TERMINAL_MODEL_PATH)
 		if s is GDScript:
 			for m in (s as GDScript).get_script_method_list():
-				if m.name == "make_lectern":
-					var n = s.call("make_lectern")
+				if m.name == "make_terminal":
+					var n = s.call("make_terminal")
 					if n is Node3D:
 						return n
 					break

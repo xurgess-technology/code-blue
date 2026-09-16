@@ -96,19 +96,6 @@ const ITEMS := {
 		"where": "In trauma bags on corridor walls, in nurse station drawers and in the steel drawer units of storage rooms.",
 		"handling": "Consumable. Found in packs of 1 or 2. Put one on the OR supply shelf, carry a downed teammate to the player table and stitch them up.",
 	},
-	"guide": {
-		"name": "Medical guide",
-		"short": "Medical guide",
-		"surgical": false,
-		"consumable": false,
-		"batch": [1, 1],
-		"fragile": false,
-		"found": {},
-		"loose_surfaces": [],
-		"real_use": "A battered reference binder. Someone has written DO NOT REMOVE on the cover and then removed it anyway.",
-		"where": "On the lectern in the clock-in room, unless somebody walked off with it.",
-		"handling": "Takes a hand. Press R while holding it, or while looking at it, to read.",
-	},
 	# SWEEP 4A HOOK (pharmacy, chunk 3): does nothing mechanically. Only ever bought at the
 	# pharmacy window (`found` empty keeps it out of the wings and the supply spawner).
 	"placebo_pills": {
@@ -126,11 +113,11 @@ const ITEMS := {
 	},
 }
 
-## Tabs the guide shows as locked, so it is obvious the pool will grow.
+## Tabs the database terminal shows as locked, so it is obvious the pool will grow.
 const LOCKED := ["Defibrillator", "Scalpel", "Clamp", "IV bag", "Sedative dart", "Battery", "Retractor"]
 
 
-## Sellable loot (scripts/economy/loot_table.gd). Not in ITEMS so the guide, the supply spawner
+## Sellable loot (scripts/economy/loot_table.gd). Not in ITEMS so the terminal, the supply spawner
 ## and the dev panel's supply list leave it alone; def() and every helper below still know it.
 const LootTable := preload("res://scripts/economy/loot_table.gd")
 
