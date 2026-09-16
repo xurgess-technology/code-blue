@@ -305,24 +305,36 @@ func _or_doors_and_crew() -> void:
 	_stand(game.clock_pos() + Vector3(1.0, 0, 1.0))
 	await _seconds(3.5)
 	_check(main_doors.is_closed(), "and closes again once the player leaves (%.2f)" % main_doors.amount)
-	# The OR's doors: a player presses E, same as any other double door.
+	# The OR's doors: a player presses E, same as any other double door. agents_open_doors is off
+	# for this part: the test's player is a bot (bot_active), and a bot standing right in front of a
+	# door facing it would otherwise push it open itself, the same way a real bot does.
 	game.doors.agents_open_doors = false
-	_stand(ord.global_position + ord.normal * 2.2)
+	_stand(ord.global_position + ord.normal * 1.5)
 	_look_at(ord.centre)
 	await _frames(4)
 	_check(me.aim_prompt == "Open doors", "the prompt on the OR's doors says Open doors (%s)" % me.aim_prompt)
 	me.bot_press += 1
 	await _seconds(1.2)
-	_check(ord.amount > 0.8, "E opens the OR's doors (%.2f)" % ord.amount)
+	_check(absf(ord.amount) > 0.8, "E opens the OR's doors (%.2f)" % ord.amount)
 	_stand(game.table_pos() + Vector3(3, 0, 3))
 	await _seconds(3.0)
-	_check(ord.amount > 0.8, "unlike the old automatic doors they stay open once the player walks away (%.2f)" % ord.amount)
-	_stand(ord.global_position + ord.normal * 2.2)
-	_look_at(ord.centre)
+	_check(absf(ord.amount) > 0.8, "unlike the old automatic doors they stay open once the player walks away (%.2f)" % ord.amount)
+	# Aim at the open leaf itself (folded against its jamb), same as the hinged-door test: aiming
+	# straight at the doorway's centre no longer hits either leaf once they have swung aside. The
+	# pair folded away from where the player opened them (into the tunnel), so step through and
+	# close it from that side, closer to the folded leaf.
+	var or_leaf: Node3D = ord.leaf_bodies[0]
+	_stand(ord.global_position - ord.normal * 1.2)
+	_look_at(or_leaf.global_transform * Vector3(0.5, 1.1, 0.0))
 	await _frames(4)
+	_check(me.aim_prompt == "Close doors", "the open OR doors can be aimed at: %s" % me.aim_prompt)
 	me.bot_press += 1
 	await _seconds(1.5)
 	_check(ord.is_closed(), "E again closes them (%.2f)" % ord.amount)
+	# Move well clear before letting bots/crews push doors again: standing right at the OR doors
+	# (as a bot) would otherwise push them open by itself and the crew check below would be moot.
+	_stand(game.clock_pos())
+	await _frames(2)
 	game.doors.agents_open_doors = true
 	# The crew: the test's first patient arrives by gurney and must push through the shut OR doors,
 	# since it cannot press E (E is taken, like a bot or a carrier).
@@ -337,9 +349,12 @@ func _or_doors_and_crew() -> void:
 		for cr in game.loop.crews.values():
 			var p: Vector3 = cr.p
 			var lp: Vector3 = ord.global_transform.affine_inverse() * p
-			if absf(lp.z) < 0.9 and absf(lp.x) < ord.width * 0.5:
-				saw_or = saw_or or ord.amount > 0.7
-				crew_blocked = crew_blocked or ord.amount < 0.5
+			# Right in the doorway itself (not just somewhere in the wide hallway approaching it): a
+			# manual door only starts opening once the crew is close and heading square at it (unlike
+			# the old automatic sensor, which saw them coming from much further out).
+			if absf(lp.z) < 0.9 and absf(lp.x) < 0.8:
+				saw_or = saw_or or absf(ord.amount) > 0.7
+				crew_blocked = crew_blocked or absf(ord.amount) < 0.5
 		var c: Dictionary = game.case_by_id(game.cases[0].id) if not game.cases.is_empty() else {}
 		if not c.is_empty() and String(c.state) == "on_table" and game.loop.crews.is_empty():
 			break
@@ -348,7 +363,14 @@ func _or_doors_and_crew() -> void:
 	_check(int(game.doors.stats.get("crew", 0)) >= 1, "counted as the crew's push")
 	_check(not game.cases.is_empty() and String(game.cases[0].state) == "on_table", "the patient reached the table")
 	_check(not ord.is_closed(), "the OR's doors stay open where the crew left them (manual doors never close by themselves)")
+	game.doors.agents_open_doors = false
 	game.doors.set_all(false)
+	# This section runs long enough (clock-in plus a full gurney delivery) for the shift's own
+	# monster spawner to have put a real Walk-In or two on the map; clear them so the deterministic
+	# sight/noise and monster sub-tests below aren't quietly nudged by a stray one wandering into
+	# whichever door they pick.
+	for m in game.monsters.values().duplicate():
+		game.kill_monster(m)
 	await _seconds(1.5)
 
 

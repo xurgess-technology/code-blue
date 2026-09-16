@@ -196,8 +196,19 @@ func _host_tick(delta: float) -> void:
 		if d.is_automatic():
 			_auto_tick(d, agents, delta)
 	for a in agents:
+		if a.kind == "crew":
+			continue
 		for d in near(a.pos):
 			if d.is_hinged():
+				_push_check(d, a)
+	# The crew (paramedics wheeling the gurney) only ever needs to get through the OR's own doors
+	# (polish-or-doors: the OR moved from "auto" to "double"), never any other hinged/double door in
+	# the hospital, so this is scoped to just those rather than a blanket "crews push every door".
+	for a in agents:
+		if a.kind != "crew":
+			continue
+		for d in near(a.pos):
+			if d.kind == "double" and bool(d.data.get("base", false)):
 				_push_check(d, a)
 
 
