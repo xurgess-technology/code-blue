@@ -158,7 +158,9 @@ func stir(strength: float) -> void:
 	if _flat:
 		return
 	strength = clampf(strength, 0.0, 1.5)
-	_jolt_v += strength * 7.0 * (1.0 if _rng.randf() < 0.5 else -1.0)
+	# Toned down from 7.0: the same stirs/second still communicate low sedation, but each one
+	# is a smaller kick (see the spring's damping below for the other half of the calming).
+	_jolt_v += strength * 5.0 * (1.0 if _rng.randf() < 0.5 else -1.0)
 	_env = maxf(_env, strength)
 
 
@@ -259,8 +261,10 @@ func _process(delta: float) -> void:
 		s.set_shader_parameter(&"pallor", _pallor)
 		s.set_shader_parameter(&"grey", _grey)
 
-	# Stir spring: an oscillating jolt plus a decaying tension envelope.
-	_jolt_v += (-120.0 * _jolt - 9.0 * _jolt_v) * delta
+	# Stir spring: an oscillating jolt plus a decaying tension envelope. More damping (was 9.0)
+	# than the stiffness alone would call for, so a stir reads as one decisive jerk that settles
+	# quickly rather than several wobbles - lessens the "spazzing" look without losing the jolt.
+	_jolt_v += (-120.0 * _jolt - 12.0 * _jolt_v) * delta
 	_jolt += _jolt_v * delta
 	_env = move_toward(_env, 0.0, delta * (1.6 + _env))
 
@@ -286,7 +290,7 @@ func _process(delta: float) -> void:
 		_twitch = 0.0
 		_jolt = move_toward(_jolt, 0.0, delta)
 
-	rig.position = Vector3(0.0, maxf(0.0, _env) * 0.025 + absf(_jolt) * 0.01, _jolt * 0.006)
+	rig.position = Vector3(0.0, maxf(0.0, _env) * 0.025 + absf(_jolt) * 0.0075, _jolt * 0.0045)
 	_builder.animate(self, _jolt, _env, _fidget, _twitch, _t)
 
 	for site in _bleed:

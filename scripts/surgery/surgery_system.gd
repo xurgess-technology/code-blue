@@ -180,10 +180,13 @@ func can_begin(player) -> String:
 			if other != self and int(other.operator_id) == int(player.peer_id):
 				return "You are operating at the other table."
 	var needed: int = maxi(1, int(s.get("uses", 0)))
-	if game.shelf_count(String(s.item)) < needed:
+	var have := int(game.shelf_count(String(s.item)))
+	if have < needed and player.has_method("hand_count"):
+		have += int(player.hand_count(String(s.item)))
+	if have < needed:
 		if needed > 1:
-			return "Put %d %s on the supply shelf first." % [needed, Items.display_name(String(s.item))]
-		return "Put %s on the supply shelf first." % Items.display_name(String(s.item))
+			return "Bring %d %s to the shelf or your hands first." % [needed, Items.display_name(String(s.item))]
+		return "Bring %s to the shelf or your hands first." % Items.display_name(String(s.item))
 	var last: float = float(_exit_times.get(player.peer_id, -99.0))
 	if float(game.world_time) - last < REBEGIN_COOLDOWN:
 		return "Stepping back from the table."
@@ -245,11 +248,13 @@ func _game_botch(amount: float, reason: String) -> void:
 		game.surgery_botch(amount, reason)
 
 
-func _game_step_done(result: Dictionary) -> void:
+## `operator_peer`: whoever's report finished the step, so its supply can be drawn from their
+## hands when the shelf alone falls short (see game.surgery_step_done).
+func _game_step_done(result: Dictionary, operator_peer: int = 0) -> void:
 	if game.has_method("case_on_table"):
-		game.surgery_step_done(result, table_index)
+		game.surgery_step_done(result, table_index, operator_peer)
 	else:
-		game.surgery_step_done(result)
+		game.surgery_step_done(result, operator_peer)
 
 
 func _body():
@@ -291,7 +296,7 @@ func receive_operator_report(peer_id: int, report: Dictionary) -> void:
 			var result = report.get("finished")
 			operator_id = 0
 			_last_operator = 0
-			_game_step_done(result if result is Dictionary else {})
+			_game_step_done(result if result is Dictionary else {}, peer_id)
 	if report.has("exit") and peer_id == operator_id:
 		_end_operation()
 

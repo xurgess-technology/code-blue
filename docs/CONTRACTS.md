@@ -267,6 +267,10 @@ func start_case(patient_id: String, ailment_id: String) -> void   # every machin
 func clear_case() -> void
 func can_begin(player) -> String      # host: "" if this player may start the current step now, else the reason
 func begin(player) -> void            # host: this player becomes the operator
+# can_begin's supply check counts game.shelf_count(item) plus this player's own
+# Player.hand_count(item) (not other players' hands) against the step's `uses`; either or both
+# together satisfying `uses` is enough. surgery_step_done draws the shelf down first and only
+# reaches into the finishing operator's hands for the shortfall.
 func end(player) -> void              # host: operator leaves (step progress is kept)
 func physics_tick(delta: float) -> void
 func net_state() -> Dictionary        # host -> clients inside the game snapshot
@@ -292,9 +296,11 @@ Game-side API the surgery system uses:
 - `game.shelf_count(kind)`, `game.is_host()`, `game.world_time`, `game.shift`, `game.players`
 - `game.surgery_botch(amount: float, reason: String, table_index := -1)` host: costs that case's
   vitals, says why (-1: the first patient case)
-- `game.surgery_step_done(result: Dictionary, table_index := -1)` host: consumes the step's items
-  from the shelf, merges `result` into the case's flags, gives vitals back, advances; the last step
-  makes the case stable (`game.finish_case`)
+- `game.surgery_step_done(result: Dictionary, table_index := -1, operator_peer := 0)` host: consumes
+  the step's items off the shelf first, then out of `operator_peer`'s hand slots (`Player.consume_hand`)
+  for whatever the shelf came up short (`can_begin` below already counted both as available), merges
+  `result` into the case's flags, gives vitals back, advances; the last step makes the case stable
+  (`game.finish_case`)
 - `game.send_operator_report(report: Dictionary)` client operator -> host. Every report carries
   `"tb": table_index`; the game routes it to that table's `receive_operator_report` (on the host
   it calls it directly)
@@ -842,6 +848,8 @@ p.slot_for(kind) -> int / p.can_take(kind)      # bulky needs two free slots (bu
 p.take_into(kind, count, value := 0) -> int     # merge or place (both halves for bulky); -1 without room
 p.clear_slot(i)                                 # empties a stack and its second half (pass either)
 p.free_slot_count() / p.hands_empty() / p.holding(kind) / p.select_step(dir)
+p.hand_count(kind) -> int               # total across every hand slot (bulky's empty tail never matches)
+p.consume_hand(kind, n) -> int          # host: removes up to n from hand slots, clears any it empties, returns how many
 ```
 
 Anything that empties a slot must use `clear_slot` (or the host's `_fix_links()` tidies an orphaned
@@ -984,7 +992,7 @@ game.spawn_supplies_for(c)      # host: the first case gets ItemSpawner.plan; la
 The loop (`scripts/loop/shift_loop.gd`, `game.loop`, child "Loop"):
 
 ```gdscript
-game.clock_in()                 # host: LOBBY -> SHIFT: loot, monsters, grace period (the clock's hold calls it)
+game.clock_in()                 # host: LOBBY -> SHIFT: loot, monsters, first call rings right away (the clock's hold calls it)
 game.begin_shift()              # host, tools: clock in and put the first patient straight on a table
 game.finish_shift(text, secs)   # host: the paycheck screen (Phase.WON), then the next shift's lobby
 game.game_over(text)            # host: Phase.LOST, then game.reset_money() and a new run (new seed, shift 1)
@@ -1000,7 +1008,8 @@ loop.pay_for(case, shift) -> int   # stable 200 (+25/shift), extra stable 300 (+
 ```
 
 - Players start a run at `level_info.neutral.spawn_points` (else `player_spawns`): `game.spawn_points()`.
-- Clock in, `GRACE_SECONDS` (60), then the phone rings. E on interactable `phone` answers (subtitles
+- Clock in and the phone rings immediately (`GRACE_SECONDS` is 0, kept only as a named constant for
+  tests/tools). E on interactable `phone` answers (subtitles
   for everyone); after `AUTO_ANSWER_SECONDS` (8) the answering machine takes it. Taking the call
   adds the case (`incoming`) and spawns its supplies; `DISPATCH_DELAY` (3 s) later a crew leaves
   `level_info.ambulance` (else `entrance`, else the spawn farthest from the table), walks the

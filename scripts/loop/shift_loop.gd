@@ -3,8 +3,8 @@ extends Node
 ##
 ##   LOBBY    players start outside (level_info.neutral) or where the level spawns them, walk in,
 ##            and hold E at the time clock.
-##   SHIFT    clock in: loot and monsters spawn, GRACE_SECONDS to look around. Then the break-room
-##            phone rings. Answering (E) plays the call as subtitles; nobody answering for
+##   SHIFT    clock in: loot and monsters spawn, and the break-room phone starts ringing right
+##            away with the first patient. Answering (E) plays the call as subtitles; nobody answering for
 ##            AUTO_ANSWER_SECONDS lets the answering machine take it, so the first patient always
 ##            comes. The patient's case is added as "incoming", their supplies spawn, and a
 ##            paramedic crew wheels them on a gurney along the navmesh from level_info.ambulance
@@ -26,7 +26,9 @@ const CrewScript := preload("res://scripts/loop/crew.gd")
 const HudScript := preload("res://scripts/loop/loop_hud.gd")
 const AmbulanceScript := preload("res://scripts/loop/ambulance.gd")   # SWEEP 4A HOOK (fog lot, chunk 2)
 
-const GRACE_SECONDS := 60.0
+## Legacy grace period before the first call: 0 now (the first call rings immediately at
+## clock-in). Kept as a named constant for tests/tools that still reference it.
+const GRACE_SECONDS := 0.0
 const AUTO_ANSWER_SECONDS := 8.0
 const EXTRA_DECLINE_SECONDS := 20.0
 ## The extra call rings this long after the first patient is on the table.
@@ -143,6 +145,8 @@ func on_clock_in() -> void:
 	pay_note = ""
 	grace_left = GRACE_SECONDS
 	_rng.seed = hash("%d|loop|%d" % [int(game.seed_value), int(game.shift)])
+	if game.is_host() and not game.dev_mode:
+		start_call("first")
 
 
 func on_game_over() -> void:
@@ -168,12 +172,8 @@ func physics_tick(delta: float) -> void:
 
 func _host_tick(delta: float) -> void:
 	if game.phase == game.Phase.SHIFT and not game.dev_mode:
-		if grace_left > 0.0:
-			grace_left -= delta
-			if grace_left <= 0.0:
-				grace_left = 0.0
-				if not first_called and call_state == "":
-					start_call("first")
+		# The first call now fires immediately from on_clock_in(); grace_left stays 0 (GRACE_SECONDS)
+		# and is kept only for tests/tools that still reference it.
 		if extra_at >= 0.0 and not extra_done and call_state == "" and game.world_time >= extra_at:
 			if game.free_patient_table() >= 0 and _has_live_case():
 				start_call("extra")
@@ -712,7 +712,7 @@ func lobby_message() -> String:
 
 
 func clock_in_message() -> String:
-	return "Clocked in. %d seconds to look around before the phone rings." % int(GRACE_SECONDS)
+	return "Clocked in. The phone's already ringing."
 
 
 ## The one-line objective the HUD shows, or "".
@@ -728,8 +728,6 @@ func objective_text() -> String:
 		if call_kind == "extra":
 			return "THE PHONE IS RINGING: ANSWER TO TAKE AN EXTRA PATIENT (%d S)." % maxi(0, ceili(EXTRA_DECLINE_SECONDS - call_t))
 		return "THE PHONE IS RINGING IN THE BREAK ROOM. ANSWER IT."
-	if not game.dev_mode and not first_called and grace_left > 0.0:
-		return "GRACE PERIOD: LOOK AROUND. THE PHONE RINGS IN %d S." % ceili(grace_left)
 	var missing := missing_supplies()
 	if not missing.is_empty():
 		return "BRING TO THE OR SHELF: " + ", ".join(missing)

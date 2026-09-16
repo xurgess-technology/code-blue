@@ -46,6 +46,7 @@ func _run() -> void:
 	await _loot_spawn()
 	await _money()
 	await _pharmacy_pills()
+	await _hand_supplies()
 	await _persistence()
 
 
@@ -407,6 +408,65 @@ func _pharmacy_pills() -> void:
 	else:
 		_say("(no patient table this run: skipped the OR blip check)")
 	_clear()
+
+
+## A surgical item can start a step whether it's on the OR shelf or in the operating player's
+## own hands, and the finishing step draws the shelf down first, the operator's hands only for
+## the shortfall (see surgery_system.gd can_begin / game.surgery_step_done).
+func _hand_supplies() -> void:
+	_say("---- surgery supplies: shelf or hands")
+	_clear()
+	# Earlier checks (_loot_spawn, _pharmacy_pills) already clocked in with random cases: end that
+	# shift so this one starts clean, with only the pinned patient on a table.
+	if game.phase == Game.Phase.SHIFT:
+		game._end_shift(true, "Test: reset for the hand-supplies check.")
+		await _until(func(): return game.phase == Game.Phase.LOBBY, 20.0)
+	game.shelf.erase("anesthetic")
+	game.loop.force_first = {"patient_id": "bob", "ailment_id": "gunshot"}
+	game.begin_shift()
+	await _frames(3)
+	var c: Dictionary = game.cases[0]
+	var table: int = int(c.table)
+	var surgery: Node = game.surgeries[table]
+	var step := Procedures.step(String(c.ailment_id), int(c.step_index))
+	_check(String(step.id) == "sedate" and String(step.item) == "anesthetic" and int(step.uses) == 1, "gunshot's first step needs one anesthetic (%s)" % str(step))
+	_check(game.shelf_count("anesthetic") == 0 and not me.holding("anesthetic"), "neither the shelf nor the bot's hands have it yet")
+	_check(surgery.can_begin(me) != "", "can_begin refuses with no anesthetic anywhere (%s)" % surgery.can_begin(me))
+
+	me.take_into("anesthetic", 1)
+	_check(me.hand_count("anesthetic") == 1, "the bot now holds one anesthetic")
+	_check(surgery.can_begin(me) == "", "can_begin accepts a hand-held anesthetic with none on the shelf")
+
+	# Finish the step as if the bot had just operated: the shelf is empty, so the item comes out
+	# of the operator's hands.
+	game.surgery_step_done({}, table, me.peer_id)
+	_check(me.hand_count("anesthetic") == 0, "finishing the step spent the hand-held anesthetic")
+	_check(game.shelf_count("anesthetic") == 0, "the empty shelf is untouched")
+	c = game.case_by_id(int(c.id))
+	_check(int(c.step_index) == 1, "the case moved on to the next step")
+
+	# The next step ("extract", forceps, uses 0) needs a forceps present but never consumes it;
+	# hand-held is enough and nothing is taken from the bot.
+	me.take_into("forceps", 1)
+	_check(surgery.can_begin(me) == "", "a hand-held forceps satisfies a 0-use step too")
+	game.surgery_step_done({}, table, me.peer_id)
+	_check(me.hand_count("forceps") == 1, "a 0-use step never consumes the item, hand or shelf")
+	c = game.case_by_id(int(c.id))
+	_check(int(c.step_index) == 2, "the case moved on again")
+
+	# Third step ("dress", gauze, uses 1): with one on the shelf AND one in hand, the shelf is
+	# drawn down first and the hand-held one is left alone.
+	me.clear_slot(me.slot_for("forceps"))
+	game.shelf["gauze"] = 1
+	me.take_into("gauze", 1)
+	_check(surgery.can_begin(me) == "", "gauze on the shelf (plus a spare in hand) satisfies the step")
+	game.surgery_step_done({}, table, me.peer_id)
+	_check(game.shelf_count("gauze") == 0, "the shelf's gauze was spent first")
+	_check(me.hand_count("gauze") == 1, "the hand-held spare gauze was left alone")
+	game._end_shift(true, "Test: shift over.")
+	await _until(func(): return game.phase == Game.Phase.LOBBY, 20.0)
+	_clear()
+	game.loop.force_first = {}
 
 
 func _persistence() -> void:
