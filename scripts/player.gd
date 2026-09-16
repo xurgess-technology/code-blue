@@ -1141,6 +1141,37 @@ func hands_empty() -> bool:
 	return true
 
 
+## Total count of `kind` held across every hand slot (both halves of a bulky stack carry the
+## same kind, so this only counts the head; see clear_slot/bulky_pair_for).
+func hand_count(kind: String) -> int:
+	var n := 0
+	for s in slots:
+		if String(s.kind) == kind:
+			n += int(s.count)
+	return n
+
+
+## Host: takes up to `n` of `kind` out of hand slots (oldest slot index first), clearing any
+## slot it empties. Returns how many were actually removed (0 to n).
+func consume_hand(kind: String, n: int) -> int:
+	var left := n
+	for i in slots.size():
+		if left <= 0:
+			break
+		if String(slots[i].kind) != kind:
+			continue
+		var have := int(slots[i].count)
+		var take := mini(have, left)
+		if take <= 0:
+			continue
+		if take >= have:
+			clear_slot(i)
+		else:
+			slots[i]["count"] = have - take
+		left -= take
+	return n - left
+
+
 func holding(kind: String) -> bool:
 	for s in slots:
 		if s.kind == kind:

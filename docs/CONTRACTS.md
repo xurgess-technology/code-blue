@@ -236,6 +236,10 @@ func start_case(patient_id: String, ailment_id: String) -> void   # every machin
 func clear_case() -> void
 func can_begin(player) -> String      # host: "" if this player may start the current step now, else the reason
 func begin(player) -> void            # host: this player becomes the operator
+# can_begin's supply check counts game.shelf_count(item) plus this player's own
+# Player.hand_count(item) (not other players' hands) against the step's `uses`; either or both
+# together satisfying `uses` is enough. surgery_step_done draws the shelf down first and only
+# reaches into the finishing operator's hands for the shortfall.
 func end(player) -> void              # host: operator leaves (step progress is kept)
 func physics_tick(delta: float) -> void
 func net_state() -> Dictionary        # host -> clients inside the game snapshot
@@ -261,9 +265,11 @@ Game-side API the surgery system uses:
 - `game.shelf_count(kind)`, `game.is_host()`, `game.world_time`, `game.shift`, `game.players`
 - `game.surgery_botch(amount: float, reason: String, table_index := -1)` host: costs that case's
   vitals, says why (-1: the first patient case)
-- `game.surgery_step_done(result: Dictionary, table_index := -1)` host: consumes the step's items
-  from the shelf, merges `result` into the case's flags, gives vitals back, advances; the last step
-  makes the case stable (`game.finish_case`)
+- `game.surgery_step_done(result: Dictionary, table_index := -1, operator_peer := 0)` host: consumes
+  the step's items off the shelf first, then out of `operator_peer`'s hand slots (`Player.consume_hand`)
+  for whatever the shelf came up short (`can_begin` below already counted both as available), merges
+  `result` into the case's flags, gives vitals back, advances; the last step makes the case stable
+  (`game.finish_case`)
 - `game.send_operator_report(report: Dictionary)` client operator -> host. Every report carries
   `"tb": table_index`; the game routes it to that table's `receive_operator_report` (on the host
   it calls it directly)
@@ -804,6 +810,8 @@ p.slot_for(kind) -> int / p.can_take(kind)      # bulky needs two free slots (bu
 p.take_into(kind, count, value := 0) -> int     # merge or place (both halves for bulky); -1 without room
 p.clear_slot(i)                                 # empties a stack and its second half (pass either)
 p.free_slot_count() / p.hands_empty() / p.holding(kind) / p.select_step(dir)
+p.hand_count(kind) -> int               # total across every hand slot (bulky's empty tail never matches)
+p.consume_hand(kind, n) -> int          # host: removes up to n from hand slots, clears any it empties, returns how many
 ```
 
 Anything that empties a slot must use `clear_slot` (or the host's `_fix_links()` tidies an orphaned

@@ -1687,8 +1687,11 @@ func surgery_botch(amount: float, reason: String, table_index: int = -1) -> void
 
 
 ## Host: the current step of a table's case is finished. Uses up its supplies, remembers its
-## result, moves on; the last step makes the patient stable.
-func surgery_step_done(result: Dictionary, table_index: int = -1) -> void:
+## result, moves on; the last step makes the patient stable. `operator_peer` is whoever's report
+## finished the step: the step's item can come off the shelf or straight out of their hands
+## (can_begin() already accepted either), shelf first so a held item is only spent when the
+## shared shelf falls short.
+func surgery_step_done(result: Dictionary, table_index: int = -1, operator_peer: int = 0) -> void:
 	if not is_host() or phase != Phase.SHIFT:
 		return
 	var c := _case_for(table_index)
@@ -1699,7 +1702,13 @@ func surgery_step_done(result: Dictionary, table_index: int = -1) -> void:
 		return
 	var uses := int(step.uses)
 	if uses > 0:
-		shelf[step.item] = maxi(0, shelf_count(step.item) - uses)
+		var from_shelf: int = mini(shelf_count(step.item), uses)
+		shelf[step.item] = maxi(0, shelf_count(step.item) - from_shelf)
+		var remaining := uses - from_shelf
+		if remaining > 0 and operator_peer != 0:
+			var p = players.get(operator_peer)
+			if p != null and p.has_method("consume_hand"):
+				p.consume_hand(String(step.item), remaining)
 	var flags: Dictionary = c.get("flags", {})
 	flags.merge(result, true)
 	c.flags = flags

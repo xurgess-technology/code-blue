@@ -709,6 +709,15 @@ Players, Bob, the paramedics and the downed player on the table use the Blender 
 - `tools/gameshot.tscn` includes `10_operating_hud`, a real operation in progress.
 - `tools/minigame_lab.tscn` takes `--seed=N` for varied forceps channels and infection lines,
   and `--wide` for a camera that shows the body around the site.
+- **`tools/devtest.tscn`'s "the dev room's furnace burns the defibrillator for $N" check is
+  flaky** (gameplay-tuning worker, 2026-09-15): re-running the identical code back to back flips
+  it between PASS and FAIL with the same expected `$N`, so `game.money` sometimes doesn't get
+  credited before the check runs a fixed number of frames after the drop. Looks like a real-time
+  race in the furnace's fire-zone detection versus the thrown item's physics settling, not
+  anything sweep-specific; confirmed unrelated to this worker's shift-loop/patient-body/surgery-
+  supply changes by bisecting against plain `main`, which shows the same flakiness. Needs the
+  furnace check either to poll for the money change instead of a fixed frame count, or the burn
+  itself to trigger off the drop event rather than a physics-zone check.
 
 ## Performance (Radeon 890M, 1600x900, measured 2026-09-12)
 

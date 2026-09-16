@@ -154,7 +154,7 @@ func surgery_botch(amount: float, reason: String) -> void:
 		game.say(reason, 1.8)
 
 
-func surgery_step_done(result: Dictionary) -> void:
+func surgery_step_done(result: Dictionary, operator_peer: int = 0) -> void:
 	if not is_host() or case.is_empty():
 		return
 	var step := Procedures.step(String(case.ailment_id), int(case.step_index))
@@ -162,7 +162,13 @@ func surgery_step_done(result: Dictionary) -> void:
 		return
 	var uses := int(step.get("uses", 0))
 	if uses > 0:
-		game.shelf[step.item] = maxi(0, game.shelf_count(String(step.item)) - uses)
+		var from_shelf: int = mini(game.shelf_count(String(step.item)), uses)
+		game.shelf[step.item] = maxi(0, game.shelf_count(String(step.item)) - from_shelf)
+		var remaining := uses - from_shelf
+		if remaining > 0 and operator_peer != 0:
+			var p = game.players.get(operator_peer)
+			if p != null and p.has_method("consume_hand"):
+				p.consume_hand(String(step.item), remaining)
 		if game.shelf_node != null:
 			game.shelf_node.show_stock(game.shelf)
 	var flags: Dictionary = case.get("flags", {})

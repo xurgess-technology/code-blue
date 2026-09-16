@@ -56,7 +56,7 @@ Ailments refer to named sites (`injection`, `gunshot`, `limb`, `limb_cut`) and e
 
 ## Surgery minigames
 
-Holding E at the table (with the step's supply on the shelf) moves your camera over the site and frees the mouse; the tool follows your cursor across a work plane lying on the patient. Teammates see your tool move. Mistakes cost vitals and nothing else.
+Holding E at the table (with the step's supply on the shelf or in your own hands) moves your camera over the site and frees the mouse; the tool follows your cursor across a work plane lying on the patient. Teammates see your tool move. Mistakes cost vitals and nothing else.
 
 - **Anesthetic**: draw the plunger to the dose band for this patient's weight, then hold the needle steady on the vein. Underdosing makes the patient stir and jolt your hands in later steps; overdosing costs vitals.
 - **Forceps**: steer down a winding wound channel to the bullet, grip it, and draw it back out without touching the sides. Dark deep in the wound: a teammate's flashlight helps.
