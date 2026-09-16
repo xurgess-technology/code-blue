@@ -1935,10 +1935,18 @@ func _scan_aim(p: Node, m: Node) -> bool:
 	if p == null or m == null or not is_instance_valid(m) or p.camera == null:
 		return false
 	var from: Vector3 = p.camera.global_position
+	var dir: Vector3 = -p.camera.global_transform.basis.z
+	# HANDS HOOK: the shoulder camera is local-only and not replicated, so this only ever
+	# straightens the ray for the host's own local player (carry_cam is null on the host for
+	# everyone else) -- the same correction Player._update_scan_progress applies locally.
+	if "carry_cam" in p and p.carry_cam != null and p.carry_cam.active:
+		var seg: Array = p.carry_cam.aim_segment(C.SCAN_RANGE)
+		from = seg[0]
+		dir = ((seg[1] as Vector3) - from).normalized()
 	var to_m: Vector3 = (m.global_position as Vector3) + Vector3.UP * 1.0
 	if from.distance_to(to_m) > C.SCAN_RANGE:
 		return false
-	var q := PhysicsRayQueryParameters3D.create(from, from - p.camera.global_transform.basis.z * C.SCAN_RANGE)
+	var q := PhysicsRayQueryParameters3D.create(from, from + dir * C.SCAN_RANGE)
 	q.collision_mask = C.L_WORLD | C.L_MONSTER
 	q.exclude = [p.get_rid()]
 	var hit := get_world_3d().direct_space_state.intersect_ray(q)

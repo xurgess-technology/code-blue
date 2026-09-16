@@ -1,20 +1,30 @@
 extends RefCounted
-## The over-the-shoulder camera while the local player carries a downed teammate or drags a monster
+## The over-the-shoulder camera: a small default offset during ordinary play, a bigger one while
+## the local player carries a downed teammate, and a third while dragging a monster
 ## (docs/HANDS_AND_FEEDBACK.md "Over-the-shoulder carry camera"). Local only: nothing new on the wire.
 ##
-## It moves the camera-feel node (Head/FX) back from the head, over the LEFT shoulder while carrying
-## (the body rides the right shoulder, game.pinned_pose +0.55 x) and higher over the right shoulder
-## while dragging (the body lies behind and below). The offset is in the head's frame, so mouse pitch
-## orbits it around the head, and a teleport moves it with the player (no easing across the world;
-## the wall pull-in snaps to the new place). A sphere cast from the shoulder keeps it out of walls: in
-## a corridor it pulls in toward the head. The local body and the carried body become visible, the
-## first-person hands hide, and the flashlight stays at the head, pointed where the camera looks.
-## Setting `carry_camera`: "shoulder" (default) or "first_person".
+## It moves the camera-feel node (Head/FX) back from the head: a little over the right shoulder by
+## default, over the LEFT shoulder while carrying (the body rides the right shoulder,
+## game.pinned_pose +0.55 x) and higher over the right shoulder while dragging (the body lies behind
+## and below). The offset is in the head's frame, so mouse pitch orbits it around the head, and a
+## teleport moves it with the player (no easing across the world; the wall pull-in snaps to the new
+## place). A sphere cast from the shoulder keeps it out of walls: in a corridor it pulls in toward
+## the head, and the first-person hands take back over if it pulls in far enough to put the camera
+## inside the local body. The local body (and the carried body, while carrying) become visible
+## whenever the shoulder offset is far enough out to show them; the first-person hands and held item
+## show whenever it is not. The flashlight stays at the head, pointed where the camera looks.
+## Setting `default_camera`: "shoulder" (default) or "first_person", for ordinary play.
+## Setting `carry_camera`: "shoulder" (default) or "first_person", for carrying/dragging.
 
 const EASE_TIME := 0.35
 ## Head-space offsets (x right, y up, z back).
 const CARRY_OFFSET := Vector3(-1.0, 0.45, 2.0)
 const DRAG_OFFSET := Vector3(0.45, 1.0, 3.6)
+## The default over-the-shoulder offset for ordinary walking-around play: modest, so it reads as
+## "third person over the shoulder" without the exaggerated pull-back tuned for showing a carried
+## body. Tuned by eye with tools/hospitalshot.gd in the entrance lobby and a narrow corridor: right
+## and just above eye height, less than a metre back.
+const DEFAULT_OFFSET := Vector3(0.38, 0.12, 0.85)
 ## Extra downward look while dragging, radians, so the body behind is in frame.
 const DRAG_TILT := 0.45
 const CAST_RADIUS := 0.16
@@ -44,8 +54,15 @@ func _init(p: Node) -> void:
 	player = p
 
 
+## The carry/drag setting: "shoulder" (default) or "first_person", checked while carrying or
+## dragging.
 static func setting_on() -> bool:
 	return String(Settings.get_value("carry_camera")) != "first_person"
+
+
+## The ordinary-play setting: "shoulder" (default) or "first_person", checked the rest of the time.
+static func default_setting_on() -> bool:
+	return String(Settings.get_value("default_camera")) != "first_person"
 
 
 func wants() -> bool:
@@ -54,16 +71,21 @@ func wants() -> bool:
 		return false
 	if p.game == null or p.game.phase == p.game.Phase.MENU:
 		return false
-	if not setting_on():
-		return false
-	return p.carrying != 0 or p.dragging_monster >= 0
+	if p.carrying != 0 or p.dragging_monster >= 0:
+		return setting_on()
+	return default_setting_on()
 
 
 func update(delta: float) -> void:
 	var p = player
 	var want := wants()
 	if want:
-		_side_offset = CARRY_OFFSET if p.carrying != 0 else DRAG_OFFSET
+		if p.carrying != 0:
+			_side_offset = CARRY_OFFSET
+		elif p.dragging_monster >= 0:
+			_side_offset = DRAG_OFFSET
+		else:
+			_side_offset = DEFAULT_OFFSET
 	blend = move_toward(blend, 1.0 if want else 0.0, delta / EASE_TIME)
 	active = blend > 0.0
 	var e := blend * blend * (3.0 - 2.0 * blend)
@@ -131,15 +153,18 @@ func _show_body(on: bool) -> void:
 		p.body_hands.set_active(on)
 
 
-## True while the first-person hands and held stack should hide.
+## True while the first-person hands and held stack should hide: only once the third-person body
+## is actually showing (see HIDE_BODY_BELOW). A wall pulling the shoulder camera in close enough to
+## hide the body (common now that this is the default view, not just the rare carry state) hands
+## the first-person view back rather than leaving both hidden.
 func hides_hands() -> bool:
-	return blend > 0.02
+	return _body_shown
 
 
-## Player._update_aim while the camera is over the shoulder: the aim ray starts on the camera ray
-## where it passes the head (nothing between the camera and the head counts) and reaches
-## C.INTERACT_RANGE from the head. [from, to].
-func aim_segment() -> Array:
+## Player._update_aim (and any other reach check, e.g. the scanner) while the camera is over the
+## shoulder: the ray starts on the camera ray where it passes the head (nothing between the camera
+## and the head counts) and reaches `range` from the head. [from, to].
+func aim_segment(range: float = C.INTERACT_RANGE) -> Array:
 	var cam: Camera3D = player.camera
 	var dir: Vector3 = -cam.global_transform.basis.z
 	var from: Vector3 = cam.global_position
@@ -147,7 +172,7 @@ func aim_segment() -> Array:
 	var along := maxf(0.0, (head - from).dot(dir))
 	var start := from + dir * along
 	var side := start.distance_to(head)
-	var reach := sqrt(maxf(0.0, C.INTERACT_RANGE * C.INTERACT_RANGE - side * side))
+	var reach := sqrt(maxf(0.0, range * range - side * side))
 	return [start, start + dir * reach]
 
 

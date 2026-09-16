@@ -972,6 +972,12 @@ func _update_scan_progress(delta: float) -> void:
 		return
 	var from := camera.global_position
 	var to := from - camera.global_transform.basis.z * C.SCAN_RANGE
+	if carry_cam != null and carry_cam.active:
+		# HANDS HOOK: same correction as the aim ray -- over the shoulder, nothing between the
+		# camera and the head counts, and the reach is measured from the head.
+		var seg: Array = carry_cam.aim_segment(C.SCAN_RANGE)
+		from = seg[0]
+		to = seg[1]
 	var q := PhysicsRayQueryParameters3D.create(from, to)
 	q.collision_mask = C.L_WORLD | C.L_MONSTER
 	q.exclude = [get_rid()]
