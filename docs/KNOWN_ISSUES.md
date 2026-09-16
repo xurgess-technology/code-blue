@@ -1081,3 +1081,11 @@ Players, Bob, the paramedics and the downed player on the table use the Blender 
   Scoping crew pushes to the OR's doors specifically fixed it and matches the fact that crews never
   walk anywhere else in the hospital. If crews ever gain other destinations (e.g. a second delivery
   point), this scoping will need revisiting.
+- **Follow-up (found during independent verification): the crematorium grate was still borderline
+  for the widest loot.** `devtest.gd`'s furnace check (throwing a defibrillator, 0.36 m at its
+  widest) failed intermittently at the earlier 0.4 m bar spacing (~0.36-0.37 m gaps, from the
+  pharmacy chunk's own follow-up fix) -- close enough to clip depending on tumble. Widened grate
+  spacing from 0.4 m to 0.45 m (`furnace.gd`, both the visual bars and their matching collision),
+  giving ~0.40-0.42 m gaps: comfortable margin above the defibrillator's width, still well short
+  of `C.PLAYER_RADIUS * 2` (0.8 m) so the "no body fits through" rule holds. Unrelated to the OR
+  doors change itself; caught only because it happened to fail on this run's dev-room pass.
