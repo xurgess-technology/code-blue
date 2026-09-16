@@ -185,6 +185,8 @@ func _wall_spot() -> Dictionary:
 			if hit.is_empty():
 				continue
 			var spot: Vector3 = hit.position - dir * 0.75
+			if game._floor_at(Vector3(spot.x, base.y, spot.z)).y > base.y + 0.3:
+				continue   # the dev room pen's waist-high barrier: standing on it, not backed against a wall
 			var high := Vector3(spot.x, base.y + 2.1, spot.z)
 			var q2 := PhysicsRayQueryParameters3D.create(high, high + dir * 1.2)
 			q2.collision_mask = C.L_WORLD

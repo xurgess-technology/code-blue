@@ -100,6 +100,8 @@ func _hospital() -> void:
 	await _frames(3)
 	_check(game.phase == Game.Phase.LOST, "everyone down fails the shift (phase %d: %s)" % [game.phase, game.message])
 	await _seconds(C.END_SCREEN_SECONDS + 1.0)
+	# The new run builds a whole new hospital behind the loading screen first (the hub is big).
+	await _until(func(): return game.phase == Game.Phase.LOBBY, 30.0)
 	_check(game.phase == Game.Phase.LOBBY and me.alive and not me.downed, "the next lobby has everyone back up")
 	main._back_to_menu("")
 	await _frames(3)
@@ -158,7 +160,7 @@ func _dev_room() -> void:
 	await _seconds(0.6)
 	_check(dummy.downed and game.all_players_out() == false, "a downed dummy; others standing, so not all out")
 	# Walking speed first, to compare.
-	_stand(Vector3(20.0, 0, 15.5), -PI / 2.0)
+	_stand(Vector3(18.5, 0, 12.5), -PI / 2.0)
 	await _frames(2)
 	start = me.global_position
 	me.bot_move = Vector2(0, -1)
@@ -182,7 +184,7 @@ func _dev_room() -> void:
 	_check(me.carrying == did and dummy.carried_by == me.peer_id, "holding E picks the downed dummy up")
 	await _frames(2)
 	_check(dummy.global_position.distance_to(me.global_position + Vector3.UP * 1.35) < 0.8, "the carried body rides on the carrier's shoulder")
-	_stand(Vector3(20.0, 0, 15.5), -PI / 2.0)
+	_stand(Vector3(18.5, 0, 12.5), -PI / 2.0)
 	await _frames(2)
 	start = me.global_position
 	me.bot_move = Vector2(0, -1)

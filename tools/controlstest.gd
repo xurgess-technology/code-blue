@@ -129,7 +129,13 @@ func _stances() -> void:
 func _sprint_dive() -> void:
 	_say("---- sprint + crouch-dive")
 	me.revive_full()
-	me.teleport(game._floor_at(me.global_position))
+	# A long clear run north: the hub's spine (cols 15-17, rows 5-19), else wherever the player is.
+	var er: Rect2 = game.level_info.get("entrance_rect", Rect2())
+	var run_from: Vector3 = me.global_position
+	if er.size != Vector2.ZERO:
+		var t := er.position + Vector2(16.5, 18.5) * C.TILE
+		run_from = Vector3(t.x, 0.0, t.y)
+	me.teleport(game._floor_at(run_from))
 	me.bot_crouch = false
 	me.bot_prone = false
 	me.bot_move = Vector2.ZERO

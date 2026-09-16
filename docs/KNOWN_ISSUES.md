@@ -1762,3 +1762,11 @@ Rebuilt around that:
   (`gurney_toppled`, frame on its side with legs and wheels), a wheelchair in the lane, a drag mark
   (`blood_trail`) and pools (`blood_pool`, glass surface so it reads wet). The five hallway fixtures
   are fixed modes (two flicker, two dead, the spine's lit) instead of rolled.
+
+- **Fixed after the chunks 2+3 merge (2026-09-16):** the crematorium furnace priced a sale from a
+  stack without its kind or spoil clock, so a spoiled brain sold for full value (`furnace.gd` now
+  passes `{kind, count, v, bt}`). The other pre-existing failures were tests left behind by the
+  rebuilt rooms, not game bugs: downedtest walked into the dev room furnace's open hatch (the carry
+  slowdown and player table checks, now a clear lane at z 12.5) and gave the new run's bigger hub
+  too little time to build; carrycamtest backed the player onto the pen's waist-high barrier
+  instead of a wall; controlstest's dive started in the lobby facing a wall (now the hub's spine).
