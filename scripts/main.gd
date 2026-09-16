@@ -75,7 +75,9 @@ func _ready() -> void:
 	hud_layer.add_child(hud)
 
 	var menu_layer := CanvasLayer.new()
-	menu_layer.layer = 5
+	# Above the look pass's grain and vignette (layer 50), like the launch printout it continues:
+	# the paper looks the same on both sides of the hand-off. The settings screen sits just above.
+	menu_layer.layer = 51
 	add_child(menu_layer)
 	menu = Menu.new()
 	menu.name = "Menu"
@@ -131,7 +133,8 @@ signal launched
 
 
 ## The one-time launch work: build and draw one of everything (scripts/warmup.gd) behind the
-## admission-chart printout (scripts/launch_screen.gd). The warmup starts inside _ready, so the
+## admission-chart printout (scripts/launch_screen.gd), which then feeds straight into the title
+## menu's sign-in sheet (scripts/menu.gd, same printer). The warmup starts inside _ready, so the
 ## game's very first frame is a lit 3D frame of its first models: the renderer's one-time setup
 ## (seconds, and it can't be split up) happens while Godot's boot splash is still on screen.
 func _launch() -> void:
@@ -161,6 +164,8 @@ func _launch() -> void:
 	rig.queue_free()
 	if screen.is_processing():
 		await screen.done
+	# The admission page has fed off the top; the sign-in sheet carries the paper on from there.
+	menu.feed_in(screen.paper_scroll_px(), screen.feed_speed())
 	screen.queue_free()
 	launching = false
 	launched.emit()

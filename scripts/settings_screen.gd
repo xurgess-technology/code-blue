@@ -14,7 +14,8 @@ signal closed
 signal exit_to_menu_requested
 signal exit_to_desktop_requested
 
-const LAYER := 6
+## Over the title menu (51, which sits above the look pass's grain at 50).
+const LAYER := 52
 
 const COL_TITLE := Color("d71e28")
 const COL_LABEL := Color("cfd6da")

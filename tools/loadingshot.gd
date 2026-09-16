@@ -6,7 +6,8 @@ extends Node
 ##
 ##   godot --path . tools/loadingshot.tscn
 ##
-## Writes tools/game_shots/launch_<n>.png and loading_<n>.png every 0.4 s, then quits.
+## Writes tools/game_shots/launch_<n>.png and loading_<n>.png every 0.4 s, and menu_<n>.png every
+## 0.3 s through the menu's feed-in, then quits.
 
 const OUT_DIR := "res://tools/game_shots"
 const SLOW_MS := 100
@@ -35,7 +36,9 @@ func _ready() -> void:
 	_main = load("res://scenes/main.tscn").instantiate()
 	add_child(_main)
 	await _watch("launch", t0, func(): return not _main.launching)
-	await get_tree().create_timer(0.5).timeout
+	# The hand-off: the title menu's sign-in sheet feeding in, shot closely, then at rest.
+	var tm := Time.get_ticks_msec()
+	await _watch("menu", tm, func(): return Time.get_ticks_msec() - tm > 3000, 300)
 	var t1 := Time.get_ticks_msec()
 	_main._start_solo("Shot")
 	await _watch("loading", t1, func(): return _main.game.phase != Game.Phase.MENU and not Loading.visible)
@@ -44,7 +47,7 @@ func _ready() -> void:
 	get_tree().quit(0)
 
 
-func _watch(tag: String, t0: int, finished: Callable) -> void:
+func _watch(tag: String, t0: int, finished: Callable, shot_ms := 400) -> void:
 	var n := 0
 	var next := 0
 	var last := t0
@@ -62,7 +65,7 @@ func _watch(tag: String, t0: int, finished: Callable) -> void:
 			worst = maxi(worst, gap)
 			print("[loadingshot] %s: slow frame %4d ms ending at %5d ms (abs %d)" % [tag, gap, ms, now])
 		if ms >= next:
-			next = ms + 400
+			next = ms + shot_ms
 			var img := get_viewport().get_texture().get_image()
 			img.save_png(ProjectSettings.globalize_path("%s/%s_%02d.png" % [OUT_DIR, tag, n]))
 			n += 1

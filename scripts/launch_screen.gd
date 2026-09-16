@@ -11,9 +11,14 @@ extends CanvasLayer
 ##      frame, so a rare slow frame slows the printer for an instant instead of skipping ahead. If
 ##      the chart finishes first, "awaiting labs" lines print while the warmup finishes.
 ##   3. PAGE COMPLETE: the ADMITTED stamp comes down, and only then does the warmup draw everything
-##      it built (its long first-draw frames) behind the still, stamped page. Then it fades.
+##      it built (its long first-draw frames) behind the still, stamped page.
+##   4. FEED OUT: the page speeds up and out of the top of the screen. The title menu underneath
+##      draws the same printer (scripts/fax_printer.gd) and carries the paper on at the speed this
+##      page left at (`paper_scroll_px`, `feed_speed`), feeding its sign-in sheet in.
 
 signal done
+
+const Fax := preload("res://scripts/fax_printer.gd")
 
 const LAYER := 124
 const CPS := 135.0
@@ -26,8 +31,9 @@ const STAMP_HOLD := 1.3
 const AFTER_DRAW_HOLD := 0.35
 ## The stamp settles before the warmup is allowed to start its long draw frames.
 const STAMP_SETTLE := 0.35
-const FADE := 0.5
-const WIDTH_CHARS := 58
+## Seconds for the finished page to accelerate up and off the screen.
+const FEED_OUT := 0.8
+const FEED_TICK := 0.11
 
 ## Connecting lasts until the renderer's setup frame has gone by: a frame of at least SETUP_MS
 ## (measured ~2.4 s on a Radeon 890M, landing about a second after the first frame, not on it),
@@ -38,16 +44,6 @@ const CALM_MS := 70.0
 const CONNECT_MIN := 1.6
 const CONNECT_FALLBACK := 5.0
 const CONNECT_MAX := 10.0
-
-const PAPER := Color("dcd8c9")
-const PAPER_BAND := Color(0.55, 0.72, 0.55, 0.13)
-const INK := Color("2b2c2f")
-const INK_FAINT := Color("5a5c60")
-const STAMP_INK := Color("a3242a")
-const ROOM := Color("06080c")
-const PRINTER := Color("16191c")
-const PRINTER_EDGE := Color("2b3035")
-const LCD_TEXT := Color("9fe8a0")
 
 const HumanModelScript := preload("res://scripts/human/human_model.gd")
 
@@ -71,7 +67,11 @@ var _setup_seen := false
 var _stamp_at := -1.0
 var _stamp_anim := 0.0
 var _drawn_at := -1.0
-var _fade := 1.0
+var _feed_t := -1.0       # seconds into the feed-out, < 0 before it starts
+var _feed_px := 0.0
+var _feed_dist := 0.0
+var _feed_tick := 0.0
+var _head_from := 0.0
 var _scroll := 0.0
 var _last_usec := 0
 var _headless := false
@@ -83,10 +83,7 @@ func _ready() -> void:
 	layer = LAYER
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_headless = DisplayServer.get_name() == "headless"
-	var sf := SystemFont.new()
-	sf.font_names = PackedStringArray(["Consolas", "Courier New", "Lucida Console", "DejaVu Sans Mono", "monospace"])
-	sf.antialiasing = TextServer.FONT_ANTIALIASING_GRAY
-	_font = sf
+	_font = Fax.make_font()
 	_canvas = Control.new()
 	_canvas.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_canvas.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -120,13 +117,23 @@ func may_work() -> bool:
 	return _headless or (not _connecting and _current.is_empty() and _stamp_at < 0.0)
 
 
+## How far the paper has moved up, in pixels: where the next page's green bars and holes carry on.
+func paper_scroll_px() -> float:
+	return _scroll * Fax.LINE_H + _feed_px
+
+
+## The paper's speed (px/s) as the page leaves: the next page starts at this speed.
+func feed_speed() -> float:
+	return 2.0 * _feed_dist / FEED_OUT if _feed_dist > 0.0 else 0.0
+
+
 func _queue_chart() -> void:
 	var dt := Time.get_datetime_dict_from_system()
 	var date := "%04d-%02d-%02d" % [dt.year, dt.month, dt.day]
 	var clock := "%02d:%02d" % [dt.hour, dt.minute]
 	var items := Items.ITEMS.size()
 	for line in [
-		[">> FAX  %s  %s  PAGE 1 OF 1" % [date, clock], "dim", false],
+		[">> FAX  %s  %s  PAGE 1 OF 2" % [date, clock], "dim", false],
 		["COUNTY GENERAL  /  NIGHT ADMISSIONS", "text", false],
 		["", "rule", false],
 		["PATIENT ........ CODE BLUE", "text", false],
@@ -193,12 +200,28 @@ func _process(_delta: float) -> void:
 	_scroll = lerpf(_scroll, float(_printed.size()), clampf(dt * 14.0, 0.0, 1.0))
 	if _stamp_at >= 0.0:
 		_stamp_anim += dt
-		if _drawn and _now() - _drawn_at >= AFTER_DRAW_HOLD and _now() - _stamp_at >= STAMP_HOLD:
-			_fade = maxf(0.0, _fade - dt / FADE)
-			if _fade <= 0.0:
+		if _feed_t < 0.0 and _drawn and _now() - _drawn_at >= AFTER_DRAW_HOLD and _now() - _stamp_at >= STAMP_HOLD:
+			_start_feed_out()
+		if _feed_t >= 0.0:
+			_feed_t += dt
+			var t := minf(_feed_t / FEED_OUT, 1.0)
+			_feed_px = _feed_dist * t * t   # accelerating: leaves at feed_speed()
+			_feed_tick -= dt
+			if _feed_tick <= 0.0:
+				_feed_tick = FEED_TICK
+				Audio.play("print_feed", null, -14.0, 0.1, Audio.BUS_UI)
+			if t >= 1.0:
 				done.emit()
 				set_process(false)
 	_canvas.queue_redraw()
+
+
+func _start_feed_out() -> void:
+	_feed_t = 0.0
+	_scroll = float(_printed.size())
+	# Far enough that the stamp, the last thing printed, is gone off the top.
+	_feed_dist = _canvas.size.y * Fax.SLOT + Fax.LINE_H * 3.0
+	_head_from = _head_x(Fax.layout(_canvas.size, _font))
 
 
 ## Spend `dt` seconds of printer time: characters, pauses, the next line off the queue.
@@ -248,119 +271,67 @@ func _finish_line(pause: float) -> void:
 
 # -- drawing -----------------------------------------------------------------------------------
 
+## Where the print head sits: on the character being printed, else after the last line printed.
+func _head_x(l: Dictionary) -> float:
+	var tx: float = l.tx
+	var char_w: float = l.char_w
+	if not _current.is_empty() and String(_current.kind) in ["text", "dim"]:
+		return tx + char_w * float(int(_chars))
+	if not _printed.is_empty():
+		return tx + char_w * float(String(_printed[_printed.size() - 1].text).length())
+	return tx
+
+
 func _draw_page() -> void:
 	var size := _canvas.size
-	var a := _fade
-	_canvas.draw_rect(Rect2(Vector2.ZERO, size), Color(ROOM, a))
-	var fs := 19
-	var line_h := 29.0
-	var char_w := _font.get_string_size("M", HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-	var text_w := char_w * WIDTH_CHARS
-	var margin := 56.0
-	var paper_w := text_w + margin * 2.0
-	var px := (size.x - paper_w) * 0.5
-	var print_y := size.y * 0.74
-	var paper_top := -10.0
-
-	# The paper, with its green-bar bands and tractor holes, moving up with the scroll.
-	var paper := Rect2(px, paper_top, paper_w, print_y + line_h * 0.6 - paper_top)
-	_canvas.draw_rect(paper, Color(PAPER, a))
-	var offset := fposmod(_scroll * line_h, line_h * 4.0)
-	var by := print_y - line_h * 0.72 - offset + line_h * 4.0
-	while by > paper_top - line_h * 2.0:
-		var band := Rect2(px, by - line_h * 2.0, paper_w, line_h * 2.0).intersection(paper)
-		if band.size.y > 0.0:
-			_canvas.draw_rect(band, Color(PAPER_BAND, PAPER_BAND.a * a))
-		by -= line_h * 4.0
-	var hole_step := line_h * 0.8
-	var hy := print_y - fposmod(_scroll * line_h, hole_step) + hole_step
-	while hy > paper_top:
-		if hy < paper.end.y - 4.0:
-			for hx in [px + margin * 0.38, px + paper_w - margin * 0.38]:
-				_canvas.draw_circle(Vector2(hx, hy), 5.0, Color(ROOM, 0.85 * a))
-		hy -= hole_step
+	var l := Fax.layout(size, _font)
+	Fax.draw_paper(_canvas, size, l, paper_scroll_px(), 1.0)
 
 	# Printed lines, newest at the head, older ones scrolled up.
-	var tx := px + margin
+	var fs := Fax.FONT_SIZE
+	var print_y: float = l.print_y
+	var tx: float = l.tx
+	var text_w: float = l.text_w
 	var total := _printed.size()
 	for i in range(total - 1, -1, -1):
-		var y := print_y - (_scroll - float(i)) * line_h
-		if y < -line_h:
+		var y := print_y - (_scroll - float(i)) * Fax.LINE_H - _feed_px
+		if y < -Fax.LINE_H * 3.0:
 			break
-		_draw_line(_printed[i], tx, y, text_w, fs, -1, a)
+		_draw_line(_printed[i], tx, y, text_w, fs, -1)
 	if not _current.is_empty():
-		_draw_line(_current, tx, print_y - (_scroll - float(total)) * line_h, text_w, fs, int(_chars), a)
-
-	# Older lines fade toward the top, into the dark.
-	var fade_h := size.y * 0.5
-	var top := Color(ROOM, 0.95 * a)
-	var clear := Color(ROOM, 0.0)
-	_canvas.draw_polygon(PackedVector2Array([Vector2(0, 0), Vector2(size.x, 0), Vector2(size.x, fade_h), Vector2(0, fade_h)]),
-			PackedColorArray([top, top, clear, clear]))
-
-	# The printer: its body below the tear line, the head riding along the line being printed.
-	var body := Rect2(px - 36.0, print_y + line_h * 0.6, paper_w + 72.0, size.y - print_y)
-	_canvas.draw_rect(body, Color(PRINTER, a))
-	_canvas.draw_line(body.position, Vector2(body.end.x, body.position.y), Color(PRINTER_EDGE, a), 3.0)
-	_canvas.draw_rect(Rect2(px - 4.0, body.position.y - 2.0, paper_w + 8.0, 6.0), Color(0.0, 0.0, 0.0, 0.6 * a))
-	var head_x := tx
-	if not _current.is_empty() and String(_current.kind) in ["text", "dim"]:
-		head_x = tx + char_w * float(int(_chars))
-	elif total > 0:
-		head_x = tx + char_w * float(String(_printed[total - 1].text).length())
-	var head := Rect2(head_x - 10.0, body.position.y - 16.0, 26.0, 20.0)
-	_canvas.draw_rect(head, Color("2a2f34", a))
-	_canvas.draw_rect(Rect2(head.position.x + 3.0, head.position.y + 3.0, 20.0, 3.0), Color("45505a", a))
+		_draw_line(_current, tx, print_y - (_scroll - float(total)) * Fax.LINE_H, text_w, fs, int(_chars))
+	Fax.draw_top_fade(_canvas, size, 1.0)
 
 	# Status light and display. Both hold still while connecting and once the page is stamped: those
 	# are the moments a long frame may land, and nothing that should be moving may be on screen then.
-	var light := Vector2(body.end.x - 30.0, body.position.y + 22.0)
+	var head_x := _head_x(l)
+	if _feed_t >= 0.0:
+		head_x = lerpf(_head_from, tx, ease(minf(_feed_t / (FEED_OUT * 0.5), 1.0), 0.4))   # carriage return
 	var status := "RECEIVING"
-	var light_col := Color(LCD_TEXT, 0.9 * a)
+	var light := Fax.LCD_TEXT
 	if _connecting:
 		status = "CONNECTING"
-		light_col = Color("e0a020", 0.9 * a)
+		light = Fax.LCD_WAIT
 	elif _stamp_at >= 0.0:
 		status = "PAGE COMPLETE"
-	_canvas.draw_circle(light, 4.0, light_col)
-	var lcd := Rect2(body.end.x - 250.0, body.position.y + 10.0, 200.0, 26.0)
-	_canvas.draw_rect(lcd, Color("0c1a12", a))
-	_canvas.draw_rect(lcd, Color(PRINTER_EDGE, a), false, 1.5)
-	_canvas.draw_string(_font, lcd.position + Vector2(10.0, 19.0), status, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(LCD_TEXT, 0.85 * a))
-	_canvas.draw_string(_font, Vector2(px - 20.0, body.position.y + 29.0), "FAX-9 / COUNTY GENERAL", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("5a646c", a))
+	Fax.draw_printer(_canvas, size, l, _font, head_x, status, light, 1.0)
 
 
-func _draw_line(line: Dictionary, x: float, y: float, w: float, fs: int, shown: int, a: float) -> void:
+func _draw_line(line: Dictionary, x: float, y: float, w: float, fs: int, shown: int) -> void:
 	var kind := String(line.kind)
 	match kind:
 		"rule":
-			var dash_y := y - fs * 0.35
-			var dx := x
-			while dx < x + w:
-				_canvas.draw_line(Vector2(dx, dash_y), Vector2(minf(dx + 9.0, x + w), dash_y), Color(INK, 0.75 * a), 2.0)
-				dx += 14.0
+			Fax.draw_rule(_canvas, x, y - fs * 0.35, w, 1.0)
 		"stamp":
-			_draw_stamp(String(line.text), Vector2(x + w - 150.0, y - 42.0), fs, a)
+			Fax.draw_stamp(_canvas, _font, String(line.text), Vector2(x + w - 150.0, y - 42.0), int(fs * 1.9),
+					1.0 - _stamp_anim / 0.1, Fax.STAMP_INK, 1.0)
 		"gap":
 			pass
 		_:
 			var text := String(line.text)
 			if shown >= 0:
 				text = text.substr(0, shown)
-			var col := INK_FAINT if kind == "dim" else INK
+			var col := Fax.INK_FAINT if kind == "dim" else Fax.INK
 			# Dot-matrix ink: a slightly offset second pass reads as struck ribbon rather than crisp type.
-			_canvas.draw_string(_font, Vector2(x + 0.6, y + 0.4), text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(col, 0.35 * a))
-			_canvas.draw_string(_font, Vector2(x, y), text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(col, 0.92 * a))
-
-
-func _draw_stamp(text: String, centre: Vector2, fs: int, a: float) -> void:
-	var k := 1.0 + 0.5 * clampf(1.0 - _stamp_anim / 0.1, 0.0, 1.0)
-	var big := int(fs * 1.9 * k)
-	var tw := _font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, big).x
-	var box := Vector2(tw + 34.0, big + 20.0)
-	_canvas.draw_set_transform(centre, -0.14, Vector2.ONE)
-	var col := Color(STAMP_INK, 0.85 * a)
-	_canvas.draw_rect(Rect2(-box * 0.5, box), col, false, 4.0)
-	_canvas.draw_rect(Rect2(-box * 0.5 + Vector2(6, 6), box - Vector2(12, 12)), Color(col, col.a * 0.5), false, 1.5)
-	_canvas.draw_string(_font, Vector2(-tw * 0.5, big * 0.36), text, HORIZONTAL_ALIGNMENT_LEFT, -1, big, col)
-	_canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+			_canvas.draw_string(_font, Vector2(x + 0.6, y + 0.4), text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(col, 0.35))
+			_canvas.draw_string(_font, Vector2(x, y), text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(col, 0.92))

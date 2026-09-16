@@ -1610,3 +1610,53 @@ Rebuilt around that:
 - Verified: `controlstest` 50/50, `devtest` (after it waits for `main.launched`), `settingstest`
   97/97, `inventorytest` 92/92, `databasetest` 12/12, `carrycamtest` (only its 3 known wall
   failures), `looptest` (only the known furnace-throw flake).
+
+## Export builds (build.bat) (2026-09-16)
+
+- **`build.bat`** exports the Windows build players get: `builds\windows\CodeBlue.exe` + `CodeBlue.pck`
+  (+ the GodotSteam and `steam_api64.dll` libraries), no import step. `build.bat debug` adds
+  `CodeBlue.console.exe` for the engine log; `nolaunch` skips starting it. Preset: `export_presets.cfg`
+  ("Windows Desktop"; `tools/`, `docs/`, `prototype-web/` left out). Needs the 4.7.2 export templates
+  in `%APPDATA%\Godot\export_templates\4.7.2.stable\` (only the Windows x86_64 ones are installed on
+  Zach's machine; Linux/Steam Deck would need the rest of the .tpz).
+- **Shader baker is on** (`shader_baker/enabled` in the preset *options*) and only runs when the export
+  is not `--headless` (needs a real rendering device; 704 shaders, ~+10 MB). So build.bat exports
+  windowed, which re-saves `project.godot` in the editor's format; build.bat backs it up and restores it.
+- **Exported builds can't take a scene on the command line** (official templates are built without
+  path overrides). To run a tools scene in an export, temporarily point `run/main_scene` at it and
+  include `tools/` in the preset, then revert.
+- **Cold first launch is slow.** The very first run of an export on a machine (no shader/pipeline cache
+  yet -- a new player on Steam, or after a GPU driver update) took ~56 s on the Radeon 890M: an ~8 s
+  frozen CONNECTING frame and a ~23 s frozen frame on the stamped page when the warmup draws
+  everything, then a ~7 s freeze in the first Solo load. The baker removes shader compiles but not
+  pipeline compiles, which is what these are. The second run matched the dev build (launch ~17.5 s,
+  Solo ~1.2 s). Not yet addressed: the warmup's first draw happens all in one frame.
+- `Assets.has()` / `material_maps()` checked materials with `FileAccess.file_exists` on the raw .jpg,
+  which isn't in an export (only the imported texture), so the export warned "11 declared key(s) have
+  no file on disk". Now `ResourceLoader.exists`. No caller asked `has()` about a material, so nothing
+  rendered wrong. Steam init fails on this machine only because the Steam client isn't installed.
+
+## Fax-style title menu (2026-09-16)
+
+- **The title menu is page 2 of the launch fax** (`scripts/menu.gd`): a night-shift sign-in sheet on
+  the same printer. Tick boxes (`Menu.FaxOption`, real Buttons drawn as ink: focus/hover pencils a
+  tick, choosing stamps an X that stays while that choice loads), the name and join address typed on
+  blanks, status as a red NOTE line. New EXIT tick box quits. The dev code turns the CODE BLUE stamp
+  blue. No instructions on the sheet (Zach: the hosting/port help and controls list were clutter;
+  the in-game host info line still shows the address to share).
+- **No printer on the menu at rest.** During the hand-off the printer slides off the bottom of the
+  screen as the sheet feeds up (`Menu._printer_drop`), and the sheet settles centred with the paper
+  running off both ends of the screen. The launch page keeps its printer and LCD (CONNECTING tells
+  you the still first seconds aren't a hang); its "FAX-9 / COUNTY GENERAL" label is gone.
+- **Shared printer** (`scripts/fax_printer.gd`): layout, paper, printer, rules and stamps for both
+  screens. At launch the stamped admission page no longer fades: it accelerates up and off the top
+  (`LaunchScreen.FEED_OUT`), and main.gd calls `menu.feed_in(paper_scroll_px(), feed_speed())`, so the
+  sign-in sheet carries the paper on at the speed it left at and slows to rest (0.5-1.4 s). Returning
+  from a shift the sheet is just there. Headless: no feed.
+- **Layers:** the menu moved from canvas layer 5 to 51 (above the look pass's grain/vignette at 50,
+  like the launch printout), and the settings screen from 6 to 52 to stay over it. The pause-menu
+  Settings / Exit buttons (also on the settings layer) are therefore no longer grained.
+- `tools/menushot.tscn` (windowed) shoots the menu's states; `tools/loadingshot.tscn` now also shoots
+  the feed-in (its screenshots stall frames, so the feed looks slower there than it is).
+- Verified: `devtest` pass, `settingstest` 97/97. Not run: `nettest` (reads `menu._status.text`,
+  which still holds the bare message).

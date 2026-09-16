@@ -1,6 +1,13 @@
 class_name Menu
 extends Control
-## Title screen: pick a name, then play solo, host, or join.
+## Title screen: the night-shift sign-in sheet, page 2 of the launch fax. Pick a name, then tick
+## solo, host, or join.
+##
+## Same paper as the launch printout (scripts/fax_printer.gd). At launch, main.gd hands over with
+## feed_in() as the stamped admission page leaves the top of the screen: this sheet feeds up out of
+## the printer at the speed that page left at while the printer slides away off the bottom, leaving
+## the sheet centred on its own. Coming back from a shift, it's simply there. The choices are real
+## Buttons and LineEdits (focus, keyboard, disabled all work) drawn as ink on the paper.
 
 signal chose_solo(player_name: String)
 signal chose_host(player_name: String)
@@ -13,121 +20,161 @@ signal chose_host_steam(player_name: String)
 ## DEV HOOK (scripts/dev): Solo or Host while the secret code is armed. host = true to host.
 signal chose_dev(player_name: String, host: bool)
 
+const Fax := preload("res://scripts/fax_printer.gd")
 const DevCodeScript := preload("res://scripts/dev/dev_code.gd")
+
+## Seconds the sheet takes to feed in when nothing hands it a speed; the hand-off's own duration
+## comes from the speed the launch page left at, clamped to this range.
+const FEED_IN := 1.0
+const FEED_MIN := 0.5
+const FEED_MAX := 1.4
+const FEED_TICK := 0.11
+const MAX_STEP := 1.0 / 30.0
+const OPTION_H := 34.0
 
 var dev_code: Node = null
 var _name_edit: LineEdit
 var _addr_edit: LineEdit
 var _status: Label
+var _note_tag: Label
 var _buttons: Array[Button] = []
+var _options: Array = []
+
+var _font: Font
+var _canvas: Control   # the room, the paper and (while feeding in) the printer
+var _clip: Control     # the paper above the printer; the sheet feeds up inside it
+var _sheet: VBoxContainer
+var _title: Control
+var _over: Control     # the top fade, over the sheet
+var _title_ink := Fax.STAMP_INK
+
+var _base_scroll := 0.0
+var _feed_t := -1.0
+var _feed_dur := FEED_IN
+var _feed_dist := 0.0
+var _feed_p := 1.0      # 0 = sheet still inside the printer, 1 = at rest
+var _feed_tick := 0.0
+var _last_usec := 0
 
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_font = Fax.make_font()
 	_build()
+	_last_usec = Time.get_ticks_usec()
+	resized.connect(_layout)
+	_layout.call_deferred()
 
 
 func _build() -> void:
-	var bg := ColorRect.new()
-	bg.color = Color("06080c")
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(bg)
+	_canvas = Control.new()
+	_canvas.name = "Paper"
+	_canvas.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_canvas.draw.connect(_draw_paper)
+	_canvas.gui_input.connect(_on_background_input)
+	add_child(_canvas)
 
-	var center := CenterContainer.new()
-	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(center)
+	_clip = Control.new()
+	_clip.name = "Sheet"
+	_clip.clip_contents = true
+	_clip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_clip)
 
-	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(620, 0)
-	center.add_child(panel)
+	_over = Control.new()
+	_over.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_over.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_over.draw.connect(_draw_over)
+	add_child(_over)
 
-	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 12)
-	panel.add_child(col)
+	_sheet = VBoxContainer.new()
+	_sheet.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_sheet.add_theme_constant_override("separation", 4)
+	_clip.add_child(_sheet)
 
-	var margin := MarginContainer.new()
-	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 28)
-	panel.remove_child(col)
-	margin.add_child(col)
-	panel.add_child(margin)
+	var dt := Time.get_datetime_dict_from_system()
+	_sheet.add_child(_ink(">> FAX  %04d-%02d-%02d  %02d:%02d  PAGE 2 OF 2" % [dt.year, dt.month, dt.day, dt.hour, dt.minute], 16, Fax.INK_FAINT))
+	_sheet.add_child(_ink("COUNTY GENERAL  /  NIGHT SHIFT SIGN-IN", Fax.FONT_SIZE, Fax.INK))
 
-	var title := Label.new()
-	title.text = "CODE BLUE"
-	title.add_theme_font_size_override("font_size", 64)
-	title.add_theme_color_override("font_color", Color("d71e28"))
-	col.add_child(title)
-	# DEV HOOK: the dev room's secret code listens here; armed, the title turns blue.
+	_title = Control.new()
+	_title.custom_minimum_size.y = 110
+	_title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_title.draw.connect(_draw_title)
+	_sheet.add_child(_title)
+	# DEV HOOK: the dev room's secret code listens here; armed, the title stamp turns blue.
 	dev_code = DevCodeScript.new()
 	dev_code.name = "DevCode"
 	add_child(dev_code)
-	dev_code.armed_changed.connect(func(on): title.add_theme_color_override("font_color", Color("2f7bff") if on else Color("d71e28")))
-	bg.gui_input.connect(_on_background_input)
+	dev_code.armed_changed.connect(func(on):
+		_title_ink = Fax.DEV_INK if on else Fax.STAMP_INK
+		_title.queue_redraw())
 
-	var tag := Label.new()
-	tag.text = "Clock in. Find the tools. Save the patient.\nTry not to shove each other into the monsters."
-	tag.add_theme_font_size_override("font_size", 15)
-	tag.add_theme_color_override("font_color", Color("8a9aa0"))
-	col.add_child(tag)
+	_sheet.add_child(_rule())
 
-	col.add_child(_spacer(8))
-
+	var name_row := _row()
+	name_row.add_child(_ink("SURGEON ON CALL:", Fax.FONT_SIZE, Fax.INK))
 	_name_edit = LineEdit.new()
-	_name_edit.placeholder_text = "Your name"
+	_name_edit.placeholder_text = "your name"
 	_name_edit.max_length = 16
 	_name_edit.text = _load_pref("name", "Surgeon %d" % (randi() % 90 + 10))
-	col.add_child(_labelled("YOUR NAME", _name_edit))
+	_name_edit.custom_minimum_size.x = 300
+	_style_field(_name_edit)
+	name_row.add_child(_name_edit)
+	_sheet.add_child(name_row)
 
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 10)
-	col.add_child(row)
-	var solo := _button("Solo shift")
-	var host := _button("Host (IP)")
-	row.add_child(solo)
-	row.add_child(host)
-	# Settings hook: not in _buttons, so it stays usable while a join is pending.
-	var settings := _button("Settings")
-	settings.name = "SettingsButton"
-	settings.pressed.connect(func(): chose_settings.emit())
-	row.add_child(settings)
-
+	var space := Control.new()
+	space.custom_minimum_size.y = 10
+	space.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_sheet.add_child(space)
+	var solo := _option("SOLO SHIFT")
+	_sheet.add_child(solo)
 	# net hook: Steam hosting, only when GodotSteam loaded and the Steam client is running.
-	var host_steam := _button("Host with Steam")
+	var host_steam := _option("HOST SHIFT  (STEAM)")
 	host_steam.visible = Net.steam_available()
-	row.add_child(host_steam)
 	host_steam.pressed.connect(_on_host_steam)
-
-	var row2 := HBoxContainer.new()
-	row2.add_theme_constant_override("separation", 10)
-	col.add_child(row2)
+	_sheet.add_child(host_steam)
+	var host := _option("HOST SHIFT  (IP)")
+	_sheet.add_child(host)
+	var join_row := _row()
+	var join := _option("JOIN SHIFT  AT")
+	join_row.add_child(join)
 	_addr_edit = LineEdit.new()
 	_addr_edit.placeholder_text = "host address, e.g. 192.168.1.20"
 	_addr_edit.text = _load_pref("addr", "")
 	_addr_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row2.add_child(_addr_edit)
-	var join := _button("Join (IP)")
-	join.size_flags_horizontal = Control.SIZE_SHRINK_END
-	row2.add_child(join)
+	_style_field(_addr_edit)
+	join_row.add_child(_addr_edit)
+	_sheet.add_child(join_row)
 
-	_status = Label.new()
-	_status.add_theme_font_size_override("font_size", 14)
-	_status.add_theme_color_override("font_color", Color("ffd35c"))
-	_status.custom_minimum_size.y = 22
-	col.add_child(_status)
+	_sheet.add_child(_rule())
 
-	var help := Label.new()
-	help.text = "Hosting listens on port %d. Friends on your network join with the address shown once you are in.\nOver the internet, forward that port or put everyone on Tailscale." % C.DEFAULT_PORT
-	if Net.steam_available():
-		help.text = "Host with Steam, then invite friends from the pause menu or the Steam overlay (Shift+Tab).\n" + help.text
-	help.add_theme_font_size_override("font_size", 12)
-	help.add_theme_color_override("font_color", Color("7a8790"))
-	col.add_child(help)
+	var admin_row := _row()
+	# Settings hook: not in _buttons, so it stays usable while a join is pending.
+	var settings := _option("SETTINGS", false)
+	settings.name = "SettingsButton"
+	settings.pressed.connect(func(): chose_settings.emit())
+	admin_row.add_child(settings)
+	var gap := Control.new()
+	gap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	admin_row.add_child(gap)
+	var quit := _option("EXIT", false)
+	quit.name = "ExitButton"
+	quit.pressed.connect(func(): get_tree().quit())
+	admin_row.add_child(quit)
+	_sheet.add_child(admin_row)
 
-	var controls := Label.new()
-	controls.text = "WASD move · mouse look · Shift sprint · F flashlight · E interact · Q shove · LMB use held item · R ability · G drop · Esc pause · F11 fullscreen"
-	controls.add_theme_font_size_override("font_size", 12)
-	controls.add_theme_color_override("font_color", Color("5e6a73"))
-	col.add_child(controls)
+	var note_row := _row()
+	note_row.custom_minimum_size.y = 26
+	_note_tag = _ink("NOTE:", 16, Fax.STAMP_INK)
+	_note_tag.visible = false
+	_note_tag.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	note_row.add_child(_note_tag)
+	_status = _ink("", 16, Fax.STAMP_INK)
+	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_status.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	note_row.add_child(_status)
+	_sheet.add_child(note_row)
 
 	_buttons = [solo, host, join, host_steam]
 	solo.pressed.connect(_on_solo)
@@ -137,31 +184,216 @@ func _build() -> void:
 	_name_edit.text_submitted.connect(func(_t): _on_solo())
 
 
-func _spacer(h: int) -> Control:
-	var s := Control.new()
-	s.custom_minimum_size.y = h
-	return s
+# -- pieces of the sheet ---------------------------------------------------------------------
 
-
-func _labelled(text: String, child: Control) -> Control:
-	var box := VBoxContainer.new()
+func _ink(text: String, font_size: int, color: Color) -> Label:
 	var l := Label.new()
 	l.text = text
-	l.add_theme_font_size_override("font_size", 12)
-	l.add_theme_color_override("font_color", Color("8a9aa0"))
-	box.add_child(l)
-	box.add_child(child)
-	return box
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	l.add_theme_font_override("font", _font)
+	l.add_theme_font_size_override("font_size", font_size)
+	l.add_theme_color_override("font_color", Color(color, 0.92))
+	return l
 
 
-func _button(text: String) -> Button:
-	var b := Button.new()
-	b.text = text
-	b.custom_minimum_size = Vector2(160, 44)
-	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	b.add_theme_font_size_override("font_size", 17)
+func _row() -> HBoxContainer:
+	var r := HBoxContainer.new()
+	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	r.add_theme_constant_override("separation", 12)
+	return r
+
+
+func _rule() -> Control:
+	var c := Control.new()
+	c.custom_minimum_size.y = 18
+	c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	c.draw.connect(func(): Fax.draw_rule(c, 0.0, c.size.y * 0.5, c.size.x, 1.0))
+	return c
+
+
+## A tick box: a Button that draws "[ ] LABEL" in ink. Hover or focus pencils in a faint tick;
+## choosing it stamps an X that stays while that choice is loading (sticky), or flashes (not).
+func _option(label: String, sticky := true) -> Button:
+	var b := FaxOption.new()
+	b.label = label
+	b.font = _font
+	b.sticky = sticky
+	# Button's own minimum size is computed from its (empty) text, so the width is set here.
+	b.custom_minimum_size = Vector2(FaxOption.BOX + 20.0 + _font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, FaxOption.FONT_SIZE).x, OPTION_H)
+	b.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	b.flat = true
+	var none := StyleBoxEmpty.new()
+	for s in ["normal", "hover", "pressed", "focus", "disabled", "hover_pressed"]:
+		b.add_theme_stylebox_override(s, none)
+	_options.append(b)
 	return b
 
+
+func _style_field(e: LineEdit) -> void:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(Fax.INK, 0.04)
+	sb.border_width_bottom = 2
+	sb.border_color = Color(Fax.INK, 0.8)
+	sb.content_margin_left = 6.0
+	sb.content_margin_right = 6.0
+	sb.content_margin_top = 2.0
+	sb.content_margin_bottom = 2.0
+	var focus := sb.duplicate() as StyleBoxFlat
+	focus.border_color = Fax.STAMP_INK
+	focus.bg_color = Color(Fax.STAMP_INK, 0.05)
+	e.add_theme_stylebox_override("normal", sb)
+	e.add_theme_stylebox_override("read_only", sb)
+	e.add_theme_stylebox_override("focus", focus)
+	e.add_theme_font_override("font", _font)
+	e.add_theme_font_size_override("font_size", Fax.FONT_SIZE)
+	e.add_theme_color_override("font_color", Fax.INK)
+	e.add_theme_color_override("font_placeholder_color", Color(Fax.INK_FAINT, 0.6))
+	e.add_theme_color_override("caret_color", Fax.STAMP_INK)
+	e.add_theme_color_override("selection_color", Color(Fax.STAMP_INK, 0.25))
+	e.add_theme_color_override("font_selected_color", Fax.INK)
+
+
+class FaxOption extends Button:
+	var label := ""
+	var font: Font
+	var sticky := true
+	var marked := false
+
+	const BOX := 20.0
+	const FONT_SIZE := 19
+
+	func _init() -> void:
+		pressed.connect(_on_pressed)
+
+	func _on_pressed() -> void:
+		marked = true
+		queue_redraw()
+		Audio.play("print_stamp", null, -14.0, 0.05, Audio.BUS_UI)
+		if not sticky:
+			get_tree().create_timer(0.3).timeout.connect(func():
+				marked = false
+				queue_redraw())
+
+	func set_marked(on: bool) -> void:
+		marked = on
+		queue_redraw()
+
+	func _draw() -> void:
+		var h := size.y
+		var ink := Color(Fax.INK_FAINT, 0.7) if disabled else Fax.INK
+		var box := Rect2(2.0, (h - BOX) * 0.5, BOX, BOX)
+		draw_rect(box, Color(ink, 0.9), false, 2.0)
+		if marked:
+			var p := box.grow(-3.0)
+			draw_line(p.position, p.end, Fax.STAMP_INK, 3.0)
+			draw_line(Vector2(p.end.x, p.position.y), Vector2(p.position.x, p.end.y), Fax.STAMP_INK, 3.0)
+		elif not disabled and (is_hovered() or has_focus()):
+			var o := box.position
+			draw_polyline(PackedVector2Array([o + Vector2(4, 11), o + Vector2(9, 16), o + Vector2(18, 3)]),
+					Color(Fax.STAMP_INK, 0.6), 2.5)
+		if font != null:
+			draw_string(font, Vector2(BOX + 14.0, h * 0.5 + FONT_SIZE * 0.36), label, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE, Color(ink, 0.92))
+
+
+# -- feeding and layout ----------------------------------------------------------------------
+
+## The launch printout's hand-off: the sheet starts inside the printer and feeds up, carrying on the
+## paper's movement from `scroll_px` at `speed` px/s and slowing to a stop.
+func feed_in(scroll_px := 0.0, speed := 0.0) -> void:
+	if DisplayServer.get_name() == "headless":
+		return
+	_base_scroll = scroll_px
+	_feed_dist = _rest_offset()
+	_feed_dur = clampf(2.0 * _feed_dist / speed, FEED_MIN, FEED_MAX) if speed > 0.0 else FEED_IN
+	_feed_t = 0.0
+	_feed_p = 0.0
+	_feed_tick = 0.0
+	_last_usec = Time.get_ticks_usec()
+	_layout()
+
+
+func is_feeding() -> bool:
+	return _feed_t >= 0.0
+
+
+## How far below its resting place the sheet starts: its top edge just inside the slot.
+func _rest_offset() -> float:
+	var l := Fax.layout(size, _font)
+	return float(l.slot_y) - _rest_y(l)
+
+
+## At rest the sheet sits centred on the screen, the printer gone.
+func _rest_y(_l: Dictionary) -> float:
+	return maxf(20.0, (size.y - _sheet.get_combined_minimum_size().y) * 0.5)
+
+
+## How far the printer has slid down: none as the hand-off starts, off the bottom by the time the
+## sheet is most of the way up. The paper runs down to wherever it is.
+func _printer_drop(l: Dictionary) -> float:
+	return (size.y - float(l.slot_y) + 24.0) * smoothstep(0.0, 0.75, _feed_p)
+
+
+func _layout() -> void:
+	if _sheet == null:
+		return
+	var l := Fax.layout(size, _font)
+	_clip.position = Vector2(l.px, 0.0)
+	_clip.size = Vector2(l.paper_w, float(l.slot_y) + _printer_drop(l))
+	var down := (1.0 - _feed_p) * _feed_dist
+	_sheet.position = Vector2(Fax.MARGIN, _rest_y(l) + down)
+	_sheet.size = Vector2(l.text_w, _sheet.get_combined_minimum_size().y)
+	_canvas.queue_redraw()
+	_over.queue_redraw()
+
+
+func _process(_delta: float) -> void:
+	var now_usec := Time.get_ticks_usec()
+	var dt := minf(float(now_usec - _last_usec) / 1000000.0, MAX_STEP)
+	_last_usec = now_usec
+	if _feed_t < 0.0 or not visible:
+		return
+	_feed_t += dt
+	var t := minf(_feed_t / _feed_dur, 1.0)
+	_feed_p = 1.0 - (1.0 - t) * (1.0 - t)   # decelerating from the launch page's speed
+	_feed_tick -= dt
+	if _feed_tick <= 0.0 and t < 0.85:
+		_feed_tick = FEED_TICK
+		Audio.play("print_feed", null, -14.0, 0.1, Audio.BUS_UI)
+	if t >= 1.0:
+		_feed_t = -1.0
+		_feed_p = 1.0
+	_layout()
+
+
+func _draw_paper() -> void:
+	var sz := _canvas.size
+	var l := Fax.layout(sz, _font)
+	var drop := _printer_drop(l)
+	Fax.draw_paper(_canvas, sz, l, _base_scroll + _feed_p * _feed_dist, 1.0, float(l.slot_y) + drop)
+	Fax.draw_printer(_canvas, sz, l, _font, float(l.tx), "RECEIVING", Fax.LCD_TEXT, 1.0, drop)
+
+
+## The same top fade as the launch page while this sheet feeds in (so nothing pops at the hand-off),
+## pulling back to just above the sheet's first line as it comes to rest.
+func _draw_over() -> void:
+	var sz := _over.size
+	var l := Fax.layout(sz, _font)
+	var rest_h := maxf(0.0, _rest_y(l) - 6.0)
+	var fade_h := lerpf(sz.y * 0.5, rest_h, _feed_p)
+	if fade_h <= 1.0:
+		return
+	var top := Color(Fax.ROOM, 0.95)
+	var clear := Color(Fax.ROOM, 0.0)
+	_over.draw_polygon(PackedVector2Array([Vector2(0, 0), Vector2(sz.x, 0), Vector2(sz.x, fade_h), Vector2(0, fade_h)]),
+			PackedColorArray([top, top, clear, clear]))
+
+
+func _draw_title() -> void:
+	Fax.draw_stamp(_title, _font, "CODE BLUE", _title.size * 0.5, 56, 0.0, _title_ink, 1.0, -0.05)
+
+
+# -- state -----------------------------------------------------------------------------------
 
 func player_name() -> String:
 	var n := _name_edit.text.strip_edges().substr(0, 16)
@@ -170,7 +402,7 @@ func player_name() -> String:
 
 func show_menu(message: String = "") -> void:
 	visible = true
-	_status.text = message
+	_set_note(message)
 	set_enabled(true)
 
 
@@ -179,12 +411,20 @@ func hide_menu() -> void:
 
 
 func set_status(text: String) -> void:
+	_set_note(text)
+
+
+func _set_note(text: String) -> void:
 	_status.text = text
+	_note_tag.visible = not text.is_empty()
 
 
 func set_enabled(on: bool) -> void:
 	for b in _buttons:
 		b.disabled = not on
+	if on:
+		for o in _options:
+			o.set_marked(false)
 
 
 func _on_solo() -> void:
@@ -212,22 +452,25 @@ func _dev_start(host: bool) -> bool:
 	return true
 
 
-## Clicking the empty background lets go of a text field (so typing reaches the menu again).
+## Clicking the empty paper or the room lets go of a text field (so typing reaches the menu again).
 func _on_background_input(e: InputEvent) -> void:
 	if e is InputEventMouseButton and e.pressed:
 		get_viewport().gui_release_focus()
 
+
 func _on_host_steam() -> void:
 	_save_prefs()
 	set_enabled(false)
-	_status.text = "Opening a Steam lobby..."
+	_set_note("Opening a Steam lobby...")
 	chose_host_steam.emit(player_name())
 
 
 func _on_join() -> void:
 	_save_prefs()
 	if _addr_edit.text.strip_edges().is_empty():
-		_status.text = "Type the host's address first."
+		_set_note("Type the host's address first.")
+		for o in _options:
+			o.set_marked(false)
 		return
 	set_enabled(false)
 	chose_join.emit(player_name(), _addr_edit.text)
