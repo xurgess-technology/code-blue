@@ -1824,9 +1824,13 @@ door.is_closed() / is_hinged() / is_automatic() / limit(side) / leaf_xform(i, a)
   same way as the cafeteria/radiology/morgue's). Opening swings away from the player (into the
   tunnel if the far side has under 80 degrees of room), at 1.9/s; closing at 1.6/s, or a slam
   (5.5/s, noise 0.95) if the door was still moving or the player sprints. Doors stay where they are
-  left. Bots, the paramedic crew wheeling the gurney, and players carrying someone or dragging a
-  monster (E is taken), push them open by walking into them. A door sweeping into a player stops and
-  waits (a dropped item stops a closing door too); the one who opened it is not in its way.
+  left. Bots, and players carrying someone or dragging a monster (E is taken), push them open by
+  walking into them. The paramedic crew wheeling the gurney (E is taken there too) pushes the OR's
+  own doors open the same way, but *only* the OR's doors: the crew never walks anywhere else in the
+  hospital, so `doors.gd` scopes its push check to `kind == "double" and base` rather than every
+  hinged/double door, to keep a stray delivery from nudging some unrelated room door. A door
+  sweeping into a player stops and waits (a dropped item stops a closing door too); the one who
+  opened it is not in its way.
 - **Monsters**: agents walking into a hinged or double door (including the OR's, now that they are
   `double`) open it by kind while wandering or rushing: the
   Walk-In pushes slowly (0.42/s, a creak, noise 0.5), the Discharged rushing bursts it (7/s, a slam,
