@@ -168,7 +168,7 @@ func _begin_end() -> void:
 	# gets the quick fly-back.
 	var me := _local_me()
 	var m = game.monsters.get(monster_id)
-	var instant := m == null or not is_instance_valid(m) \
+	var instant: bool = m == null or not is_instance_valid(m) \
 		or (me != null and (int(me.hp) < _start_hp or not me.alive or me.downed or me.carried_by != 0))
 	if instant:
 		_deactivate()
@@ -191,7 +191,7 @@ func _deactivate() -> void:
 
 ## A navmesh path from `from` to `to` on the default map, else empty (the caller glides straight).
 func _find_path(from: Vector3, to: Vector3) -> PackedVector3Array:
-	var world := game.get_tree().root.get_world_3d() if game != null and game.get_tree() != null else null
+	var world: World3D = game.get_tree().root.get_world_3d() if game != null and game.get_tree() != null else null
 	if world == null:
 		return PackedVector3Array()
 	var map: RID = world.navigation_map

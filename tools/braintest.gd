@@ -324,7 +324,7 @@ func _hive_eyes() -> void:
 	var started := game.world_time
 	await _until(func(): return not me.hive_view, 12.0)
 	var lasted := game.world_time - started
-	var want := b.hive_view.FLIGHT_IN + 7.0
+	var want: float = float(b.hive_view.FLIGHT_IN) + 7.0
 	_check(absf(lasted - want) < 0.3, "level 1 lasts about flight-in + 7 s = %.1f (%.2f)" % [want, lasted])
 	# A hit ends it.
 	b._cd.clear()

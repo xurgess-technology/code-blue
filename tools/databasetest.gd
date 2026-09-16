@@ -55,8 +55,12 @@ func _run() -> void:
 func _scan_unlocks_tier2() -> void:
 	_say("---- a completed scan unlocks tier 2 in the host database")
 	game.database.clear()
+	# The OR is always open floor around the patient table, clear of furniture that could block
+	# the scanner's raycast (a lobby spawn point can have chairs/desks within a few metres).
+	me.teleport(game.table_pos() + Vector3(0, 0, -2.0))
+	await _frames(3)
 	var here: Vector3 = me.global_position
-	var wi: Node3D = game.brains.spawn_walk_in(game._floor_at(here + Vector3(0, 0, 6))) as Node3D
+	var wi: Node3D = game.brains.spawn_walk_in(game._floor_at(here + Vector3(0, 0, 4))) as Node3D
 	await _frames(2)
 	var to: Vector3 = wi.global_position - me.global_position
 	me.bot_yaw = atan2(-to.x, -to.z)
@@ -99,9 +103,9 @@ func _guest_scan_lands_in_host_db() -> void:
 	guest.bot_invulnerable = true
 	game.players[-501] = guest
 	game.get_node("Entities").add_child(guest)
-	guest.teleport(me.global_position + Vector3(2.0, 0.0, 0.0))
+	guest.teleport(game.table_pos() + Vector3(2.0, 0.0, -2.0))   # open OR floor, see _scan_unlocks_tier2
 	await _frames(3)
-	var wi: Node3D = game.brains.spawn_walk_in(game._floor_at(guest.global_position + Vector3(0, 0, 6))) as Node3D
+	var wi: Node3D = game.brains.spawn_walk_in(game._floor_at(guest.global_position + Vector3(0, 0, 4))) as Node3D
 	await _frames(2)
 	var to: Vector3 = wi.global_position - guest.global_position
 	guest.bot_yaw = atan2(-to.x, -to.z)
@@ -166,17 +170,16 @@ func _say(line: String) -> void:
 
 func _frames(n: int) -> void:
 	for i in n:
-		await get_tree().process_frame
+		await get_tree().physics_frame
 
 
 func _until(cond: Callable, seconds: float) -> bool:
-	var t := 0.0
-	while t < seconds:
+	var frames := int(seconds * 60.0)
+	for i in frames:
 		if cond.call():
 			return true
-		await get_tree().process_frame
-		t += get_process_delta_time()
-	return cond.call()
+		await get_tree().physics_frame
+	return bool(cond.call())
 
 
 func _finish() -> void:
