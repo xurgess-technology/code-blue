@@ -946,7 +946,7 @@ game.spawn_supplies_for(c)      # host: the first case gets ItemSpawner.plan; la
 The loop (`scripts/loop/shift_loop.gd`, `game.loop`, child "Loop"):
 
 ```gdscript
-game.clock_in()                 # host: LOBBY -> SHIFT: loot, monsters, grace period (the clock's hold calls it)
+game.clock_in()                 # host: LOBBY -> SHIFT: loot, monsters, first call rings right away (the clock's hold calls it)
 game.begin_shift()              # host, tools: clock in and put the first patient straight on a table
 game.finish_shift(text, secs)   # host: the paycheck screen (Phase.WON), then the next shift's lobby
 game.game_over(text)            # host: Phase.LOST, then game.reset_money() and a new run (new seed, shift 1)
@@ -962,7 +962,8 @@ loop.pay_for(case, shift) -> int   # stable 200 (+25/shift), extra stable 300 (+
 ```
 
 - Players start a run at `level_info.neutral.spawn_points` (else `player_spawns`): `game.spawn_points()`.
-- Clock in, `GRACE_SECONDS` (60), then the phone rings. E on interactable `phone` answers (subtitles
+- Clock in and the phone rings immediately (`GRACE_SECONDS` is 0, kept only as a named constant for
+  tests/tools). E on interactable `phone` answers (subtitles
   for everyone); after `AUTO_ANSWER_SECONDS` (8) the answering machine takes it. Taking the call
   adds the case (`incoming`) and spawns its supplies; `DISPATCH_DELAY` (3 s) later a crew leaves
   `level_info.ambulance` (else `entrance`, else the spawn farthest from the table), walks the

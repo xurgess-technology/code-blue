@@ -5,16 +5,17 @@ extends Node
 ##   godot --headless --fixed-fps 60 --path . tools/looptest.tscn [-- --seed=N] [--pocket=factory]
 ##   (--pocket forces that pocket space on every shift's wings and checks it is rebuilt for shift 2)
 ##
-## Shift 1  start at a spawn point, walk to the time clock and clock in; the grace period runs;
-##          pick up some loot; the phone rings and the bot answers it (subtitles); the patient's
-##          supplies spawn; paramedics wheel the patient along the navmesh onto a patient table
-##          and leave; the extra call rings, the bot answers, the second patient lands on the
-##          other table; the bot fetches supplies and operates both to stable; it cannot clock out
-##          before that; clock out pays exactly both cases; the loot is still in hand in the next
-##          lobby; the bot sells it at the crematorium furnace and buys pills at the pharmacy.
+## Shift 1  start at a spawn point, walk to the time clock and clock in; the phone starts ringing
+##          immediately; the bot picks up some loot on the way; the phone is answered (subtitles);
+##          the patient's supplies spawn; paramedics wheel the patient along the navmesh onto a
+##          patient table and leave; the extra call rings, the bot answers, the second patient
+##          lands on the other table; the bot fetches supplies and operates both to stable; it
+##          cannot clock out before that; clock out pays exactly both cases; the loot is still in
+##          hand in the next lobby; the bot sells it at the crematorium furnace and buys pills at
+##          the pharmacy.
 ## Shift 2  clock in again in the same hospital: fresh loot, last shift's untouched loot gone,
-##          containers closed, grace restarted. Nobody answers: the answering machine takes the
-##          call. The patient dies on the table; the extra call is ignored and declines itself;
+##          containers closed, the phone rings immediately again. Nobody answers: the answering
+##          machine takes the call. The patient dies on the table; the extra call is ignored and declines itself;
 ##          clock out costs the dead patient's penalty and nothing for the declined one.
 ## Shift 3  clock in, everyone goes down: game over, then a new run (shift 1, money reset,
 ##          a new hospital).
@@ -103,7 +104,7 @@ func _run() -> void:
 		_check(Zones.zone_of(game.level_info, start) == "entrance" and Zones.zone_of(game.level_info, bot.global_position) == "entrance",
 			"it starts and stays inside the entrance building (%s -> %s)" % [Zones.zone_of(game.level_info, start), Zones.zone_of(game.level_info, bot.global_position)])
 		_check(not game.monster_may_wander_to(game.clock_pos()) and not game.monster_may_wander_to(start), "monsters may not wander into the entrance building or the neutral area")
-	_check(game.loop.grace_left > game.loop.GRACE_SECONDS - 3.0, "the grace period started (%.0f s)" % game.loop.grace_left)
+	_check(game.loop.call_kind == "first" and game.loop.call_state == "ringing", "the phone starts ringing immediately at clock-in, no grace period")
 	_check(game.cases.is_empty() and game.monsters.size() > 0, "no patient yet, monsters are awake")
 	var loot_count := 0
 	for it in game.world_items.values():
@@ -112,14 +113,8 @@ func _run() -> void:
 	_check(loot_count > 0, "loot spawned at clock-in (%d stacks)" % loot_count)
 	_check(game.loop.clock_prompt(bot).begins_with("!"), "the clock refuses to clock out with no patient: '%s'" % game.loop.clock_prompt(bot))
 
-	# Grab a piece of loot during the grace period.
-	var loot_kind := await _grab_loot()
-	_check(loot_kind != "", "the bot picked up loot during the grace period (%s)" % loot_kind)
-
-	# Wait by the phone (the answering machine takes calls nobody reaches in time).
-	ok = await _do_until(func(): _go_use("phone", game.loop.phone.global_position, false), func(): return game.loop.call_state == "ringing", 90.0)
-	_check(ok, "the phone rings when the grace period ends")
-	_check(game.phase == Game.Phase.SHIFT and game.cases.is_empty(), "ringing, still no case")
+	# The phone is already ringing (no grace period): walk over and answer it before the
+	# answering machine's AUTO_ANSWER_SECONDS window takes it automatically.
 	game.loop.force_extra = {"patient_id": "seal", "ailment_id": "gunshot"}
 	ok = await _do_until(func(): _go_use("phone", game.loop.phone.global_position, false), func(): return game.loop.call_state == "talking", 30.0)
 	_check(ok, "walking to the phone and pressing E answers it")
@@ -176,6 +171,11 @@ func _run() -> void:
 	_check(extra_table >= 0 and extra_table != first_table, "the extra patient lies on the other table (%d vs %d)" % [extra_table, first_table])
 	_check(game.body_for_table(first_table) != null and game.body_for_table(extra_table) != null, "two patient bodies on two tables")
 	_check(game.case == game.case_by_id(first_id), "game.case is the first patient case")
+
+	# Grab a piece of loot now that both patients are delivered, well before there is any more
+	# time-sensitive phone interaction (there's no grace period any more to do this in).
+	var loot_kind := await _grab_loot()
+	_check(loot_kind != "", "the bot picked up loot (%s)" % loot_kind)
 
 	var money_before: int = game.money
 	ok = await _do_until(func(): _work(), func():
@@ -256,10 +256,10 @@ func _run() -> void:
 		if n.has_method("is_open") and n.is_open() and String(n.get("container_type")) != "pegboard":   # pegboards have no door
 			open_containers += 1
 	_check(open_containers == 0 and opened_before > 0, "every container in the new wings is closed (%d open, %d were open last shift)" % [open_containers, opened_before])
-	_check(game.loop.grace_left > game.loop.GRACE_SECONDS - 3.0, "grace restarted")
+	_check(game.loop.call_kind == "first" and game.loop.call_state == "ringing", "the phone rings immediately again at the new shift's clock-in")
 	game.dev_skip_grace()
 	ok = await _do_until(func(): _halt(), func(): return game.loop.call_state == "ringing", 10.0)
-	_check(ok, "skip grace: the phone rings")
+	_check(ok, "the phone is still ringing")
 	ok = await _do_until(func(): _halt(), func(): return game.loop.call_state == "talking", 20.0)
 	_check(ok and game.loop.subtitle.begins_with("ANSWERING MACHINE"), "unanswered, the answering machine takes the call: '%s'" % game.loop.subtitle)
 	_check(game.cases.size() == 1, "the first patient still comes")
