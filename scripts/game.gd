@@ -69,14 +69,18 @@ var level: Node3D = null
 var level_info: Dictionary = {}
 var players: Dictionary = {}      # peer id -> Player
 var monsters: Dictionary = {}     # monster id -> Monster
-## SWEEP 4A HOOK (database terminal, chunk 4): host-only. kind -> DbRecord (sighted / scanned /
-## harvested). Loaded from disk in _ready(), saved through mark_db() whenever a field flips, so
-## it survives a wipe (game.reset_money) and a full reload (docs/CONTRACTS.md "Brains").
+## SWEEP 4A HOOK (database terminal, chunk 4): THIS machine's player's own database, kind ->
+## DbRecord (sighted / scanned / harvested). Every player has their own: the host decides when a
+## player sights, scans or harvests something (mark_db) and tells that player's machine, which saves
+## it (DatabaseStore). Loaded from disk in _ready(); survives a wipe (game.reset_money) and a reload.
 const DbRecordScript := preload("res://scripts/database/db_record.gd")
 const DatabaseStoreScript := preload("res://scripts/database/database_store.gd")
 var database: Dictionary = {}
 var _scan_progress: Dictionary = {}   # peer id -> 0..1
-var _scan_target: Dictionary = {}     # peer id -> monster id being scanned
+var _scan_target: Dictionary = {}     # peer id -> scan target id (monster id, or a scan prop's negative id)
+## Scannable things that are not monsters (the waiting room's Night Nurse): nodes with `kind`,
+## `height` and a negative `scan_id`, a collider on C.L_SCAN. They add and remove themselves.
+var scan_props: Array = []
 var world_items: Dictionary = {}  # item id -> WorldItem
 ## loop: the PatientBody on the first patient case's table, or null.
 var patient_body: Node3D:
@@ -209,6 +213,11 @@ func _ready() -> void:
 	loop.name = "Loop"
 	add_child(loop)
 	loop.setup(self)
+	# SWEEP 4A HOOK (scanner): the local scan hologram, beam, completion ring and banner.
+	var scan_fx: Node = preload("res://scripts/scan_fx.gd").new()
+	scan_fx.name = "ScanFx"
+	add_child(scan_fx)
+	scan_fx.setup(self)
 	# DEV HOOK: the dev room lives on every machine at the same path so its RPCs line up.
 	dev = DevRoomScript.new()
 	dev.name = "Dev"
@@ -2016,36 +2025,55 @@ func db_record(kind: String) -> DbRecord:
 	return database[kind]
 
 
-## Host: set a database field ("sighted" / "scanned" / "harvested") the first time it becomes
-## true, saving to disk only on that transition (docs/CONTRACTS.md "Brains" -> the database
-## terminal). Called for both the host's own players and remote guests: whoever sights, scans or
-## harvests a species, the record it lands in is always the host's.
-func mark_db(kind: String, field: String) -> void:
+## Host: player `p` sighted / scanned / harvested `kind` ("sighted" / "scanned" / "harvested"). It
+## lands in that player's own database: the host's own player's straight away, a guest's by an event
+## to their machine (which saves it). `p` null: every player in the game (a harvest off the table is
+## the team's). Bots have no database.
+func mark_db(kind: String, field: String, p: Node = null) -> void:
 	if not is_host():
 		return
+	var who: Array = [p] if p != null else players.values()
+	for q in who:
+		if q == null or not is_instance_valid(q) or bool(q.get("is_bot")):
+			continue
+		if bool(q.is_local):
+			mark_own_db(kind, field)
+		elif Net.active and multiplayer.get_peers().has(int(q.peer_id)):
+			_event.rpc_id(int(q.peer_id), "db_update", {"kind": kind, "field": field})
+
+
+## Every machine: set a field in this machine's player's own database, saving on the first flip.
+func mark_own_db(kind: String, field: String) -> void:
 	var rec := db_record(kind)
 	if not bool(rec.get(field)):
 		rec.set(field, true)
 		DatabaseStoreScript.save(database)
-		_broadcast("db_update", {"kind": kind, "field": field})
 
 
-## Client: the terminal wants a full copy of the host's database (only sent on request, not
-## replicated continuously -- it barely ever changes and can be arbitrarily large).
-func request_database_sync() -> void:
-	if not is_host() and Net.active:
-		_rpc_request_database.rpc_id(Net.HOST_ID)
+## A scan target by id: a monster (id >= 0) or a scan prop (negative id), null when gone.
+func scan_target_node(id: int) -> Node3D:
+	if id >= 0:
+		var m = monsters.get(id)
+		return m if m != null and is_instance_valid(m) else null
+	for sp in scan_props:
+		if is_instance_valid(sp) and int(sp.scan_id) == id:
+			return sp
+	return null
 
 
-@rpc("any_peer", "reliable", "call_remote")
-func _rpc_request_database() -> void:
-	if not is_host():
-		return
-	var sender := multiplayer.get_remote_sender_id()
-	var out := {}
-	for k in database.keys():
-		out[k] = (database[k] as DbRecord).to_dict()
-	_event.rpc_id(sender, "db_full", {"all": out})
+func _scan_targets() -> Array:
+	var out: Array = []
+	for m in monsters.values():
+		if m != null and is_instance_valid(m):
+			out.append(m)
+	for sp in scan_props:
+		if is_instance_valid(sp):
+			out.append(sp)
+	return out
+
+
+static func _scan_id_of(t: Node) -> int:
+	return int(t.monster_id) if "monster_id" in t else int(t.scan_id)
 
 
 ## Host: is `p` aiming at `m`, in scan range, with a clear shot (a straight raycast from the
@@ -2066,34 +2094,34 @@ func _scan_aim(p: Node, m: Node) -> bool:
 	if from.distance_to(to_m) > C.SCAN_RANGE:
 		return false
 	var q := PhysicsRayQueryParameters3D.create(from, from + dir * C.SCAN_RANGE)
-	q.collision_mask = C.L_WORLD | C.L_MONSTER
+	q.collision_mask = C.L_WORLD | C.L_MONSTER | C.L_SCAN
 	q.exclude = [p.get_rid()]
 	var hit := get_world_3d().direct_space_state.intersect_ray(q)
-	return not hit.is_empty() and hit.get("collider") == m
+	if hit.is_empty():
+		return false
+	var col = hit.get("collider")
+	return col == m or (col is Node and (col as Node).get_parent() == m)   # a scan prop's body is its child
 
 
 ## Host: hold R aiming at a monster (in range, in sight) to scan it; breaking either resets
-## progress. A completed scan marks the species scanned and tells the scanner "Entry updated".
+## progress. A completed scan marks the species scanned; the scanner's own machine shows it (scan_fx.gd).
 ## Also tracks "sighted": a monster within scan range and visible (aimed at is not required) to
 ## any living player, regardless of whether anyone is scanning.
 func _tick_scan(delta: float) -> void:
-	for m in monsters.values():
-		if m == null or not is_instance_valid(m):
-			continue
+	var targets := _scan_targets()
+	for m in targets:
 		for p in alive_players():
 			if p.camera != null and p.camera.global_position.distance_to(m.global_position) <= C.SCAN_RANGE \
 					and Perception.in_view(p, m.global_position) and _scan_aim(p, m):
-				mark_db(String(m.kind), "sighted")
-				break
+				mark_db(String(m.kind), "sighted", p)   # each player's own database
 	for p in alive_players():
 		var peer: int = p.peer_id
 		var target: Node = null
 		if bool(p.get("scan_holding")):
-			var mid := int(_scan_target.get(peer, -1))
-			var cur = monsters.get(mid) if mid >= 0 and _scan_aim(p, monsters.get(mid)) else null
-			target = cur
+			var cur: Node3D = scan_target_node(int(_scan_target.get(peer, -1))) if int(_scan_target.get(peer, -1)) != -1 else null
+			target = cur if cur != null and _scan_aim(p, cur) else null
 			if target == null:
-				for m in monsters.values():
+				for m in targets:
 					if _scan_aim(p, m):
 						target = m
 						break
@@ -2101,12 +2129,11 @@ func _tick_scan(delta: float) -> void:
 			_scan_progress[peer] = 0.0
 			_scan_target[peer] = -1
 			continue
-		_scan_target[peer] = int(target.monster_id)
+		_scan_target[peer] = _scan_id_of(target)
 		var prog: float = float(_scan_progress.get(peer, 0.0)) + delta / C.SCAN_SECONDS
 		if prog >= 1.0:
 			_scan_progress[peer] = 0.0
-			mark_db(String(target.kind), "scanned")
-			tell(p, "Entry updated", 2.0)
+			mark_db(String(target.kind), "scanned", p)
 		else:
 			_scan_progress[peer] = prog
 
@@ -3786,17 +3813,9 @@ func _drop_hands_in_place(p: Node) -> bool:
 func _event(kind: String, data: Dictionary) -> void:
 	match kind:
 		"db_update":
-			# SWEEP 4A HOOK (database terminal, chunk 4): a client's own mirror of game.database,
-			# used only so its terminal can show the same tiers the host just unlocked. Never
-			# saved to disk on a client (DatabaseStore.save is only ever called from mark_db(),
-			# which is a no-op off the host).
-			db_record(String(data.kind)).set(String(data.field), true)
-		"db_full":
-			database.clear()
-			for k in (data.get("all", {}) as Dictionary).keys():
-				var rec := DbRecordScript.new(String(k))
-				rec.from_dict(data.all[k])
-				database[String(k)] = rec
+			# SWEEP 4A HOOK (database terminal, chunk 4): this player sighted, scanned or harvested
+			# something (the host's mark_db): it goes in their own database, saved on this machine.
+			mark_own_db(String(data.kind), String(data.field))
 		"sound":
 			Audio.play(data.cue, data.get("at"))
 		"sting":

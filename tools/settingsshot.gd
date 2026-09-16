@@ -51,12 +51,28 @@ func _run() -> void:
 	add_child(main)
 	await _frames(3)
 	game = main.game
+	if main.launching:
+		await main.launched
+	await _frames(90)   # the sign-in sheet feeds up and settles
 
-	# 1. From the title menu.
+	# 1. From the title menu: the sign-in sheet ejects, the settings page feeds out; Back reverses it.
 	main.settings_ui.open()
-	await _frames(20)
+	await _frames(14)
+	await _shot("01a_menu_sheet_ejecting")
+	await _frames(40)
+	await _shot("01b_settings_feeding")
+	await _frames(70)
 	await _shot("01_menu_settings")
 	main.settings_ui.close()
+	await _frames(14)
+	await _shot("01c_settings_ejecting")
+	await _frames(40)
+	await _shot("01d_menu_feeding")
+	await _frames(80)
+	await _shot("01e_menu_back")
+	if OS.get_cmdline_user_args().has("--menu-only"):
+		get_tree().quit(0)
+		return
 
 	# Into a shift.
 	main.menu.hide_menu()
@@ -88,15 +104,20 @@ func _run() -> void:
 	_pose_corridor(true)
 	await _frames(30)
 
-	# 2. Pause overlay with its Settings button, then the screen over it.
+	# 2. Esc: the settings fax comes in (printer up, page down into it), at rest, and on its way out.
 	main._toggle_pause()
-	await _frames(20)
-	await _shot("02_pause_overlay")
-	main.settings_ui.open()
-	await _frames(10)
+	await _frames(14)
+	await _shot("02_pause_coming_in")
+	await _frames(50)
 	await _shot("03_pause_settings")
-	main.settings_ui.close()
 	main._toggle_pause()
+	await _frames(12)
+	await _shot("03b_pause_leaving")
+	while game.paused:
+		await get_tree().process_frame
+	if OS.get_cmdline_user_args().has("--pause-only"):
+		get_tree().quit(0)
+		return
 
 	# 3. Dark corridor, flashlight off and on, at three brightness settings.
 	for light in [false, true]:

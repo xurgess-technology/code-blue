@@ -377,7 +377,7 @@ func drink(p: Node) -> void:
 	var before := level(p.peer_id, path)
 	p.clear_slot(head)
 	add_points(p.peer_id, path, pts)
-	game.mark_db(path, "harvested")   # SWEEP 4A HOOK (database terminal, chunk 4): an absorbed brain also unlocks tier 3
+	game.mark_db(path, "harvested", p)   # SWEEP 4A HOOK (database terminal, chunk 4): tier 3 for whoever drank it
 	var lvl := level(p.peer_id, path)
 	var at: Vector3 = blender.global_position if blender != null and is_instance_valid(blender) else p.global_position
 	_emit("br_drink", {"id": p.peer_id, "kind": kind, "pos": at, "cond": condition(f)})

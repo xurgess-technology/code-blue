@@ -1146,7 +1146,7 @@ func _update_scan_progress(delta: float) -> void:
 		from = seg[0]
 		to = seg[1]
 	var q := PhysicsRayQueryParameters3D.create(from, to)
-	q.collision_mask = C.L_WORLD | C.L_MONSTER
+	q.collision_mask = C.L_WORLD | C.L_MONSTER | C.L_SCAN
 	q.exclude = [get_rid()]
 	var hit := get_world_3d().direct_space_state.intersect_ray(q)
 	var target_id := -1
@@ -1154,6 +1154,8 @@ func _update_scan_progress(delta: float) -> void:
 		var collider = hit.get("collider")
 		if collider != null and "monster_id" in collider:
 			target_id = int(collider.monster_id)
+		elif collider is Node and (collider as Node).get_parent() != null and "scan_id" in (collider as Node).get_parent():
+			target_id = int((collider as Node).get_parent().scan_id)   # a scan prop (the waiting Night Nurse)
 	if target_id != scan_target_id:
 		scan_progress = 0.0
 		scan_target_id = target_id

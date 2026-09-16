@@ -46,6 +46,8 @@ const L_PLAYER := 2
 const L_MONSTER := 4
 const L_PICKUP := 8
 const L_INTERACT := 16
+## Scannable scenery (the waiting room's Night Nurse): only scan rays look for it; collides with nothing.
+const L_SCAN := 32
 
 const PLAYER_COLORS: Array[Color] = [
 	Color("3d8f80"), Color("8f3d6e"), Color("8f7a3d"), Color("3d5f8f"),

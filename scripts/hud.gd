@@ -33,6 +33,9 @@ var _alt_t: float = 0.0
 ## Ability id -> world_time its first-ability card should stop showing itself, and which ids have
 ## already had their card (so it only shows once per id per session).
 var _card_until: Dictionary = {}
+# SWEEP 4A HOOK (scanner): the "SCAN COMPLETE" banner (scan_fx.gd), until _t passes this.
+var _scan_banner_until := -1.0
+var _scan_banner_name := ""
 var _card_seen: Dictionary = {}
 const ABILITY_LABEL := {"echo": "Echo", "hive_in": "Hive Eyes"}
 const ABILITY_COST := {"echo": "LOUD", "hive_in": ""}
@@ -43,6 +46,7 @@ const ABILITY_DESC := {
 
 
 func _ready() -> void:
+	add_to_group("hud")   # SWEEP 4A HOOK (scanner): scan_fx.gd finds the banner here
 	_font = ThemeDB.fallback_font
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -86,6 +90,7 @@ func _draw() -> void:
 		_draw_health(h, me)
 	if me != null and me.alive and not game.paused and not in_surgery:
 		_draw_scan_ring(w, h, me)   # SWEEP 4A HOOK (scanner)
+		_draw_scan_banner(w, h)
 		_draw_ability_card(w, h)
 	if me != null and not in_surgery:
 		_draw_money(w, h, me)
@@ -96,8 +101,9 @@ func _draw() -> void:
 	_draw_message(w, h, in_surgery)
 	if not in_surgery:
 		_draw_hint(w, h)
+	# Paused: the settings fax is the pause menu (settings_screen.gd), nothing drawn here.
 	if game.paused:
-		_overlay(w, h, "PAUSED", "Esc to resume, Q to walk out." if not Net.solo else "The night shift waits for no one.", "", Color("c9d1d9"))
+		pass
 	elif game.phase == Game.Phase.LOST:
 		# loop: a team failure ends the run.
 		_overlay(w, h, "GAME OVER", game.message, "Money reset. A new run starts in %d" % ceili(game.end_timer), Color("ff2a2a"))
@@ -396,6 +402,32 @@ func _draw_scan_ring(w: float, h: float, me) -> void:
 	var prog: float = float(me.scan_progress)
 	draw_arc(c, 22.0, -PI * 0.5, -PI * 0.5 + TAU * prog, 32, Color("5ce0d0", 0.9), 3.0)
 	draw_arc(c, 22.0, 0.0, TAU, 32, Color(1, 1, 1, 0.15), 1.5)
+
+
+## SWEEP 4A HOOK (scanner): a scan just completed on this machine (scan_fx.gd).
+func show_scan_banner(specimen: String) -> void:
+	_scan_banner_name = specimen
+	_scan_banner_until = _t + 2.4
+
+
+func _draw_scan_banner(w: float, h: float) -> void:
+	if _t > _scan_banner_until:
+		return
+	drawn.append("scan_banner")
+	var left := _scan_banner_until - _t
+	var a := clampf(left / 0.5, 0.0, 1.0) * clampf((2.4 - left) / 0.12, 0.0, 1.0)
+	var col := Color("5ce0d0")
+	var box := Rect2(w * 0.5 - 170, h * 0.5 + 44, 340, 70)
+	draw_rect(box, Color(0.01, 0.06, 0.06, 0.78 * a))
+	draw_rect(box, Color(col, 0.8 * a), false, 1.5)
+	# Corner ticks, a scanner readout rather than a dialog box.
+	for c in [box.position, Vector2(box.end.x, box.position.y), Vector2(box.position.x, box.end.y), box.end]:
+		var sx := 1.0 if c.x < w * 0.5 else -1.0
+		var sy := 1.0 if c.y < box.get_center().y else -1.0
+		draw_line(c, c + Vector2(14 * sx, 0), Color(col, a), 3.0)
+		draw_line(c, c + Vector2(0, 14 * sy), Color(col, a), 3.0)
+	_text(Vector2(box.position.x, box.position.y + 26), "SCAN COMPLETE", 20, Color(col, a), HORIZONTAL_ALIGNMENT_CENTER, box.size.x)
+	_text(Vector2(box.position.x, box.position.y + 50), "%s  -  database entry updated" % _scan_banner_name.to_upper(), 13, Color(0.8, 0.95, 0.92, a), HORIZONTAL_ALIGNMENT_CENTER, box.size.x)
 
 
 ## SWEEP 4A HOOK: the first-ability card, closing itself after a few seconds or on any key.

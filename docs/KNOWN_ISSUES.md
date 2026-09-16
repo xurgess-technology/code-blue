@@ -1770,3 +1770,28 @@ Rebuilt around that:
   slowdown and player table checks, now a clear lane at z 12.5) and gave the new run's bigger hub
   too little time to build; carrycamtest backed the player onto the pen's waist-high barrier
   instead of a wall; controlstest's dive started in the lobby facing a wall (now the hub's spine).
+
+## Terminal models, scanner feedback, per-player database, settings fax (2026-09-16)
+
+- **Terminal 3D viewer** (`scripts/database/model_preview.gd`): a SubViewportContainer with its own
+  world beside each page's text: monsters (black silhouette unscanned, the rig once scanned, plus its
+  brain enlarged once harvested), ability brains, items, a procedure's tools in a small grid. Rebuilt
+  only when the page key changes (the terminal redraws its text every frame). Skinned rigs report
+  their rest-pose bounds, so monsters pass `preview_bounds` from MonsterPages' height.
+- **Scanner feedback** (`scripts/scan_fx.gd`, local only): holding R turns the flashlight blue and
+  sweeps a projected scan line (a SpotLight3D with a stripe projector, shadowed); on a monster a cyan
+  hologram overlay (material_overlay on every mesh of its model), a beam from the hand, and on
+  completion a flash, a floor ring, a chime and hud.gd's "SCAN COMPLETE" banner. Completion is
+  detected locally from Player.scan_progress wrapping; the host still records the scan.
+- **Per-player database:** `game.database` is this machine's player's own. `mark_db(kind, field, p)`
+  marks for that player (the host's own directly, a guest's through a "db_update" event their machine
+  saves); `p` null = every player (a dissection harvest is the team's). Bots have none. Existing saves
+  on guests' machines start from whatever they unlock from now on.
+- **Scan props:** `game.scan_props` (the waiting room's Night Nurse, scan_id -10) are scanned like
+  monsters, through a StaticBody on the new `C.L_SCAN` layer (6) only scan rays look at.
+- **Settings fax** (`scripts/settings_screen.gd` rewritten): the settings page is a two-column fax
+  sheet. Title menu: the sign-in sheet ejects (menu.gd `eject`), the settings page feeds out as the
+  next page; Back ejects it and a fresh sign-in page feeds in. In a shift it is the pause menu: Esc
+  raises the printer and brings the page down into it (Resume / Reset / Main menu / Quit game), and
+  leaving plays it backwards before `closed` unpauses. hud.gd no longer draws the PAUSED overlay;
+  click-to-resume and Q-to-walk-out while paused are gone (the page's buttons replace them).

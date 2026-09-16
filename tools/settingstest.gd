@@ -220,23 +220,23 @@ func _run() -> void:
 	await _frames(1)
 	_check(not ui.is_open() and not game.paused, "Esc closes the screen without pausing")
 
-	# Pause: the settings button appears, and it opens the screen.
+	# Pause: Esc brings up the settings fax as the pause menu; Esc again sends it away and only then
+	# resumes the shift.
 	main._toggle_pause()
 	await _frames(2)
-	_check(game.paused and ui._pause_button.visible, "pause shows the Settings button")
+	_check(game.paused and ui.is_open() and ui._pause_button.visible, "pausing brings up the settings fax with Resume")
 	_check(ui._exit_menu_button.visible and ui._exit_desktop_button.visible,
-		"pause shows the Exit to Main Menu / Exit to Desktop buttons")
-	ui._pause_button.pressed.emit()
-	await _frames(1)
-	_check(ui.is_open() and not ui._pause_button.visible, "pause Settings button opens the screen")
-	_check(not ui._exit_menu_button.visible and not ui._exit_desktop_button.visible,
-		"the exit buttons hide while the settings screen is open")
+		"the pause page has the Main menu / Quit game buttons")
 	get_viewport().push_input(esc)
 	await _frames(1)
-	_check(not ui.is_open() and game.paused, "Esc from the screen returns to the pause overlay")
-	_check(ui._exit_menu_button.visible and ui._exit_desktop_button.visible,
-		"the exit buttons come back after closing the screen")
+	_check(not ui.is_open() and game.paused, "Esc sends the page away; still paused while it leaves")
+	await _until(func(): return not game.paused, 3.0)
+	_check(not game.paused and not ui._root.visible, "once the page has gone the shift resumes")
 	main._toggle_pause()
+	await _frames(2)
+	ui._pause_button.pressed.emit()
+	await _until(func(): return not game.paused, 3.0)
+	_check(not game.paused, "Resume on the page resumes too")
 
 	# "Exit to Main Menu": ends the session cleanly (same path Q already uses to walk out
 	# mid-shift) and lands back at the menu, same as a fresh launch.
@@ -296,3 +296,12 @@ func _run() -> void:
 	Settings._save_timer = -1.0
 	print("[settings] %d checks, %d failed" % [checks, fails])
 	get_tree().quit(1 if fails > 0 else 0)
+
+
+func _until(cond: Callable, seconds: float) -> bool:
+	var end := Time.get_ticks_msec() + int(seconds * 1000.0)
+	while Time.get_ticks_msec() < end:
+		if cond.call():
+			return true
+		await get_tree().process_frame
+	return bool(cond.call())

@@ -120,6 +120,11 @@ func _ready() -> void:
 	# uses to walk out mid-shift), or quit the app outright.
 	settings_ui.exit_to_menu_requested.connect(func(): _back_to_menu(""))
 	settings_ui.exit_to_desktop_requested.connect(func(): get_tree().quit())
+	# The pause fax has left the screen: back into the shift.
+	settings_ui.closed.connect(func():
+		if game.paused and game.phase != Game.Phase.MENU:
+			game.paused = false
+			_set_mouse(true))
 
 	Audio.set_ambience(true)
 	_set_mouse(false)
@@ -473,12 +478,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 
-	# While paused: click to resume, Q to leave the shift.
+	# While paused the settings fax owns input (Resume, Main menu, Quit game on the page).
 	if game.paused:
-		if event is InputEventMouseButton and event.pressed:
-			_toggle_pause()
-		elif event.is_action_pressed("shove"):
-			_back_to_menu("You walked out mid-shift.")
 		return
 
 	# Dead players click to change who they are watching.
@@ -487,9 +488,15 @@ func _unhandled_input(event: InputEvent) -> void:
 		_cycle_spectate()
 
 
+## Esc in a shift: pause and bring up the settings fax; again (or Resume on the page) sends the page
+## away, and settings_ui.closed unpauses once it has gone.
 func _toggle_pause() -> void:
-	game.paused = not game.paused
-	_set_mouse(not game.paused)
+	if game.paused:
+		settings_ui.close()
+		return
+	game.paused = true
+	_set_mouse(false)
+	settings_ui.open_pause()
 
 
 ## You can open the database terminal while looking at it (no carryable version, sweep 4a).

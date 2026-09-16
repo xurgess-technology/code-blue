@@ -16,6 +16,10 @@ extends CanvasLayer
 
 const Pages := preload("res://scripts/database/database_pages.gd")
 const MonsterPages := preload("res://scripts/database/monster_pages.gd")
+const ModelPreview := preload("res://scripts/database/model_preview.gd")
+const MonsterModel := preload("res://scripts/monsters/monster_model.gd")
+## The text column's width beside the 3D viewer.
+const TEXT_W := 540.0
 
 var game: Node = null
 
@@ -31,6 +35,7 @@ var _list: VBoxContainer
 var _list_scroll: ScrollContainer
 var _detail: Control
 var _hint: Label
+var _preview: SubViewportContainer
 
 
 func _ready() -> void:
@@ -46,8 +51,6 @@ func open() -> void:
 	_open = true
 	visible = true
 	_index = 0
-	if game != null and game.has_method("request_database_sync") and not game.is_host():
-		game.request_database_sync()
 	_refresh()
 	_sfx("click")
 
@@ -137,6 +140,11 @@ func _build() -> void:
 	_detail.size = Vector2(1060, 640)
 	_root.add_child(_detail)
 
+	_preview = ModelPreview.new()
+	_preview.position = Vector2(1080, 96)
+	_preview.size = Vector2(480, 620)
+	_root.add_child(_preview)
+
 	_hint = Label.new()
 	_hint.text = "1-3 sections    Up/Down select    Esc / E  close"
 	_hint.add_theme_font_size_override("font_size", 13)
@@ -168,6 +176,73 @@ func _refresh() -> void:
 		Tab.MONSTERS: _draw_monster(_index)
 		Tab.ABILITIES: _draw_ability(_index)
 		Tab.ITEMS: _draw_item(_index)
+	_update_preview()
+
+
+# ---------------------------------------------------------------------------
+# The 3D viewer: the models this page talks about, rebuilt only when the page changes
+# ---------------------------------------------------------------------------
+
+func _update_preview() -> void:
+	var spec := _preview_spec()
+	if String(spec.key) == _preview.current_key():
+		return
+	var models: Array = []
+	for m in spec.models:
+		var d: Dictionary = m
+		if d.has("monster"):
+			var mm: Node3D = MonsterModel.new()
+			mm.set_meta("preview_monster", String(d.monster))
+			var h := float(MonsterPages.entry(String(d.monster)).get("height", 1.9))
+			mm.set_meta("preview_bounds", AABB(Vector3(-0.35, 0.0, -0.3), Vector3(0.7, h, 0.6)))
+			models.append(mm)
+		else:
+			var n: Node3D = ItemModels.make(String(d.item), int(d.get("count", 1)))
+			if d.has("scale"):
+				n.set_meta("preview_scale", float(d.scale))
+			models.append(n)
+	_preview.show_models(String(spec.key), models, bool(spec.get("silhouette", false)))
+
+
+## {key, models: [{monster} | {item, count, scale}], silhouette} for the page on screen.
+func _preview_spec() -> Dictionary:
+	match _tab:
+		Tab.MONSTERS:
+			if _index < 0 or _index >= MonsterPages.ORDER.size():
+				return {"key": "none", "models": []}
+			var kind: String = MonsterPages.ORDER[_index]
+			var tier := _tier(kind)
+			if tier == 0:
+				return {"key": "none", "models": []}
+			var models: Array = [{"monster": kind}]
+			if tier >= 3 and String(MonsterPages.entry(kind).get("ability", "")) != "":
+				models.append({"item": "brain_" + kind, "scale": 5.0})
+			return {"key": "mon:%s:%d" % [kind, mini(tier, 3)], "models": models, "silhouette": tier == 1}
+		Tab.ABILITIES:
+			var brain := "brain_discharged" if _index == 0 else "brain_walk_in"
+			return {"key": "ability:" + brain, "models": [{"item": brain, "scale": 3.0}]}
+		Tab.ITEMS:
+			var entries := Pages.entries()
+			if _index < 0 or _index >= entries.size():
+				return {"key": "none", "models": []}
+			var e: Dictionary = entries[_index]
+			match String(e.type):
+				"item":
+					var kind2 := String(e.key)
+					return {"key": "item:" + kind2, "models": [{"item": kind2, "count": 3 if Items.is_consumable(kind2) else 1}]}
+				"placebo":
+					return {"key": "item:placebo_pills", "models": [{"item": "placebo_pills"}]}
+				"procedure":
+					var kinds: Array = []
+					for s in Procedures.ailment(String(e.key)).get("steps", []):
+						var it := String(s.get("item", ""))
+						if it != "" and not kinds.has(it):
+							kinds.append(it)
+					var models2: Array = []
+					for k in kinds:
+						models2.append({"item": k, "count": 2 if Items.is_consumable(k) else 1})
+					return {"key": "procedure:" + String(e.key), "models": models2}
+	return {"key": "none", "models": []}
 
 
 func _row_names() -> Array:
@@ -221,20 +296,17 @@ func _draw_monster(i: int) -> void:
 		return
 	_label(String(e.name).to_upper(), Vector2(0, y), Color(0.45, 1.0, 0.55), 30)
 	y += 44.0
-	var sil := TerminalSilhouette.new()
-	sil.position = Vector2(0, y)
-	sil.size = Vector2(220, 320)
-	sil.setup(float(e.height), float(e.hunch), tier >= 2, String(e.get("brain_site", "")))
-	_detail.add_child(sil)
-	var tx := 260.0
+	# The model itself turns in the 3D viewer beside this column (_update_preview): a black
+	# silhouette at tier 1, the real thing once scanned, its brain beside it once harvested.
+	var tx := 0.0
 	if tier == 1:
 		_label("Tier 1: SIGHTED\nSeen at range. Not yet scanned.", Vector2(tx, y), Color(0.6, 0.85, 0.65), 16)
 		return
-	_label("Behaviour: %s" % e.behaviour, Vector2(tx, y), Color(0.75, 0.9, 0.78), 15, 760.0)
-	_label("Senses: %s" % e.senses, Vector2(tx, y + 60), Color(0.75, 0.9, 0.78), 15, 760.0)
-	_label("Threat: %s" % e.threat, Vector2(tx, y + 120), Color(0.9, 0.7, 0.4), 15, 760.0)
-	_label("Sedation: %s" % e.doses, Vector2(tx, y + 180), Color(0.75, 0.9, 0.78), 15, 760.0)
-	_label("Brain site: %s (see X-ray)" % e.brain_site, Vector2(tx, y + 240), Color(0.75, 0.9, 0.78), 15, 760.0)
+	_label("Behaviour: %s" % e.behaviour, Vector2(tx, y), Color(0.75, 0.9, 0.78), 15, TEXT_W)
+	_label("Senses: %s" % e.senses, Vector2(tx, y + 60), Color(0.75, 0.9, 0.78), 15, TEXT_W)
+	_label("Threat: %s" % e.threat, Vector2(tx, y + 120), Color(0.9, 0.7, 0.4), 15, TEXT_W)
+	_label("Sedation: %s" % e.doses, Vector2(tx, y + 180), Color(0.75, 0.9, 0.78), 15, TEXT_W)
+	_label("Brain site: %s" % e.brain_site, Vector2(tx, y + 240), Color(0.75, 0.9, 0.78), 15, TEXT_W)
 	if tier == 2:
 		_label("Tier 2: SCANNED\nHarvest a brain of this species to unlock its growth.", Vector2(tx, y + 300), Color(0.6, 0.85, 0.65), 16)
 		return
@@ -245,7 +317,7 @@ func _draw_monster(i: int) -> void:
 		ability_line = "Growth site: unknown. No brain has ever been harvested from her."
 	else:
 		ability_line = "Grants: %s" % e.ability
-	_label("Tier 3: HARVESTED\n%s" % ability_line, Vector2(tx, y + 300), Color(0.55, 0.95, 0.65), 16, 760.0)
+	_label("Tier 3: HARVESTED\n%s" % ability_line, Vector2(tx, y + 300), Color(0.55, 0.95, 0.65), 16, TEXT_W)
 	if String(e.get("ability", "")) != "" and game != null and game.brains != null:
 		var path := kind
 		var lines: Array = []
@@ -295,7 +367,7 @@ func _draw_ability(i: int) -> void:
 		for lvl2 in range(0, 4):
 			if game != null and game.brains != null:
 				lines.append("Lv %d   range %.0f m   duration %.1f s   cooldown 12 s" % [lvl2, game.brains.hive_range(lvl2), game.brains.hive_seconds(lvl2)])
-	_label("\n".join(lines), Vector2(0, 90), Color(0.75, 0.9, 0.78), 15, 1000.0)
+	_label("\n".join(lines), Vector2(0, 90), Color(0.75, 0.9, 0.78), 15, TEXT_W)
 
 
 # ---------------------------------------------------------------------------
@@ -311,15 +383,15 @@ func _draw_item(i: int) -> void:
 		"item":
 			var d := Pages.item_page(e.key)
 			_label(String(d.name).to_upper(), Vector2(0, 0), Color(0.45, 1.0, 0.55), 26)
-			_label("Real-world use: %s" % d.real_use, Vector2(0, 44), Color(0.75, 0.9, 0.78), 15, 1000.0)
-			_label("Where to find: %s" % d.where, Vector2(0, 140), Color(0.75, 0.9, 0.78), 15, 1000.0)
-			_label("Handling: %s" % d.handling, Vector2(0, 220), Color(0.75, 0.9, 0.78), 15, 1000.0)
+			_label("Real-world use: %s" % d.real_use, Vector2(0, 44), Color(0.75, 0.9, 0.78), 15, TEXT_W)
+			_label("Where to find: %s" % d.where, Vector2(0, 140), Color(0.75, 0.9, 0.78), 15, TEXT_W)
+			_label("Handling: %s" % d.handling, Vector2(0, 220), Color(0.75, 0.9, 0.78), 15, TEXT_W)
 		"placebo":
 			var d2 := Pages.placebo_page()
 			_label(String(d2.name).to_upper(), Vector2(0, 0), Color(0.45, 1.0, 0.55), 26)
-			_label(String(d2.real_use), Vector2(0, 44), Color(0.75, 0.9, 0.78), 15, 1000.0)
-			_label("Where: %s" % d2.where, Vector2(0, 90), Color(0.75, 0.9, 0.78), 15, 1000.0)
-			_label("Handling: %s" % d2.handling, Vector2(0, 136), Color(0.75, 0.9, 0.78), 15, 1000.0)
+			_label(String(d2.real_use), Vector2(0, 44), Color(0.75, 0.9, 0.78), 15, TEXT_W)
+			_label("Where: %s" % d2.where, Vector2(0, 90), Color(0.75, 0.9, 0.78), 15, TEXT_W)
+			_label("Handling: %s" % d2.handling, Vector2(0, 136), Color(0.75, 0.9, 0.78), 15, TEXT_W)
 		"procedure":
 			var d3 := Pages.procedure_page(e.key)
 			_label(String(d3.name).to_upper(), Vector2(0, 0), Color(0.45, 1.0, 0.55), 26)
@@ -328,11 +400,11 @@ func _draw_item(i: int) -> void:
 			for s in d3.steps:
 				lines.append("%d. %s (needs %s)" % [n, s.label, s.needs])
 				n += 1
-			_label("\n".join(lines), Vector2(0, 44), Color(0.75, 0.9, 0.78), 15, 1000.0)
+			_label("\n".join(lines), Vector2(0, 44), Color(0.75, 0.9, 0.78), 15, TEXT_W)
 		"locked":
 			var d4 := Pages.locked_page(e.key)
 			_label(String(d4.name).to_upper(), Vector2(0, 0), Color(0.6, 0.6, 0.6), 26)
-			_label(String(d4.scrawl), Vector2(0, 44), Color(0.6, 0.6, 0.6), 15, 1000.0)
+			_label(String(d4.scrawl), Vector2(0, 44), Color(0.6, 0.6, 0.6), 15, TEXT_W)
 
 
 func _label(text: String, pos: Vector2, col: Color, size: int, wrap: float = 0.0) -> Label:
@@ -352,34 +424,3 @@ func _sfx(cue: String) -> void:
 	var audio := get_node_or_null("/root/Audio")
 	if audio != null and audio.has_method("play"):
 		audio.play(cue)
-
-
-## A tiny procedural humanoid silhouette with an optional brain marker for the X-ray tier.
-class TerminalSilhouette extends Control:
-	var _height := 1.8
-	var _hunch := 0.0
-	var _show_brain := false
-	var _brain_note := ""
-
-	func setup(height: float, hunch: float, show_brain: bool, note: String) -> void:
-		_height = height
-		_hunch = hunch
-		_show_brain = show_brain
-		_brain_note = note
-		queue_redraw()
-
-	func _draw() -> void:
-		var w := size.x
-		var h := size.y
-		var scale_y: float = h / maxf(_height, 0.1)
-		var head_r := 0.22 * scale_y
-		var body_w := 0.42 * scale_y
-		var body_h := (_height - 0.5) * scale_y
-		var cx := w * 0.5
-		var head_c := Vector2(cx + _hunch * scale_y * 0.5, head_r + 4.0)
-		draw_circle(head_c, head_r, Color(0.15, 0.25, 0.18))
-		var body_rect := Rect2(cx - body_w * 0.5, head_c.y + head_r * 0.7, body_w, body_h)
-		draw_rect(body_rect, Color(0.15, 0.25, 0.18))
-		if _show_brain:
-			draw_circle(head_c, head_r * 0.45, Color(0.95, 0.35, 0.35, 0.9))
-			draw_arc(head_c, head_r * 0.45, 0.0, TAU, 20, Color(1.0, 0.6, 0.6), 2.0)

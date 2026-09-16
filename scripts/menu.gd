@@ -28,6 +28,8 @@ const FEED_IN := 1.3
 const FEED_TICK := 0.11
 const MAX_STEP := 1.0 / 30.0
 const OPTION_H := 34.0
+## Seconds for the sheet to eject up and off the top when another page takes its place (settings).
+const EJECT_SECONDS := 0.5
 ## Paper left above the sheet's first line, and between its last line and the printer's slot.
 const PAGE_MARGIN := 30.0
 const BOTTOM_PAD := 22.0
@@ -54,6 +56,11 @@ var _feed_t := -1.0
 var _feed_dur := FEED_IN
 var _feed_dist := 0.0
 var _feed_p := 1.0      # 0 = sheet still inside the printer, 1 = at rest
+## The fax page this sheet is (its header), and the one after it goes to whatever replaces it.
+var page_no := 2
+var _eject_t := -1.0    # seconds into ejecting the sheet, < 0 when not
+var _eject_px := 0.0
+var _eject_done: Callable
 var _feed_tick := 0.0
 var _last_usec := 0
 
@@ -319,6 +326,9 @@ func _header_text(page: int) -> String:
 ## The launch printout's hand-off: the sheet starts inside the printer and feeds up, slowing to a
 ## stop. `scroll_px` keeps the paper's green bars in phase; `page` is its number.
 func feed_in(scroll_px := 0.0, _speed := 0.0, page := 2) -> void:
+	page_no = page
+	_eject_t = -1.0
+	_eject_px = 0.0
 	if _header != null:
 		_header.text = _header_text(page)
 	if DisplayServer.get_name() == "headless":
@@ -336,6 +346,26 @@ func feed_in(scroll_px := 0.0, _speed := 0.0, page := 2) -> void:
 
 func is_feeding() -> bool:
 	return _feed_t >= 0.0
+
+
+## Another page is coming (the settings sheet): this one speeds up and out of the top of the screen,
+## the printer staying put, then `done` runs (the caller hides the menu and feeds its own page).
+func eject(done: Callable) -> void:
+	if DisplayServer.get_name() == "headless" or not visible:
+		done.call()
+		return
+	_feed_t = -1.0
+	_feed_p = 1.0
+	_eject_t = 0.0
+	_eject_px = 0.0
+	_eject_done = done
+	_last_usec = Time.get_ticks_usec()
+	set_enabled(false)
+	Audio.play("print_feed", null, -8.0, 0.05, Audio.BUS_UI)
+
+
+func is_ejecting() -> bool:
+	return _eject_t >= 0.0
 
 
 ## How far below its resting place the sheet starts: its top edge just inside the slot.
@@ -356,7 +386,7 @@ func _layout() -> void:
 	_clip.position = Vector2(l.px, 0.0)
 	_clip.size = Vector2(l.paper_w, float(l.slot_y))
 	var down := (1.0 - _feed_p) * _feed_dist
-	_sheet.position = Vector2(Fax.MARGIN, _rest_y(l) + down)
+	_sheet.position = Vector2(Fax.MARGIN, _rest_y(l) + down - _eject_px)
 	_sheet.size = Vector2(l.text_w, _sheet.get_combined_minimum_size().y)
 	_canvas.queue_redraw()
 	_over.queue_redraw()
@@ -366,6 +396,20 @@ func _process(_delta: float) -> void:
 	var now_usec := Time.get_ticks_usec()
 	var dt := minf(float(now_usec - _last_usec) / 1000000.0, MAX_STEP)
 	_last_usec = now_usec
+	if _eject_t >= 0.0 and visible:
+		_eject_t += dt
+		var k := minf(_eject_t / EJECT_SECONDS, 1.0)
+		var l := Fax.layout(size, _font)
+		_eject_px = (float(l.slot_y) + PAGE_MARGIN + 20.0) * k * k   # accelerating up and away
+		_layout()
+		if k >= 1.0:
+			_eject_t = -1.0
+			set_enabled(true)
+			var done := _eject_done
+			_eject_done = Callable()
+			if done.is_valid():
+				done.call()
+		return
 	if _feed_t < 0.0 or not visible:
 		return
 	_feed_t += dt
@@ -384,9 +428,11 @@ func _process(_delta: float) -> void:
 func _draw_paper() -> void:
 	var sz := _canvas.size
 	var l := Fax.layout(sz, _font)
-	# A page just the size of the sign-in sheet, a margin above its first line, running into the slot.
+	# A page just the size of the sign-in sheet, a margin above its first line and a pad below its last:
+	# at rest (and while feeding) that runs into the slot; ejecting, the whole page leaves it.
 	var page_top := _sheet.position.y - PAGE_MARGIN
-	Fax.draw_paper(_canvas, sz, l, _base_scroll + _feed_p * _feed_dist, 1.0, INF, true, page_top)
+	var page_bottom := minf(_sheet.position.y + _sheet.size.y + BOTTOM_PAD, float(l.slot_y))
+	Fax.draw_paper(_canvas, sz, l, _base_scroll + _feed_p * _feed_dist, 1.0, page_bottom, true, page_top)
 	var status := "RECEIVING" if _feed_t >= 0.0 else "READY"
 	Fax.draw_printer(_canvas, sz, l, _font, float(l.tx), status, Fax.LCD_TEXT, 1.0)
 

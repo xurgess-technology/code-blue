@@ -42,6 +42,24 @@ func _ready() -> void:
 		{"name": "61_scan_ring", "fn": _pose_scan_ring, "settle": 6},
 		{"name": "62_hive_flight", "fn": _pose_hive_flight, "settle": 1},
 	]
+	# --scan: the scanner's hologram mid-scan, then the completion flash, ring and banner.
+	if OS.get_cmdline_user_args().has("--scan"):
+		shots = [
+			{"name": "70_scan_hologram", "fn": _pose_scan_ring, "settle": 1},
+			{"name": "71_scan_complete", "fn": _pose_scan_complete, "settle": 1},
+			{"name": "72_scan_nothing", "fn": _pose_scan_nothing, "settle": 20},
+		]
+	# --terminal: every kind of page the 3D viewer shows instead.
+	if OS.get_cmdline_user_args().has("--terminal"):
+		shots = [
+			{"name": "63_terminal_walk_in_t1", "fn": _pose_page.bind(0, 0, {"walk_in": ["sighted"]}), "settle": 30},
+			{"name": "64_terminal_discharged_t2", "fn": _pose_page.bind(0, 1, {"discharged": ["sighted", "scanned"]}), "settle": 30},
+			{"name": "65_terminal_walk_in_t3", "fn": _pose_page.bind(0, 0, {"walk_in": ["sighted", "scanned", "harvested"]}), "settle": 30},
+			{"name": "66_terminal_nurse_t2", "fn": _pose_page.bind(0, 2, {"night_nurse": ["sighted", "scanned"]}), "settle": 30},
+			{"name": "67_terminal_ability", "fn": _pose_page.bind(1, 0, {}), "settle": 30},
+			{"name": "68_terminal_item", "fn": _pose_page.bind(2, 2, {}), "settle": 30},
+			{"name": "69_terminal_procedure", "fn": _pose_procedure, "settle": 30},
+		]
 	for shot in shots:
 		await shot.fn.call()
 		for i in int(shot.get("settle", 20)):
@@ -67,6 +85,26 @@ func _pose_terminal() -> void:
 	await get_tree().process_frame
 
 
+## The terminal open on section `tab`, row `index`, with the database holding `marks`.
+func _pose_page(tab: int, index: int, marks: Dictionary) -> void:
+	game.database.clear()
+	for kind in marks.keys():
+		for m in marks[kind]:
+			game.mark_db(kind, m)
+	main.terminal_ui.open()
+	main.terminal_ui._tab = tab
+	main.terminal_ui._index = index
+	await get_tree().process_frame
+
+
+func _pose_procedure() -> void:
+	var entries: Array = main.terminal_ui.Pages.entries()
+	for i in entries.size():
+		if String(entries[i].type) == "procedure":
+			await _pose_page(2, i, {})
+			return
+
+
 ## Aiming at a monster mid-scan: the HUD's crosshair progress ring.
 func _pose_scan_ring() -> void:
 	main.terminal_ui.close()
@@ -84,6 +122,43 @@ func _pose_scan_ring() -> void:
 		bot.bot_yaw = atan2(-d.x, -d.z)
 		bot.bot_pitch = clampf(atan2(d.y, Vector2(d.x, d.z).length()), -1.0, 1.0)
 		await get_tree().process_frame
+
+
+## Keep scanning the Walk-In from _pose_scan_ring until it completes, a few frames into the ring.
+func _pose_scan_complete() -> void:
+	var hud: Node = get_tree().get_first_node_in_group("hud")
+	var wi: Node3D = null
+	for m in game.monsters.values():
+		wi = m
+	if wi == null or hud == null:
+		return
+	var pin: Vector3 = wi.global_position
+	for i in 400:
+		wi.global_position = pin
+		var d: Vector3 = pin + Vector3.UP * 1.0 - bot.camera.global_position
+		bot.bot_yaw = atan2(-d.x, -d.z)
+		bot.bot_pitch = clampf(atan2(d.y, Vector2(d.x, d.z).length()), -1.0, 1.0)
+		await get_tree().process_frame
+		if float(hud._scan_banner_until) > float(hud._t) + 2.2:
+			break
+	for i in 12:
+		wi.global_position = pin
+		await get_tree().process_frame
+
+
+## Holding R at an empty wall: the blue flashlight and the scan line.
+func _pose_scan_nothing() -> void:
+	for m in game.monsters.values():
+		game.kill_monster(m)
+	await get_tree().process_frame
+	bot.bot_scan = false
+	var er: Rect2 = game.level_info.get("entrance_rect", Rect2())
+	var at := er.position + Vector2(8.0, 3.0) * C.TILE
+	bot.teleport(game._floor_at(Vector3(at.x, 0, at.y)))
+	bot.bot_yaw = 0.0
+	bot.bot_pitch = -0.1
+	await get_tree().process_frame
+	bot.bot_scan = true
 
 
 ## Mid fly-through: the camera should be somewhere between the player's head and the Walk-In.

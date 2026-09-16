@@ -145,6 +145,7 @@ ability_alt={
 3d_physics/layer_3="monster"
 3d_physics/layer_4="pickup"
 3d_physics/layer_5="interactable"
+3d_physics/layer_6="scan"
 
 [navigation]
 

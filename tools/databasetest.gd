@@ -2,8 +2,9 @@ extends Node
 ## Headless checks for the database terminal (sweep 4a chunk 4, docs/SWEEP4A.md "Chunk 4:
 ## Database terminal, guide removal, Hive Eyes and Echo polish"): a completed scan unlocks tier 2,
 ## a harvest (dissection or an absorbed brain) unlocks tier 3, the database survives a wipe and a
-## reload (saved under user://), a second peer's scan lands in the (single) host database, and no
-## `read` action or guide binder code remains in the project.
+## reload (saved under user://), each player's database is their own (another player's scan never
+## lands in yours), the waiting room's Night Nurse can be scanned, and no `read` action or guide
+## binder code remains in the project.
 ##
 ##   godot --headless --fixed-fps 60 --path . tools/databasetest.tscn [-- --seed=N]
 ##
@@ -45,7 +46,8 @@ func _ready() -> void:
 func _run() -> void:
 	await _scan_unlocks_tier2()
 	await _harvest_unlocks_tier3()
-	await _guest_scan_lands_in_host_db()
+	await _guest_scan_stays_theirs()
+	await _scan_waiting_nurse()
 	_persists_across_wipe_and_reload()
 	_no_guide_code_remains()
 
@@ -104,8 +106,8 @@ func _harvest_unlocks_tier3() -> void:
 	_check(game.db_record("discharged").harvested, "drinking an absorbed brain marks tier 3 harvested")
 
 
-func _guest_scan_lands_in_host_db() -> void:
-	_say("---- a second peer's scan lands in the host's database")
+func _guest_scan_stays_theirs() -> void:
+	_say("---- another player's scan goes in their database, not this one")
 	game.database.erase("walk_in")
 	var guest: Player = Player.new_player(-501, "Guest", false)
 	guest.is_bot = true
@@ -117,6 +119,8 @@ func _guest_scan_lands_in_host_db() -> void:
 	await _frames(3)
 	var wi: Node3D = game.brains.spawn_walk_in(game._floor_at(guest.global_position + Vector3(0, 0, 4))) as Node3D
 	await _frames(2)
+	# This machine's own player looks away, so only the guest sights and scans it.
+	me.bot_yaw = atan2(-(guest.global_position - wi.global_position).x, -(guest.global_position - wi.global_position).z)
 	var to: Vector3 = wi.global_position - guest.global_position
 	guest.bot_yaw = atan2(-to.x, -to.z)
 	guest.bot_pitch = 0.0
@@ -126,13 +130,43 @@ func _guest_scan_lands_in_host_db() -> void:
 		wi.global_position = pin
 		var d: Vector3 = pin - guest.global_position
 		guest.bot_yaw = atan2(-d.x, -d.z)
-		return game.db_record("walk_in").scanned
-	var done := await _until(track, 8.0)
-	_check(done, "the guest peer's own scan marks the species scanned in game.database (the host's copy)")
+		return int(game._scan_target.get(-501, -1)) >= 0 and float(game._scan_progress.get(-501, 0.0)) > 0.9
+	var scanning := await _until(track, 8.0)
+	await _frames(20)
+	_check(scanning, "the guest's scan ran on the host")
+	_check(not game.db_record("walk_in").scanned, "the guest's scan did not land in this player's database")
 	guest.bot_scan = false
 	game.kill_monster(wi)
 	game.players.erase(-501)
 	guest.queue_free()
+
+
+func _scan_waiting_nurse() -> void:
+	_say("---- the waiting room's Night Nurse can be scanned")
+	var wn: Node3D = game.economy.waiting_nurse if game.economy != null else null
+	_check(wn != null and game.scan_props.has(wn), "the waiting Night Nurse is a scan prop")
+	if wn == null:
+		return
+	game.database.erase("night_nurse")
+	wn.set_process(false)   # hold her still in her chair
+	var target: Vector3 = wn.global_position + Vector3.UP * 1.0
+	var from: Vector3 = wn.global_position + wn.global_basis.z * 3.0
+	me.teleport(game._floor_at(Vector3(from.x, wn.global_position.y, from.z)))
+	await _frames(3)
+	me.bot_scan = true
+	var track := func():
+		var cam: Vector3 = me.camera.global_position
+		var d: Vector3 = target - cam
+		var fwd: Vector3 = -me.camera.global_transform.basis.z
+		me.bot_yaw += wrapf(atan2(-d.x, -d.z) - atan2(-fwd.x, -fwd.z), -PI, PI)
+		var pitch_err := atan2(d.y, Vector2(d.x, d.z).length()) - atan2(fwd.y, Vector2(fwd.x, fwd.z).length())
+		me.bot_pitch = clampf(me.bot_pitch + pitch_err, -1.2, 1.2)
+		return game.db_record("night_nurse").scanned
+	var done := await _until(track, 8.0)
+	me.bot_scan = false
+	wn.set_process(true)
+	_check(me.scan_target_id == -10 or done, "the local scan ray finds her (target %d)" % me.scan_target_id)
+	_check(done and game.db_record("night_nurse").sighted, "scanning her fills in the Night Nurse's entry (tiers 1 and 2)")
 
 
 func _persists_across_wipe_and_reload() -> void:

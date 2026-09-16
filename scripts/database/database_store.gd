@@ -1,11 +1,9 @@
 class_name DatabaseStore
 extends RefCounted
-## Saves and loads the host's monster database (game.database: kind -> DbRecord) to
-## user://database.save. Host-only, plain JSON. The database belongs to the host and survives a
-## wipe (game.reset_money / game over) and a full reload (a new Godot process): it is loaded once
-## when the game starts and saved whenever a record changes (throttled by the caller).
-##
-## docs/SWEEP4A.md "Chunk 4": "Saving: the database belongs to the host... survives wipes."
+## Saves and loads this machine's player's own monster database (game.database: kind -> DbRecord)
+## to user://database.save, plain JSON. Every player keeps their own (Zach, 2026-09-16: the terminal
+## is the individual's database): it survives a wipe (game.reset_money / game over) and a full
+## reload, is loaded once when the game starts and saved whenever one of its records changes.
 
 const DbRecordScript := preload("res://scripts/database/db_record.gd")
 const PATH := "user://database.save"

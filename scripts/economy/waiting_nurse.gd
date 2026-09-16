@@ -24,6 +24,10 @@ const SEAT_APPROACH := 0.55
 const SEAT_CHANCE := 0.55
 
 var game: Node = null
+## Scannable (game.scan_props): the scan system reads these like a monster's.
+var kind := "night_nurse"
+var height := 2.3
+var scan_id := -10
 var seats: Array = []      # [{position, yaw}]
 var corners: Array = []    # [{position, yaw}]
 var model: Node3D = null
@@ -68,6 +72,21 @@ func _ready() -> void:
 	model.setup("night_nurse")
 	_skirt_follows_thighs()
 	top_level = true
+	# Scannable like a monster, but on its own layer: nothing else collides with or hits her.
+	var body := StaticBody3D.new()
+	body.name = "ScanBody"
+	body.collision_layer = C.L_SCAN
+	body.collision_mask = 0
+	var cs := CollisionShape3D.new()
+	var cap := CapsuleShape3D.new()
+	cap.radius = 0.32
+	cap.height = 1.9
+	cs.shape = cap
+	cs.position = Vector3(0.0, 1.15, 0.0)
+	body.add_child(cs)
+	add_child(body)
+	if game != null:
+		game.scan_props.append(self)
 	if not seats.is_empty():
 		_sit_in(seats[0])
 
@@ -86,6 +105,11 @@ func _process(delta: float) -> void:
 		_shown_pos = _shown_pos.lerp(pos, k) if _shown_pos.distance_to(pos) < 3.0 else pos
 		_shown_yaw = lerp_angle(_shown_yaw, yaw, k)
 	_apply_visual()
+
+
+func _exit_tree() -> void:
+	if game != null and is_instance_valid(game):
+		game.scan_props.erase(self)
 
 
 # ---------------------------------------------------------------------------
