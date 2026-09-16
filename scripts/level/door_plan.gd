@@ -3,9 +3,9 @@ extends RefCounted
 ##
 ## Kinds:
 ##   hinged   one leaf, press E; swings either way (double-acting)       room doors
-##   double   two leaves, press E; swings either way                     cafeteria, radiology, morgue
+##   double   two leaves, press E; swings either way                     cafeteria, radiology, morgue, the OR
 ##   gate     automatic heavy double doors with small windows, lockable  the doorways into the wings
-##   auto     automatic heavy double doors with small windows            the OR
+##   auto     automatic heavy double doors with small windows            unused (kept for a future automatic door)
 ##   sliding  automatic sliding glass doors, four panels                 the main entrance
 ##
 ## Every doorway is a tunnel one tile deep (the walls are a tile thick). The door hangs in the
@@ -55,8 +55,8 @@ static func plan(st: S, er: Rect2i) -> Array:
 	for c in Ent.MAIN_DOORS:
 		main.append(Vector2i(ox + c, oy + Ent.H - 1))
 	groups.append({"kind": "sliding", "tiles": main})
-	# The OR's doors.
-	groups.append({"kind": "auto", "tiles": [Vector2i(ox + 13, oy + 7), Vector2i(ox + 13, oy + 8)]})
+	# The OR's doors: manual double doors (polish-or-doors), same as the cafeteria/radiology/morgue.
+	groups.append({"kind": "double", "tiles": [Vector2i(ox + 13, oy + 7), Vector2i(ox + 13, oy + 8)]})
 	# The gates into the wings.
 	for wd in st.wings:
 		groups.append({"kind": "gate", "tiles": (wd.entry as Array).duplicate(), "wing": String(wd.id)})

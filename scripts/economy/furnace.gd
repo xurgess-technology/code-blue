@@ -115,8 +115,11 @@ func _build() -> void:
 	# with gaps generous enough that a reasonably-aimed thrown pill or stack of loot reliably sails
 	# through (a narrower grate looked right but meant a few centimetres of throw drift -- from a
 	# walked-up player, not just a test bot -- was enough to clip a bar instead of scoring).
+	# SWEEP 4A FOLLOW-UP: 0.4 m spacing (~0.36-0.37 m gaps) was still borderline for the widest
+	# loot (the defibrillator, 0.36 m) -- widened to 0.45 m (~0.40-0.42 m gaps), still nowhere
+	# near C.PLAYER_RADIUS*2 (0.8 m) so the "no body fits through" rule holds comfortably.
 	for i in 3:
-		var x := -0.4 + i * 0.4
+		var x := -0.45 + i * 0.45
 		_box(Vector3(0.03, 1.55, 0.03), Vector3(x, 1.0, -0.02), steel)
 	_box(Vector3(0.9, 0.03, 0.03), Vector3(0.0, 0.24, -0.02), steel)
 	_box(Vector3(0.9, 0.03, 0.03), Vector3(0.0, 1.76, -0.02), steel)
@@ -189,7 +192,7 @@ func _build() -> void:
 	body.collision_mask = 0
 	add_child(body)
 	for i in 3:
-		var x := -0.4 + i * 0.4
+		var x := -0.45 + i * 0.45
 		var cs := CollisionShape3D.new()
 		var bs := BoxShape3D.new()
 		bs.size = Vector3(0.05, 1.6, 0.05)

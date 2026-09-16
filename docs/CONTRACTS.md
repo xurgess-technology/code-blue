@@ -1754,8 +1754,10 @@ DoorPlan.leaves(d) / leaf_points(d, leaf, deg, side) / passable(d) / check(state
 ```
 
 - Kinds: `sliding` the main entrance (four glass panels into the wall), `gate` the doorway into each
-  wing (heavy double doors, small wired windows, hazard band, a lock lamp), `auto` the OR (the same
-  in light steel), `double` the cafeteria, radiology and morgue, `hinged` every other room door.
+  wing (heavy double doors, small wired windows, hazard band, a lock lamp), `double` the cafeteria,
+  radiology, morgue and (polish-or-doors) the OR, `hinged` every other room door. `auto` (the same
+  heavy look as `gate`, in light steel) is unused since polish-or-doors moved the OR to `double`; kept
+  in `door.gd`/`door_models.gd` for a future automatic door rather than deleted.
 - Each doorway is a tunnel one tile deep. A door hangs just inside one face (`n` points out of it):
   room doors at the hallway face, gates and the OR at the side you reach first from the entrance
   building, the sliding doors at the outside face. Swinging toward -n folds a leaf into the tunnel
@@ -1807,9 +1809,10 @@ door.occluder (QuadOccluder3D, visible while shut), door.lamp_state ("locked" | 
 door.is_closed() / is_hinged() / is_automatic() / limit(side) / leaf_xform(i, a) / snap_to(a) / step(dt, check)
 ```
 
-- **Automatic doors** open while anyone is within 3.4 m in front of either face (4.6 m for a crew):
-  players (downed too), paramedic crews, monsters. Closed pairs pick their swing then: into the
-  tunnel, or out of the face when the nearest one is coming through the tunnel and there is room.
+- **Automatic doors** (the wing gates and the main entrance; the OR's doors are `double`/manual since
+  polish-or-doors, see below) open while anyone is within 3.4 m in front of either face (4.6 m for a
+  crew): players (downed too), paramedic crews, monsters. Closed pairs pick their swing then: into
+  the tunnel, or out of the face when the nearest one is coming through the tunnel and there is room.
   They close 1.2 s after nobody is near. A locked gate opens for nobody.
 - **Gates** are locked (host: `phase != SHIFT or not wing_loader.wings_ready`, never in the dev room),
   shut, lamp red, prompt "!Locked until the shift starts", E plays `doors_locked`. Unlocking plays
@@ -1817,13 +1820,19 @@ door.is_closed() / is_hinged() / is_automatic() / limit(side) / leaf_xform(i, a)
   blink amber. **Jams**: a gate of one of the two deepest wings (three or more wings), once per
   opening and not on the unlock, 30% chance: it stops at about 55% (a passable gap) and shudders
   for 1.6-3.4 s with `doors_jam` (noise 0.35), then opens; 45-90 s cooldown.
-- **Hinged doors**: E toggles. Opening swings away from the player (into the tunnel if the far side
-  has under 80 degrees of room), at 1.9/s; closing at 1.6/s, or a slam (5.5/s, noise 0.95) if the
-  door was still moving or the player sprints. Doors stay where they are left. Bots, and players
-  carrying someone or dragging a monster (E is taken), push them open by walking into them. A door
+- **Hinged and double doors**: E toggles (the OR's doors, `double` since polish-or-doors, open the
+  same way as the cafeteria/radiology/morgue's). Opening swings away from the player (into the
+  tunnel if the far side has under 80 degrees of room), at 1.9/s; closing at 1.6/s, or a slam
+  (5.5/s, noise 0.95) if the door was still moving or the player sprints. Doors stay where they are
+  left. Bots, and players carrying someone or dragging a monster (E is taken), push them open by
+  walking into them. The paramedic crew wheeling the gurney (E is taken there too) pushes the OR's
+  own doors open the same way, but *only* the OR's doors: the crew never walks anywhere else in the
+  hospital, so `doors.gd` scopes its push check to `kind == "double" and base` rather than every
+  hinged/double door, to keep a stray delivery from nudging some unrelated room door. A door
   sweeping into a player stops and waits (a dropped item stops a closing door too); the one who
   opened it is not in its way.
-- **Monsters**: agents walking into a hinged door open it by kind while wandering or rushing: the
+- **Monsters**: agents walking into a hinged or double door (including the OR's, now that they are
+  `double`) open it by kind while wandering or rushing: the
   Walk-In pushes slowly (0.42/s, a creak, noise 0.5), the Discharged rushing bursts it (7/s, a slam,
   0.95) and otherwise creaks it open, the Night Nurse opens it silently (2.2/s) only while she is not
   observed and nobody is watching the doorway (`Perception.observed_any` at the door, 5 Hz). Doors

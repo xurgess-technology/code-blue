@@ -301,8 +301,10 @@ func _run_solo() -> void:
 	me._pitch = me.bot_pitch
 	await _frames(3)
 	game.drop_selected(me, 1.0)
-	await _until(func(): return not me.holding("defibrillator"), 3.0)
-	await _frames(6)
+	# not-holding fires the instant the throw releases; the sale only lands a moment later once
+	# the item has actually flown into the furnace's FireZone (same fix as inventorytest.gd,
+	# looptest.gd and nettest.gd's furnace checks).
+	await _until(func(): return game.money != money_before + 1000, 5.0)
 	_check(not me.holding("defibrillator") and game.money == money_before + 1000 + value, "the dev room's furnace burns the defibrillator for $%d" % value)
 	var pharm: Node3D = game.economy.pharmacy
 	_stand(pharm.global_position + pharm.global_basis.z * 1.3, 0.0)

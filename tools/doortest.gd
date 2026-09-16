@@ -6,12 +6,14 @@ extends Node
 ##   godot --path . tools/doortest.tscn --resolution 1280x720 -- --frames    # windowed frame times
 ##
 ## Checks: a player opens and closes a hinged door with E (swinging away from them, staying where
-## left); automatic doors open for a player and for the paramedic crew with the gurney and close
-## after; a Walk-In pushes a door open slowly, a rushing Discharged bursts through, the Night Nurse
-## opens one only while unobserved; closed doors block sight (perception, the Walk-In's eyes) and
-## attenuate noise; gates are locked in the lobby and open after clock-in; the wings regenerate
-## between two shifts with a different layout while the entrance stays identical; the rebuild is
-## spread over frames; a jammed gate frees itself.
+## left); the main entrance's sliding doors still open automatically for a player and close after;
+## the OR's doors are a manual "double" pair (polish-or-doors: they used to be automatic) that a
+## player opens and closes with E and that the paramedic crew pushes open by walking into them with
+## the gurney, staying open where the crew leaves them; a Walk-In pushes a door open slowly, a
+## rushing Discharged bursts through, the Night Nurse opens one only while unobserved; closed doors
+## block sight (perception, the Walk-In's eyes) and attenuate noise; gates are locked in the lobby
+## and open after clock-in; the wings regenerate between two shifts with a different layout while
+## the entrance stays identical; the rebuild is spread over frames; a jammed gate frees itself.
 
 const MG := preload("res://scripts/mapgen.gd")
 const HB := preload("res://scripts/hospital_builder.gd")
@@ -74,7 +76,7 @@ func _run() -> void:
 	for d in doors.doors.values():
 		kinds[d.kind] = int(kinds.get(d.kind, 0)) + 1
 	_say("door kinds: %s" % str(kinds))
-	for k in ["hinged", "gate", "auto", "sliding"]:
+	for k in ["hinged", "double", "gate", "sliding"]:
 		_check(kinds.has(k), "there is a %s door" % k)
 	# Every doorway tile has a door node.
 	var rows: PackedStringArray = game.level_info.rows
@@ -91,7 +93,7 @@ func _run() -> void:
 	await _hinged_by_player()
 	await _bot_pushes()
 	await _gates_and_lobby()
-	await _auto_for_player_and_crew()
+	await _or_doors_and_crew()
 	await _sight_and_noise()
 	await _monsters_and_doors()
 	await _drag_through()
@@ -277,33 +279,68 @@ func _gates_and_lobby() -> void:
 	_check(HB.zone_of(game.level_info, me.global_position) != "entrance", "a player can go through into the wing")
 
 
-## The OR's doors and the main entrance open for players and for the paramedics with the gurney.
-func _auto_for_player_and_crew() -> void:
-	_say("---- automatic doors, players and the crew")
-	var ord: Node = null
+## The main entrance still opens automatically for anyone close. The OR's doors are now a manual
+## "double" pair (polish-or-doors): a player opens/closes them with E and they stay where left; the
+## paramedic crew, which cannot press E, pushes them open by walking into them with the gurney, the
+## same way a bot pushes a hinged door.
+func _or_doors_and_crew() -> void:
+	_say("---- the OR's manual doors: E, and the crew with the gurney")
+	var ord: Node = _pick_or_doors()
 	var main_doors: Node = null
 	for d in game.doors.doors.values():
-		if d.kind == "auto":
-			ord = d
-		elif d.kind == "sliding":
+		if d.kind == "sliding":
 			main_doors = d
-	_stand(game.table_pos() + Vector3(0, 0, 3))
-	await _seconds(3.0)
-	_check(ord.is_closed() and main_doors.is_closed(), "the OR and entrance doors are shut with nobody near")
-	_stand(ord.global_position + ord.normal * 2.4)
-	await _seconds(1.2)
-	_check(ord.amount > 0.8, "the OR doors open for a player (%.2f)" % ord.amount)
+	_check(ord != null, "found the OR's double doors")
+	if ord == null:
+		return
+	_check(ord.kind == "double", "the OR's doors are a manual double pair, not automatic (%s)" % ord.kind)
+	game.doors.set_all(false)
+	_stand(game.table_pos() + Vector3(3, 0, 3))
+	await _seconds(1.5)
+	_check(ord.is_closed() and main_doors.is_closed(), "the OR and entrance doors start shut")
+	# The main entrance is unaffected: it still senses anyone nearby.
 	_stand(main_doors.global_position - main_doors.normal * 2.5)
 	await _seconds(1.2)
-	_check(main_doors.amount > 0.8, "the sliding doors open for a player (%.2f)" % main_doors.amount)
+	_check(main_doors.amount > 0.8, "the sliding entrance still opens automatically for a player (%.2f)" % main_doors.amount)
 	_stand(game.clock_pos() + Vector3(1.0, 0, 1.0))
 	await _seconds(3.5)
-	_check(ord.is_closed() and main_doors.is_closed(), "both close when the player leaves (%.2f, %.2f)" % [ord.amount, main_doors.amount])
-	# The crew: the test's first patient arrives by gurney.
+	_check(main_doors.is_closed(), "and closes again once the player leaves (%.2f)" % main_doors.amount)
+	# The OR's doors: a player presses E, same as any other double door. agents_open_doors is off
+	# for this part: the test's player is a bot (bot_active), and a bot standing right in front of a
+	# door facing it would otherwise push it open itself, the same way a real bot does.
+	game.doors.agents_open_doors = false
+	_stand(ord.global_position + ord.normal * 1.5)
+	_look_at(ord.centre)
+	await _frames(4)
+	_check(me.aim_prompt == "Open doors", "the prompt on the OR's doors says Open doors (%s)" % me.aim_prompt)
+	me.bot_press += 1
+	await _seconds(1.2)
+	_check(absf(ord.amount) > 0.8, "E opens the OR's doors (%.2f)" % ord.amount)
+	_stand(game.table_pos() + Vector3(3, 0, 3))
+	await _seconds(3.0)
+	_check(absf(ord.amount) > 0.8, "unlike the old automatic doors they stay open once the player walks away (%.2f)" % ord.amount)
+	# Aim at the open leaf itself (folded against its jamb), same as the hinged-door test: aiming
+	# straight at the doorway's centre no longer hits either leaf once they have swung aside. The
+	# pair folded away from where the player opened them (into the tunnel), so step through and
+	# close it from that side, closer to the folded leaf.
+	var or_leaf: Node3D = ord.leaf_bodies[0]
+	_stand(ord.global_position - ord.normal * 1.2)
+	_look_at(or_leaf.global_transform * Vector3(0.5, 1.1, 0.0))
+	await _frames(4)
+	_check(me.aim_prompt == "Close doors", "the open OR doors can be aimed at: %s" % me.aim_prompt)
+	me.bot_press += 1
+	await _seconds(1.5)
+	_check(ord.is_closed(), "E again closes them (%.2f)" % ord.amount)
+	# Move well clear before letting bots/crews push doors again: standing right at the OR doors
+	# (as a bot) would otherwise push them open by itself and the crew check below would be moot.
+	_stand(game.clock_pos())
+	await _frames(2)
+	game.doors.agents_open_doors = true
+	# The crew: the test's first patient arrives by gurney and must push through the shut OR doors,
+	# since it cannot press E (E is taken, like a bot or a carrier).
 	for c in game.cases.duplicate():
 		game.remove_case(int(c.id))
 	game.loop.dev_phone_call()
-	var saw_main := false
 	var saw_or := false
 	var crew_blocked := false
 	var end := t + 90.0
@@ -311,22 +348,45 @@ func _auto_for_player_and_crew() -> void:
 		await get_tree().physics_frame
 		for cr in game.loop.crews.values():
 			var p: Vector3 = cr.p
-			for pair in [[main_doors, "main"], [ord, "or"]]:
-				var dn: Node = pair[0]
-				var lp: Vector3 = dn.global_transform.affine_inverse() * p
-				if absf(lp.z) < 0.9 and absf(lp.x) < dn.width * 0.5:
-					if pair[1] == "main":
-						saw_main = saw_main or dn.amount > 0.7
-					else:
-						saw_or = saw_or or dn.amount > 0.7
-					crew_blocked = crew_blocked or dn.amount < 0.5
+			var lp: Vector3 = ord.global_transform.affine_inverse() * p
+			# Right in the doorway itself (not just somewhere in the wide hallway approaching it): a
+			# manual door only starts opening once the crew is close and heading square at it (unlike
+			# the old automatic sensor, which saw them coming from much further out).
+			if absf(lp.z) < 0.9 and absf(lp.x) < 0.8:
+				saw_or = saw_or or absf(ord.amount) > 0.7
+				crew_blocked = crew_blocked or absf(ord.amount) < 0.5
 		var c: Dictionary = game.case_by_id(game.cases[0].id) if not game.cases.is_empty() else {}
 		if not c.is_empty() and String(c.state) == "on_table" and game.loop.crews.is_empty():
 			break
-	_check(saw_main, "the entrance doors were open as the crew and gurney passed")
-	_check(saw_or, "the OR doors were open as the crew and gurney passed")
-	_check(not crew_blocked, "the crew never passed a doorway with its door mostly shut")
+	_check(saw_or, "the crew pushed the OR's doors open to bring the gurney through")
+	_check(not crew_blocked, "the crew never passed the doorway with the door mostly shut")
+	_check(int(game.doors.stats.get("crew", 0)) >= 1, "counted as the crew's push")
 	_check(not game.cases.is_empty() and String(game.cases[0].state) == "on_table", "the patient reached the table")
+	_check(not ord.is_closed(), "the OR's doors stay open where the crew left them (manual doors never close by themselves)")
+	game.doors.agents_open_doors = false
+	game.doors.set_all(false)
+	# This section runs long enough (clock-in plus a full gurney delivery) for the shift's own
+	# monster spawner to have put a real Walk-In or two on the map; clear them so the deterministic
+	# sight/noise and monster sub-tests below aren't quietly nudged by a stray one wandering into
+	# whichever door they pick.
+	for m in game.monsters.values().duplicate():
+		game.kill_monster(m)
+	await _seconds(1.5)
+
+
+## The OR's doors: the "double" door nearest the OR table (the cafeteria/radiology/morgue doors are
+## all out in the wings, far from it).
+func _pick_or_doors() -> Node:
+	var best: Node = null
+	var best_d := INF
+	for d in game.doors.doors.values():
+		if d.kind != "double":
+			continue
+		var dist: float = d.global_position.distance_to(game.table_pos())
+		if dist < best_d:
+			best_d = dist
+			best = d
+	return best
 
 
 ## Closed doors block the Night Nurse's watchers, the Walk-In's eyes and muffle noise.

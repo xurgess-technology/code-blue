@@ -5,13 +5,15 @@ extends Node
 ## dev room) and registered here; the host decides, clients follow the replicated amounts.
 ##
 ## Who opens doors (host):
-##   automatic (gates, the OR, the main entrance)  anyone close in front: players (downed and
-##       carrying included), paramedic crews, monsters. A locked gate opens for nobody.
-##   hinged (E)  players press E: it swings away from them (into the tunnel when the other side has
-##       no room) and stays where it is left. Bots, and players carrying someone or dragging a
-##       monster (E is taken), push it open by walking into it. The Walk-In pushes it open slowly,
-##       the Discharged bursts through when it rushes (a slam), otherwise opens it with a creak, the
-##       Night Nurse opens it silently and only while nobody is looking at her or at the door.
+##   automatic (gates, the main entrance)  anyone close in front: players (downed and carrying
+##       included), paramedic crews, monsters. A locked gate opens for nobody.
+##   hinged/double (E)  players press E: it swings away from them (into the tunnel when the other
+##       side has no room) and stays where it is left. Bots, paramedic crews wheeling the gurney,
+##       and players carrying someone or dragging a monster (E is taken), push it open by walking
+##       into it. The Walk-In pushes it open slowly, the Discharged bursts through when it rushes (a
+##       slam), otherwise opens it with a creak, the Night Nurse opens it silently and only while
+##       nobody is looking at her or at the door. The OR's doors are a "double" pair, same as the
+##       cafeteria/radiology/morgue (polish-or-doors: they used to be automatic).
 ##   Doors never close by themselves except the automatic ones.
 ##
 ## Noise the Discharged hears: opening 0.25, a creaking push 0.5, a slam 0.95, a heavy gate 0.35.
@@ -194,10 +196,19 @@ func _host_tick(delta: float) -> void:
 		if d.is_automatic():
 			_auto_tick(d, agents, delta)
 	for a in agents:
-		if a.kind == "crew" or a.kind == "auto":
+		if a.kind == "crew":
 			continue
 		for d in near(a.pos):
 			if d.is_hinged():
+				_push_check(d, a)
+	# The crew (paramedics wheeling the gurney) only ever needs to get through the OR's own doors
+	# (polish-or-doors: the OR moved from "auto" to "double"), never any other hinged/double door in
+	# the hospital, so this is scoped to just those rather than a blanket "crews push every door".
+	for a in agents:
+		if a.kind != "crew":
+			continue
+		for d in near(a.pos):
+			if d.kind == "double" and bool(d.data.get("base", false)):
 				_push_check(d, a)
 
 
@@ -418,7 +429,7 @@ func _push_check(d: Node, a: Dictionary) -> void:
 	# around a corner often face the door at a slant, so for them being right at it is enough.
 	var fwd_z: float = d.normal.dot(a.fwd)
 	var pushing := fwd_z * signf(lp.z) <= -0.2
-	if (kind == "bot" or kind == "carrier") and absf(lp.z) <= 1.3 and absf(lp.x) <= d.width * 0.5:
+	if (kind == "bot" or kind == "carrier" or kind == "crew") and absf(lp.z) <= 1.3 and absf(lp.x) <= d.width * 0.5:
 		pushing = pushing or fwd_z * signf(lp.z) <= 0.3
 	if not pushing:
 		return
@@ -430,11 +441,11 @@ func _push_check(d: Node, a: Dictionary) -> void:
 		return   # open enough to pass
 	var m: Node = a.node
 	match kind:
-		"bot", "carrier":
+		"bot", "carrier", "crew":
 			if not agents_open_doors:
 				return
 			_drive(d, want, SPEED_OPEN, m)
-			_count("bot")
+			_count("bot" if kind != "crew" else "crew")
 			_fx(d, "doors_creak", NOISE_OPEN, "door")
 		"walk_in":
 			if m == null or not _monster_wants_through(m):

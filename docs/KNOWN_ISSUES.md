@@ -1051,3 +1051,41 @@ Players, Bob, the paramedics and the downed player on the table use the Blender 
   spiked to ~1.8s before disconnecting). Only seen once, not reproduced on a second run in this
   pass; flagged in case it recurs for whoever next runs nettest under heavy lag around a wing
   rebuild.
+
+## Toggleable OR doors (polish-or-doors, 2026-09-15)
+
+- **The OR's doors changed visual style, not just behavior.** They were the only "auto" kind
+  (heavy steel, automatic, like a wing gate without the lock); reassigning them to "double"
+  (the quick win the code review flagged, and it held up) means they now render as the lighter
+  double-swing model used by the cafeteria/radiology/morgue, since that is the model the manual
+  E-to-interact "double" kind actually draws. Nobody asked for a new "manual but still heavy
+  steel" look, and building one would have been exactly the "new engineering" the review said to
+  avoid, so this was left as-is. Worth a look if the OR is ever meant to read as heavier/more
+  clinical than an ordinary double door.
+- **The `auto` door kind is now unused** (kept in `door.gd`/`door_models.gd`/`door_plan.gd` and
+  `scripts/warmup.gd` rather than deleted, in case a future room wants a genuinely automatic pair
+  again). If nothing ever reclaims it, it is a candidate for removal.
+- **The paramedic crew's push-open margin against the OR doors is tight by design geometry, not
+  by choice.** The crew only lines up squarely with the doorway (the same facing check a bot uses)
+  a fraction of a second before actually crossing the door plane, because its nav path only turns
+  to face the doorway right at the corner into it. In the seed exercised by `tools/doortest.gd`
+  the doors are still ~85-100% open by the time the gurney reaches the plane, which reads fine,
+  but this hasn't been checked across other seeds/layouts. If a future hospital layout puts a
+  longer straight run in front of the OR (or a sharper last-second turn), it is worth re-checking
+  that the doors still finish opening before the gurney model visually reaches them.
+- **Crew door-pushing was deliberately scoped to just the OR's own doors** (`doors.gd`:
+  `kind == "double" and data.base`), not every hinged/double door in the hospital. The naive first
+  pass (removing the old blanket "crews never push doors" exclusion for every door) worked for the
+  OR but let a real, independently-spawned Walk-In monster wandering the live shift push open an
+  unrelated room door mid-test, corrupting later doortest checks that assumed it was untouched.
+  Scoping crew pushes to the OR's doors specifically fixed it and matches the fact that crews never
+  walk anywhere else in the hospital. If crews ever gain other destinations (e.g. a second delivery
+  point), this scoping will need revisiting.
+- **Follow-up (found during independent verification): the crematorium grate was still borderline
+  for the widest loot.** `devtest.gd`'s furnace check (throwing a defibrillator, 0.36 m at its
+  widest) failed intermittently at the earlier 0.4 m bar spacing (~0.36-0.37 m gaps, from the
+  pharmacy chunk's own follow-up fix) -- close enough to clip depending on tumble. Widened grate
+  spacing from 0.4 m to 0.45 m (`furnace.gd`, both the visual bars and their matching collision),
+  giving ~0.40-0.42 m gaps: comfortable margin above the defibrillator's width, still well short
+  of `C.PLAYER_RADIUS * 2` (0.8 m) so the "no body fits through" rule holds. Unrelated to the OR
+  doors change itself; caught only because it happened to fail on this run's dev-room pass.
