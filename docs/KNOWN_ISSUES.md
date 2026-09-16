@@ -1481,3 +1481,25 @@ into an ordinary crouch-walk. Client-owned local movement throughout, same as th
   `controlstest.gd`'s older, unmigrated scan test. Not investigated further here since
   `tools/controlstest.tscn` isn't one of this task's mandated regression scenes and nothing in this
   diff touches scanning.
+
+**Playtest follow-up (2026-09-16, user feedback):** four changes after a hands-on test.
+- **Toggle sprint is now the default.** New `Settings` key `sprint_mode` ("toggle" default, "hold"
+  available in the settings screen). Toggled sprint ends when every movement key is released. Bots
+  still use `bot_sprint` as hold.
+- **0.2 s grace window** (`DIVE_SPRINT_GRACE`): a crouch press just after sprint drops still dives.
+- **It's a real dive now, not a ground slide.** The launch adds `DIVE_HOP_VELOCITY` = 3.0 m/s
+  upward (~0.25 m peak, ~0.33 s airborne), full launch speed is held through the air, and the
+  0.4 s slide-out decay only starts on touchdown (`_dive_airborne`). The hop is applied after the
+  grounded velocity clamp, same as jump. Must be on the floor to start one. The user suggested a
+  proper "prone" landing state (lying flat, then getting up) -- not built yet, pending design
+  questions (how/when you get up, whether you can crawl, third-person prone pose).
+- **No cooldown.** Replaced by a stamina cost: `DIVE_STAMINA_COST` = 0.2 per dive (about five
+  back-to-back from full), and stamina no longer regenerates mid-dive -- before this, diving counted
+  as "not sprinting" and actually *recovered* stamina, so without a cooldown dives could be chained
+  forever at 1.45x sprint speed.
+- The `controlstest.gd` scanner failures noted just above no longer reproduce (38/38 pass) -- they
+  went away with the default-camera revert, which fits the body-vs-camera aim explanation.
+- Verified: `controlstest` 38/38 (dive checks rewritten for hop, touchdown, decay, no cooldown,
+  stamina gate, grace window, low ceiling), `settingstest` 97/97 (new `sprint_mode` coverage),
+  `inventorytest` 92/92, `devtest`, `databasetest` 12/12, `looptest` (only the known furnace-throw
+  flake).

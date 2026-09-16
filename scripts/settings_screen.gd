@@ -181,6 +181,7 @@ func _build() -> void:
 	col.add_child(_section("CONTROLS"))
 	col.add_child(_slider_row("sensitivity", "Mouse sensitivity", 0.2, 3.0, 0.05,
 		func(v): return "%.2fx" % v))
+	col.add_child(_choice_row("sprint_mode", "Sprint", [["toggle", "Toggle"], ["hold", "Hold"]]))
 	col.add_child(_choice_row("carry_camera", "Carry camera", [["shoulder", "Shoulder"], ["first_person", "First person"]]))   # HANDS HOOK
 	col.add_child(_slider_row("fov", "Field of view", 60.0, 100.0, 1.0,
 		func(v): return "%d°" % roundi(v)))

@@ -79,14 +79,26 @@ var scan_holding: bool = false
 ## bump counter edge-detected via _bot_dive_seen, same pattern as bot_jump/_bot_jump_seen.
 var diving: bool = false
 var _dive_t: float = 0.0
-var _dive_cooldown: float = 0.0
+var _dive_airborne: bool = false
 var _dive_dir: Vector3 = Vector3.ZERO
 var _crouch_prev: bool = false
 var _bot_dive_seen: int = 0
 var _bot_dive_fire: bool = false
+## Toggle sprint: the sprint key flips this on/off instead of having to be held (Settings
+## "sprint_mode" = "toggle", the default; "hold" restores hold-to-sprint).
+var _sprint_toggle: bool = false
+## Seconds left in which a crouch press still counts as "while sprinting", so the dive doesn't
+## need frame-perfect timing against the moment sprint drops.
+var _sprint_grace: float = 0.0
+## Slide-out after landing, not counting the time in the air.
 const DIVE_DURATION := 0.4
 const DIVE_SPEED_MULT := 1.45
-const DIVE_COOLDOWN := 2.5
+## Upward launch speed: ~0.25 m peak, ~0.33 s airborne under the 18 m/s^2 gravity below.
+const DIVE_HOP_VELOCITY := 3.0
+const DIVE_SPRINT_GRACE := 0.2
+## Stamina (0..1) spent per dive; stamina also doesn't recover mid-dive. About five back-to-back
+## dives from a full bar.
+const DIVE_STAMINA_COST := 0.2
 ## Local-only cosmetic scan progress (0..1) and the monster id it is aimed at, for the HUD ring.
 ## Not replicated: every machine computes its own from its own aim, same as aim_id/aim_prompt.
 var scan_progress: float = 0.0
@@ -589,7 +601,15 @@ func _local_step(delta: float) -> void:
 	elif can_move:
 		input_dir = Input.get_vector("move_left", "move_right", "move_forward", "move_back")
 		wants_interact = Input.is_action_pressed("interact")
-		want_sprint = Input.is_action_pressed("sprint")
+		if String(Settings.get_value("sprint_mode")) == "hold":
+			want_sprint = Input.is_action_pressed("sprint")
+		else:
+			if Input.is_action_just_pressed("sprint"):
+				_sprint_toggle = not _sprint_toggle
+			# Letting go of every movement key ends a toggled sprint, like most shooters.
+			if input_dir.length() < 0.1:
+				_sprint_toggle = false
+			want_sprint = _sprint_toggle
 		_want_crouch = Input.is_action_pressed("crouch")
 		scan_holding = Input.is_action_pressed("scan") and not hive_view and not downed and not diving
 	else:
@@ -666,23 +686,32 @@ func _local_step(delta: float) -> void:
 	_crouch_prev = _want_crouch
 	var dive_fire: bool = (crouch_pressed and not bot_active) or (bot_active and _bot_dive_fire)
 	_bot_dive_fire = false
-	if dive_fire and sprinting and not crouching and not diving \
-			and _dive_cooldown <= 0.0 and not downed and not winding and input_dir.y < -0.5:
+	_sprint_grace = DIVE_SPRINT_GRACE if sprinting else maxf(0.0, _sprint_grace - delta)
+	var dive_hop := false
+	# No cooldown timer: each dive costs DIVE_STAMINA_COST instead, so chaining them runs out of
+	# breath rather than turning into a permanent speed boost.
+	if dive_fire and (sprinting or _sprint_grace > 0.0) and not crouching and not diving and is_on_floor() \
+			and stamina >= DIVE_STAMINA_COST and not downed and not winding and input_dir.y < -0.5:
 		diving = true
 		_dive_t = 0.0
-		_dive_cooldown = DIVE_COOLDOWN
+		_dive_airborne = true
 		_dive_dir = dir
+		_sprint_grace = 0.0
+		stamina -= DIVE_STAMINA_COST
+		dive_hop = true
 		# Instant burst, not a ramp-up: the acceleration-chase below would otherwise take several
 		# frames to catch up to sprint*MULT, which reads as a slow speed-up rather than a lunge.
-		# This matches the dive_k=1.0 target speed computed just below, so there is no pop when
-		# move_toward picks the target up on the next line.
 		velocity.x = dir.x * C.SPRINT_SPEED * DIVE_SPEED_MULT
 		velocity.z = dir.z * C.SPRINT_SPEED * DIVE_SPEED_MULT
 	if diving:
-		_dive_t += delta
-		if _dive_t >= DIVE_DURATION:
-			diving = false
-	_dive_cooldown = maxf(0.0, _dive_cooldown - delta)
+		# Airborne: full launch speed, no decay. The slide-out clock only starts on touchdown.
+		if _dive_airborne:
+			if is_on_floor() and velocity.y <= 0.0 and not dive_hop:
+				_dive_airborne = false
+		else:
+			_dive_t += delta
+			if _dive_t >= DIVE_DURATION:
+				diving = false
 
 	# SWEEP 4A HOOK (controls): crouch is client-owned. Standing back up is refused under a low
 	# ceiling (a raycast from the crouched head to the standing head height); until there is room
@@ -691,7 +720,7 @@ func _local_step(delta: float) -> void:
 	# that ends under a low ceiling correctly stays crouched instead of popping the capsule back up.
 	_apply_crouch(delta)
 	sprinting = moving and can_move and want_sprint and stamina > 0.0 and not downed and not crouching and carrying == 0 and dragging_monster < 0 and not winding and not diving
-	stamina = clampf(stamina + (-delta / 4.5 if sprinting else delta / 5.0), 0.0, 1.0)
+	stamina = clampf(stamina + (-delta / 4.5 if sprinting else (0.0 if diving else delta / 5.0)), 0.0, 1.0)
 
 	var speed: float = 0.0 if operating else (C.SPRINT_SPEED if sprinting else C.WALK_SPEED)
 	# Downed hook: crawling is slow; a teammate over your shoulder slows you down.
@@ -700,7 +729,7 @@ func _local_step(delta: float) -> void:
 	elif diving:
 		# SPRINT-DIVE HOOK: an instant burst beyond sprint speed that decays back down to crouch
 		# speed over DIVE_DURATION, so the dive reads as a lunge-then-slide rather than a teleport.
-		var dive_k: float = 1.0 - clampf(_dive_t / DIVE_DURATION, 0.0, 1.0)
+		var dive_k: float = 1.0 if _dive_airborne else 1.0 - clampf(_dive_t / DIVE_DURATION, 0.0, 1.0)
 		speed = lerpf(C.CROUCH_SPEED, C.SPRINT_SPEED * DIVE_SPEED_MULT, dive_k)
 	elif crouching:
 		speed = C.CROUCH_SPEED   # SWEEP 4A HOOK (controls): crouching is slow, on top of everything else
@@ -724,6 +753,9 @@ func _local_step(delta: float) -> void:
 		velocity.y = minf(velocity.y, 0.0) + _knock.y
 	if want_jump:
 		velocity.y = C.JUMP_VELOCITY
+	# After the grounded clamp above, or it would zero the launch on the frame the dive fires.
+	if dive_hop:
+		velocity.y = DIVE_HOP_VELOCITY
 	_knock = _knock.lerp(Vector3.ZERO, clampf(delta * 6.0, 0.0, 1.0))
 
 	var was_air := not is_on_floor()
@@ -1435,7 +1467,9 @@ func revive_full() -> void:
 	crouching = false   # SWEEP 4A HOOK (controls)
 	scan_holding = false
 	diving = false   # SPRINT-DIVE HOOK
-	_dive_cooldown = 0.0
+	_dive_airborne = false
+	_sprint_toggle = false
+	_sprint_grace = 0.0
 	_clear_downed()
 	_set_visible_alive(true)
 

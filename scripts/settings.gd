@@ -13,6 +13,7 @@ extends Node
 ##   fov            player camera vertical field of view in degrees
 ##   quality        0 low, 1 medium, 2 high (main.gd's presets)
 ##   carry_camera   "shoulder" or "first_person" while carrying or dragging (scripts/camera/carry_camera.gd)
+##   sprint_mode    "toggle" (press to start/stop sprinting) or "hold" (scripts/player.gd)
 ##
 ## This node applies what is global itself (audio buses, window mode). Scene-specific
 ## settings are applied by whoever owns the thing: main.gd (quality, brightness) and
@@ -28,6 +29,7 @@ const LEGACY_PREFS := "user://prefs.cfg"
 const WINDOW_MODES: PackedStringArray = ["fullscreen", "borderless", "windowed"]
 ## HANDS HOOK: the over-the-shoulder camera while carrying a body or dragging a monster.
 const CARRY_CAMERA_MODES: PackedStringArray = ["shoulder", "first_person"]
+const SPRINT_MODES: PackedStringArray = ["toggle", "hold"]
 
 const DEFAULTS := {
 	"master_volume": 1.0,
@@ -39,6 +41,7 @@ const DEFAULTS := {
 	"fov": 78.0,
 	"quality": 1,
 	"carry_camera": "shoulder",   # HANDS HOOK: "shoulder" | "first_person", carrying/dragging
+	"sprint_mode": "toggle",
 	# SWEEP 4A HOOK (controls): rebindable keys, stored as a physical_keycode int. Applied to the
 	# matching InputMap action (see REBIND_ACTIONS / _apply) so the whole game (not just the
 	# settings screen) follows a rebind immediately.
@@ -201,6 +204,9 @@ func _sanitize(key: String, v):
 	if key == "carry_camera":   # HANDS HOOK
 		var c := str(v)
 		return c if CARRY_CAMERA_MODES.has(c) else def
+	if key == "sprint_mode":
+		var sm := str(v)
+		return sm if SPRINT_MODES.has(sm) else def
 	if key == "window_mode":
 		var s := str(v)
 		return s if WINDOW_MODES.has(s) else def
