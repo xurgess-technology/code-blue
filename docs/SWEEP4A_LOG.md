@@ -29,3 +29,23 @@ re-verified with fresh screenshots, fogtest, and perfprobe. Known issues logged:
 renders when volumetric fog is on (off at the LOW quality preset — the lot gets only the base
 depth fog there, not specifically retuned); one repositioned lamp's beam still faintly reaches
 the wall; the ambulance's own headlights light the wall behind the bay by design.
+
+## Chunk 3: Pharmacy, crematorium, charged throw, placebo pills, no gold (`s4a-pharmacy`)
+Landed: charged throw (hold to charge, tap to drop, host-run physics); gold bars fully removed
+(`grep -ri gold` finds only a UI color name reused for loot in general and removal-documentation
+comments, no functional gold-bar code); pharmacy window (tube delivery, sells placebo pills);
+crematorium furnace (throw-to-sell, bounces unsellable items and bodies, cheap fire visuals);
+placebo pills (buy/eat/throw, warm effect, floating lines, OR green blip, burns for $0). Tests:
+inventorytest (79/79), devtest, mapcheck (same pre-existing morgue flake), spawncheck, looptest,
+perfprobe's crematorium scenario (60fps all tiers), `playtest --god --seed=1` (PASS).
+**Follow-up during review:** the furnace was unreachable on some seeds — `economy.gd`'s
+floor-placement probe cast its ray from above a normal ceiling height, so on seeds where the
+reserved crematorium rect had full ceiling coverage the furnace got built a full storey up,
+floating on the ceiling. `looptest.gd`'s bot-driven furnace throw always timed out because of
+this even though the manual `inventorytest.gd` check (which teleports straight there) passed.
+Fixed the probe height and, separately, widened the furnace's grate gaps (0.13m → 0.37m) since
+the narrow original gaps meant ordinary aim/position variance was enough to miss. Known issues
+logged: the pharmacy/crematorium footprints can still overlap lobby furniture on some seeds (not
+this chunk's fix to make — flagged for whoever owns entrance.gd's lobby layout); the pill hit
+check is a per-frame distance poll, not swept, and untested under lag; chunk 4 owns the placebo
+pill database/terminal entry.
