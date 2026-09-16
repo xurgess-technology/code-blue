@@ -42,6 +42,9 @@ var selected: int = 0
 var aim_id: String = ""
 var aim_prompt: String = ""
 var aim_hold: float = 0.0
+## AFFORDANCE HOOK: the node (if any) currently wearing the local player's aim highlight rim
+## (scripts/aim_highlight.gd). Local-only presentation, never replicated or read elsewhere.
+var _aim_highlighted: Node = null
 
 ## Counters the host watches so each press fires exactly once.
 var shove_count: int = 0
@@ -874,6 +877,30 @@ func _update_aim() -> void:
 	else:
 		_jab_prompt = ""
 		_jab_prompt_t = 0.0
+	# AFFORDANCE HOOK: only the local player ever sees their own highlight (a bot's aim is a host
+	# decision, not something drawn to anyone's screen).
+	if is_local:
+		_update_aim_highlight()
+
+
+## AFFORDANCE HOOK: swap the aim-highlight rim (scripts/aim_highlight.gd) onto whatever `aim_id`
+## now points at, replacing the old always-on floating labels as the primary "you can interact
+## with this" signal (docs/CONTRACTS.md, "Interaction"). Skips anything whose prompt begins with
+## "!" (the existing "can't use this right now" convention), same as the crosshair prompt already
+## does for its own styling.
+func _update_aim_highlight() -> void:
+	var want: Node = null
+	if aim_id != "" and not aim_prompt.begins_with("!") and game != null:
+		var n: Node = game.find_interactable(aim_id)
+		if n != null and n.is_in_group("interactable"):
+			want = n
+	if want == _aim_highlighted:
+		return
+	if _aim_highlighted != null and is_instance_valid(_aim_highlighted):
+		AimHighlight.set_highlighted(_aim_highlighted, false)
+	_aim_highlighted = want
+	if _aim_highlighted != null:
+		AimHighlight.set_highlighted(_aim_highlighted, true)
 
 
 func _update_aim_core() -> void:

@@ -1135,3 +1135,33 @@ Players, Bob, the paramedics and the downed player on the table use the Blender 
   host_kill scenarios (which cover the same `Net.leave()` teardown path "Exit to Main Menu"
   reuses) both still pass. Layout/positioning has not been screenshot-checked at other
   resolutions.
+
+## Interactable affordance: aim highlight replacing floating labels (2026-09-15)
+
+- **Only two always-on `Label3D` props were actually found and replaced**: the OR supply shelf's
+  "SUPPLY - SURGICAL" tag (`scripts/supply_shelf.gd`) and the break-room blender's "BLENDER" tag
+  (`scripts/brains/blender.gd`). Both are gone outright; `AimHighlight` (`scripts/aim_highlight.gd`)
+  plus the existing crosshair prompt now carry the "you can interact with this" signal instead.
+  `scripts/economy/economy_props.gd` and `scripts/economy/furnace.gd` (the pharmacy window and the
+  furnace, which also carry price/amount `Label3D`s) were deliberately left untouched -- a sibling
+  worker owns those files for the entrance/lobby rebuild, and this sweep was scoped to the generic
+  system, not a specific room's props. Whatever they build there picks up `AimHighlight` for free
+  once merged (it works on anything in group `"interactable"`), but their own labels (price tags,
+  not "this is interactable" labels) are that worker's call to keep or change.
+- **`scripts/downed/player_table.gd`'s "STAFF" tag was left as-is.** It reads more like an identity
+  label (which table is which, similar in spirit to the hospital's own room-name signs) than a
+  "you can interact with this" cue, and the table's own aim highlight now covers the latter. Worth
+  a second look if it turns out players read "STAFF" as redundant once they get used to the rim.
+- **The blender's highlight is hard to see in a screenshot taken close up and level with its own
+  overhead lamp** (`tools/affordanceshot.tscn` shot `d_blender_aimed_highlight_on.png`): the lamp's
+  own bright bloom washes out the thin rim on the jar and motor housing at that framing. Confirmed
+  by instrumentation that the rim shells are actually created (6, `AimHighlight.MAX_MESHES`), so
+  this is a lighting/screenshot-framing issue, not a mechanism bug -- the same rim reads clearly on
+  the supply shelf's steel frame in the same run. Worth a look with a wider shot or the lamp dimmed
+  if the blender specifically still feels unclear in a real playtest.
+- **No other floating always-on interactable labels were found** in a full `Label3D` grep of
+  `scripts/`: the rest are either transient (the pharmacy's `_spawn_pill_line` flavor quotes in
+  `game.gd`, which rise and fade on their own), dev-only (`scripts/dev/dev_level.gd`,
+  `scripts/dev/dev_dispenser.gd`), debug gizmos (`scripts/patients/patient_kit.gd`'s axis labels),
+  or player name tags (`scripts/player.gd`), none of which are the "bright out of place room/prop
+  label" the affordance sweep was about.
