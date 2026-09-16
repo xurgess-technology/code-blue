@@ -1089,3 +1089,39 @@ Players, Bob, the paramedics and the downed player on the table use the Blender 
   giving ~0.40-0.42 m gaps: comfortable margin above the defibrillator's width, still well short
   of `C.PLAYER_RADIUS * 2` (0.8 m) so the "no body fits through" rule holds. Unrelated to the OR
   doors change itself; caught only because it happened to fail on this run's dev-room pass.
+
+## Hub redesign: pharmacy/crematorium rooms, kiosk, terminal desk (hub-redesign, 2026-09-15)
+
+- **`tools/looptest.gd` (seed 4242) can fail with both patients dying**, not required by this
+  sweep's test list but run as extra diligence. Isolated (by swapping just `entrance.gd` between
+  the old and new hospital layout, everything else held constant) to the entrance restructuring
+  specifically, not the pharmacy/furnace/terminal scripts themselves: `tools/inventorytest.tscn`
+  and `tools/devtest.tscn`, which exercise the same kiosk/furnace/terminal through direct
+  teleport-based interaction, are unaffected and pass reliably. The failure is a real bot
+  (`NavigationServer3D`-driven, not a teleport) getting permanently stuck -- `_stuck` climbs
+  without bound and it never recovers -- partway to the OR shelf, at a position inside a north
+  wing (tile roughly (2.75, -4) relative to the entrance origin, well outside the new rooms'
+  footprint) that the ORIGINAL entrance layout's bot walks through in under two seconds for the
+  identical seed. Wing content itself is unaffected (`Entrance.build()` takes no RNG, so the
+  hub redesign cannot have shifted wing generation), so this reads as a pre-existing pathing or
+  door-state edge case in that wing, newly exposed because the hub redesign's furniture moves
+  shifted the bot's upstream timing (which loot it grabs and when) enough to route it into a
+  different container choice than before. `tools/nettest_run.gd -- --only=economy` timed out the
+  same way (a real bot failing to reach the kiosk/furnace under real movement, not the direct
+  interaction both `inventorytest` and `devtest` cover) and is suspected to be the same root
+  cause. Not root-caused further within this sweep's budget -- worth a look from whoever owns
+  wing navigation/doors, starting from that specific stuck position and seed.
+- **The database terminal's live screen only renders a real picture with a hardware GPU
+  renderer.** `tools/perfprobe.tscn` ran headless (`--rendering-driver` unset defaults to a dummy
+  renderer in this environment) and reported "draws 0" for every scenario, so its numbers don't
+  reflect the SubViewport's actual GPU cost -- only that the CPU-side script work
+  (`terminal_screen_live.gd`'s per-frame camera copy, gated to 4.5 m / 8 Hz) stayed cheap. Worth a
+  real windowed perfprobe pass near the terminal on real hardware before trusting the 192x120/8 Hz
+  numbers as final.
+- **Crematorium and pharmacy screenshots were taken from the existing close-up poses**
+  (`tools/inventoryshot.gd`'s `05`-`08` shots stand 2.0-2.4 m back, which mostly fills the frame
+  with the flashlight cone in this game's dark lighting) rather than a new wide establishing shot
+  of each room. They confirm the mechanics (kiosk prompt, delivery, throw-to-sell) and the Night
+  Nurse's model rendering correctly, but not a clean wide view of the walls/archway/fire-through-
+  a-hole read from a few metres back. Worth a dedicated wide shot next time inventoryshot.gd is
+  touched.
