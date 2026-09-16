@@ -740,6 +740,10 @@ static func _primitive(kind: String) -> ArrayMesh:
 		"or_screen_mount":
 			g.box(Vector3(2.2, 1.3, 0.06), Vector3(0, m + 0.65, -0.05), DARK)
 			g.box(Vector3(2.08, 1.18, 0.01), Vector3(0, m + 0.65, -0.082), Color(0.02, 0.05, 0.06), 1)
+		"table_monitor_mount":
+			g.box(Vector3(1.2, 0.72, 0.06), Vector3(0, m + 0.36, -0.05), DARK)
+			g.box(Vector3(1.08, 0.6, 0.01), Vector3(0, m + 0.36, -0.082), Color(0.02, 0.05, 0.06), 1)
+			g.box(Vector3(0.12, 0.3, 0.05), Vector3(0, m - 0.12, -0.03), DARK)   # the wall arm
 		# ---- outdoors ------------------------------------------------------
 		"ambulance", "van", "sedan", "suv", "hatchback", "covered_car":
 			var col := ENAMEL

@@ -67,7 +67,11 @@ func _physics_process(delta: float) -> void:
 func _sample() -> void:
 	var scr = game.get("or_screen")
 	if scr != null and scr.mounted():
-		var vis: float = scr._visibility()
+		# Hub rebuild, chunk 2: one monitor per table; refresh_count counts them all, so "out of view"
+		# means every one of them is.
+		var vis := -1.0
+		for m in scr.monitors:
+			vis = maxf(vis, scr._visibility_of(m))
 		var rc: int = scr.refresh_count
 		if _last_refresh >= 0 and vis < 0.0 and _last_vis < 0.0:
 			_far_frames += 1

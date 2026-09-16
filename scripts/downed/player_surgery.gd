@@ -95,13 +95,14 @@ func _vitals() -> float:
 # the case (host starts and ends it; every machine applies it)
 # =========================================================================
 
-## Host: `p` lies on the player table; the stitches step can begin.
-func start(p: Node) -> void:
+## Host: `p` lies on the player table; the stitches step can begin. `table`: which patient table
+## they lie on, on levels where downed players use any free one (the hub), else -1.
+func start(p: Node, table := -1) -> void:
 	if not is_host() or p == null:
 		return
 	_revive_in = 0.0
 	case = {"patient_id": "player", "player_id": p.peer_id, "ailment_id": "stitches", "step_index": 0,
-		"flags": {"sedation": 1.0}}
+		"flags": {"sedation": 1.0}, "table": table}
 	apply_locally()
 
 
@@ -116,10 +117,11 @@ func clear() -> void:
 
 ## Every machine, idempotent: the body on the table and the surgery system follow `case`.
 func apply_locally() -> void:
-	var key := "" if case.is_empty() else "%d|%s" % [int(case.get("player_id", 0)), String(case.get("ailment_id", ""))]
+	var key := "" if case.is_empty() else "%d|%s|%d" % [int(case.get("player_id", 0)), String(case.get("ailment_id", "")), int(case.get("table", -1))]
 	if key != _case_key:
 		_case_key = key
 		_flags_key = ""
+		game.set_downed_table(int(case.get("table", -1)) if not case.is_empty() else -1)
 		if patient_body != null and is_instance_valid(patient_body):
 			patient_body.queue_free()
 		patient_body = null

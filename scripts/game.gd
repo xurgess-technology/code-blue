@@ -959,6 +959,11 @@ func _add_proxy(id: String, pos: Vector3, radius: float, hold: float, prompt_fn:
 func _table_prompt(p, table_index: int) -> String:
 	if phase != Phase.SHIFT:
 		return ""
+	if downed_any_table and p != null:
+		if p.carrying != 0:
+			return _downed_place_prompt(p, table_index)
+		if int(player_table.get("index", -1)) == table_index:
+			return player_surgery.operate_prompt(p)
 	var c := case_on_table(table_index)
 	if c.is_empty() or String(c.get("patient_id", "")) == "player":
 		return ""
@@ -988,6 +993,9 @@ func _proxy_used(id: String, p: Node) -> void:
 	for t in patient_tables:
 		if table_interact_id(int(t.index)) != id:
 			continue
+		if downed_any_table and int(player_table.get("index", -1)) == int(t.index):
+			player_surgery.begin(p)   # the downed teammate lying on this table
+			return
 		if dissection.table_used(p, int(t.index)):
 			return   # SWEEP 3 HOOK (dissection): anesthetic in hand re-doses a strapped monster
 		var sys := surgery_for_table(int(t.index))
@@ -1425,22 +1433,49 @@ const PILL_PRICE := 15
 const PILL_COUNT := 10
 
 
-## Host: buy one bottle of placebo pills at the pharmacy window. False (and a message) without
-## the money. The item does not appear in hand: a tube capsule thunks into the delivery station a
-## moment later and drops it there (economy.gd's pharmacy node runs the timer/visual).
+## Hub rebuild, chunk 3: what the pharmacy's fax order form offers, in order. Placebo pills are all
+## it stocks today; a new entry here shows up on the form. `count` and `price` are per set; the form
+## orders 1 to PHARMACY_MAX_QTY sets of each.
+const PHARMACY_MAX_QTY := 99
+const PHARMACY_CATALOG := [
+	{"kind": "placebo_pills", "name": "Placebo pills", "count": PILL_COUNT, "price": PILL_PRICE},
+]
+
+
+## Host: buy one bottle of placebo pills (tests, and the older callers): a one-item fax order.
 func buy_pills(p: Node) -> bool:
-	if not is_host() or economy == null or economy.pharmacy == null:
+	return order_pharmacy(p, ["placebo_pills"])
+
+
+## Host: a faxed pharmacy order. `order` is {catalog kind: sets} (or an Array of kinds, one set each).
+## False (and a message) without the money. Nothing appears in hand: the page prints behind the bars,
+## the Night Nurse fetches the order and the pickup drawer slides out with it (economy_props.gd runs
+## that timeline on every machine; only the host spawns the items, one stack per line).
+func order_pharmacy(p: Node, order: Variant) -> bool:
+	if not is_host() or economy == null or economy.pharmacy == null or not is_instance_valid(economy.pharmacy):
 		return false
-	if money < PILL_PRICE:
-		tell(p, "Pills cost $%d. The team has $%d." % [PILL_PRICE, money])
+	var sets := {}
+	if order is Array:
+		for k in order:
+			sets[String(k)] = 1
+	elif order is Dictionary:
+		sets = order
+	var items: Array = []
+	var total := 0
+	for e in PHARMACY_CATALOG:
+		var qty := clampi(int(sets.get(String(e.kind), 0)), 0, PHARMACY_MAX_QTY)
+		if qty > 0:
+			items.append({"kind": String(e.kind), "count": int(e.count) * qty})
+			total += int(e.price) * qty
+	if items.is_empty():
 		return false
-	add_money(-PILL_PRICE, "pharmacy:placebo_pills")
-	_sound("economy_buy", economy.pharmacy_position())
-	say("%s bought a bottle of pills for $%d." % [p.player_name if p != null else "Someone", PILL_PRICE], 2.5)
-	# The tube-capsule animation plays on every machine; only the host spawns the item once it
-	# lands (economy_props.gd gates that on is_host()).
-	economy.pharmacy.queue_delivery("placebo_pills", PILL_COUNT)
-	_broadcast("pharmacy_deliver", {"kind": "placebo_pills", "count": PILL_COUNT})
+	if money < total:
+		tell(p, "That order comes to $%d. The team has $%d." % [total, money])
+		return false
+	add_money(-total, "pharmacy:fax")
+	say("%s faxed the pharmacy an order ($%d)." % [p.player_name if p != null else "Someone", total], 2.5)
+	economy.pharmacy.queue_order(items)
+	_broadcast("pharmacy_order", {"items": items})
 	return true
 
 
@@ -1593,6 +1628,8 @@ func remove_case(id: int) -> void:
 ## Index of the player table in level_info.tables, or -1. Levels without one in the data (the
 ## fallback second-table levels) get the downed worker's placed player table appended once it exists.
 func player_table_index() -> int:
+	if downed_any_table:
+		return int(player_table.get("index", -1))
 	var all: Array = level_info.get("tables", [])
 	for i in all.size():
 		if String(all[i].get("kind", "")) == "player":
@@ -2360,7 +2397,7 @@ func revive_player(p: Node, _source: String = "stitches") -> void:
 	var from: Vector3 = p.global_position
 	if p.on_table and not player_table.is_empty():
 		var b := Basis(Vector3.UP, player_table_yaw())
-		from = player_table.position + b * Vector3(0.0, 0.0, 1.1)
+		from = (player_table.position as Vector3) + b * Vector3(0.0, 0.0, 1.1)
 	_release_downed_links(p)
 	var spot := _scatter_spot(from)
 	p.teleport(spot)
@@ -2477,6 +2514,15 @@ func carrier_pressed_interact(q: Node, aim: String) -> void:
 		if node != null and _within_reach(q, node) and player_table_prompt(q).begins_with("Place"):
 			place_on_player_table(q)
 			return
+	if downed_any_table and aim.begins_with("table"):
+		for t in patient_tables:
+			var ti := int(t.index)
+			if table_interact_id(ti) != aim:
+				continue
+			var node := find_interactable(aim)
+			if node != null and _within_reach(q, node) and _downed_place_prompt(q, ti).begins_with("Place"):
+				place_on_player_table(q, ti)
+				return
 	drop_carried(q)
 
 
@@ -2535,7 +2581,47 @@ func spawn_suture_kits() -> void:
 ## (the same on every machine: the level is identical).
 func _add_player_table() -> void:
 	player_table = {}
+	# Hub rebuild, chunk 2: a level whose tables are all patient tables (the hub's three) has no
+	# player table of its own: a downed teammate goes on whichever patient table is free, and
+	# `player_table` names that table only while they lie on it (set_downed_table).
+	downed_any_table = false
+	var has_player_table := false
+	for t in level_info.get("tables", []):
+		if t is Dictionary and String(t.get("kind", "")) == "player":
+			has_player_table = true
+	if not has_player_table and not bool(level_info.get("tables_fallback", false)) and patient_tables.size() >= 3:
+		downed_any_table = true
+		return
 	_place_player_table.call_deferred(level)
+
+
+## Hub rebuild, chunk 2: true when a downed teammate is laid on any free patient table instead of
+## a player table of the level's own.
+var downed_any_table := false
+## The top of an OR table above its floor position (piece_defs "or_table").
+const OR_TABLE_TOP := 0.945
+
+
+## Every machine (player_surgery.apply_locally): which patient table the downed teammate lies on,
+## -1 for none. Only on levels where downed players use any free table.
+func set_downed_table(index: int) -> void:
+	if not downed_any_table:
+		return
+	if index < 0:
+		player_table = {}
+		return
+	var pos := table_position(index)
+	player_table = {"position": pos, "yaw": table_yaw_of(index), "top": pos.y + OR_TABLE_TOP, "index": index}
+
+
+## What aiming at patient table `ti` offers a carrier: lay the teammate there when it is free.
+func _downed_place_prompt(q: Node, ti: int) -> String:
+	var who = players.get(q.carrying)
+	if not case_on_table(ti).is_empty() or loop.table_reserved(ti):
+		return "!The table is taken."
+	if not player_table.is_empty():
+		return "!Someone is already on a table."
+	return "Place %s on the table" % (who.player_name if who != null else "them")
 
 
 func _place_player_table(for_level: Node) -> void:
@@ -2620,7 +2706,7 @@ func _player_table_used(q: Node) -> void:
 
 
 ## Host: the carrier lays their downed teammate on the player table; the stitches case starts.
-func place_on_player_table(q: Node) -> void:
+func place_on_player_table(q: Node, table_index := -1) -> void:
 	if not is_host():
 		return
 	var p = players.get(q.carrying)
@@ -2630,11 +2716,12 @@ func place_on_player_table(q: Node) -> void:
 		return
 	p.carried_by = 0
 	p.on_table = true
+	# The case first: on the hub it names the table, which pinned_pose reads through player_table.
+	player_surgery.start(p, table_index)
 	p.teleport(pinned_pose(p).origin)
 	if p.is_local or p.is_bot:
 		p.look_up_from_table()
 	p.refresh_downed_visuals()
-	start_player_surgery(p)
 	_sound("thud", player_table_top())
 	say("%s is on the table. A suture kit on the shelf, then stitch them up." % p.player_name, 4.0)
 
@@ -3310,6 +3397,7 @@ func _global_fields() -> Dictionary:
 		"dv": dev.net_state() if dev_mode else {},  # DEV HOOK
 		"mn": money,  # inventory: team money
 		"fh": economy.furnace.hatch_open if economy.furnace != null and is_instance_valid(economy.furnace) else false,  # hub: the furnace hatch
+		"wn": economy.waiting_nurse.net_state() if economy.waiting_nurse != null and is_instance_valid(economy.waiting_nurse) else {},  # hub: the waiting room's Night Nurse
 		"pn": pill_notes.duplicate(),  # SWEEP 4A HOOK (pharmacy, chunk 3): OR green blip notes
 		# SWEEP 3 HOOK: small dictionaries of quantized values only (see docs/SWEEP3.md)
 		"cb": combat.net_state(), "dx": dissection.net_state(), "br": brains.net_state(),
@@ -3535,6 +3623,9 @@ func _apply_state(state: Dictionary, msg: Dictionary, keyframe: bool) -> void:
 	# Hub rebuild: the crematorium furnace's hatch.
 	if economy.furnace != null and is_instance_valid(economy.furnace) and g.has("fh"):
 		economy.furnace.set_hatch(bool(g.fh))
+	var wn = g.get("wn", {})
+	if economy.waiting_nurse != null and is_instance_valid(economy.waiting_nurse) and wn is Dictionary and not wn.is_empty():
+		economy.waiting_nurse.apply_net_state(wn)
 	# inventory: money.
 	var new_money := int(g.get("mn", money))
 	if new_money != money:
@@ -3728,11 +3819,11 @@ func _event(kind: String, data: Dictionary) -> void:
 			# SWEEP 4A HOOK (pharmacy, chunk 3): the floating quoted line over a patient or
 			# monster, for everyone nearby. Purely decorative and local to each machine.
 			_spawn_pill_line(data.pos, String(data.text))
-		"pharmacy_deliver":
-			# SWEEP 4A HOOK (pharmacy, chunk 3): every client plays the tube-capsule animation;
-			# only the host (economy_props.gd) actually spawns the item once it lands.
+		"pharmacy_order":
+			# Hub rebuild, chunk 3: every client plays the fax order's timeline (the page, the
+			# Night Nurse, the drawer); only the host (economy_props.gd) spawns the items.
 			if economy != null and economy.pharmacy != null and is_instance_valid(economy.pharmacy):
-				economy.pharmacy.queue_delivery(String(data.kind), int(data.count))
+				economy.pharmacy.queue_order(data.get("items", []))
 		"hit":
 			var p = players.get(data.id)
 			if p != null:

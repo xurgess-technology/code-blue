@@ -12,6 +12,9 @@ extends SkeletonModifier3D
 ##   lunge   0..1  both arms reach forward and up, the head pushes out (the attack)
 ##   recoil  0..1  knocked back: torso and head thrown back, arms flung out (a dev gun knock-down)
 ##   slump   0..1  dead: head dropped, shoulders fallen, arms loose (the dev room's corpse)
+##   sit     0..1  seated upright, hands in her lap (the hub's waiting room; no clip plays)
+##   hold    0..1  right hand raised in front of her chest, as if holding a page up to read (the
+##                 hub pharmacy's attendant reading a fax; `bone_world("hand.R")` is where it is)
 ##
 ## She is never sedated, dragged or strapped to a table (docs/SWEEP3.md: unfightable, no brain), so
 ## there is no lying or thrashing pose; `MonsterModel.make_lying` still gives her rest pose if asked.
@@ -32,6 +35,14 @@ const WALK_LIFT := 0.035
 var lunge := 0.0
 var recoil := 0.0
 var slump := 0.0
+var sit := 0.0
+var hold := 0.0
+## World position of her right hand as last posed with `hold` (what the page is pinned to).
+var held_hand_world := Vector3.ZERO
+
+## Seated, her hips come down by about a thigh's length (hip 1.12 m, knee 0.62 m standing): the model
+## is lowered this much so her feet stay on the floor.
+const SIT_DROP := 0.5
 
 var _b := {}
 
@@ -107,13 +118,39 @@ func _turn(sk: Skeleton3D, bone: String, axis: Vector3, angle: float) -> void:
 
 
 func _process_modification_with_delta(_delta: float) -> void:
-	if lunge == 0.0 and recoil == 0.0 and slump == 0.0:
+	if lunge == 0.0 and recoil == 0.0 and slump == 0.0 and sit == 0.0 and hold == 0.0:
 		return
 	var sk := get_skeleton()
 	if sk == null:
 		return
 	var X := Vector3.RIGHT
 	var Z := Vector3.BACK
+	if hold > 0.0:
+		var h := hold
+		# The upper arm forward and a little in, the forearm folded up so the hand is at chest height.
+		_turn(sk, "upperarm.R", X, -0.45 * h)
+		_turn(sk, "upperarm.R", Z, 0.25 * h)
+		_turn(sk, "forearm.R", X, -1.05 * h)
+		_turn(sk, "hand.R", X, 0.2 * h)
+		_turn(sk, "head", X, 0.25 * h)
+		# Recorded here, after the pose: outside the modifier the skeleton reads back the clip's pose.
+		held_hand_world = bone_world("hand.R")
+	if sit > 0.0:
+		var s := sit
+		# Thighs forward to level, shins back down, a slight lean; forearms laid across the lap.
+		_turn(sk, "thigh.L", X, -1.52 * s)
+		_turn(sk, "thigh.R", X, -1.52 * s)
+		_turn(sk, "shin.L", X, 1.45 * s)
+		_turn(sk, "shin.R", X, 1.45 * s)
+		_turn(sk, "foot.L", X, 0.05 * s)
+		_turn(sk, "foot.R", X, 0.05 * s)
+		_turn(sk, "spine", X, 0.06 * s)
+		_turn(sk, "upperarm.L", X, -0.35 * s)
+		_turn(sk, "upperarm.R", X, -0.35 * s)
+		_turn(sk, "forearm.L", X, -1.0 * s)
+		_turn(sk, "forearm.R", X, -1.0 * s)
+		_turn(sk, "forearm.L", Vector3.UP, -0.35 * s)
+		_turn(sk, "forearm.R", Vector3.UP, 0.35 * s)
 	if slump > 0.0:
 		var s := slump
 		_turn(sk, "spine", X, 0.25 * s)

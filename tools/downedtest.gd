@@ -68,7 +68,13 @@ func _hospital() -> void:
 				wrong += 1
 	_check(stacks >= 3 and kits >= 3 and wrong == 0, "suture kits spawn every shift (%d kits in %d stacks, %d misplaced)" % [kits, stacks, wrong])
 	_check(Items.is_surgical("suture_kit") and ItemModels.tint_material("suture_kit") != null, "suture kits are surgical and tinted teal")
-	_check(not game.player_table.is_empty() and game.find_interactable("player_table") != null, "a player table stands in the OR (%s)" % str(game.player_table))
+	# Hub rebuild, chunk 2: the hub's OR has three patient tables and no player table of its own; a
+	# downed teammate goes on whichever is free (`player_table` names it only while they lie there).
+	if game.downed_any_table:
+		_check(game.player_table.is_empty() and game.patient_tables.size() == 3 and game.find_interactable("player_table") == null,
+			"the hub has no fixed player table: 3 patient tables take a downed teammate (%d tables)" % game.patient_tables.size())
+	else:
+		_check(not game.player_table.is_empty() and game.find_interactable("player_table") != null, "a player table stands in the OR (%s)" % str(game.player_table))
 	if not game.player_table.is_empty():
 		var entry := {}
 		for tb in game.level_info.get("tables", []):

@@ -58,7 +58,7 @@ static func build(st: S, ox: int, oy: int) -> void:
 	carve.call(1, 1, 31, 4)     # the hallway
 	carve.call(15, 5, 3, 15)    # the spine, hallway to lobby
 	carve.call(12, 23, 1, 3)    # the wide opening between the waiting room and the lobby
-	carve.call(23, 23, 1, 2)    # the pharmacy window (its counter and grate stand in it)
+	carve.call(23, 20, 1, 9)    # the pharmacy's barred front (economy_props.gd builds the bars in it)
 	carve.call(29, 8, 1, 2)     # the furnace window through the crematorium's east wall
 	carve.call(30, 8, 2, 2)     # the sealed fire chamber behind it (furnace.gd builds both)
 	carve.call(18, 29, 4, 1)    # lobby into the vestibule
@@ -125,10 +125,11 @@ static func build(st: S, ox: int, oy: int) -> void:
 		for c in [11, 12, 13]:
 			st.set_keep(ox + c, oy + y)
 	for y in range(22, 27):
-		st.set_keep(ox + 22, oy + y)   # the order kiosk stands out here, in front of the window
-	for y in range(23, 25):
-		st.set_keep(ox + 23, oy + y, 2)
-		st.set_keep(ox + 24, oy + y)
+		st.set_keep(ox + 22, oy + y)   # the lobby fax terminal stands out here, in front of the bars
+	for y in range(20, 29):
+		st.set_keep(ox + 23, oy + y, 2)   # the bars
+	for y in range(23, 26):
+		st.set_keep(ox + 24, oy + y)      # the attendant and the drawer behind them
 
 	var put := func(kind: String, x: float, y: float, face: Vector2, r := -1, extra := {}) -> bool:
 		return st.put(kind, Vector2(ox + x, oy + y), Defs.yaw_facing(face), r, extra)
@@ -162,24 +163,26 @@ static func build(st: S, ox: int, oy: int) -> void:
 	put.call("plant", 12.6, 14.5, SOUTH, break_room)
 
 	# ---- OR (x 5-13, y 6-12), supply storage (x 1-3, y 6-8), locker bay (x 1-4, y 10-12) -----------
+	# Chunk 2: three patient tables in a row along the north wall, each with its own monitor on the
+	# wall above its head end; a downed teammate goes on whichever is free (game.downed_any_table).
 	# On a tile row's centre line: the table (0.7 m deep) only claims its tiles, and so gets its
 	# collider, when its footprint reaches a tile's middle.
-	var tables := [
-		{"pos": Vector2(ox + 7.3, oy + 8.5), "kind": "patient"},
-		{"pos": Vector2(ox + 9.8, oy + 8.5), "kind": "patient"},
-		{"pos": Vector2(ox + 12.2, oy + 8.5), "kind": "player"},
-	]
+	var table_x := [7.3, 9.8, 12.2]
 	st.spots["tables"] = []
-	for t in tables:
-		st.put("or_table", t.pos, 0.0, or_room, {"table": t.kind})
-		st.put("surgical_lamp", t.pos, 0.0, or_room)
-		(st.spots["tables"] as Array).append({"pos": t.pos, "yaw": 0.0, "kind": t.kind})
-	st.spots["or_screen"] = {"pos": Vector2(ox + 9.8, oy + 13.0), "yaw": Defs.yaw_facing(N),
-			"height": Defs.mount_height("or_screen_mount") + Defs.size("or_screen_mount").y * 0.5,
-			"size": Vector2(Defs.size("or_screen_mount").x, Defs.size("or_screen_mount").y)}
-	put.call("or_screen_mount", 9.8, 13.0, N, or_room)
-	put.call("wall_clock", 9.8, 6.0, SOUTH, or_room)
-	put.call("crash_cart", 12.5, 6.5, SOUTH, or_room)
+	st.spots["or_screens"] = []
+	var mon := "table_monitor_mount"
+	for i in table_x.size():
+		var tp := Vector2(ox + table_x[i], oy + 7.5)
+		st.put("or_table", tp, 0.0, or_room, {"table": "patient"})
+		st.put("surgical_lamp", tp, 0.0, or_room)
+		(st.spots["tables"] as Array).append({"pos": tp, "yaw": 0.0, "kind": "patient"})
+		put.call(mon, table_x[i], 6.0, SOUTH, or_room)
+		(st.spots["or_screens"] as Array).append({"pos": Vector2(ox + table_x[i], oy + 6.0), "yaw": Defs.yaw_facing(SOUTH),
+				"height": Defs.mount_height(mon) + Defs.size(mon).y * 0.5,
+				"size": Vector2(Defs.size(mon).x, Defs.size(mon).y), "table": i})
+	st.spots["or_screen"] = (st.spots["or_screens"] as Array)[1]
+	put.call("wall_clock", 9.8, 13.0, N, or_room)
+	put.call("crash_cart", 10.5, 12.5, N, or_room)
 	for y in [10.5, 12.5]:
 		put.call("scrub_sink", 14.0 - depth.call("scrub_sink"), y, WEST, or_room)
 	put.call("gurney", 8.0, 12.55, E, or_room)
@@ -206,25 +209,49 @@ static func build(st: S, ox: int, oy: int) -> void:
 	put.call("vending", 9.5, 20.0 + depth.call("vending"), SOUTH, waiting)
 	put.call("magazine_table", 10.3, 27.8, N, waiting)
 	put.call("plant", 1.5, 28.5, N, waiting)
+	# Every seat, for the Night Nurse (economy's WaitingNurse picks one per shift): three to a bench,
+	# facing the way the benches face.
+	st.spots["waiting_seats"] = []
+	for y in [22.5, 24.5, 26.5]:
+		for x in [2.5, 3.7, 6.3, 7.5]:
+			for off in [-0.4, 0.0, 0.4]:
+				(st.spots["waiting_seats"] as Array).append({"pos": Vector2(ox + x + off, oy + y), "yaw": Defs.yaw_facing(N)})
+
+	# Where she goes to stand when she leaves her chair: tucked into the corners, facing the walls.
+	st.spots["waiting_corners"] = [
+		{"pos": Vector2(ox + 1.35, oy + 20.35), "yaw": Defs.yaw_facing(Vector2(-1, -1))},
+		{"pos": Vector2(ox + 11.6, oy + 20.4), "yaw": Defs.yaw_facing(Vector2(1, -1))},
+		{"pos": Vector2(ox + 1.35, oy + 27.65), "yaw": Defs.yaw_facing(Vector2(-1, 1))},
+		{"pos": Vector2(ox + 11.6, oy + 28.6), "yaw": Defs.yaw_facing(Vector2(1, 1))},
+		{"pos": Vector2(ox + 5.4, oy + 20.35), "yaw": Defs.yaw_facing(N)},
+	]
 
 	# ---- lobby (x 13-22, y 20-28) and the vestibule -------------------------------------------------
 	# SWEEP 4A HOOK (fog lot, chunk 2): the run's start and every respawn are inside the main doors.
 	var lobby_spawn_tiles: Array[Vector2i] = [
-		Vector2i(14, 26), Vector2i(15, 26), Vector2i(16, 26), Vector2i(17, 26),
-		Vector2i(14, 27), Vector2i(15, 27), Vector2i(16, 27), Vector2i(17, 27),
+		Vector2i(18, 27), Vector2i(19, 27), Vector2i(20, 27), Vector2i(21, 27),
+		Vector2i(18, 28), Vector2i(19, 28), Vector2i(20, 28), Vector2i(21, 28),
 	]
 	var lobby_spawns: Array = []
 	for t in lobby_spawn_tiles:
 		st.set_keep(ox + t.x, oy + t.y)
 		lobby_spawns.append(Vector2(ox + t.x + 0.5, oy + t.y + 0.5))
 	st.spots["lobby_spawns"] = lobby_spawns
-	# Triage: a desk facing the way in, the phone on the wall behind it (chunk 3 puts the phone on
-	# the desk itself).
-	put.call("reception_desk", 14.5, 22.5, SOUTH, lobby)
-	put.call("office_chair", 14.5, 21.6, SOUTH, lobby)
-	put.call("wall_phone", 14.0, 20.0, SOUTH, lobby)
-	st.spots["phone"] = {"pos": Vector2(ox + 14.0, oy + 20.0), "yaw": Defs.yaw_facing(SOUTH),
-			"height": Defs.mount_height("wall_phone") + Defs.size("wall_phone").y * 0.5}
+	# Triage (chunk 3): the front counter faces the path in from the doors, so everyone passes it; the
+	# desk phone sits on its front edge (loop's phone.gd, desk build) and blinks red while a call waits.
+	# Call-center workstations behind it, one each side of the opening to the waiting room.
+	put.call("reception_desk", 16.5, 23.5, E, lobby)
+	put.call("office_chair", 15.55, 23.5, E, lobby)
+	# On the middle of the counter's raised front ledge (piece_factory reception_desk: 1.1 m high, 0.32 m
+	# deep, 0.33 m in from the front), at the north end, clear of the potted plant at the south end.
+	st.spots["phone"] = {"pos": Vector2(ox + 16.5 + 0.33 / Defs.TILE, oy + 23.5 - 0.9 / Defs.TILE), "yaw": Defs.yaw_facing(E),
+			"height": 1.12, "desk": true}
+	put.call("office_desk", 14.0, 20.0 + depth.call("office_desk"), SOUTH, lobby)
+	put.call("computer", 14.0, 20.3, SOUTH, lobby, {"y": 0.75})
+	put.call("office_chair", 14.0, 21.3, N, lobby)
+	put.call("office_desk", 15.0, 27.0, N, lobby)
+	put.call("computer", 15.0, 27.1, N, lobby, {"y": 0.75})
+	put.call("office_chair", 15.0, 26.1, SOUTH, lobby)
 	put.call("chair_row", 14.5, 28.5, N, lobby)
 	put.call("directory_board", 20.0, 20.0, SOUTH, lobby)
 	put.call("wall_clock", 21.6, 20.0, SOUTH, lobby)
@@ -240,8 +267,13 @@ static func build(st: S, ox: int, oy: int) -> void:
 		"pharmacy": Rect2i(ox + 24, oy + 20, 8, 9),
 		"crematorium": Rect2i(ox + 19, oy + 6, 10, 7),
 	}
+	# Medicine shelves behind the bars, in three long rows facing the lobby.
+	for x in [26.5, 28.5, 32.0 - depth.call("med_shelf")]:
+		for y in range(21, 28):
+			put.call("med_shelf", x, y + 0.5, WEST, pharmacy)
 	st.spots["economy_spots"] = {
-		"pharmacy": {"pos": Vector2(ox + 23.5, oy + 24.0), "yaw": Defs.yaw_facing(-WEST)},
+		# The middle of the barred front (col 23, rows 20-28), the lobby side is +Z.
+		"pharmacy": {"pos": Vector2(ox + 23.5, oy + 24.5), "yaw": Defs.yaw_facing(-WEST)},
 		# The room-side face of the furnace window (col 29's west face), the middle of rows 8-9.
 		"crematorium": {"pos": Vector2(ox + 29.0, oy + 9.0), "yaw": Defs.yaw_facing(-WEST)},
 	}

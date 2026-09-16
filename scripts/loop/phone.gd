@@ -3,15 +3,20 @@ extends Node3D
 ## shift loop decides what answering means). A red line lamp blinks (and lights the wall a
 ## little) while it rings, on every machine.
 ##
-## Two builds: `create(true)` for levels that already have a wall phone model at
-## level_info.phone (the hospital): only the aim target, the lamp and its glow, origin at the
-## phone's centre, -Z facing into the room. `create()`: a beige desk phone on a small side table,
-## origin on the floor, for levels without one; its handset shivers while it rings.
+## Three builds: `create(true)` for levels that already have a wall phone model at
+## level_info.phone: only the aim target, the lamp and its glow, origin at the phone's centre, -Z
+## facing into the room. `create(false, true)` (the hub's triage counter): the desk phone alone,
+## origin on the counter top. `create()`: a desk phone on a small side table, origin on the floor,
+## for levels without one. The desk phone shivers while it rings.
 
 const RING_SHAKE := 0.012
+## Hub desk phone: how high it leaps off the counter while it rings.
+const LEAP := 0.32
 
 var ringing := false
 var wall := false
+## Standing on a counter: no side table, everything `desk_drop` lower.
+var on_desk := false
 var _t := 0.0
 var _lamp_mat: StandardMaterial3D
 var _glow: OmniLight3D
@@ -19,15 +24,33 @@ var _handset: Node3D = null
 var _handset_rest := Vector3.ZERO
 
 
-static func create(on_wall: bool = false) -> Node3D:
+static func create(on_wall: bool = false, desk: bool = false) -> Node3D:
 	var n: Node3D = (load("res://scripts/loop/phone.gd") as GDScript).new()
-	n.name = "BreakRoomPhone"
+	n.name = "BreakRoomPhone" if not desk else "TriagePhone"
 	n.wall = on_wall
+	n.on_desk = desk
 	if on_wall:
 		n._build_wall()
+	elif desk:
+		n._build_on_desk()
 	else:
 		n._build()
 	return n
+
+
+## Hub rebuild: the desk phone on the triage counter. The side-table build's phone, 0.8 m lower (its
+## origin is the counter top), with a brighter line lamp you can see from the path in.
+func _build_on_desk() -> void:
+	_build()
+	var stand := get_node_or_null("Stand")
+	if stand != null:
+		stand.free()
+	for c in get_children():
+		if c is Node3D:
+			(c as Node3D).position.y -= 0.8
+	_handset_rest.y -= 0.8
+	if _glow != null:
+		_glow.omni_range = 2.2
 
 
 func _build_wall() -> void:
@@ -178,7 +201,16 @@ func _process(delta: float) -> void:
 		_glow.visible = true
 		_glow.light_energy = 0.9 if blink else 0.15
 		if _handset != null:
-			if trill:
+			if on_desk:
+				# Hub: the phone leaps off the counter and rattles in the air for each ring, then drops.
+				var ph := fmod(_t, 2.6)
+				var up := 0.0
+				if ph < 1.9:
+					up = smoothstep(0.0, 0.18, ph) * (1.0 - smoothstep(1.7, 1.9, ph))
+				var buzz := up * (0.6 + 0.4 * absf(sin(_t * 9.0)))
+				_handset.position = _handset_rest + Vector3(sin(_t * 90.0) * 0.012 * buzz, LEAP * up + absf(sin(_t * 55.0)) * 0.02 * buzz, cos(_t * 77.0) * 0.01 * buzz)
+				_handset.rotation = Vector3(sin(_t * 61.0) * 0.12 * buzz, sin(_t * 23.0) * 0.25 * up, sin(_t * 83.0) * 0.14 * buzz)
+			elif trill:
 				_handset.position = _handset_rest + Vector3(sin(_t * 140.0) * RING_SHAKE * 0.3, absf(sin(_t * 70.0)) * RING_SHAKE, 0)
 			else:
 				_handset.position = _handset_rest
@@ -187,6 +219,7 @@ func _process(delta: float) -> void:
 		_glow.visible = false
 		if _handset != null:
 			_handset.position = _handset_rest
+			_handset.rotation = Vector3.ZERO
 
 
 # ---- interactable contract ----

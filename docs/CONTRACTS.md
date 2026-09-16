@@ -601,9 +601,13 @@ lights: [{tile, position, mode, node}]   # node's child OmniLight3D "Bulb"; stre
 containers, loose_anchors       # see Containers; both carry wing and depth
 rows, size, nav_region          # nav_region: one NavigationRegion3D over the whole map
 # new
-tables: [{position: Vector3, yaw: float, kind: "patient" | "player"}]   # 2 patient tables, then the player table, all in the OR
-or_screen: {position: Vector3 (centre of the screen, on the OR wall, at its height), yaw (faces into the OR), size: Vector2 (2.2 x 1.3)}
-phone: {position: Vector3 (the wall phone, at its height, on the lobby wall behind the triage desk), yaw (faces into the lobby)}
+tables: [{position: Vector3, yaw: float, kind: "patient" | "player"}]   # hub rebuild chunk 2: 3 patient tables in the OR (a
+                                # downed player goes on any free one); fallback levels append a "player" entry
+or_screen: {position: Vector3 (centre of the screen, at its height), yaw (faces into the OR), size: Vector2}   # the middle table's
+or_screens: [{position, yaw, size, table: int}]   # hub rebuild chunk 2: one monitor per table, on its mount on the OR's north wall
+phone: {position: Vector3 (at its height), yaw (faces the caller), desk: bool}   # hub: a desk phone on the reception desk's ledge
+waiting_seats: [{position, yaw}]   # hub rebuild chunk 3: the waiting room's bench seats (the waiting Night Nurse)
+waiting_corners: [{position, yaw}] # hub rebuild chunk 3: corners she stands in
 entrance: {position (just outside the main doors), yaw (faces out)}
 entrance_rect: Rect2            # world XZ of the whole entrance building, walls included
 # SWEEP 4A HOOK (fog lot worker, chunk 2, 2026-09-15): the lot is stripped to asphalt, stall
@@ -912,13 +916,15 @@ game.reset_money()                            # host; money to 0 (game over; sta
 game.economy                                  # scripts/economy/economy.gd, child "Economy"
 game.economy.pharmacy / .furnace              # nodes once placed (placed() true); positions helpers
 game.economy.money_visible_for(p) -> bool     # HUD: near the pharmacy/furnace, aiming at the
-                                              # order kiosk, or just changed
+                                              # lobby fax terminal, the order form open, or just changed
+game.economy.request_order({kind: sets})      # this machine's player orders (host direct, client RPC)
+game.economy.open_fax_ui() / .fax_ui          # the order form (scripts/economy/fax_order_ui.gd)
 ```
 
 ### The pharmacy and the crematorium furnace (pharmacy worker, sweep 4A chunk 3; HUB REDESIGN, 2026-09-15)
 
-Gold bars, the sell bin and the shop van are gone. Buying is at the pharmacy's order kiosk (an
-interactable, `scripts/economy/pharmacy_kiosk.gd`); selling is throwing into the crematorium
+Gold bars, the sell bin and the shop van are gone. Buying is a fax order from the lobby's fax terminal
+(an interactable, `scripts/economy/fax_terminal.gd`, hub rebuild chunk 3); selling is throwing into the crematorium
 furnace (a thrown-item Area3D, `scripts/economy/furnace.gd`). **HUB REDESIGN**: both are now real
 walled rooms off the lobby, each with its own single door (`scripts/level/entrance.gd`), not just
 open floor. Placement, first match: `level_info.safe_zone {pharmacy_rect, crematorium_rect}` (the
@@ -928,7 +934,10 @@ search for free floor around the time clock (`economy.gd`'s `_search_spots`). Pl
 physics frames after `_add_landmarks`.
 
 ```gdscript
-game.buy_pills(p) -> bool           # host; $PILL_PRICE, unlimited buys, no price climb
+game.order_pharmacy(p, {kind: sets}) -> bool   # host; also takes an Array of kinds (one set each). Takes
+                                    # price x sets, queues the order, broadcasts "pharmacy_order"
+game.buy_pills(p) -> bool           # host; one set of pills, order_pharmacy(p, ["placebo_pills"])
+game.PHARMACY_CATALOG               # [{kind, name, count, price}] per set; PHARMACY_MAX_QTY sets a line
 game.eat_pill(p)                    # host; take one from the held bottle, same hit reaction as a throw
 game.furnace_sell(kind, count, value, at)   # host; the furnace calls this once a sale resolves
 game.furnace_can_sell(kind) -> bool  # loot (incl. brains) and placebo_pills; nothing else
@@ -936,18 +945,24 @@ game.furnace_value(kind, slot) -> int  # brains: spoiled value; placebo_pills: 0
 game.PILL_PRICE / game.PILL_COUNT    # $15, 10 pills a bottle
 ```
 
-- **The pharmacy** (`scripts/economy/economy_props.gd`): a counter behind a steel grate, a price
-  board, and (**HUB REDESIGN**) the Night Nurse's model standing idle behind the grate, pure set
-  dressing -- no Monster node, no brain, no AI, never watched, never a threat; chosen over the old
-  capsule silhouette because it costs nothing extra (already warmed for the real encounters) and
-  reads as a quiet, deniable foreshadowing beat without adding any mechanic. The counter itself is
-  no longer interactable: ordering is E on the **kiosk** beside it
-  (`scripts/economy/pharmacy_kiosk.gd`, interact_id `"pharmacy_kiosk"`), a catalog-driven podium
-  (`{kind, name, price, count}` entries plus a `_buy` branch per kind) so a second item is one
-  entry away from a rewrite; today there is still only `placebo_pills`. Buying takes the money
-  immediately; `economy.pharmacy.queue_delivery(kind, count)` starts a ~1.6 s capsule animation
-  (played on every machine) and the host drops the item at the wall delivery station once it lands
-  (`game._spawn_item`, a normal `WorldItem` pickup).
+- **The pharmacy** (`scripts/economy/economy_props.gd`, hub rebuild chunk 3): a wall of steel bars
+  across the pharmacy (width 13.5 m in the hub, 3 m in the dev room) with a pickup drawer through a
+  slot in them, a receiving fax machine behind the bars, and the Night Nurse's model as the
+  attendant -- set dressing, no Monster node, no brain, never a threat. Ordering is E on the lobby
+  **fax terminal** in front of the bars (interact_id `"pharmacy_fax"`; `interact` is a no-op, main.gd
+  opens the form on this machine): a fax page with a tick box per `PHARMACY_CATALOG` entry and a
+  quantity (1..`PHARMACY_MAX_QTY` sets: - / +, typed, or the mouse wheel; shift steps 10), the total
+  and the team's money. SEND FAX feeds the page into the machine, then `economy.request_order`.
+  The host takes the money at once; `economy.pharmacy.queue_order(items)` (every machine, via the
+  `"pharmacy_order"` broadcast) runs the timeline: the page prints, the nurse fetches and reads it
+  (page in her raised hand), goes behind the shelves, brings the order and the drawer slides out
+  toward the lobby; the host spawns one `WorldItem` stack per line (count = sets x per-set count)
+  on the tray once it is fully out. It closes once nothing is left on it. `tools/faxcheck.tscn`
+  runs it headless.
+- **The waiting-room Night Nurse** (`scripts/economy/waiting_nurse.gd`, hub rebuild chunk 3):
+  scenery on `level_info.waiting_seats`; host-driven, replicated as `g.wn`. Unwatched she sometimes
+  gets up and changes seats or stands in a `waiting_corners` spot; watched (`Percept.observed_any`)
+  she freezes mid-move. She never goes for players.
 - **The furnace**: a grate of vertical steel bars across the mouth blocks players, monsters and
   carried bodies like any `C.L_WORLD` wall (a real collider, not a special case), while a thrown
   item small enough to clear a gap reaches `FireZone`, an `Area3D` monitoring `C.L_PICKUP` only.
@@ -1064,8 +1079,9 @@ loop.pay_for(case, shift) -> int   # stable 200 (+25/shift), extra stable 300 (+
   up at the start.
 - The player table (downed worker): the stitches operation stays in
   `scripts/downed/player_surgery.gd`; the host mirrors it into `game.cases` every tick as a
-  `patient_id "player"` case with `mirror: true`, `table = game.player_table_index()` (the "player"
-  entry of `level_info.tables`, appended on fallback levels once the player table is placed),
+  `patient_id "player"` case with `mirror: true`, `table = game.player_table_index()` (hub rebuild
+  chunk 2: whichever free OR table the carrier put them on, `game.set_downed_table(index)`; on
+  fallback levels the "player" entry of `level_info.tables`, appended once that table is placed),
   `player_id`, `ailment_id "stitches"`, `step_index`, `flags`, `vitals` (the bleed clock) and state
   `on_table` (`stable` once the step is done). It gets no PatientBody, drain, pay or clock-out
   rule from the loop; it exists so it replicates with the cases and the OR monitor lists it.
@@ -1187,7 +1203,8 @@ game.or_screen.model_override = {...}   # test seam: draw this model instead of 
 OrScreenModel.build(game) -> Dictionary # scripts/orscreen/or_screen_model.gd, pure
 ```
 
-- Placement: every new `game.level` gets a monitor two physics frames later, at
+- Placement: every new `game.level` gets its monitors two physics frames later: one per table from
+  `level_info.or_screens` (hub rebuild chunk 2; each shows only its table's panel), else one at
   `level_info.or_screen` (centre of the glass on the wall, `yaw` facing -Z into the room, as the
   hospital builds it; the glass is laid onto the hospital's own `or_screen_mount` piece), else on
   the flattest wall facing the tables found by ray casts (the dev room), else floating near the

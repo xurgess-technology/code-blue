@@ -115,6 +115,7 @@ const P := {
 	"scrub_sink": {"size": Vector3(0.82, 0.93, 0.86), "block": true},
 	"glass_cabinet": {"size": Vector3(1.2, 1.9, 0.45), "block": true},
 	"or_screen_mount": {"size": Vector3(2.2, 1.3, 0.1), "mount": 1.25},
+	"table_monitor_mount": {"size": Vector3(1.2, 0.72, 0.1), "mount": 1.45},   # hub: one per OR table
 	# ---- outdoors --------------------------------------------------------------
 	"ambulance": {"size": Vector3(2.18, 2.61, 4.71), "block": true},
 	"van": {"size": Vector3(2.18, 1.96, 3.99), "block": true},

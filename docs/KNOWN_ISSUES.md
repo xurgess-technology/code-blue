@@ -1702,3 +1702,44 @@ Rebuilt around that:
   inventorytest and braintest (set_hatch directly). inventorytest's "held laptop wears the gold rim"
   waited 3 physics frames, which after the bigger hub's loot spawn can all run before Player._process
   rebuilds the held model; it waits process frames now (92/92).
+
+## Hub rebuild, chunks 2 and 3: the OR, the lobby side (2026-09-16)
+
+- **OR (chunk 2):** three patient tables on tile row centres (a table only collides where its
+  footprint reaches a tile centre), each with its own `table_monitor_mount` and monitor
+  (`level_info.or_screens`, one panel per table). No fixed player table in the hub any more: a
+  carried downed teammate goes on any free table (`carrier_pressed_interact` accepts "table*" aims,
+  `player_surgery.start(p, table)`, `game.set_downed_table`). `game.player_table` names that table
+  only while someone lies on it; the dev room and fallback levels keep their own player table.
+- **Lobby (chunk 3):** reception desk with the triage phone on its ledge (`phone.gd` desk build;
+  it leaps and rattles in the air while ringing), two office workstations, waiting benches. The
+  pharmacy is a 13.5 m wall of bars with a slot drawer, a receiving fax and the Night Nurse as the
+  attendant; ordering is the lobby fax terminal and its full-screen fax form with quantities
+  (`fax_order_ui.gd`). The kiosk and the pneumatic tube are gone (`pharmacy_kiosk.gd` deleted).
+  Orders take ~30 s from SEND to the drawer (print, fetch, read, gather, bring, place); the drawer
+  shuts once nothing is left on it.
+- **Waiting-room Night Nurse** (`waiting_nurse.gd`): host state machine, replicated as `g.wn`.
+  Her skirt is reweighted onto the thighs at load (`_skirt_follows_thighs`, verts below 1.08 m on
+  the hips/spine) with back faces drawn, so the sitting pose no longer shows the legs through the
+  gown. Gap: the seated pose on the benches is eyeballed, not fitted to the seat height per bench.
+- **The nurse holding the fax page:** `night_nurse_rig.gd`'s `hold` pose; the hand's world position
+  is recorded inside the SkeletonModifier3D (reading the bone outside it returns the clip pose,
+  not the modified one).
+- **Fax screens:** launch printout, title menu and order form share `fax_printer.gd`, drawn at
+  `UI_SCALE` 1.3 through `fit_layer` (CanvasLayer scale). The launch chart prints on 12-line sheets
+  that eject whole; the menu's sign-in sheet feeds out of the printer and stays in it. A sheet
+  that had left the printer used to fall back to "down into the slot" once its bottom edge passed
+  the top of the screen (a `bottom < 0` sentinel), flashing a full-height blank page; the sentinel
+  is `INF` now.
+- Tests moved to the fax: inventorytest (orders 2 sets and waits for the drawer), looptest (the bot
+  walks to the fax terminal and orders), devtest (dev room order), faxcheck (form quantities,
+  timeline, stack size, the waiting nurse). Gap: the fax form itself is only driven through its
+  methods, never by real clicks.
+- Test run for the chunks 2+3 merge (headless, --fixed-fps 60): inventorytest, devtest, settingstest,
+  databasetest, faxcheck, orscreentest pass; mapcheck validates 300 seeds and fails only the known
+  morgue tray anchors (seeds 1, 38, 112). **Failing identically on 1df95f4 (chunk 1), so not from
+  chunks 2/3, not fixed yet:** downedtest's 16 dev-room checks (carrying doesn't slow, the dev room's
+  player table offers no "Place" prompt so the stitches flow never starts, "the next lobby has
+  everyone back up"), carrycamtest's wall pull-in (3), controlstest's air/touchdown speed (2), and
+  braintest's spoiled brain selling for full price in the furnace (1). nettest (via
+  tools/nettest_run.gd) and looptest are run separately after the commit.

@@ -213,8 +213,13 @@ func _run() -> void:
 	ok = await _do_until(func(): _go_throw(game.economy.furnace), func(): return game.money != m0, 90.0)
 	_check(ok and game.money == m0 + value, "the bot threw the loot into the furnace and sold it for $%d" % value)
 	m0 = game.money
-	ok = await _do_until(func(): _go_use("pharmacy_kiosk", game.economy.pharmacy.kiosk.global_position, false), func(): return game.money < m0, 60.0)
-	_check(ok, "and bought a bottle of pills at the pharmacy")
+	var fax_at: Vector3 = game.economy.pharmacy.terminal.global_position
+	ok = await _do_until(func(): _go_use("pharmacy_fax", fax_at, false),
+			func(): return Vector2(fax_at.x - bot.global_position.x, fax_at.z - bot.global_position.z).length() <= REACH, 60.0)
+	bot.bot_move = Vector2.ZERO
+	# The form itself is UI on the player's machine; the bot sends what its SEND FAX would.
+	ok = ok and game.order_pharmacy(bot, {"placebo_pills": 1}) and game.money < m0
+	_check(ok, "and faxed the pharmacy an order for pills from the lobby terminal")
 	var pills_delivered := func() -> bool:
 		for it in game.world_items.values():
 			if it.kind == "placebo_pills":
@@ -222,8 +227,8 @@ func _run() -> void:
 		return false
 	ok = pills_delivered.call()
 	if not ok:
-		ok = await _until(pills_delivered, 5.0)
-	_check(ok, "the tube delivered the pill bottle")
+		ok = await _until(pills_delivered, 90.0)
+	_check(ok, "the pickup drawer served the pill bottle")
 
 	# ------------------------------------------------------------------ shift 2
 	_say("---- shift 2: same run, new wings, answering machine, a death, a declined call")

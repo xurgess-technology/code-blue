@@ -249,7 +249,7 @@ func _loot_spawn() -> void:
 func _money() -> void:
 	_say("---- money, the pharmacy, the furnace")
 	_check(game.economy.placed(), "the pharmacy and the furnace are placed (mode %s)" % game.economy.mode)
-	_check(game.find_interactable("pharmacy_kiosk") != null, "the pharmacy kiosk is an interactable")
+	_check(game.find_interactable("pharmacy_fax") != null, "the pharmacy's lobby fax terminal is an interactable")
 	game.reset_money()
 	_check(game.money == 0, "money starts at zero")
 	game.add_money(-50, "test")
@@ -290,26 +290,25 @@ func _money() -> void:
 		if it.kind == "gauze":
 			game.world_items.erase(it.item_id)
 			it.queue_free()
-	# The pharmacy: a flat price, unlimited buys, delivered through the tube. Ordering is at the
-	# kiosk (HUB REDESIGN); the window itself is set dressing now.
-	var pharm: Node3D = game.find_interactable("pharmacy_kiosk")
-	_check(pharm != null, "the pharmacy kiosk is interactable")
+	# The pharmacy (hub rebuild, chunk 3): a flat price per set, unlimited orders, faxed from the lobby
+	# terminal; the Night Nurse fetches the order and the pickup drawer serves it as one stack.
 	var price := int(game.PILL_PRICE)
 	m0 = game.money
-	await _press_on("pharmacy_kiosk")
-	await _frames(120)
-	var delivered := false
-	for it in game.world_items.values():
-		if it.kind == "placebo_pills" and int(it.count) == Game.PILL_COUNT:
-			delivered = true
-	_check(game.money == m0 - price, "buying pills takes $%d (money %d)" % [price, game.money])
-	_check(delivered, "the tube delivered a bottle of %d pills" % Game.PILL_COUNT)
+	game.economy.request_order({"placebo_pills": 2})
+	_check(game.money == m0 - 2 * price, "faxing an order for 2 sets of pills takes $%d (money %d)" % [2 * price, game.money])
+	var delivered := await _until(func():
+		for it in game.world_items.values():
+			if it.kind == "placebo_pills" and int(it.count) == 2 * Game.PILL_COUNT:
+				return true
+		return false, 90.0)
+	_check(delivered, "the pickup drawer served 2 sets as one stack of %d pills" % (2 * Game.PILL_COUNT))
 	game.money = 0
-	_check(pharm.interact_prompt(me).begins_with("!"), "the pharmacy says you cannot afford it: '%s'" % pharm.interact_prompt(me))
-	_check(not game.buy_pills(me), "without the money nothing is bought")
+	_check(not game.buy_pills(me), "without the money nothing is ordered")
 	game.add_money(100000, "test")
-	_check(game.buy_pills(me) and game.buy_pills(me), "unlimited buys: pills never run out or get pricier")
-	_check(game.economy.money_visible_for(me), "the money readout shows near the pharmacy")
+	_check(game.buy_pills(me) and game.buy_pills(me), "unlimited orders: pills never run out or get pricier")
+	game.economy.open_fax_ui()
+	_check(game.economy.money_visible_for(me), "the money readout shows while the order form is open")
+	game.economy.fax_ui.close()
 
 
 func _pharmacy_pills() -> void:

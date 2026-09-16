@@ -12,9 +12,9 @@ extends CanvasLayer
 ##      the chart finishes first, "awaiting labs" lines print while the warmup finishes.
 ##   3. PAGE COMPLETE: the ADMITTED stamp comes down, and only then does the warmup draw everything
 ##      it built (its long first-draw frames) behind the still, stamped page.
-##   4. FEED OUT: the page speeds up and out of the top of the screen. The title menu underneath
-##      draws the same printer (scripts/fax_printer.gd) and carries the paper on at the speed this
-##      page left at (`paper_scroll_px`, `feed_speed`), feeding its sign-in sheet in.
+##   4. FEED OUT: the stamped sheet ejects, all of it, up and out of the top of the screen. The title
+##      menu underneath draws the same printer (scripts/fax_printer.gd) and feeds its sign-in sheet
+##      up out of the slot as the next page (`paper_scroll_px`, `feed_speed`, `pages_printed`).
 
 signal done
 
@@ -34,6 +34,12 @@ const STAMP_SETTLE := 0.35
 ## Seconds for the finished page to accelerate up and off the screen.
 const FEED_OUT := 0.8
 const FEED_TICK := 0.11
+## Lines to a sheet; then it ejects and a new sheet peeks out.
+const PAGE_LINES := 12
+const EJECT_SECONDS := 0.55
+const PEEK_SECONDS := 0.35
+## Blank paper above a sheet's first line (in lines): what peeks out of the slot before it prints.
+const PAGE_MARGIN := 1.3
 
 ## Connecting lasts until the renderer's setup frame has gone by: a frame of at least SETUP_MS
 ## (measured ~2.4 s on a Radeon 890M, landing about a second after the first frame, not on it),
@@ -73,6 +79,14 @@ var _feed_dist := 0.0
 var _feed_tick := 0.0
 var _head_from := 0.0
 var _scroll := 0.0
+## Pages: the chart prints onto sheets of PAGE_LINES lines. A full sheet ejects (flies up and off),
+## and a fresh one peeks out of the slot before the next line prints.
+var _page_start := 0      # index in _printed of the current page's first line
+var _page_no := 1
+var _old_start := -1      # the ejecting page's lines: _old_start until _page_start
+var _eject_t := -1.0
+var _eject_px := 0.0
+var _peek_t := -1.0
 var _last_usec := 0
 var _headless := false
 var _font: Font
@@ -85,15 +99,20 @@ func _ready() -> void:
 	_headless = DisplayServer.get_name() == "headless"
 	_font = Fax.make_font()
 	_canvas = Control.new()
-	_canvas.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_canvas.mouse_filter = Control.MOUSE_FILTER_STOP
 	_canvas.draw.connect(_draw_page)
 	add_child(_canvas)
+	_fit()
+	get_viewport().size_changed.connect(_fit)
 	_last_usec = Time.get_ticks_usec()
 	_connect_since = _now()
 	_queue_chart()
 	if not _headless:
 		Audio.play("fax_connect", null, -12.0, 0.0, Audio.BUS_UI)
+
+
+func _fit() -> void:
+	Fax.fit_layer(self, _canvas)
 
 
 ## Warmup.run's progress callback: only "built" and "done" matter here.
@@ -133,7 +152,7 @@ func _queue_chart() -> void:
 	var clock := "%02d:%02d" % [dt.hour, dt.minute]
 	var items := Items.ITEMS.size()
 	for line in [
-		[">> FAX  %s  %s  PAGE 1 OF 2" % [date, clock], "dim", false],
+		[">> FAX  %s  %s  PAGE 1" % [date, clock], "dim", false],
 		["COUNTY GENERAL  /  NIGHT ADMISSIONS", "text", false],
 		["", "rule", false],
 		["PATIENT ........ CODE BLUE", "text", false],
@@ -196,7 +215,8 @@ func _process(_delta: float) -> void:
 			_queue.append({"text": WAITING_LINES[_waiting_i], "kind": "dim", "ts": true})
 			_waiting_i += 1
 			_pause = 0.9
-	_print(dt)
+	if not _tick_page(dt):
+		_print(dt)
 	_scroll = lerpf(_scroll, float(_printed.size()), clampf(dt * 14.0, 0.0, 1.0))
 	if _stamp_at >= 0.0:
 		_stamp_anim += dt
@@ -219,9 +239,54 @@ func _process(_delta: float) -> void:
 func _start_feed_out() -> void:
 	_feed_t = 0.0
 	_scroll = float(_printed.size())
-	# Far enough that the stamp, the last thing printed, is gone off the top.
-	_feed_dist = _canvas.size.y * Fax.SLOT + Fax.LINE_H * 3.0
+	# The finished sheet ejects like any other: far enough that its bottom edge, leaving the slot, is
+	# gone off the top of the screen.
+	_feed_dist = float(Fax.layout(_canvas.size, _font).slot_y) + Fax.LINE_H
 	_head_from = _head_x(Fax.layout(_canvas.size, _font))
+
+
+## A sheet being ejected or a new one peeking out: true while that holds the printer up.
+func _tick_page(dt: float) -> bool:
+	if _eject_t >= 0.0:
+		_eject_t += dt
+		var k := minf(_eject_t / EJECT_SECONDS, 1.0)
+		_eject_px = _eject_dist() * k * k
+		if k >= 1.0:
+			_eject_t = -1.0
+			_old_start = -1
+			_eject_px = 0.0
+			_peek_t = 0.0
+			Audio.play("print_feed", null, -12.0, 0.08, Audio.BUS_UI)
+		return true
+	if _peek_t >= 0.0:
+		_peek_t += dt
+		if _peek_t >= PEEK_SECONDS:
+			_peek_t = -1.0
+		return true
+	return false
+
+
+func _eject_dist() -> float:
+	return _canvas.size.y * Fax.SLOT + Fax.LINE_H * (PAGE_LINES + 3)
+
+
+## The current sheet is full: send it up and out, start the next one with its own fax header.
+func _eject_page() -> void:
+	_old_start = _page_start
+	_page_start = _printed.size()
+	_page_no += 1
+	_eject_t = 0.0
+	_eject_px = 0.0
+	_scroll = float(_printed.size())
+	var dt := Time.get_datetime_dict_from_system()
+	_queue.push_front({"text": ">> FAX  %04d-%02d-%02d  %02d:%02d  PAGE %d" % [dt.year, dt.month, dt.day, dt.hour, dt.minute, _page_no],
+			"kind": "dim", "ts": false})
+	Audio.play("print_feed", null, -8.0, 0.05, Audio.BUS_UI)
+
+
+## How many sheets the chart took (the menu's sign-in sheet is the next one).
+func pages_printed() -> int:
+	return _page_no
 
 
 ## Spend `dt` seconds of printer time: characters, pauses, the next line off the queue.
@@ -235,6 +300,11 @@ func _print(dt: float) -> void:
 				t_left -= p
 				continue
 			if _queue.is_empty() or _stamp_at >= 0.0:
+				return
+			# A full sheet ejects before the next line, unless that line finishes what's on it (the stamp
+			# stays with the lines it stamps).
+			if _printed.size() - _page_start >= PAGE_LINES and String(_queue[0].kind) in ["text", "dim", "rule"]:
+				_eject_page()
 				return
 			_current = _queue.pop_front()
 			if bool(_current.get("ts", false)):
@@ -285,22 +355,41 @@ func _head_x(l: Dictionary) -> float:
 func _draw_page() -> void:
 	var size := _canvas.size
 	var l := Fax.layout(size, _font)
-	Fax.draw_paper(_canvas, size, l, paper_scroll_px(), 1.0)
-
-	# Printed lines, newest at the head, older ones scrolled up.
-	var fs := Fax.FONT_SIZE
 	var print_y: float = l.print_y
+	var slot_y: float = l.slot_y
+	var margin := Fax.LINE_H * PAGE_MARGIN
+	# Blank paper room behind the room fill: the room, then each sheet.
+	_canvas.draw_rect(Rect2(Vector2.ZERO, size), Fax.ROOM)
+	# The ejecting sheet: its own top edge and a bottom edge that has left the slot, flying up.
+	if _old_start >= 0:
+		var old_top := print_y - (_scroll - float(_old_start)) * Fax.LINE_H - margin - _eject_px
+		Fax.draw_paper(_canvas, size, l, paper_scroll_px() + _eject_px, 1.0, slot_y - _eject_px, false, old_top)
+	# The current sheet: a margin of blank paper above its first line, down into the slot. A brand new
+	# sheet (nothing printed on it yet) peeks up out of the slot to that margin first.
+	var page_top := print_y - (_scroll - float(_page_start)) * Fax.LINE_H - margin - _feed_px
+	if _old_start >= 0:
+		page_top = slot_y
+	elif _peek_t >= 0.0:
+		page_top = lerpf(slot_y, print_y - margin, ease(minf(_peek_t / PEEK_SECONDS, 1.0), 0.5))
+	# Once stamped, the whole sheet leaves: its bottom edge comes up out of the slot with the rest of it.
+	var page_bottom := slot_y - _feed_px if _feed_t >= 0.0 else INF
+	Fax.draw_paper(_canvas, size, l, paper_scroll_px(), 1.0, page_bottom, false, page_top)
+
+	# Printed lines, newest at the head, older ones scrolled up; the ejecting sheet's fly off with it.
+	var fs := Fax.FONT_SIZE
 	var tx: float = l.tx
 	var text_w: float = l.text_w
 	var total := _printed.size()
 	for i in range(total - 1, -1, -1):
-		var y := print_y - (_scroll - float(i)) * Fax.LINE_H - _feed_px
+		var on_old := i < _page_start
+		if on_old and (_old_start < 0 or i < _old_start):
+			break
+		var y := print_y - (_scroll - float(i)) * Fax.LINE_H - _feed_px - (_eject_px if on_old else 0.0)
 		if y < -Fax.LINE_H * 3.0:
 			break
 		_draw_line(_printed[i], tx, y, text_w, fs, -1)
 	if not _current.is_empty():
 		_draw_line(_current, tx, print_y - (_scroll - float(total)) * Fax.LINE_H, text_w, fs, int(_chars))
-	Fax.draw_top_fade(_canvas, size, 1.0)
 
 	# Status light and display. Both hold still while connecting and once the page is stamped: those
 	# are the moments a long frame may land, and nothing that should be moving may be on screen then.

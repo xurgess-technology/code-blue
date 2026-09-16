@@ -21,6 +21,10 @@ const WIDTH_CHARS := 58
 const MARGIN := 56.0
 ## The print line (the paper's slot into the printer), as a fraction of the screen height.
 const SLOT := 0.74
+## Pages are short (a sheet holds a dozen lines), so the paper and printer are drawn this much larger
+## than their pixel sizes here, capped so the machine still fits across the screen.
+const UI_SCALE := 1.3
+const FIT_WIDTH := 780.0
 
 
 static func make_font() -> Font:
@@ -28,6 +32,17 @@ static func make_font() -> Font:
 	sf.font_names = PackedStringArray(["Consolas", "Courier New", "Lucida Console", "DejaVu Sans Mono", "monospace"])
 	sf.antialiasing = TextServer.FONT_ANTIALIASING_GRAY
 	return sf
+
+
+## Scales `layer` up by UI_SCALE and sizes `root`, its full-screen Control, to cover the screen in that
+## scaled space; every fax screen draws in there. Call again when the viewport resizes.
+static func fit_layer(layer: CanvasLayer, root: Control) -> void:
+	var vp := layer.get_viewport().get_visible_rect().size
+	var k := minf(UI_SCALE, vp.x / FIT_WIDTH)
+	layer.scale = Vector2(k, k)
+	root.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	root.position = Vector2.ZERO
+	root.size = vp / k
 
 
 ## Where everything goes on a screen of `size`: px (paper left), paper_w, tx (text left), text_w,
@@ -44,18 +59,27 @@ static func layout(size: Vector2, font: Font) -> Dictionary:
 	}
 
 
-## The room, and the paper from the top of the screen down to `bottom` (default: into the slot).
+## The room, and a page from `top` down to `bottom` (INF, the default: into the slot; a sheet that has
+## left the printer passes its own bottom edge, which may be above the screen). Pages are only as tall
+## as what's on them: `top` is the page's top edge (above the screen for a long printout).
 ## `scroll_px` is how far the paper has moved up; its green bars and tractor holes ride along with it,
 ## phased from the print line so they line up across both screens.
-static func draw_paper(ci: CanvasItem, size: Vector2, l: Dictionary, scroll_px: float, a: float, bottom := -1.0) -> void:
-	ci.draw_rect(Rect2(Vector2.ZERO, size), Color(ROOM, a))
+static func draw_paper(ci: CanvasItem, size: Vector2, l: Dictionary, scroll_px: float, a: float, bottom := INF,
+		room := true, top := -10.0) -> void:
+	if room:
+		ci.draw_rect(Rect2(Vector2.ZERO, size), Color(ROOM, a))
 	var px: float = l.px
 	var paper_w: float = l.paper_w
 	var print_y: float = l.print_y
-	var paper_top := -10.0
-	var paper_bottom: float = float(l.slot_y) if bottom < 0.0 else bottom
+	var paper_top := top
+	var paper_bottom: float = float(l.slot_y) if is_inf(bottom) else bottom
+	if paper_bottom <= paper_top:
+		return
 	var paper := Rect2(px, paper_top, paper_w, paper_bottom - paper_top)
 	ci.draw_rect(paper, Color(PAPER, a))
+	# The page's torn-off top edge.
+	if paper_top > -5.0:
+		ci.draw_rect(Rect2(px, paper_top, paper_w, 2.0), Color(0.0, 0.0, 0.0, 0.18 * a))
 	var band_step := LINE_H * 4.0
 	var below := ceilf(maxf(0.0, paper_bottom - print_y) / band_step) + 1.0
 	var by := print_y - LINE_H * 0.72 - fposmod(scroll_px, band_step) + band_step * below
@@ -85,7 +109,7 @@ static func draw_top_fade(ci: CanvasItem, size: Vector2, a: float) -> void:
 ## The printer body below the slot, its print head at `head_x`, the status light and the LCD.
 ## `drop` lowers the whole machine (the menu slides it off the bottom of the screen).
 static func draw_printer(ci: CanvasItem, size: Vector2, l: Dictionary, font: Font, head_x: float,
-		status: String, light: Color, a: float, drop := 0.0) -> void:
+		status: String, light: Color, a: float, drop := 0.0, label := "") -> void:
 	var px: float = l.px
 	var paper_w: float = l.paper_w
 	var top := float(l.slot_y) + drop
@@ -103,6 +127,8 @@ static func draw_printer(ci: CanvasItem, size: Vector2, l: Dictionary, font: Fon
 	ci.draw_rect(lcd, Color("0c1a12", a))
 	ci.draw_rect(lcd, Color(PRINTER_EDGE, a), false, 1.5)
 	ci.draw_string(font, lcd.position + Vector2(10.0, 19.0), status, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(LCD_TEXT, 0.85 * a))
+	if label != "":
+		ci.draw_string(font, Vector2(px - 20.0, body.position.y + 29.0), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("7d8a93", a))
 
 
 ## A dashed rule across the paper at `y`.

@@ -364,7 +364,7 @@ static func _frame(s: Dictionary) -> void:
 
 ## Look-alikes only: nothing on the shelf may answer find_interactable() or collide. It is built
 ## before any level exists, so it comes first in the "interactable" group and would otherwise
-## shadow the real kiosk, furnace or phone with the same interact id.
+## shadow the real fax terminal, furnace or phone with the same interact id.
 static func _inert(shelf: Node) -> void:
 	for n in shelf.find_children("*", "", true, false):
 		if n.is_in_group("interactable"):

@@ -5,8 +5,8 @@ extends Node
 ##
 ## SWEEP 4A HOOK (pharmacy, chunk 3): gold bars, the sell bin and the shop van are gone. HUB
 ## REDESIGN (2026-09-15): both are now real rooms off the lobby (scripts/level/entrance.gd);
-## buying is the order kiosk beside the pharmacy window (placebo pills only, for now, interact_id
-## "pharmacy_kiosk" -- the window itself is set dressing); selling is throwing loot into the
+## buying is a fax order from the lobby's fax terminal (interact_id "pharmacy_fax", hub rebuild
+## chunk 3: fax_terminal.gd, fax_order_ui.gd, economy_props.gd); selling is throwing loot into the
 ## furnace.
 ##
 ## Where things go, first match wins:
@@ -22,6 +22,7 @@ extends Node
 
 const PharmacyScript := preload("res://scripts/economy/economy_props.gd")
 const FurnaceScript := preload("res://scripts/economy/furnace.gd")
+const WaitingNurseScript := preload("res://scripts/economy/waiting_nurse.gd")
 
 const NEAR_METRES := 9.0
 const FLASH_SECONDS := 4.0
@@ -29,6 +30,8 @@ const FLASH_SECONDS := 4.0
 var game: Node = null
 var pharmacy: Node3D = null
 var furnace: Node3D = null
+## Hub rebuild, chunk 3: the Night Nurse model sitting in the waiting room (scenery), or null.
+var waiting_nurse: Node3D = null
 ## "", "reserve" (the lobby spots), "economy" (hand-placed) or "search": how this level's spots
 ## were chosen.
 var mode := ""
@@ -44,6 +47,44 @@ var _wait := -1
 
 func setup(g: Node) -> void:
 	game = g
+	fax_ui = FaxUIScript.new()
+	fax_ui.name = "FaxOrderUI"
+	add_child(fax_ui)
+
+
+# ---------------------------------------------------------------------------
+# the pharmacy's fax order (hub rebuild, chunk 3)
+
+const FaxUIScript := preload("res://scripts/economy/fax_order_ui.gd")
+## This machine's order form (a CanvasLayer), opened by main.gd at the fax terminal.
+var fax_ui: CanvasLayer = null
+
+
+func fax_ui_open() -> bool:
+	return fax_ui != null and fax_ui.is_open()
+
+
+func open_fax_ui() -> void:
+	if fax_ui != null:
+		fax_ui.open(game)
+
+
+## This machine's player sends an order, {catalog kind: sets}: straight to the game on the host, by
+## RPC from a client.
+func request_order(sets: Dictionary) -> void:
+	if game.is_host():
+		game.order_pharmacy(game.local_player(), sets)
+	elif Net.active:
+		_rpc_order.rpc_id(Net.HOST_ID, sets)
+
+
+@rpc("any_peer", "reliable", "call_remote")
+func _rpc_order(sets: Dictionary) -> void:
+	if not game.is_host():
+		return
+	var p = game.players.get(multiplayer.get_remote_sender_id())
+	if p != null:
+		game.order_pharmacy(p, sets)
 
 
 ## game._add_landmarks: a new level exists. Everything from the old one went with it.
@@ -85,7 +126,7 @@ func money_visible_for(p: Node) -> bool:
 		return true
 	if p == null or not placed():
 		return false
-	if p.aim_id == "pharmacy_kiosk":
+	if p.aim_id == "pharmacy_fax" or fax_ui_open():
 		return true
 	for n in [pharmacy, furnace]:
 		if n != null and is_instance_valid(n) and (n as Node3D).global_position.distance_to(p.global_position) < NEAR_METRES:
@@ -132,7 +173,8 @@ func _place() -> void:
 	root.name = "Economy"
 	_level.add_child(root)
 
-	pharmacy = PharmacyScript.create(game)
+	# The hub's pharmacy front runs the width of the room (9 tiles); anywhere else a short stretch.
+	pharmacy = PharmacyScript.create(game, 13.5 if mode == "reserve" else 3.0)
 	root.add_child(pharmacy)
 	_put(pharmacy, spots.get("shop"))
 	# The hub builds it into a wall with a chamber behind; anywhere else (the dev room) it is the
@@ -142,6 +184,11 @@ func _place() -> void:
 	_put(furnace, spots.get("furnace"))
 	if mode != "reserve":
 		furnace.set_hatch(true, false)
+	# Hub rebuild, chunk 3: the Night Nurse in the waiting room, scenery only: she sits, and moves
+	# (chairs, corners) only while nobody is watching (waiting_nurse.gd).
+	if not (_info.get("waiting_seats", []) as Array).is_empty():
+		waiting_nurse = WaitingNurseScript.create(game, _info)
+		root.add_child(waiting_nurse)
 
 
 ## The centre of a reserved world-space rect (Rect2, x/z plane), floor height found by a ray, and

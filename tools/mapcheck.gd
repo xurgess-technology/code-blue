@@ -565,8 +565,10 @@ class Runner extends Node:
 			kinds[t.kind] += 1
 			if not (info.entrance_rect as Rect2).has_point(Vector2(t.position.x, t.position.z)):
 				_fail("%s: table outside the entrance building" % tag)
-		if kinds.patient != 2 or kinds.player != 1:
-			_fail("%s: tables %s, expected 2 patient and 1 player" % [tag, str(kinds)])
+		if kinds.patient != 3 or kinds.player != 0:
+			_fail("%s: tables %s, expected 3 patient tables" % [tag, str(kinds)])
+		if (info.get("or_screens", []) as Array).size() != kinds.patient:
+			_fail("%s: %d OR monitors for %d tables" % [tag, (info.get("or_screens", []) as Array).size(), kinds.patient])
 		if not tables.is_empty() and info.table != tables[0].position:
 			_fail("%s: table_pos() is not the first patient table" % tag)
 		for key in ["or_screen", "phone", "entrance", "ambulance"]:

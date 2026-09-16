@@ -581,8 +581,11 @@ static func validate(gen: Dictionary) -> PackedStringArray:
 			patient += 1
 		elif t.kind == "player":
 			player += 1
-	if patient != 2 or player != 1:
-		problems.append("expected 2 patient tables and 1 player table, found %d and %d" % [patient, player])
+	# Hub rebuild, chunk 2: three patient tables; downed teammates use any free one.
+	if patient != 3 or player != 0:
+		problems.append("expected 3 patient tables and no player table, found %d and %d" % [patient, player])
+	if (spots.get("or_screens", []) as Array).size() != patient:
+		problems.append("expected one OR monitor per table, found %d" % (spots.get("or_screens", []) as Array).size())
 	for key in ["clock", "lectern"]:
 		if spots.has(key) and String(room_of.call(spots[key].pos).get("kind", "")) != "break_room":
 			problems.append("%s is not in the break room" % key)

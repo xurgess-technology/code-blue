@@ -134,7 +134,7 @@ func on_level_built(level: Node3D, info: Dictionary) -> void:
 	var spot := _phone_spot(info)
 	if spot.is_empty():
 		return
-	phone = PhoneScript.create(bool(spot.get("wall", false)))
+	phone = PhoneScript.create(bool(spot.get("wall", false)), bool(spot.get("desk", false)))
 	level.add_child(phone)
 	phone.global_position = spot.position
 	phone.rotation.y = float(spot.yaw)
@@ -874,7 +874,10 @@ static func _yaw_along(a: Vector3, b: Vector3) -> float:
 func _phone_spot(info: Dictionary) -> Dictionary:
 	var given = info.get("phone")
 	if given is Dictionary and given.has("position"):
-		# The hospital builds a wall phone there (position at its centre): add to it, no desk phone.
+		# Hub rebuild: a desk phone standing on the triage counter (position on the counter top).
+		if bool(given.get("desk", false)):
+			return {"position": given.position, "yaw": float(given.get("yaw", 0.0)), "desk": true}
+		# A level with a wall phone model there (position at its centre): add to it, no desk phone.
 		return {"position": given.position, "yaw": float(given.get("yaw", 0.0)), "wall": (given.position as Vector3).y > 0.5}
 	if not info.has("clock"):
 		return {}

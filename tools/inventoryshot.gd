@@ -132,12 +132,12 @@ func _game_shots() -> void:
 	_clear()
 	game.add_money(1500, "test")
 	_look_from(pharm.global_position + pharm.global_basis.z * 2.0, pharm.global_position + Vector3.UP * 1.2)
-	bot.bot_aim_id = "pharmacy_kiosk"
+	bot.bot_aim_id = "pharmacy_fax"
 	await _frames(30)
 	await _shot("05_pharmacy_prompt")
-	bot.bot_press += 1
+	game.economy.request_order({"placebo_pills": 1})
 	await _frames(60)
-	await _shot("06_pharmacy_delivery")
+	await _shot("06_pharmacy_order")
 	bot.bot_aim_id = ""
 	bot.take_into("laptop", 1, 184)
 	_look_from(furn.global_position + furn.global_basis.z * 2.4, furn.global_position + Vector3.UP * 0.9)

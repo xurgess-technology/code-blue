@@ -60,7 +60,8 @@ const REQUIRED := {
 	"break_room": ["time_clock", "break_table"],
 	"or": ["or_table", "surgical_lamp", "scrub_sink"],
 	"or_lockers": ["lockers"],
-	"lobby": ["reception_desk", "wall_phone"],
+	"lobby": ["reception_desk", "office_desk"],
+	"hub_pharmacy": ["med_shelf"],
 	"hub_waiting": ["chair_row", "tv_wall"],
 }
 

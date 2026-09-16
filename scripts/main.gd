@@ -165,7 +165,7 @@ func _launch() -> void:
 	if screen.is_processing():
 		await screen.done
 	# The admission page has fed off the top; the sign-in sheet carries the paper on from there.
-	menu.feed_in(screen.paper_scroll_px(), screen.feed_speed())
+	menu.feed_in(screen.paper_scroll_px(), screen.feed_speed(), screen.pages_printed() + 1)
 	screen.queue_free()
 	launching = false
 	launched.emit()
@@ -434,6 +434,15 @@ func _unhandled_input(event: InputEvent) -> void:
 	# The open terminal owns the keyboard until it closes itself.
 	if terminal_ui != null and terminal_ui.is_open():
 		return
+	# Hub rebuild, chunk 3: so does the pharmacy's fax order form.
+	if game.economy != null and game.economy.fax_ui_open():
+		return
+	if event.is_action_pressed("interact") and not game.paused:
+		var fax_me = game.local_player()
+		if fax_me != null and fax_me.alive and not fax_me.downed and fax_me.aim_id == "pharmacy_fax":
+			game.economy.open_fax_ui()
+			get_viewport().set_input_as_handled()
+			return
 
 	# SWEEP 3 HOOK (brains): Esc while looking through a Walk-In's eyes comes back instead of pausing.
 	if event.is_action_pressed("pause") and not game.paused and game.brains != null and game.brains.local_hive_active():
@@ -490,6 +499,7 @@ func _can_use_terminal(me) -> bool:
 func _update_mouse() -> void:
 	var free: bool = menu.visible or game.phase == Game.Phase.MENU or game.paused \
 		or (terminal_ui != null and terminal_ui.is_open()) \
+		or (game.economy != null and game.economy.fax_ui_open()) \
 		or game.surgery_wants_mouse() \
 		or (dev_panel != null and dev_panel.is_open())  # DEV HOOK
 	var want := Input.MOUSE_MODE_VISIBLE if free else Input.MOUSE_MODE_CAPTURED

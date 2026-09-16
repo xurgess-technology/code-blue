@@ -70,6 +70,14 @@ func _ready() -> void:
 		["hub_unassigned", _pose_hub.bind(Vector2(17.0, 16.5), Vector2(31.0, 16.5), 1.2)],
 		["hub_waiting", _pose_hub.bind(Vector2(14.0, 24.5), Vector2(1.5, 21.0), 1.0)],
 		["hub_pharmacy", _pose_hub.bind(Vector2(18.5, 26.5), Vector2(23.5, 24.0), 1.4)],
+		["hub_triage", _pose_hub.bind(Vector2(19.8, 25.8), Vector2(16.3, 23.8), 1.0)],
+		["hub_fax_form", _pose_fax_form],
+		["hub_drawer", _pose_drawer],
+		["hub_nurse_reading", _pose_nurse_reading],
+		["hub_fax_desk", _pose_fax_desk],
+		["hub_waiting_nurse", _pose_waiting_nurse.bind(Vector3(0.9, 0.5, -2.6))],
+		["hub_waiting_nurse_side", _pose_waiting_nurse.bind(Vector3(-1.9, 0.3, -0.6))],
+		["hub_waiting_nurse_close", _pose_waiting_nurse.bind(Vector3(-0.7, 0.0, -1.3))],
 	]
 	for k in ROOM_KINDS:
 		shots.append(["room_" + k, _pose_room.bind(k)])
@@ -176,6 +184,65 @@ func _pose_hub(from: Vector2, at: Vector2, h: float) -> bool:
 	var f := er.position + from * C.TILE
 	var t := er.position + at * C.TILE
 	_look_from(Vector3(f.x, 0, f.y), Vector3(t.x, h, t.y))
+	return true
+
+
+## The pharmacy's fax order form, open, with pills ticked.
+func _pose_fax_form() -> bool:
+	game.add_money(100, "shot")
+	game.economy.open_fax_ui()
+	await get_tree().process_frame
+	var ui = game.economy.fax_ui
+	if ui._rows.is_empty():
+		return false
+	ui._rows[0].box.checked = true
+	ui._rows[0].box.queue_redraw()
+	return true
+
+
+## The pickup drawer pulled out through its slot, seen from the lobby at an angle.
+func _pose_drawer() -> bool:
+	if game.economy.fax_ui_open():
+		game.economy.fax_ui.close()
+	var ph: Node3D = game.economy.pharmacy
+	ph._drawer_state = "open"
+	ph._drawer_k = 1.0
+	ph._apply_drawer()
+	var at: Vector3 = ph.global_transform * Vector3(0.9, 1.5, 1.7)
+	_look_from(Vector3(at.x, 0.0, at.z), ph.global_transform * Vector3(0.0, 1.0, 0.2))
+	return true
+
+
+## The lobby's fax desk, from where a player stands to use it.
+func _pose_fax_desk() -> bool:
+	game.economy.fax_ui.close()
+	var t: Node3D = game.economy.pharmacy.terminal
+	var at: Vector3 = t.global_transform * Vector3(0.2, 0.0, 1.1)
+	_look_from(at, t.global_transform * Vector3(0.15, 1.0, 0.0))
+	return true
+
+
+## The attendant at the fax machine, reading the page in her hand.
+func _pose_nurse_reading() -> bool:
+	game.economy.fax_ui.close()
+	var ph: Node3D = game.economy.pharmacy
+	ph._nurse.position = ph._at_fax
+	ph._start("read")
+	ph._nurse.get("nurse").hold = 1.0
+	for i in 5:
+		await get_tree().process_frame
+	var at: Vector3 = ph.global_transform * (ph._at_fax + Vector3(-0.9, 0.0, 1.9))
+	_look_from(Vector3(at.x, 0.0, at.z), ph.global_transform * (ph._at_fax + Vector3(0, 1.4, 0)))
+	return true
+
+
+## Looking at the waiting room's seated Night Nurse from a few metres in front of her.
+func _pose_waiting_nurse(offset: Vector3) -> bool:
+	var n: Node3D = game.economy.waiting_nurse
+	if n == null:
+		return false
+	var front: Vector3 = n.global_position + n.global_basis * offset
+	_look_from(Vector3(front.x, n.global_position.y + 0.5, front.z), n.global_position + Vector3.UP * 1.0)
 	return true
 
 

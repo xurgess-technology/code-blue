@@ -1,13 +1,18 @@
 extends Node
-## The OR wall monitor (sweep 2 wave 3, `orscreen`). One per game, child "ORScreen" of Game.
+## The OR monitors (sweep 2 wave 3, `orscreen`). One controller per game, child "ORScreen" of Game.
 ##
-## It watches game.level: whenever a new level appears it mounts a monitor in the OR at
-## level_info.or_screen ({position, yaw, size}) or, without that key, on the flattest wall facing
-## the operating table. The picture is a SubViewport drawn by or_screen_canvas.gd from
+## It watches game.level: whenever a new level appears it mounts the OR's monitors. Hub rebuild,
+## chunk 2: level_info.or_screens ([{position, yaw, size, table}]) gives one monitor per table, each
+## showing only its own table's patient (or "no patient"). Otherwise one monitor for every case at
+## level_info.or_screen ({position, yaw, size}) or, without that key, on the flattest wall facing the
+## operating table. The picture is a SubViewport drawn by or_screen_canvas.gd from
 ## or_screen_model.gd, derived locally from replicated game state on every machine.
 ##
-## Cost control: the SubViewport renders only on request (UPDATE_ONCE), at REFRESH_NEAR_HZ while
-## the live camera is close and REFRESH_FAR_HZ further away, and not at all while the screen is
+## `mount`, `model`, `placement` and screen_centre()/screen_normal() describe the first monitor
+## (tests and tools read them); `monitors` holds all of them.
+##
+## Cost control: each SubViewport renders only on request (UPDATE_ONCE), at REFRESH_NEAR_HZ while
+## the live camera is close and REFRESH_FAR_HZ further away, and not at all while its screen is
 ## outside the camera's view or beyond VIEW_RANGE. Its light re-tints a few times a second.
 
 const ModelScript := preload("res://scripts/orscreen/or_screen_model.gd")
@@ -37,17 +42,17 @@ var refresh_count := 0
 ## Test seam (tools/gameshot.gd): when not empty, shown instead of the model built from the game.
 var model_override: Dictionary = {}
 
+## Every mounted monitor: {mount, vp, canvas, light, quad, size, table (-1: every case), model,
+## accum, light_accum, since}.
+var monitors: Array = []
+
 var _level: Node = null
 var _place_wait := -1
-var _vp: SubViewport = null
-var _canvas: Control = null
-var _light: OmniLight3D = null
 var _quad: MeshInstance3D = null
 var _size := DEFAULT_SIZE
 var _t := 0.0
-var _accum := 0.0
-var _light_accum := 0.0
-var _since_refresh := 0.0
+var _full: Dictionary = {}
+var _full_frame := -1
 
 static var _shader: Shader = null
 
@@ -84,40 +89,46 @@ func _process(delta: float) -> void:
 	if not enabled:
 		return
 	_t += delta
-	_canvas.t = _t
-	_since_refresh += delta
-	var cam_d := _camera_distance()
-	if cam_d >= 0.0 and cam_d <= VIEW_RANGE:
-		# The glow lights the room even when the glass itself is out of view.
-		_light_accum += delta
-		if _light_accum >= 1.0 / LIGHT_HZ:
-			_light_accum = 0.0
-			if _since_refresh > 1.0 / LIGHT_HZ:
-				model = model_override if not model_override.is_empty() else ModelScript.build(game)
-			_tint_light()
-	var vis := _visibility()
-	if vis < 0.0:
-		return
-	_accum += delta
-	var interval := 1.0 / (REFRESH_NEAR_HZ if vis <= NEAR_RANGE else REFRESH_FAR_HZ)
-	if _accum >= interval:
-		_accum = 0.0
-		refresh_now()
+	for m in monitors:
+		if not is_instance_valid(m.mount):
+			continue
+		(m.canvas as Control).set("t", _t)
+		m.since += delta
+		var cam_d := _camera_distance(m)
+		if cam_d >= 0.0 and cam_d <= VIEW_RANGE:
+			# The glow lights the room even when the glass itself is out of view.
+			m.light_accum += delta
+			if m.light_accum >= 1.0 / LIGHT_HZ:
+				m.light_accum = 0.0
+				if m.since > 1.0 / LIGHT_HZ:
+					m.model = _model_for(int(m.table))
+				_tint_light(m)
+		var vis := _visibility_of(m)
+		if vis < 0.0:
+			continue
+		m.accum += delta
+		var interval := 1.0 / (REFRESH_NEAR_HZ if vis <= NEAR_RANGE else REFRESH_FAR_HZ)
+		if m.accum >= interval:
+			m.accum = 0.0
+			_refresh(m)
+	if not monitors.is_empty():
+		model = monitors[0].model
 
 
-## Perf A/B and debugging: hide the whole monitor and stop refreshing it.
+## Perf A/B and debugging: hide the monitors and stop refreshing them.
 func set_enabled(on: bool) -> void:
 	enabled = on
-	if mounted():
-		mount.visible = on
+	for m in monitors:
+		if is_instance_valid(m.mount):
+			m.mount.visible = on
 
 
-func _camera_distance() -> float:
+func _camera_distance(m: Dictionary) -> float:
 	var vp := get_viewport()
 	var cam := vp.get_camera_3d() if vp != null else null
-	if cam == null or _quad == null:
+	if cam == null or m.quad == null:
 		return -1.0
-	return cam.global_position.distance_to(_quad.global_position)
+	return cam.global_position.distance_to((m.quad as Node3D).global_position)
 
 
 func _physics_process(_delta: float) -> void:
@@ -130,45 +141,77 @@ func _physics_process(_delta: float) -> void:
 			_mount_on(_level)
 
 
-## Rebuild the model and redraw the picture right now.
+## Rebuild the models and redraw every picture right now.
 func refresh_now() -> void:
 	if not mounted():
 		return
-	model = model_override if not model_override.is_empty() else ModelScript.build(game)
-	_canvas.model = model
-	_canvas.queue_redraw()
-	_vp.render_target_update_mode = SubViewport.UPDATE_ONCE
+	_full_frame = -1
+	for m in monitors:
+		_refresh(m)
+	model = monitors[0].model
+
+
+func _refresh(m: Dictionary) -> void:
+	m.model = _model_for(int(m.table))
+	m.canvas.model = m.model
+	m.canvas.queue_redraw()
+	(m.vp as SubViewport).render_target_update_mode = SubViewport.UPDATE_ONCE
 	refresh_count += 1
-	_since_refresh = 0.0
+	m.since = 0.0
 
 
-## Distance from the live camera to the screen when the screen is in its view and facing it,
+## The picture for one table: every case's panel built once a frame, then only this table's panel
+## (table -1: all of them).
+func _model_for(table: int) -> Dictionary:
+	var frame := Engine.get_process_frames()
+	if frame != _full_frame:
+		_full_frame = frame
+		_full = model_override if not model_override.is_empty() else ModelScript.build(game)
+	if table < 0:
+		return _full
+	var out := _full.duplicate()
+	var panels: Array = []
+	for p in _full.get("panels", []):
+		if int(p.get("table", -1)) == table:
+			panels.append(p)
+	out["panels"] = panels
+	out["mode"] = "cases" if not panels.is_empty() else "idle"
+	return out
+
+
+## Distance from the live camera to a monitor when its screen is in view and facing the camera,
 ## else -1.
-func _visibility() -> float:
+func _visibility_of(m: Dictionary) -> float:
 	var vp := get_viewport()
 	var cam := vp.get_camera_3d() if vp != null else null
-	if cam == null or _quad == null:
+	if cam == null or m.quad == null:
 		return -1.0
-	var c := _quad.global_position
+	var mnt: Node3D = m.mount
+	var c: Vector3 = (m.quad as Node3D).global_position
 	var to_cam := cam.global_position - c
 	var d := to_cam.length()
-	if d > VIEW_RANGE or to_cam.dot(screen_normal()) <= 0.0:
+	if d > VIEW_RANGE or to_cam.dot(mnt.global_basis.z.normalized()) <= 0.0:
 		return -1.0
-	var right := mount.global_basis.x.normalized() * _size.x * 0.5
-	var up := mount.global_basis.y.normalized() * _size.y * 0.5
+	var sz: Vector2 = m.size
+	var right := mnt.global_basis.x.normalized() * sz.x * 0.5
+	var up := mnt.global_basis.y.normalized() * sz.y * 0.5
 	for p in [c, c + right + up, c - right + up, c + right - up, c - right - up]:
 		if cam.is_position_in_frustum(p):
 			return d
 	return -1.0
 
 
+## The first monitor's visibility (tools/orscreentest.gd).
+func _visibility() -> float:
+	return _visibility_of(monitors[0]) if not monitors.is_empty() else -1.0
+
+
 func _unmount() -> void:
-	if mounted():
-		mount.queue_free()
+	for m in monitors:
+		if is_instance_valid(m.mount):
+			m.mount.queue_free()
+	monitors = []
 	mount = null
-	_vp = null
-	_canvas = null
-	_light = null
 	_quad = null
 	placement = ""
 	model = {}
@@ -179,54 +222,76 @@ func _unmount() -> void:
 func _mount_on(level: Node) -> void:
 	_unmount()
 	var info: Dictionary = game.get("level_info") if game.get("level_info") is Dictionary else {}
-	var spot := find_spot(level, info)
-	# On the level's own mount (a dark bezel the hospital builds, face ~0.087 m off the wall) only the
-	# glass is added, just in front of it and inside its frame.
-	var on_level_mount: bool = String(spot.how) == "level_info"
-	_size = spot.size - (Vector2(0.12, 0.12) if on_level_mount else Vector2.ZERO)
-	mount = make_monitor(_size, not on_level_mount, 0.095 if on_level_mount else 0.072)
-	mount.name = "ORScreen"
-	level.add_child(mount)
-	mount.global_position = spot.position
-	mount.rotation = Vector3(0.0, float(spot.yaw), 0.0)
-	placement = String(spot.how)
-	mount.visible = enabled
-	_vp = mount.get_node("Viewport")
-	_canvas = _vp.get_node("Canvas")
-	_light = mount.get_node("Glow")
-	_quad = mount.get_node("Screen")
-	_accum = 1.0
+	var spots: Array = []
+	var per_table = info.get("or_screens")
+	if per_table is Array and not per_table.is_empty():
+		for o in per_table:
+			var s := _level_spot(o, info)
+			s["table"] = int(o.get("table", -1))
+			spots.append(s)
+	else:
+		var s := find_spot(level, info)
+		s["table"] = -1
+		spots.append(s)
+	for i in spots.size():
+		var spot: Dictionary = spots[i]
+		# On the level's own mount (a dark bezel the hospital builds, face ~0.087 m off the wall) only
+		# the glass is added, just in front of it and inside its frame.
+		var on_level_mount: bool = String(spot.how) == "level_info"
+		var sz: Vector2 = spot.size - (Vector2(0.12, 0.12) if on_level_mount else Vector2.ZERO)
+		var mnt := make_monitor(sz, not on_level_mount, 0.095 if on_level_mount else 0.072)
+		mnt.name = "ORScreen" if i == 0 else "ORScreen%d" % i
+		level.add_child(mnt)
+		mnt.global_position = spot.position
+		mnt.rotation = Vector3(0.0, float(spot.yaw), 0.0)
+		mnt.visible = enabled
+		var vp: SubViewport = mnt.get_node("Viewport")
+		var m := {"mount": mnt, "vp": vp, "canvas": vp.get_node("Canvas"), "light": mnt.get_node("Glow"),
+				"quad": mnt.get_node("Screen"), "size": sz, "table": int(spot.table), "model": {},
+				"accum": 1.0, "light_accum": 0.0, "since": 0.0}
+		monitors.append(m)
+	mount = monitors[0].mount
+	_quad = monitors[0].quad
+	_size = monitors[0].size
+	placement = String(spots[0].how)
 	refresh_now()
-	_tint_light()
+	for m in monitors:
+		_tint_light(m)
 
 
 ## Where the monitor goes: {position (on the wall, centre of the display), yaw (+Z faces the
 ## room), size, how}.
 func find_spot(level: Node, info: Dictionary) -> Dictionary:
 	var target := _table_centre(info)
-	var floor_y := target.y
 	var o = info.get("or_screen")
 	if o is Dictionary and o.has("position"):
-		var pos: Vector3 = o.position
-		var size: Vector2 = o.get("size", DEFAULT_SIZE)
-		if size.x < 0.3 or size.y < 0.2:
-			size = DEFAULT_SIZE
-		# A floor-level anchor means "on the wall above here".
-		if pos.y < floor_y + 1.0:
-			pos.y = floor_y + CENTRE_HEIGHT
-		# level_info yaws face -Z into the room (Godot forward); this monitor faces its local +Z.
-		var yaw := float(o.get("yaw", 0.0)) + PI
-		# Whatever the convention, never face the wall: if +Z points away from the table, turn round.
-		var n := Vector3(sin(yaw), 0.0, cos(yaw))
-		var to_table := target - pos
-		to_table.y = 0.0
-		if to_table.length() > 0.2 and n.dot(to_table) < 0.0:
-			yaw += PI
-		return {"position": pos, "yaw": yaw, "size": size, "how": "level_info"}
+		return _level_spot(o, info)
 	var wall := _wall_spot(level, target, DEFAULT_SIZE)
 	if not wall.is_empty():
 		return wall
 	return {"position": target + Vector3(0.0, CENTRE_HEIGHT, -3.5), "yaw": 0.0, "size": DEFAULT_SIZE, "how": "floating"}
+
+
+## A monitor spot the level gave ({position, yaw, size}), turned to face the tables.
+func _level_spot(o: Dictionary, info: Dictionary) -> Dictionary:
+	var target := _table_centre(info)
+	var floor_y := target.y
+	var pos: Vector3 = o.position
+	var size: Vector2 = o.get("size", DEFAULT_SIZE)
+	if size.x < 0.3 or size.y < 0.2:
+		size = DEFAULT_SIZE
+	# A floor-level anchor means "on the wall above here".
+	if pos.y < floor_y + 1.0:
+		pos.y = floor_y + CENTRE_HEIGHT
+	# level_info yaws face -Z into the room (Godot forward); this monitor faces its local +Z.
+	var yaw := float(o.get("yaw", 0.0)) + PI
+	# Whatever the convention, never face the wall: if +Z points away from the table, turn round.
+	var n := Vector3(sin(yaw), 0.0, cos(yaw))
+	var to_table := target - pos
+	to_table.y = 0.0
+	if to_table.length() > 0.2 and n.dot(to_table) < 0.0:
+		yaw += PI
+	return {"position": pos, "yaw": yaw, "size": size, "how": "level_info"}
 
 
 func _table_centre(info: Dictionary) -> Vector3:
@@ -307,12 +372,14 @@ func _ray(space: PhysicsDirectSpaceState3D, from: Vector3, to: Vector3) -> Dicti
 
 # ------------------------------------------------------------------------------ the object
 
-func _tint_light() -> void:
-	if _light == null or not is_instance_valid(_light):
+func _tint_light(m: Dictionary) -> void:
+	var light: OmniLight3D = m.light
+	if light == null or not is_instance_valid(light):
 		return
+	var mdl: Dictionary = m.model
 	var col := CanvasScript.GREEN
 	var energy := LIGHT_ENERGY
-	for p in model.get("panels", []):
+	for p in mdl.get("panels", []):
 		var c: Color
 		if String(p.state) == "incoming":
 			c = CanvasScript.AMBER
@@ -324,10 +391,10 @@ func _tint_light() -> void:
 			continue
 		if c == CanvasScript.RED or col == CanvasScript.GREEN:
 			col = c
-	if String(model.get("mode", "idle")) == "idle":
+	if String(mdl.get("mode", "idle")) == "idle":
 		energy = LIGHT_ENERGY * 0.6
-	_light.light_color = col.lerp(Color.WHITE, 0.4)
-	_light.light_energy = energy
+	light.light_color = col.lerp(Color.WHITE, 0.4)
+	light.light_energy = energy
 
 
 ## A monitor on its wall bracket, origin on the wall surface at the display's centre, facing +Z.

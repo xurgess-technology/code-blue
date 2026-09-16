@@ -94,7 +94,7 @@ const ITEMS := {
 		"loose_surfaces": [],
 		"real_use": "A sterile pack with a curved needle already threaded with suture. Each bite goes in on one side of a gash and out the other, and pulling the thread snug draws the edges together so the bleeding stops and the wound can heal.",
 		"where": "In trauma bags on corridor walls, in nurse station drawers and in the steel drawer units of storage rooms.",
-		"handling": "Consumable. Found in packs of 1 or 2. Put one on the OR supply shelf, carry a downed teammate to the player table and stitch them up.",
+		"handling": "Consumable. Found in packs of 1 or 2. Put one on the OR supply shelf, carry a downed teammate to a free OR table and stitch them up.",
 	},
 	# SWEEP 4A HOOK (pharmacy, chunk 3): does nothing mechanically. Only ever bought at the
 	# pharmacy window (`found` empty keeps it out of the wings and the supply spawner).

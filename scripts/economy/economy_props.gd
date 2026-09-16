@@ -1,35 +1,82 @@
 extends StaticBody3D
-## SWEEP 4A HOOK (pharmacy, chunk 3), HUB REDESIGN (2026-09-15): the outpatient pharmacy window,
-## now inside its own walled room (docs/CONTRACTS.md "Hospital", scripts/level/entrance.gd) with a
-## real order kiosk (pharmacy_kiosk.gd) next to it. The counter itself is pure set dressing: a
-## price board, a steel grate, and the Night Nurse (docs/CONTRACTS.md "The Night Nurse's model")
-## standing idle behind it -- see `_build_pharmacist` for why she replaced the old capsule
-## silhouette. Ordering is E on the kiosk, not on this counter any more.
+## The pharmacy (hub rebuild, chunk 3, after Zach's floorplan and playtest): a wall of steel bars you
+## see straight through, medicine shelves behind it, and nobody goes in. Ordering is by fax:
 ##
-## Local frame: origin on the floor, front (the side a player stands on) toward +Z.
+##   1. At the lobby's fax terminal (fax_terminal.gd) you tick what you want on a fax form
+##      (fax_order_ui.gd) and send it. The host takes the money (game.order_pharmacy).
+##   2. The page prints out of the fax machine behind the bars.
+##   3. The Night Nurse comes out from behind the shelves, takes the page, reads it, and walks back
+##      behind the shelves.
+##   4. She comes back out to the pickup drawer in the bars, puts the order in, and the drawer slides
+##      out into the lobby with the items in it (the host spawns them). Once they're taken it shuts.
+##
+## The attendant is the Night Nurse model (docs/CONTRACTS.md "The Night Nurse's model"): set dressing
+## on a scripted walk, no Monster, no brain, never a threat. Orders are replicated as events
+## (game "pharmacy_order"), and every machine plays the same timeline from them; only the host
+## spawns the items.
+##
+## Local frame: origin on the floor in the middle of the bars, the lobby toward +Z. `span` is how wide
+## the bars run (the hub's pharmacy front is 13.5 m; the dev room's stand-alone one 3 m).
 
 const ItemsDB := preload("res://scripts/items.gd")
-const KioskScript := preload("res://scripts/economy/pharmacy_kiosk.gd")
+const FaxTerminalScript := preload("res://scripts/economy/fax_terminal.gd")
 const MonsterModelScript := preload("res://scripts/monsters/monster_model.gd")
 
+const DRAWER_SLIDE := 0.55
+## The drawer stays out at least this long, then until nothing lies in it.
+const DRAWER_MIN_OPEN := 1.5
+const DRAWER_X := 0.0
+const DRAWER_Y := 0.95
+## The slot through the bars the drawer slides in and out of.
+const SLOT_HALF_W := 0.44
+const SLOT_BOTTOM := 0.9
+const SLOT_TOP := 1.3
+const BAR_GAP := 0.16
+const HEIGHT := 3.0
+## The attendant's walking speed and the pauses of the order timeline (seconds).
+const NURSE_SPEED := 1.6
+const PRINT_SECONDS := 2.0
+const READ_SECONDS := 2.2
+const GATHER_SECONDS := 2.0
+const PLACE_SECONDS := 0.9
+
 var game: Node = null
+var span := 13.5
+var terminal: StaticBody3D = null
+
 var _price: Label3D
-var _nurse: Node3D          # the idle Night Nurse model, pure set dressing behind the grate
-var _nurse_base_x := 0.0
-var _shape_t := 0.0
-var kiosk: StaticBody3D = null
+var _nurse: Node3D
+var _nurse_page: MeshInstance3D
+var _fax_page: MeshInstance3D
+var _fax_at := Vector3.ZERO
 
-## Tube delivery: a queued {kind, count} list, each waiting DELIVER_SECONDS before it thunks out.
-const DELIVER_SECONDS := 1.6
+## Where the attendant walks, local: behind the shelves, at the fax, at the drawer, and the corner
+## she rounds at the end of the shelves.
+var _hide := Vector3.ZERO
+var _corner_back := Vector3.ZERO
+var _corner_front := Vector3.ZERO
+var _at_fax := Vector3.ZERO
+var _at_drawer := Vector3.ZERO
+
+## Orders waiting: [{items: [{kind, count}]}]. The one being served and where its timeline is.
 var _queue: Array = []
-var _capsule: MeshInstance3D
-var _capsule_t := 0.0
-var _delivery_slot: Vector3
+var _order := {}
+var _phase := ""   # "" idle | print | fetch | read | back | gather | bring | place | return
+var _phase_t := 0.0
+var _path: PackedVector3Array = PackedVector3Array()
+var _path_len := 0.0
+
+var _drawer: Node3D
+var _drawer_k := 0.0          # 0 shut (inside the bars) .. 1 out in the lobby
+var _drawer_state := "shut"   # shut | opening | open | closing
+var _open_t := 0.0
+var _serving := {}
 
 
-static func create(g: Node) -> StaticBody3D:
+static func create(g: Node, width := 13.5) -> StaticBody3D:
 	var n := new()
 	n.game = g
+	n.span = width
 	n.name = "Pharmacy"
 	n._build()
 	return n
@@ -42,15 +89,29 @@ func _game() -> Node:
 
 
 func _build() -> void:
-	# HUB REDESIGN: the counter is no longer itself interactable -- the kiosk beside it is the
-	# order point now (still collides like any wall/counter, C.L_WORLD, so nobody walks through it).
 	collision_layer = C.L_WORLD
 	collision_mask = 0
-	_build_window()
+	var half := span * 0.5
+	if span >= 8.0:
+		# The hub: the first shelf row stands 4.5 m in and runs to 5.25 m either side of the middle.
+		_hide = Vector3(3.6, 0, -6.0)
+		_corner_back = Vector3(half - 0.55, 0, -6.0)
+		_corner_front = Vector3(half - 0.55, 0, -2.0)
+	else:
+		_hide = Vector3(half - 0.4, 0, -2.4)
+		_corner_back = _hide
+		_corner_front = Vector3(half - 0.4, 0, -1.2)
+	_fax_at = Vector3(DRAWER_X + minf(2.4, half - 0.6), 0, -0.45)
+	_at_fax = _fax_at + Vector3(0, 0, -0.75)
+	_at_drawer = Vector3(DRAWER_X, 0, -0.95)
+	_build_bars()
+	_build_drawer()
+	_build_fax()
 	_build_pharmacist()
-	kiosk = KioskScript.create(game)
-	add_child(kiosk)
-	kiosk.position = Vector3(1.55, 0.0, 0.9)
+	terminal = FaxTerminalScript.create(game)
+	add_child(terminal)
+	# Out in the lobby beside the bars, a step north of the drawer, facing the bars.
+	terminal.position = Vector3(DRAWER_X - minf(2.4, half - 0.7), 0.0, 1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -75,25 +136,24 @@ static func _mat(key: String, col: Color, rough := 0.6, metal := 0.0, emit := Co
 	return m
 
 
-func _box(size: Vector3, pos: Vector3, mat: Material, rot := Vector3.ZERO, parent: Node = null) -> MeshInstance3D:
+func _box(size: Vector3, pos: Vector3, mat: Material, parent: Node = null) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
 	var b := BoxMesh.new()
 	b.size = size
 	mi.mesh = b
 	mi.material_override = mat
 	mi.position = pos
-	mi.rotation_degrees = rot
 	(parent if parent != null else self).add_child(mi)
 	return mi
 
 
-func _shape(size: Vector3, pos: Vector3) -> void:
+func _shape(size: Vector3, pos: Vector3, body: CollisionObject3D = null) -> void:
 	var cs := CollisionShape3D.new()
 	var bs := BoxShape3D.new()
 	bs.size = size
 	cs.shape = bs
 	cs.position = pos
-	add_child(cs)
+	(body if body != null else self).add_child(cs)
 
 
 func _label(text: String, size: int, col: Color) -> Label3D:
@@ -108,142 +168,348 @@ func _label(text: String, size: int, col: Color) -> Label3D:
 	return l
 
 
-## A counter behind a steel grate: a low wall, a grate of thin bars over the window opening, a
-## price board, an order terminal, and a wall delivery station beside it.
-func _build_window() -> void:
-	var wall := _mat("wall", Color(0.66, 0.63, 0.58), 0.85)
+## Floor-to-ceiling bars across the whole front, a rail top, bottom and at counter height, one
+## collider for all of it (thrown things bounce off too).
+func _build_bars() -> void:
 	var steel := _mat("steel", Color(0.42, 0.44, 0.46), 0.35, 0.7)
-	var counter := _mat("counter", Color(0.3, 0.32, 0.34), 0.5, 0.4)
-	var board := _mat("board", Color(0.08, 0.07, 0.06), 0.8)
-	var glow := _mat("glow", Color(0.02, 0.05, 0.02), 0.3, 0.0, Color(0.25, 0.9, 0.35), 1.3)
-	var dark := _mat("dark", Color(0.05, 0.05, 0.06), 0.6)
+	var dark := _mat("dark", Color(0.08, 0.08, 0.09), 0.6)
+	var half := span * 0.5
+	var bar_mesh := BoxMesh.new()
+	bar_mesh.size = Vector3(0.035, HEIGHT, 0.035)
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = bar_mesh
+	# Bars in front of the drawer's slot stop short above and below it, so the drawer slides through
+	# an opening instead of through the bars.
+	var n := int(span / BAR_GAP)
+	var xforms: Array = []
+	for i in n:
+		var x := -half + BAR_GAP * 0.5 + i * (span - BAR_GAP) / float(maxi(1, n - 1))
+		if absf(x - DRAWER_X) < SLOT_HALF_W + 0.02:
+			xforms.append(_bar_xform(x, 0.0, SLOT_BOTTOM))
+			xforms.append(_bar_xform(x, SLOT_TOP, HEIGHT))
+		else:
+			xforms.append(_bar_xform(x, 0.0, HEIGHT))
+	mm.instance_count = xforms.size()
+	for i in xforms.size():
+		mm.set_instance_transform(i, xforms[i])
+	var mmi := MultiMeshInstance3D.new()
+	mmi.name = "Bars"
+	mmi.multimesh = mm
+	mmi.material_override = steel
+	add_child(mmi)
+	for y in [0.06, 2.1, HEIGHT - 0.06]:
+		_box(Vector3(span, 0.06, 0.07), Vector3(0, y, 0), steel)
+	# The counter-height rail stops either side of the slot.
+	for s in [-1.0, 1.0]:
+		var w := half - SLOT_HALF_W
+		_box(Vector3(w, 0.06, 0.07), Vector3(DRAWER_X + s * (SLOT_HALF_W + w * 0.5), DRAWER_Y - 0.05, 0), steel)
+	# Colliders: left and right of the slot full height, and under and over it.
+	for s in [-1.0, 1.0]:
+		var w := half - SLOT_HALF_W
+		_shape(Vector3(w, HEIGHT, 0.08), Vector3(DRAWER_X + s * (SLOT_HALF_W + w * 0.5), HEIGHT * 0.5, 0))
+	_shape(Vector3(SLOT_HALF_W * 2.0, SLOT_BOTTOM, 0.08), Vector3(DRAWER_X, SLOT_BOTTOM * 0.5, 0))
+	_shape(Vector3(SLOT_HALF_W * 2.0, HEIGHT - SLOT_TOP, 0.08), Vector3(DRAWER_X, (SLOT_TOP + HEIGHT) * 0.5, 0))
 
-	# Low counter wall either side of the window opening (opening is 1.1m wide, centred).
-	_box(Vector3(0.5, 1.1, 0.4), Vector3(-0.8, 0.55, 0.0), wall)
-	_box(Vector3(0.5, 1.1, 0.4), Vector3(0.8, 0.55, 0.0), wall)
-	_box(Vector3(1.9, 0.08, 0.4), Vector3(0.0, 1.14, 0.0), counter)
-	# Steel grate across the opening: vertical bars, close enough together nobody reaches through.
-	for i in 8:
-		var x := -0.5 + i * (1.0 / 7.0)
-		_box(Vector3(0.02, 0.9, 0.02), Vector3(x, 1.6, 0.0), steel)
-	_box(Vector3(1.1, 0.03, 0.03), Vector3(0.0, 1.15, 0.0), steel)
-	_box(Vector3(1.1, 0.03, 0.03), Vector3(0.0, 2.05, 0.0), steel)
-
-	# Price board and order terminal.
-	_box(Vector3(1.0, 0.4, 0.03), Vector3(0.0, 2.35, -0.02), board)
+	# The sign over the drawer, on the lobby side.
+	_box(Vector3(1.9, 0.42, 0.03), Vector3(DRAWER_X, 2.45, 0.06), dark)
 	var head := _label("PHARMACY", 44, Color(0.85, 0.92, 1.0))
-	head.position = Vector3(0.0, 2.46, 0.0)
-	_price = _label("", 32, Color(0.8, 1.0, 0.85))
-	_price.position = Vector3(0.0, 2.26, 0.0)
-	_box(Vector3(0.18, 0.14, 0.05), Vector3(-0.8, 0.95, 0.21), dark)
-	_box(Vector3(0.1, 0.07, 0.01), Vector3(-0.8, 0.97, 0.24), glow)
-
-	# The wall delivery station: a steel box with a hatch the tube capsule drops out of.
-	var station := Node3D.new()
-	station.position = Vector3(1.35, 0.0, 0.05)
-	add_child(station)
-	_box(Vector3(0.42, 0.42, 0.22), Vector3(0.0, 1.0, 0.0), steel, Vector3.ZERO, station)
-	_box(Vector3(0.3, 0.03, 0.2), Vector3(0.0, 0.83, 0.0), dark, Vector3.ZERO, station)
-	var tube := _cyl(0.05, 0.25, steel)
-	tube.rotation_degrees = Vector3(90, 0, 0)
-	tube.position = Vector3(0.0, 1.5, -0.02)
-	station.add_child(tube)
-	var lamp := OmniLight3D.new()
-	lamp.light_color = Color(0.7, 0.9, 1.0)
-	lamp.light_energy = 0.5
-	lamp.omni_range = 1.6
-	lamp.shadow_enabled = false
-	lamp.position = Vector3(0.0, 1.3, 0.0)
-	station.add_child(lamp)
-	_delivery_slot = station.position + Vector3(0.0, 0.72, 0.14)
-
-	_shape(Vector3(0.5, 1.4, 0.4), Vector3(-0.8, 0.7, 0.0))
-	_shape(Vector3(0.5, 1.4, 0.4), Vector3(0.8, 0.7, 0.0))
-	_shape(Vector3(0.5, 1.4, 0.3), Vector3(1.35, 0.7, 0.05))
+	head.position = Vector3(DRAWER_X, 2.55, 0.08)
+	_price = _label("ORDERS BY FAX", 30, Color(0.8, 1.0, 0.85))
+	_price.position = Vector3(DRAWER_X, 2.35, 0.08)
 
 
-## HUB REDESIGN: the pharmacist, standing idle behind the grate. Previously a plain capsule
-## silhouette; now the actual Night Nurse model (docs/CONTRACTS.md "The Night Nurse's model"),
-## reused purely as set dressing -- no Monster node, no brain, no AI, never watched, never a
-## threat. Chosen over the capsule for two reasons: it costs nothing extra (her asset and
-## materials are already warmed for the real encounters, `scripts/warmup.gd`) and it plants a
-## quiet, deniable foreshadowing beat ("was that her?") consistent with the design doc's
-## "you never clearly see the pharmacist" line, without adding any mechanic -- she just stands in
-## Idle, dimly lit, and the same drift/duck-out-of-view timing the old silhouette used still hides
-## her most of the time so she never reads as a real encounter.
+func _bar_xform(x: float, from_y: float, to_y: float) -> Transform3D:
+	var h := to_y - from_y
+	return Transform3D(Basis().scaled(Vector3(1.0, h / HEIGHT, 1.0)), Vector3(x, from_y + h * 0.5, 0.0))
+
+
+## The pickup drawer: a steel sleeve through a slot in the bars at counter height, framed on the
+## lobby side, and a tray that slides out through it. Its floor is a moving collider so whatever is
+## served rides out on it.
+func _build_drawer() -> void:
+	var steel := _mat("steel", Color(0.42, 0.44, 0.46), 0.35, 0.7)
+	var dark := _mat("drawer_dark", Color(0.16, 0.17, 0.18), 0.5, 0.5)
+	var lamp := _mat("drawer_lamp", Color(0.1, 0.25, 0.12), 0.4, 0.0, Color(0.35, 1.0, 0.45), 0.001)
+	var sleeve_h := SLOT_TOP - SLOT_BOTTOM
+	var mid_y := (SLOT_TOP + SLOT_BOTTOM) * 0.5
+	# The sleeve: sides, roof and floor, 0.9 m deep, the slot's size.
+	for s in [-1.0, 1.0]:
+		_box(Vector3(0.04, sleeve_h, 0.9), Vector3(DRAWER_X + s * (SLOT_HALF_W - 0.02), mid_y, 0.0), dark)
+	_box(Vector3(SLOT_HALF_W * 2.0, 0.04, 0.9), Vector3(DRAWER_X, SLOT_TOP - 0.02, 0.0), dark)
+	_box(Vector3(SLOT_HALF_W * 2.0, 0.04, 0.9), Vector3(DRAWER_X, SLOT_BOTTOM + 0.02, 0.0), dark)
+	# A steel frame round the slot on the lobby face, and the "ready" lamp above it.
+	_box(Vector3(SLOT_HALF_W * 2.0 + 0.16, 0.08, 0.05), Vector3(DRAWER_X, SLOT_TOP + 0.04, 0.06), steel)
+	_box(Vector3(SLOT_HALF_W * 2.0 + 0.16, 0.08, 0.05), Vector3(DRAWER_X, SLOT_BOTTOM - 0.04, 0.06), steel)
+	for s in [-1.0, 1.0]:
+		_box(Vector3(0.08, sleeve_h + 0.16, 0.05), Vector3(DRAWER_X + s * (SLOT_HALF_W + 0.04), mid_y, 0.06), steel)
+	_box(Vector3(0.12, 0.05, 0.02), Vector3(DRAWER_X + 0.3, SLOT_TOP + 0.13, 0.09), lamp)
+	_drawer = Node3D.new()
+	_drawer.name = "Drawer"
+	add_child(_drawer)
+	_box(Vector3(0.78, 0.04, 0.7), Vector3(0, 0.0, 0), steel, _drawer)
+	_box(Vector3(0.78, 0.22, 0.03), Vector3(0, 0.1, 0.34), steel, _drawer)       # the front plate
+	_box(Vector3(0.22, 0.03, 0.05), Vector3(0, 0.12, 0.38), dark, _drawer)       # the handle
+	for s in [-1.0, 1.0]:
+		_box(Vector3(0.03, 0.12, 0.7), Vector3(s * 0.375, 0.06, 0), steel, _drawer)
+	var tray := AnimatableBody3D.new()
+	tray.name = "Tray"
+	tray.collision_layer = C.L_WORLD
+	tray.collision_mask = 0
+	tray.sync_to_physics = false
+	_drawer.add_child(tray)
+	_shape(Vector3(0.78, 0.04, 0.7), Vector3.ZERO, tray)
+	_shape(Vector3(0.78, 0.22, 0.03), Vector3(0, 0.1, 0.34), tray)
+	_apply_drawer()
+
+
+func _apply_drawer() -> void:
+	if _drawer == null:
+		return
+	var z := lerpf(-0.45, 0.5, ease(_drawer_k, -1.6))
+	_drawer.position = Vector3(DRAWER_X, DRAWER_Y, z)
+	var lamp: StandardMaterial3D = _mats.get("drawer_lamp")
+	if lamp != null:
+		lamp.emission_energy_multiplier = 2.2 if _drawer_state == "open" else 0.0
+
+
+## The fax machine the orders come out of: on a little stand just behind the bars, where the lobby can
+## watch the page print.
+func _build_fax() -> void:
+	var dark := _mat("fax_dark", Color(0.07, 0.07, 0.08), 0.6)
+	var steel := _mat("steel", Color(0.42, 0.44, 0.46), 0.35, 0.7)
+	var paper := _mat("paper", Color(0.88, 0.87, 0.82), 0.9)
+	var at := _fax_at
+	_box(Vector3(0.6, 0.04, 0.45), at + Vector3(0, 0.9, 0), steel)
+	for sx in [-0.26, 0.26]:
+		_box(Vector3(0.04, 0.9, 0.04), at + Vector3(sx, 0.45, 0), steel)
+	_box(Vector3(0.4, 0.14, 0.32), at + Vector3(0, 0.99, 0), dark)
+	_box(Vector3(0.28, 0.01, 0.14), at + Vector3(0, 1.065, 0.12), _mat("fax_tray", Color(0.7, 0.66, 0.56), 0.6))
+	_fax_page = _box(Vector3(0.21, 0.004, 0.28), at + Vector3(0, 1.07, 0.18), paper)
+	_fax_page.visible = false
+
+
+## The attendant: the Night Nurse model, waiting behind the shelves until an order comes in.
 func _build_pharmacist() -> void:
-	_nurse_base_x = -0.15
 	_nurse = MonsterModelScript.new()
 	_nurse.name = "Pharmacist"
 	add_child(_nurse)
 	_nurse.setup("night_nurse")
-	# Her rig's front is -Z (docs/CONTRACTS.md); turn her to face the grate/the player's side.
-	_nurse.rotation_degrees.y = 180.0
-	_nurse.position = Vector3(_nurse_base_x, 0.0, -1.05)
+	_nurse.position = _hide
+	_face(Vector3(0, 0, 1))
+	# The page she carries: pinned to her raised right hand every frame (_hold_page).
+	var paper := _mat("paper", Color(0.88, 0.87, 0.82), 0.9)
+	_nurse_page = _box(Vector3(0.24, 0.32, 0.006), Vector3.ZERO, paper)
+	_nurse_page.top_level = true
+	_nurse_page.visible = false
 
 
-func _cyl(r: float, h: float, mat: Material, sides := 12) -> MeshInstance3D:
-	var mi := MeshInstance3D.new()
-	var c := CylinderMesh.new()
-	c.top_radius = r
-	c.bottom_radius = r
-	c.height = h
-	c.radial_segments = sides
-	c.rings = 1
-	mi.mesh = c
-	mi.material_override = mat
-	return mi
+## Turn her to face a local direction (her model's front is -Z).
+func _face(dir: Vector3) -> void:
+	if _nurse == null or Vector2(dir.x, dir.z).length() < 0.001:
+		return
+	_nurse.rotation.y = atan2(-dir.x, -dir.z)
 
 
 func _process(delta: float) -> void:
-	_shape_t += delta
-	if _nurse != null:
-		# A slow, small drift, like someone shifting their weight. Never a clear silhouette: she
-		# ducks out of view (behind the counter wall, out of the grate's sightline) now and then.
-		_nurse.position.x = _nurse_base_x + sin(_shape_t * 0.35) * 0.08
-		_nurse.visible = sin(_shape_t * 0.19) > -0.7
-	var g := _game()
-	if _price != null and g != null:
-		var text := "PLACEBO PILLS  $%d/10" % int(g.PILL_PRICE)
-		if _price.text != text:
-			_price.text = text
-	_tick_delivery(delta)
+	_tick_order(delta)
+	_tick_drawer(delta)
+	_hold_page(delta)
+
+
+## While she has the fax (reading it, carrying it back), her right hand comes up and the page sits in
+## it, turned toward her face.
+func _hold_page(delta: float) -> void:
+	var poser = _nurse.get("nurse") if _nurse != null else null
+	var holding := _phase == "read" or _phase == "back"
+	if poser != null:
+		poser.hold = move_toward(float(poser.hold), 1.0 if holding else 0.0, delta / 0.35)
+	if _nurse_page == null or not _nurse_page.visible or poser == null:
+		return
+	var hand: Vector3 = poser.held_hand_world
+	if hand == Vector3.ZERO:
+		return
+	# Her front in the world (the model's -Z); the page stands up in her fingers, a little in front of
+	# her hand, tipped back toward her face.
+	var fwd: Vector3 = -(_nurse.global_basis.z)
+	fwd.y = 0.0
+	if fwd.length() < 0.01:
+		return
+	fwd = fwd.normalized()
+	var at := hand + Vector3.UP * 0.1 + fwd * 0.06
+	var basis := Basis.looking_at(fwd, Vector3.UP).rotated(fwd.cross(Vector3.UP).normalized(), -0.35)
+	_nurse_page.global_transform = Transform3D(basis, at)
 
 
 # ---------------------------------------------------------------------------
-# tube delivery
+# orders
 
-## Host and every machine that shows it: queue a capsule delivery. Called by game.buy_pills()
-## right after the money is taken; DELIVER_SECONDS later a capsule thunks into the station and
-## the host drops the item there. The animation itself is harmless to run on every machine (it
-## reads the queue locally), but only the host actually spawns the world item.
+## Every machine, when an order is placed (host: game.order_pharmacy; clients: its broadcast):
+## queue it. `items`: [{kind, count}].
+func queue_order(items: Array) -> void:
+	_queue.append({"items": items.duplicate(true)})
+	if terminal != null and is_instance_valid(terminal):
+		terminal.play_send()
+
+
+## Older callers: one item.
 func queue_delivery(kind: String, count: int) -> void:
-	_queue.append({"kind": kind, "count": count, "t": DELIVER_SECONDS})
+	queue_order([{"kind": kind, "count": count}])
 
 
-func _tick_delivery(delta: float) -> void:
-	if _queue.is_empty():
-		_capsule_t = 0.0
-		if _capsule != null:
-			_capsule.visible = false
+## Where a served item sits: on the drawer's tray, pulled out into the lobby.
+func pickup_point() -> Vector3:
+	return global_transform * Vector3(DRAWER_X, DRAWER_Y + 0.08, 0.5)
+
+
+func busy() -> bool:
+	return _phase != "" or not _queue.is_empty()
+
+
+func _start(phase: String) -> void:
+	_phase = phase
+	_phase_t = 0.0
+	match phase:
+		"print":
+			_fax_page.visible = true
+			_sfx("print_line", _fax_at + Vector3.UP)
+		"fetch":
+			_walk([_hide, _corner_back, _corner_front, _at_fax])
+		"read":
+			_fax_page.visible = false
+			_nurse_page.visible = true
+			_face(_fax_at - _at_fax)
+			_sfx("print_feed", _at_fax + Vector3.UP)
+		"back":
+			_walk([_at_fax, _corner_front, _corner_back, _hide])
+		"gather":
+			_nurse_page.visible = false
+		"bring":
+			_walk([_hide, _corner_back, _corner_front, _at_drawer])
+		"place":
+			_face(Vector3(0, 0, 1))
+		"return":
+			_walk([_at_drawer, _corner_front, _corner_back, _hide])
+
+
+func _walk(points: Array) -> void:
+	_path = PackedVector3Array(points)
+	_path_len = 0.0
+	for i in range(1, _path.size()):
+		_path_len += _path[i].distance_to(_path[i - 1])
+	if _nurse != null:
+		_nurse.play("walk", NURSE_SPEED)
+
+
+## Position along the current walk after `d` metres, and the direction there.
+func _along(d: float) -> Array:
+	var left := d
+	for i in range(1, _path.size()):
+		var seg := _path[i].distance_to(_path[i - 1])
+		if left <= seg or i == _path.size() - 1:
+			var k := clampf(left / maxf(seg, 0.001), 0.0, 1.0)
+			return [_path[i - 1].lerp(_path[i], k), _path[i] - _path[i - 1]]
+		left -= seg
+	return [_path[_path.size() - 1], Vector3.ZERO]
+
+
+func _tick_order(delta: float) -> void:
+	if _phase == "":
+		if _queue.is_empty():
+			return
+		_order = _queue.pop_front()
+		_start("print")
 		return
-	var e: Dictionary = _queue[0]
-	e.t -= delta
-	if _capsule == null:
-		_capsule = _cyl(0.045, 0.14, _mat("capsule", Color(0.85, 0.7, 0.2), 0.35, 0.3))
-		_capsule.rotation_degrees = Vector3(90, 0, 0)
-		add_child(_capsule)
-	_capsule.visible = true
-	_capsule.position = _delivery_slot + Vector3.UP * clampf(e.t / DELIVER_SECONDS, 0.0, 1.0) * 0.5
-	if e.t <= 0.0:
-		_queue.pop_front()
-		_capsule.visible = false
-		var g := _game()
-		if g != null and g.is_host():
-			g._sound("economy_buy", global_position + _delivery_slot)
-			var xf := Transform3D(Basis(), global_position + _delivery_slot + Vector3.UP * 0.05)
-			var it = g._spawn_item(String(e.kind), int(e.count), xf, WorldItem.State.LOOSE)
-			if it != null:
-				it.value = 0
-	else:
-		_queue[0] = e
+	_phase_t += delta
+	match _phase:
+		"print":
+			# The page creeps out of the machine as it prints.
+			var k := clampf(_phase_t / PRINT_SECONDS, 0.0, 1.0)
+			_fax_page.position = _fax_at + Vector3(0, 1.07, 0.02 + 0.16 * k)
+			if _phase_t >= PRINT_SECONDS:
+				_start("fetch")
+		"fetch", "back", "bring", "return":
+			var d := _phase_t * NURSE_SPEED
+			var at: Array = _along(d)
+			_nurse.position = at[0]
+			_face(at[1])
+			if d >= _path_len:
+				_nurse.play("idle")
+				match _phase:
+					"fetch": _start("read")
+					"back": _start("gather")
+					"bring": _start("place")
+					"return":
+						_phase = ""
+						_face(Vector3(0, 0, 1))
+		"read":
+			if _phase_t >= READ_SECONDS:
+				_start("back")
+		"gather":
+			if _phase_t >= GATHER_SECONDS:
+				_start("bring")
+		"place":
+			if _phase_t >= PLACE_SECONDS:
+				_serve(_order)
+				_start("return")
+
+
+## The order goes into the drawer: it slides out, and once it's out the host puts the items on its
+## tray.
+func _serve(order: Dictionary) -> void:
+	_drawer_state = "opening"
+	_serving = order
+	_sfx("economy_buy", Vector3(DRAWER_X, DRAWER_Y, 0.3))
+
+
+func _spawn_served(order: Dictionary) -> void:
+	var g := _game()
+	if g == null or not g.is_host():
+		return
+	var n := 0
+	for e in order.get("items", []):
+		var off := Vector3(-0.18 + 0.18 * (n % 3), 0.04 + 0.08 * (n / 3), 0.0)
+		var xf := Transform3D(Basis(), pickup_point() + off)
+		var it = g._spawn_item(String(e.kind), int(e.count), xf, WorldItem.State.LOOSE)
+		if it != null:
+			it.value = 0
+		n += 1
+
+
+func _sfx(cue: String, local_at: Vector3) -> void:
+	if is_inside_tree() and DisplayServer.get_name() != "headless":
+		Audio.play(cue, global_transform * local_at, -4.0, 0.05)
+
+
+# ---------------------------------------------------------------------------
+# the pickup drawer
+
+func _tick_drawer(delta: float) -> void:
+	match _drawer_state:
+		"opening":
+			_drawer_k = minf(1.0, _drawer_k + delta / DRAWER_SLIDE)
+			if _drawer_k >= 1.0:
+				_drawer_state = "open"
+				_open_t = 0.0
+				_spawn_served(_serving)
+				_serving = {}
+		"open":
+			_open_t += delta
+			if _open_t >= DRAWER_MIN_OPEN and not _item_in_drawer():
+				_drawer_state = "closing"
+		"closing":
+			_drawer_k = maxf(0.0, _drawer_k - delta / DRAWER_SLIDE)
+			if _drawer_k <= 0.0:
+				_drawer_state = "shut"
+	_apply_drawer()
+
+
+func _item_in_drawer() -> bool:
+	var g := _game()
+	if g == null:
+		return false
+	var at := pickup_point()
+	for it in g.world_items.values():
+		if is_instance_valid(it) and it.state == WorldItem.State.LOOSE and (it.global_position as Vector3).distance_to(at) < 0.6:
+			return true
+	return false

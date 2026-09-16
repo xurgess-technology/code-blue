@@ -1110,7 +1110,9 @@ func _update_aim_core() -> void:
 	if carrying != 0:
 		var who = game.players.get(carrying) if game != null else null
 		var drop_text := "Put %s down" % (who.player_name if who != null else "them")
-		if node == null or not node.has_meta("interact_id") or String(node.get_meta("interact_id")) != "player_table":
+		# Hub rebuild: on the hub any free patient table ("table", "table_<i>") takes them too.
+		var tid := String(node.get_meta("interact_id")) if node != null and node.has_meta("interact_id") else ""
+		if tid != "player_table" and not tid.begins_with("table"):
 			aim_prompt = drop_text
 			return
 		var tp: String = node.interact_prompt(self)

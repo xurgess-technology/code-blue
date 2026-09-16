@@ -4,9 +4,9 @@ extends Control
 ## solo, host, or join.
 ##
 ## Same paper as the launch printout (scripts/fax_printer.gd). At launch, main.gd hands over with
-## feed_in() as the stamped admission page leaves the top of the screen: this sheet feeds up out of
-## the printer at the speed that page left at while the printer slides away off the bottom, leaving
-## the sheet centred on its own. Coming back from a shift, it's simply there. The choices are real
+## feed_in() once the stamped admission page has ejected off the top: this sheet, the next page, feeds
+## up out of the printer and slows to a stop, standing out of the slot. Coming back from a shift, it's
+## simply there. The choices are real
 ## Buttons and LineEdits (focus, keyboard, disabled all work) drawn as ink on the paper.
 
 signal chose_solo(player_name: String)
@@ -23,20 +23,21 @@ signal chose_dev(player_name: String, host: bool)
 const Fax := preload("res://scripts/fax_printer.gd")
 const DevCodeScript := preload("res://scripts/dev/dev_code.gd")
 
-## Seconds the sheet takes to feed in when nothing hands it a speed; the hand-off's own duration
-## comes from the speed the launch page left at, clamped to this range.
-const FEED_IN := 1.0
-const FEED_MIN := 0.5
-const FEED_MAX := 1.4
+## Seconds the sheet takes to feed up out of the printer and settle.
+const FEED_IN := 1.3
 const FEED_TICK := 0.11
 const MAX_STEP := 1.0 / 30.0
 const OPTION_H := 34.0
+## Paper left above the sheet's first line, and between its last line and the printer's slot.
+const PAGE_MARGIN := 30.0
+const BOTTOM_PAD := 22.0
 
 var dev_code: Node = null
 var _name_edit: LineEdit
 var _addr_edit: LineEdit
 var _status: Label
 var _note_tag: Label
+var _header: Label
 var _buttons: Array[Button] = []
 var _options: Array = []
 
@@ -58,12 +59,22 @@ var _last_usec := 0
 
 
 func _ready() -> void:
-	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_font = Fax.make_font()
+	_fit()
+	get_viewport().size_changed.connect(_fit)
 	_build()
 	_last_usec = Time.get_ticks_usec()
 	resized.connect(_layout)
 	_layout.call_deferred()
+
+
+## Drawn at the fax screens' scale (the menu's own CanvasLayer, set up in main.gd).
+func _fit() -> void:
+	var layer := get_parent() as CanvasLayer
+	if layer != null:
+		Fax.fit_layer(layer, self)
+	else:
+		set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 
 func _build() -> void:
@@ -92,7 +103,8 @@ func _build() -> void:
 	_clip.add_child(_sheet)
 
 	var dt := Time.get_datetime_dict_from_system()
-	_sheet.add_child(_ink(">> FAX  %04d-%02d-%02d  %02d:%02d  PAGE 2 OF 2" % [dt.year, dt.month, dt.day, dt.hour, dt.minute], 16, Fax.INK_FAINT))
+	_header = _ink(_header_text(2), 16, Fax.INK_FAINT)
+	_sheet.add_child(_header)
 	_sheet.add_child(_ink("COUNTY GENERAL  /  NIGHT SHIFT SIGN-IN", Fax.FONT_SIZE, Fax.INK))
 
 	_title = Control.new()
@@ -298,14 +310,23 @@ class FaxOption extends Button:
 
 # -- feeding and layout ----------------------------------------------------------------------
 
-## The launch printout's hand-off: the sheet starts inside the printer and feeds up, carrying on the
-## paper's movement from `scroll_px` at `speed` px/s and slowing to a stop.
-func feed_in(scroll_px := 0.0, speed := 0.0) -> void:
+## The sheet's fax header: the page after however many the launch chart took.
+func _header_text(page: int) -> String:
+	var dt := Time.get_datetime_dict_from_system()
+	return ">> FAX  %04d-%02d-%02d  %02d:%02d  PAGE %d" % [dt.year, dt.month, dt.day, dt.hour, dt.minute, page]
+
+
+## The launch printout's hand-off: the sheet starts inside the printer and feeds up, slowing to a
+## stop. `scroll_px` keeps the paper's green bars in phase; `page` is its number.
+func feed_in(scroll_px := 0.0, _speed := 0.0, page := 2) -> void:
+	if _header != null:
+		_header.text = _header_text(page)
 	if DisplayServer.get_name() == "headless":
 		return
 	_base_scroll = scroll_px
 	_feed_dist = _rest_offset()
-	_feed_dur = clampf(2.0 * _feed_dist / speed, FEED_MIN, FEED_MAX) if speed > 0.0 else FEED_IN
+	# A fresh sheet out of the slot at its own pace: the page before it has already ejected.
+	_feed_dur = FEED_IN
 	_feed_t = 0.0
 	_feed_p = 0.0
 	_feed_tick = 0.0
@@ -320,18 +341,12 @@ func is_feeding() -> bool:
 ## How far below its resting place the sheet starts: its top edge just inside the slot.
 func _rest_offset() -> float:
 	var l := Fax.layout(size, _font)
-	return float(l.slot_y) - _rest_y(l)
+	return float(l.slot_y) - _rest_y(l) + PAGE_MARGIN
 
 
-## At rest the sheet sits centred on the screen, the printer gone.
-func _rest_y(_l: Dictionary) -> float:
-	return maxf(20.0, (size.y - _sheet.get_combined_minimum_size().y) * 0.5)
-
-
-## How far the printer has slid down: none as the hand-off starts, off the bottom by the time the
-## sheet is most of the way up. The paper runs down to wherever it is.
-func _printer_drop(l: Dictionary) -> float:
-	return (size.y - float(l.slot_y) + 24.0) * smoothstep(0.0, 0.75, _feed_p)
+## At rest the sheet stands out of the printer, its last line just above the slot.
+func _rest_y(l: Dictionary) -> float:
+	return float(l.slot_y) - _sheet.get_combined_minimum_size().y - BOTTOM_PAD
 
 
 func _layout() -> void:
@@ -339,7 +354,7 @@ func _layout() -> void:
 		return
 	var l := Fax.layout(size, _font)
 	_clip.position = Vector2(l.px, 0.0)
-	_clip.size = Vector2(l.paper_w, float(l.slot_y) + _printer_drop(l))
+	_clip.size = Vector2(l.paper_w, float(l.slot_y))
 	var down := (1.0 - _feed_p) * _feed_dist
 	_sheet.position = Vector2(Fax.MARGIN, _rest_y(l) + down)
 	_sheet.size = Vector2(l.text_w, _sheet.get_combined_minimum_size().y)
@@ -355,7 +370,7 @@ func _process(_delta: float) -> void:
 		return
 	_feed_t += dt
 	var t := minf(_feed_t / _feed_dur, 1.0)
-	_feed_p = 1.0 - (1.0 - t) * (1.0 - t)   # decelerating from the launch page's speed
+	_feed_p = 1.0 - (1.0 - t) * (1.0 - t)   # decelerating to a stop
 	_feed_tick -= dt
 	if _feed_tick <= 0.0 and t < 0.85:
 		_feed_tick = FEED_TICK
@@ -369,24 +384,16 @@ func _process(_delta: float) -> void:
 func _draw_paper() -> void:
 	var sz := _canvas.size
 	var l := Fax.layout(sz, _font)
-	var drop := _printer_drop(l)
-	Fax.draw_paper(_canvas, sz, l, _base_scroll + _feed_p * _feed_dist, 1.0, float(l.slot_y) + drop)
-	Fax.draw_printer(_canvas, sz, l, _font, float(l.tx), "RECEIVING", Fax.LCD_TEXT, 1.0, drop)
+	# A page just the size of the sign-in sheet, a margin above its first line, running into the slot.
+	var page_top := _sheet.position.y - PAGE_MARGIN
+	Fax.draw_paper(_canvas, sz, l, _base_scroll + _feed_p * _feed_dist, 1.0, INF, true, page_top)
+	var status := "RECEIVING" if _feed_t >= 0.0 else "READY"
+	Fax.draw_printer(_canvas, sz, l, _font, float(l.tx), status, Fax.LCD_TEXT, 1.0)
 
 
-## The same top fade as the launch page while this sheet feeds in (so nothing pops at the hand-off),
-## pulling back to just above the sheet's first line as it comes to rest.
+## Nothing over the sheet any more: the page ends at its own top edge (kept for the node order).
 func _draw_over() -> void:
-	var sz := _over.size
-	var l := Fax.layout(sz, _font)
-	var rest_h := maxf(0.0, _rest_y(l) - 6.0)
-	var fade_h := lerpf(sz.y * 0.5, rest_h, _feed_p)
-	if fade_h <= 1.0:
-		return
-	var top := Color(Fax.ROOM, 0.95)
-	var clear := Color(Fax.ROOM, 0.0)
-	_over.draw_polygon(PackedVector2Array([Vector2(0, 0), Vector2(sz.x, 0), Vector2(sz.x, fade_h), Vector2(0, fade_h)]),
-			PackedColorArray([top, top, clear, clear]))
+	pass
 
 
 func _draw_title() -> void:

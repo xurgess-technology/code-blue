@@ -1443,8 +1443,26 @@ static func _fill_contract(gen: Dictionary, info: Dictionary) -> void:
 	if spots.has("or_screen"):
 		var o: Dictionary = spots.or_screen
 		info["or_screen"] = {"position": _w(o.pos, float(o.height)), "yaw": float(o.yaw), "size": o.size}
+	# Hub rebuild, chunk 3: the waiting room's seats (where the Night Nurse sits, one per shift).
+	if spots.has("waiting_seats"):
+		var seats: Array = []
+		for s in spots.waiting_seats:
+			seats.append({"position": _w(s.pos), "yaw": float(s.yaw)})
+		info["waiting_seats"] = seats
+	if spots.has("waiting_corners"):
+		var corners: Array = []
+		for s in spots.waiting_corners:
+			corners.append({"position": _w(s.pos), "yaw": float(s.yaw)})
+		info["waiting_corners"] = corners
+	# Hub rebuild, chunk 2: one monitor per OR table; `table` is its index into `tables`.
+	if spots.has("or_screens"):
+		var screens: Array = []
+		for o in spots.or_screens:
+			screens.append({"position": _w(o.pos, float(o.height)), "yaw": float(o.yaw), "size": o.size, "table": int(o.table)})
+		info["or_screens"] = screens
 	if spots.has("phone"):
-		info["phone"] = {"position": _w(spots.phone.pos, float(spots.phone.height)), "yaw": float(spots.phone.yaw)}
+		info["phone"] = {"position": _w(spots.phone.pos, float(spots.phone.height)), "yaw": float(spots.phone.yaw),
+				"desk": bool(spots.phone.get("desk", false))}   # hub: a desk phone on the triage counter
 	if spots.has("entrance"):
 		info["entrance"] = {"position": _w(spots.entrance.pos), "yaw": float(spots.entrance.yaw)}
 	var er: Rect2i = gen.entrance_rect

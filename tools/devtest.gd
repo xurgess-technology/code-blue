@@ -335,15 +335,11 @@ func _run_solo() -> void:
 	if not sold:
 		sold = await _until(func(): return game.money != money_before + 1000, 3.0)
 	_check(sold and game.money == money_before + 1000 + value, "the dev room's furnace burns the defibrillator for $%d" % value)
-	var kiosk: Node3D = game.economy.pharmacy.kiosk
-	_stand(kiosk.global_position + kiosk.global_basis.z * 1.3, 0.0)
-	me.bot_aim_id = "pharmacy_kiosk"
-	await _frames(3)
+	var fax: Node3D = game.economy.pharmacy.terminal
+	_check(fax != null and game.find_interactable("pharmacy_fax") != null, "the dev room's pharmacy has its fax terminal")
 	var money_before_pills: int = game.money
-	me.bot_press += 1
-	await _frames(4)
-	me.bot_aim_id = ""
-	_check(game.money == money_before_pills - game.PILL_PRICE, "the dev room's pharmacy sells a bottle of pills")
+	game.economy.request_order({"placebo_pills": 1})
+	_check(game.money == money_before_pills - game.PILL_PRICE, "the dev room's pharmacy takes a faxed order for pills")
 	dev.request("money", {"reset": true})
 	_check(game.money == 0, "the panel's money reset clears money")
 
