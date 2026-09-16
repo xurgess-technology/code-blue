@@ -596,6 +596,8 @@ table: Vector3                  # == tables[0].position, the first patient table
 table_yaw: float                # the tables' long axis runs along X (0.0)
 clock: Vector3                  # break room; clock_pos() unchanged (downed removed the Re-Gen Pod)
 shelf, lectern: {position, yaw}; lectern_node
+printer: {position, yaw}        # hub rebuild chunk 4: the break room case printer (front +Z); without it the
+                                # loop puts the printer 1 m beside the lectern (game.loop.printer, case_printer.gd)
 lights: [{tile, position, mode, node}]   # node's child OmniLight3D "Bulb"; street lamps and canopy lights are
                                          # included (mode 0) but are not in group "fixture" and never flicker
 containers, loose_anchors       # see Containers; both carry wing and depth

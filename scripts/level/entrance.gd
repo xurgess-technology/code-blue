@@ -14,7 +14,7 @@ extends RefCounted
 ## Chunk 1 of the hub rebuild is the building: walls, rooms, doors and today's working pieces in
 ## their new places. The OR's three monitored tables, the triage desk and its phone, the waiting
 ## room's Night Nurse, the pharmacy's bars and pickup drawer, the break room's printer and the
-## hallway's bodies come in later chunks.
+## hallway's bodies, blood and dead lights (chunk 5).
 ##
 ## Monsters never spawn here and nothing a case needs is ever placed here.
 
@@ -159,6 +159,9 @@ static func build(st: S, ox: int, oy: int) -> void:
 	var lectern_pos := Vector2(ox + 10.0, oy + 19.0 - 0.32 / Defs.TILE)
 	st.spots["lectern"] = {"pos": lectern_pos, "yaw": Defs.yaw_facing(N)}
 	st.blocked[st.idx(ox + 10, oy + 18)] = 1
+	# Chunk 4: the case printer on its stand beside the computer (the loop builds it; its front, +Z,
+	# faces the room).
+	st.spots["printer"] = {"pos": Vector2(ox + 10.0 + 0.95 / Defs.TILE, oy + 19.0 - 0.3 / Defs.TILE), "yaw": Defs.yaw_facing(SOUTH)}
 	put.call("notice_board", 7.0, 19.0, N, break_room)
 	put.call("plant", 12.6, 14.5, SOUTH, break_room)
 
@@ -278,12 +281,32 @@ static func build(st: S, ox: int, oy: int) -> void:
 		"crematorium": {"pos": Vector2(ox + 29.0, oy + 9.0), "yaw": Defs.yaw_facing(-WEST)},
 	}
 
+	# ---- the hallway (x 1-31, y 1-4): chunk 5, the dead parked in it --------------------------------
+	# Set dressing only. Blocking pieces stay in rows 1 and 4 against the walls, so rows 2-3 are one
+	# clear lane end to end; nothing within two tiles of the wing doorways or the spine.
+	# West half: a body bag on a gurney, one on the floor with the drag mark it left, a gurney
+	# knocked over by the spine with blood beside it.
+	put.call("gurney_bag", 5.0, 1.27, E)
+	put.call("body_bag", 8.2, 4.62, E)
+	put.call("blood_trail", 9.9, 4.45, E)
+	put.call("gurney_toppled", 12.0, 1.34, E)
+	put.call("blood_pool", 12.4, 2.3, N)
+	# East half: a wheelchair left in the lane, a sheeted body on a gurney, another bag, more blood.
+	put.call("wheelchair", 20.8, 3.62, Vector2(-0.6, 0.8).normalized())
+	put.call("gurney_body", 24.5, 1.27, WEST)
+	put.call("blood_pool", 27.6, 4.2, E)
+	put.call("gurney_bag", 27.8, 4.73, WEST)
+	put.call("body_bag", 29.2, 1.25, WEST)
+
 	# ---- lights -------------------------------------------------------------------------------------
 	# The OR is always lit, and brighter than anywhere else: the one room that still works.
 	for p in [Vector2i(7, 10), Vector2i(10, 7), Vector2i(12, 10)]:
 		st.lights.append({"tile": Vector2i(ox + p.x, oy + p.y), "zone": z, "mode": 0, "bright": true})
-	for p in [Vector2i(2, 7), Vector2i(2, 11), Vector2i(4, 2), Vector2i(10, 3), Vector2i(16, 2), Vector2i(22, 3),
-			Vector2i(28, 2), Vector2i(16, 9), Vector2i(16, 16), Vector2i(4, 16),
+	# Chunk 5: the hallway's fixtures are set, not rolled: two flicker, two are dead, the one over the
+	# spine still works.
+	for l in [[Vector2i(4, 2), 1], [Vector2i(10, 3), 2], [Vector2i(16, 2), 0], [Vector2i(22, 3), 1], [Vector2i(28, 2), 2]]:
+		st.lights.append({"tile": Vector2i(ox + l[0].x, oy + l[0].y), "zone": z, "mode": l[1]})
+	for p in [Vector2i(2, 7), Vector2i(2, 11), Vector2i(16, 9), Vector2i(16, 16), Vector2i(4, 16),
 			Vector2i(10, 16), Vector2i(4, 22), Vector2i(8, 25), Vector2i(4, 27), Vector2i(16, 22), Vector2i(20, 25),
 			Vector2i(16, 27), Vector2i(19, 30), Vector2i(27, 22), Vector2i(27, 26)]:
 		st.lights.append({"tile": Vector2i(ox + p.x, oy + p.y), "zone": z, "mode": -1})

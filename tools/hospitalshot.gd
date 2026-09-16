@@ -61,6 +61,13 @@ func _ready() -> void:
 		["hub_lobby_in", _pose_hub.bind(Vector2(19.5, 31.0), Vector2(16.0, 19.0), 1.2)],
 		["hub_spine", _pose_hub.bind(Vector2(16.5, 21.0), Vector2(16.5, 2.0), 1.4)],
 		["hub_hallway", _pose_hub.bind(Vector2(2.0, 2.5), Vector2(31.0, 2.5), 1.4)],
+		["hub_hallway_back", _pose_hub.bind(Vector2(31.0, 2.8), Vector2(1.0, 2.5), 1.2)],
+		["hub_hallway_west", _pose_hub.bind(Vector2(14.0, 3.2), Vector2(4.0, 2.2), 0.4)],
+		["hub_hallway_east", _pose_hub.bind(Vector2(18.5, 2.2), Vector2(28.0, 3.4), 0.4)],
+		["hub_hall_bag", _pose_hub.bind(Vector2(7.2, 3.3), Vector2(5.0, 1.3), 0.5)],
+		["hub_hall_drag", _pose_hub.bind(Vector2(12.5, 3.0), Vector2(8.5, 4.6), 0.1)],
+		["hub_hall_toppled", _pose_hub.bind(Vector2(10.5, 3.6), Vector2(12.0, 1.6), 0.3)],
+		["hub_hall_east_bodies", _pose_hub.bind(Vector2(22.5, 2.6), Vector2(27.8, 3.6), 0.6)],
 		["hub_or", _pose_hub.bind(Vector2(13.0, 11.8), Vector2(5.5, 7.5), 0.9)],
 		["hub_storage", _pose_hub.bind(Vector2(6.0, 7.5), Vector2(1.5, 7.0), 1.0)],
 		["hub_crematorium", _pose_hub.bind(Vector2(19.8, 9.0), Vector2(29.0, 9.0), 1.3)],
@@ -75,6 +82,10 @@ func _ready() -> void:
 		["hub_drawer", _pose_drawer],
 		["hub_nurse_reading", _pose_nurse_reading],
 		["hub_fax_desk", _pose_fax_desk],
+		["hub_computer", _pose_hub.bind(Vector2(9.2, 16.4), Vector2(10.3, 18.9), 0.75)],
+		["hub_printing", _pose_printer.bind(1.6)],
+		["hub_printed", _pose_printer.bind(4.0)],
+		["hub_case_sheet", _pose_case_sheet],
 		["hub_waiting_nurse", _pose_waiting_nurse.bind(Vector3(0.9, 0.5, -2.6))],
 		["hub_waiting_nurse_side", _pose_waiting_nurse.bind(Vector3(-1.9, 0.3, -0.6))],
 		["hub_waiting_nurse_close", _pose_waiting_nurse.bind(Vector3(-0.7, 0.0, -1.3))],
@@ -198,6 +209,28 @@ func _pose_fax_form() -> bool:
 	ui._rows[0].box.checked = true
 	ui._rows[0].box.queue_redraw()
 	return true
+
+
+## Chunk 4: a call taken (an incoming case), the break room printer `after` seconds into printing it.
+func _pose_printer(after: float) -> bool:
+	if game.economy.fax_ui_open():
+		game.economy.fax_ui.close()
+	var pr: Node3D = game.loop.printer
+	if pr == null:
+		return false
+	if pr.sheet_ids().is_empty() and not pr.is_printing():
+		game.add_case({"patient_id": "bob", "ailment_id": "amputation", "table": -1, "state": "incoming"})
+	var from: Vector3 = pr.global_transform * Vector3(0.35, 0.0, 1.25)
+	_look_from(from, pr.global_transform * Vector3(0.0, 0.85, 0.0))
+	var t := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t < int(after * 1000.0):
+		await get_tree().process_frame
+	return true
+
+
+## Chunk 4: the case sheet reader open on that sheet.
+func _pose_case_sheet() -> bool:
+	return game.loop.open_case_sheets()
 
 
 ## The pickup drawer pulled out through its slot, seen from the lobby at an angle.

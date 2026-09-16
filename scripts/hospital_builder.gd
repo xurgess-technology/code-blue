@@ -1217,6 +1217,8 @@ static func _fill_landmarks(gen: Dictionary, info: Dictionary) -> void:
 		info["shelf"] = {"position": _w(spots.shelf.pos), "yaw": float(spots.shelf.yaw)}
 	if spots.has("lectern"):
 		info["lectern"] = {"position": _w(spots.lectern.pos), "yaw": float(spots.lectern.yaw)}
+	if spots.has("printer"):   # hub rebuild, chunk 4: the break room's case printer
+		info["printer"] = {"position": _w(spots.printer.pos), "yaw": float(spots.printer.yaw)}
 
 
 ## Builds at the "lectern" spot MapGen reserved in the break room (docs/CONTRACTS.md "Hospital"

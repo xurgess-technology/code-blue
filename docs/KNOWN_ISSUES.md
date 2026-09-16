@@ -1743,3 +1743,22 @@ Rebuilt around that:
   everyone back up"), carrycamtest's wall pull-in (3), controlstest's air/touchdown speed (2), and
   braintest's spoiled brain selling for full price in the furnace (1). nettest (via
   tools/nettest_run.gd) and looptest are run separately after the commit.
+
+## Hub rebuild, chunks 4 and 5: the break room, the hallway (2026-09-16)
+
+- **Break room (chunk 4):** the database terminal (`terminal_model.gd`) is a beige CRT on a sitting-height
+  office desk (tower, keyboard, mouse, mug); same interact id, same live screen. Beside it the case
+  printer (`scripts/loop/case_printer.gd`, built by the loop at `level_info.printer`, else 1 m beside
+  the lectern): every new "incoming" case prints a sheet (a page rises out of the printer line by line,
+  then drops into the tray). Local on every machine, derived from `game.cases`; cases first seen past
+  "incoming" go straight onto the pile. E on it (`case_sheet`, opened by main.gd) shows
+  `case_sheet_ui.gd`: one fax page per case from `OrScreenModel.build` (patient, condition, procedure
+  steps, supplies short on the shelf), refreshing twice a second; A/D pages, Esc/E closes.
+- The printer's own body is only an aim target (`C.L_INTERACT`); its stand is the solid part, kept
+  below 0.8 m, because the brains blender's counter search (`brains.gd` `_counter_spot`) takes any flat
+  0.8-1.1 m top near the time clock and had put the blender on the printer.
+- **Hallway (chunk 5):** set dressing in rows 1 and 4 only (rows 2-3 stay a clear lane): body bags on
+  gurneys (`gurney_bag`) and on the floor (`body_bag`), a sheeted body, a toppled gurney
+  (`gurney_toppled`, frame on its side with legs and wheels), a wheelchair in the lane, a drag mark
+  (`blood_trail`) and pools (`blood_pool`, glass surface so it reads wet). The five hallway fixtures
+  are fixed modes (two flicker, two dead, the spine's lit) instead of rolled.

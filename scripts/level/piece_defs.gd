@@ -77,6 +77,12 @@ const P := {
 	"covered_body": {"size": Vector3(0.6, 0.35, 1.8), "collide": false},
 	"gurney": {"size": Vector3(0.75, 0.85, 2.0), "block": true, "anchors": [[Vector3(0.0, 0.85, 0.0), "gurney"]]},
 	"gurney_body": {"size": Vector3(0.75, 1.1, 2.0), "block": true},
+	# Hub rebuild, chunk 5: the hallway's dead (set dressing, no mechanics).
+	"gurney_bag": {"size": Vector3(0.75, 1.05, 2.0), "block": true},
+	"body_bag": {"size": Vector3(0.62, 0.3, 1.95), "collide": false},
+	"gurney_toppled": {"size": Vector3(0.9, 0.75, 2.0), "block": true},
+	"blood_trail": {"size": Vector3(0.7, 0.02, 3.0), "collide": false},
+	"blood_pool": {"size": Vector3(1.2, 0.02, 1.0), "collide": false},
 	"instrument_cart": {"size": Vector3(1.27, 0.96, 0.75), "block": true, "anchors": [[Vector3(0.0, 0.96, 0.0), "tray"]]},
 	# ---- janitor ------------------------------------------------------------
 	"mop_sink": {"size": Vector3(0.9, 0.55, 0.7), "block": true},

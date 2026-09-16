@@ -288,11 +288,52 @@ const TEAL := Color(0.22, 0.42, 0.44)
 const WOOD := Color(0.42, 0.30, 0.20)
 const LAMINATE := Color(0.62, 0.60, 0.55)
 const RED := Color(0.55, 0.09, 0.07)
+const BODY_BAG := Color(0.05, 0.05, 0.06)
+const BLOOD := Color(0.24, 0.015, 0.01, 0.92)
 const YELLOW := Color(0.85, 0.66, 0.08)
 const BLUE_GREY := Color(0.36, 0.44, 0.50)
 const BEIGE := Color(0.66, 0.60, 0.50)
 const SCREEN := Color(0.20, 0.62, 0.55)
 const LAMP := Color(1.0, 0.95, 0.82)
+
+
+## Hub rebuild, chunk 5: a bare gurney (the "gurney" piece's frame and mattress) placed by `xf`.
+## `open_frame` (the toppled one) swaps the lower tray for four corner posts, so on its side it reads
+## as legs and wheels rather than two slabs.
+static func _gurney_frame(g: Geo, xf: Transform3D, open_frame := false) -> void:
+	var b := xf.basis
+	var at := func(p: Vector3) -> Vector3: return xf * p
+	g.box(Vector3(0.66, 0.05, 1.9), at.call(Vector3(0, 0.62, 0)), STEEL, 0, b)
+	g.box(Vector3(0.62, 0.08, 1.9), at.call(Vector3(0, 0.69, 0)), BLUE_GREY, 0, b)
+	for sx in [-0.34, 0.34]:
+		g.box(Vector3(0.025, 0.1, 1.2), at.call(Vector3(sx, 0.72, -0.1)), CHROME, 0, b)
+	if open_frame:
+		for sx in [-0.26, 0.26]:
+			for sz in [-0.8, 0.8]:
+				g.box(Vector3(0.04, 0.56, 0.04), at.call(Vector3(sx, 0.34, sz)), CHROME, 0, b)
+		for sz in [-0.8, 0.8]:
+			g.box(Vector3(0.52, 0.04, 0.04), at.call(Vector3(0, 0.12, sz)), DARK_STEEL, 0, b)
+		for sx in [-0.26, 0.26]:
+			for sz in [-0.8, 0.8]:
+				g.box(Vector3(0.05, 0.13, 0.13), at.call(Vector3(sx, 0.05, sz)), RUBBER, 0, b)
+		return
+	g.box(Vector3(0.5, 0.04, 1.4), at.call(Vector3(0, 0.16, 0)), DARK_STEEL, 0, b)
+	g.box(Vector3(0.04, 0.5, 0.04), at.call(Vector3(0, 0.38, -0.55)), DARK_STEEL, 0, b * Basis(Vector3.RIGHT, 0.6))
+	g.box(Vector3(0.04, 0.5, 0.04), at.call(Vector3(0, 0.38, 0.55)), DARK_STEEL, 0, b * Basis(Vector3.RIGHT, -0.6))
+	for sx in [-0.24, 0.24]:
+		for sz in [-0.68, 0.68]:
+			g.box(Vector3(0.035, 0.09, 0.09), at.call(Vector3(sx, 0.045, sz)), RUBBER, 0, b)
+
+
+## Hub rebuild, chunk 5: a zipped black body bag lying along Z (head toward +Z), bottom at `base`.
+static func _body_bag(g: Geo, base: Vector3) -> void:
+	g.box(Vector3(0.56, 0.2, 1.3), base + Vector3(0, 0.1, -0.18), BODY_BAG)
+	g.box(Vector3(0.46, 0.24, 0.42), base + Vector3(0, 0.12, 0.62), BODY_BAG)          # shoulders
+	g.box(Vector3(0.3, 0.2, 0.26), base + Vector3(0, 0.12, 0.9), BODY_BAG)             # head
+	g.box(Vector3(0.4, 0.16, 0.3), base + Vector3(0, 0.09, -0.92), BODY_BAG)           # feet
+	g.box(Vector3(0.022, 0.012, 1.5), base + Vector3(0.1, 0.245, 0.05), CHROME)       # the zip
+	g.box(Vector3(0.05, 0.02, 0.08), base + Vector3(0.1, 0.25, 0.8), CHROME)
+	g.box(Vector3(0.1, 0.004, 0.06), base + Vector3(-0.3, 0.1, -0.95), OFFWHITE, 0, Basis(Vector3.BACK, 1.2))   # toe tag
 
 
 static func _casters(g: Geo, hx: float, hz: float, r := 0.045) -> void:
@@ -592,6 +633,32 @@ static func _primitive(kind: String) -> ArrayMesh:
 				g.box(Vector3(0.46, 0.18, 0.95), Vector3(0, 0.82, -0.05), sheet)
 				g.cyl(0.11, 0.18, Vector3(0, 0.84, 0.62), sheet, "y", 10)
 				g.box(Vector3(0.34, 0.12, 0.6), Vector3(0, 0.79, -0.7), sheet)
+		"gurney_bag":
+			_gurney_frame(g, Transform3D.IDENTITY)
+			_body_bag(g, Vector3(0, 0.73, -0.02))
+		"body_bag":
+			_body_bag(g, Vector3.ZERO)
+		"gurney_toppled":
+			# Knocked over onto its side: the frame turned 90 degrees about its long axis, the wheels in
+			# the air toward +X, the mattress slid half off onto the floor.
+			_gurney_frame(g, Transform3D(Basis(Vector3.BACK, PI * 0.5), Vector3(0.35, 0.36, 0)), true)
+			g.box(Vector3(0.62, 0.08, 1.3), Vector3(-0.7, 0.05, 0.25), BLUE_GREY, 0, Basis(Vector3.UP, 0.18))
+		"blood_trail":
+			# A drag mark: blotches thinning out toward -Z, zig-zagging a little, wet on top.
+			for i in 9:
+				var k := float(i) / 8.0
+				var w := lerpf(0.5, 0.12, k)
+				var len := lerpf(0.5, 0.26, k)
+				var x := sin(float(i) * 1.7) * 0.08
+				g.box(Vector3(w, 0.008, len), Vector3(x, 0.006, 1.3 - k * 2.6), BLOOD, 2, Basis(Vector3.UP, sin(float(i) * 2.3) * 0.25))
+			g.box(Vector3(0.12, 0.008, 0.14), Vector3(0.28, 0.006, 0.6), BLOOD, 2)
+			g.box(Vector3(0.08, 0.008, 0.09), Vector3(-0.25, 0.006, -0.3), BLOOD, 2)
+		"blood_pool":
+			g.box(Vector3(0.9, 0.008, 0.62), Vector3(0, 0.006, 0), BLOOD, 2, Basis(Vector3.UP, 0.3))
+			g.box(Vector3(0.5, 0.008, 0.5), Vector3(0.28, 0.007, 0.22), BLOOD, 2, Basis(Vector3.UP, -0.5))
+			g.box(Vector3(0.36, 0.008, 0.3), Vector3(-0.34, 0.007, -0.24), BLOOD, 2, Basis(Vector3.UP, 0.9))
+			for d in [Vector3(0.55, 0, -0.35), Vector3(-0.5, 0, 0.3), Vector3(0.1, 0, 0.45)]:
+				g.box(Vector3(0.07, 0.008, 0.07), d + Vector3(0, 0.006, 0), BLOOD, 2)
 		"instrument_cart":
 			g.box(Vector3(1.2, 0.03, 0.7), Vector3(0, 0.94, 0), CHROME)
 			g.box(Vector3(1.2, 0.03, 0.7), Vector3(0, 0.3, 0), CHROME)
