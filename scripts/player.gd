@@ -69,6 +69,24 @@ var ability_slot_press: Array = [0, 0, 0, 0]
 ## and the scanner (client-owned aim/hold, report bit 32; the host checks range/LOS and records).
 var crouching: bool = false
 var scan_holding: bool = false
+## SPRINT-DIVE HOOK: pressing crouch while sprinting forward triggers a short diving lunge. Purely
+## client-owned local movement, like the rest of _local_step (see docs/KNOWN_ISSUES.md "Sprint +
+## crouch-dive"). Deliberately NOT replicated as its own field: it forces `crouching` true for its
+## duration (through the same _apply_crouch() capsule-resize / low-ceiling-safe path everyone
+## already uses), and `crouching` already replicates (bit 16 / "cr"), so every other machine sees
+## the same flattened posture and torso-lean pose automatically. Human players trigger it with the
+## crouch key itself (edge-detected via _crouch_prev); bots trigger it with bot_dive, a one-shot
+## bump counter edge-detected via _bot_dive_seen, same pattern as bot_jump/_bot_jump_seen.
+var diving: bool = false
+var _dive_t: float = 0.0
+var _dive_cooldown: float = 0.0
+var _dive_dir: Vector3 = Vector3.ZERO
+var _crouch_prev: bool = false
+var _bot_dive_seen: int = 0
+var _bot_dive_fire: bool = false
+const DIVE_DURATION := 0.4
+const DIVE_SPEED_MULT := 1.45
+const DIVE_COOLDOWN := 2.5
 ## Local-only cosmetic scan progress (0..1) and the monster id it is aimed at, for the HUD ring.
 ## Not replicated: every machine computes its own from its own aim, same as aim_id/aim_prompt.
 var scan_progress: float = 0.0
@@ -115,6 +133,10 @@ var bot_ability_slot: int = 0
 var bot_crouch: bool = false
 var bot_jump: int = 0
 var bot_scan: bool = false
+## SPRINT-DIVE HOOK: bump to fire the sprint+crouch-dive once, same edge-triggered pattern as
+## bot_jump/_bot_jump_seen just above (a bot script sprinting forward bumps this instead of
+## toggling bot_crouch, since bot_crouch alone still means an ordinary hold-to-crouch).
+var bot_dive: int = 0
 
 ## DEV HOOK (scripts/dev): a dev room bot or target dummy. The host simulates it like a local
 ## player through the bot_* seam; everyone else sees it like a remote player.
@@ -534,34 +556,42 @@ func _local_step(delta: float) -> void:
 			invuln = 9.0
 		if bot_press != _bot_press_seen:
 			_bot_press_seen = bot_press
-			interact_count += 1
+			# SPRINT-DIVE HOOK: no interacting while diving, same as the human E-press gates below.
+			if not diving:
+				interact_count += 1
 		# SWEEP 3 HOOK: scripted item use and brain ability. HANDS HOOK: a use winds up first.
+		# SPRINT-DIVE HOOK: no using/shoving/ability-firing while diving, same as the human paths.
 		if bot_use != _bot_use_seen:
 			_bot_use_seen = bot_use
-			if g != null and g.combat != null and g.combat.is_usable(selected_stack().kind):
+			if not diving and g != null and g.combat != null and g.combat.is_usable(selected_stack().kind):
 				g.combat.local_try_use(self)
 		# HANDS HOOK: bot_charge true holds the shove, false lets it go.
 		if bot_charge != _bot_charging and g != null and g.combat != null:
 			_bot_charging = bot_charge
-			if bot_charge:
+			if bot_charge and not diving:
 				g.combat.local_shove_begin(self)
 			else:
 				g.combat.local_shove_release(self)
 		if bot_ability != _bot_ability_seen:
 			_bot_ability_seen = bot_ability
-			var bi: int = clampi(bot_ability_slot, 0, ability_slot_press.size() - 1)
-			ability_slot_press[bi] = int(ability_slot_press[bi]) + 1
+			if not diving:
+				var bi: int = clampi(bot_ability_slot, 0, ability_slot_press.size() - 1)
+				ability_slot_press[bi] = int(ability_slot_press[bi]) + 1
 		_want_crouch = bot_crouch
-		scan_holding = bot_scan and not hive_view and not downed
+		scan_holding = bot_scan and not hive_view and not downed and not diving
 		if bot_jump != _bot_jump_seen:
 			_bot_jump_seen = bot_jump
 			_bot_jump_fire = true
+		# SPRINT-DIVE HOOK: same edge-triggered bump pattern as bot_jump just above.
+		if bot_dive != _bot_dive_seen:
+			_bot_dive_seen = bot_dive
+			_bot_dive_fire = true
 	elif can_move:
 		input_dir = Input.get_vector("move_left", "move_right", "move_forward", "move_back")
 		wants_interact = Input.is_action_pressed("interact")
 		want_sprint = Input.is_action_pressed("sprint")
 		_want_crouch = Input.is_action_pressed("crouch")
-		scan_holding = Input.is_action_pressed("scan") and not hive_view and not downed
+		scan_holding = Input.is_action_pressed("scan") and not hive_view and not downed and not diving
 	else:
 		wants_interact = false
 		scan_holding = false
@@ -584,11 +614,11 @@ func _local_step(delta: float) -> void:
 
 	_update_aim()
 	_update_scan_progress(delta)
-	if can_move and not bot_active and not hive_view and Input.is_action_just_pressed("interact") \
+	if can_move and not bot_active and not hive_view and not diving and Input.is_action_just_pressed("interact") \
 			and aim_id != "" and aim_hold <= 0.0 and not aim_prompt.begins_with("!"):
 		interact_count += 1
 	# Downed hook: downed, E calls for help; carrying, E puts them down (or on the table, above).
-	elif can_move and not bot_active and Input.is_action_just_pressed("interact") and (downed or carrying != 0 or dragging_monster >= 0):
+	elif can_move and not bot_active and not diving and Input.is_action_just_pressed("interact") and (downed or carrying != 0 or dragging_monster >= 0):
 		interact_count += 1
 
 	rotation.y = _yaw
@@ -623,25 +653,64 @@ func _local_step(delta: float) -> void:
 	moving = input_dir.length() > 0.1 and not operating
 	# HANDS HOOK: winding up or charging walks (no sprint) and keeps the slot.
 	var winding: bool = g != null and g.combat != null and g.combat.is_winding(self)
+	var dir := (transform.basis * Vector3(input_dir.x, 0.0, input_dir.y)).normalized()
+
+	# SPRINT-DIVE HOOK: pressing crouch (edge: not-held -> held, not an already-held crouch that
+	# happens to overlap a later sprint) while sprinting and moving roughly forward triggers a short
+	# diving lunge instead of dropping straight into a normal crouch-walk. Checked against last
+	# frame's `sprinting`/`crouching` (both are only reassigned further down), so this is the exact
+	# instant the crouch key transitions while still mid-sprint. A bot fires the same move with a
+	# dedicated one-shot bump (bot_dive, edge-detected into _bot_dive_fire above) rather than the
+	# continuous bot_crouch, which still means an ordinary hold-to-crouch for bot scripts.
+	var crouch_pressed: bool = _want_crouch and not _crouch_prev
+	_crouch_prev = _want_crouch
+	var dive_fire: bool = (crouch_pressed and not bot_active) or (bot_active and _bot_dive_fire)
+	_bot_dive_fire = false
+	if dive_fire and sprinting and not crouching and not diving \
+			and _dive_cooldown <= 0.0 and not downed and not winding and input_dir.y < -0.5:
+		diving = true
+		_dive_t = 0.0
+		_dive_cooldown = DIVE_COOLDOWN
+		_dive_dir = dir
+		# Instant burst, not a ramp-up: the acceleration-chase below would otherwise take several
+		# frames to catch up to sprint*MULT, which reads as a slow speed-up rather than a lunge.
+		# This matches the dive_k=1.0 target speed computed just below, so there is no pop when
+		# move_toward picks the target up on the next line.
+		velocity.x = dir.x * C.SPRINT_SPEED * DIVE_SPEED_MULT
+		velocity.z = dir.z * C.SPRINT_SPEED * DIVE_SPEED_MULT
+	if diving:
+		_dive_t += delta
+		if _dive_t >= DIVE_DURATION:
+			diving = false
+	_dive_cooldown = maxf(0.0, _dive_cooldown - delta)
+
 	# SWEEP 4A HOOK (controls): crouch is client-owned. Standing back up is refused under a low
 	# ceiling (a raycast from the crouched head to the standing head height); until there is room
-	# the player stays crouched even if the key is let go.
+	# the player stays crouched even if the key is let go. SPRINT-DIVE HOOK: _apply_crouch also
+	# forces the capsule down for `diving`, through this same resize/ceiling-safe path, so a dive
+	# that ends under a low ceiling correctly stays crouched instead of popping the capsule back up.
 	_apply_crouch(delta)
-	sprinting = moving and can_move and want_sprint and stamina > 0.0 and not downed and not crouching and carrying == 0 and dragging_monster < 0 and not winding
+	sprinting = moving and can_move and want_sprint and stamina > 0.0 and not downed and not crouching and carrying == 0 and dragging_monster < 0 and not winding and not diving
 	stamina = clampf(stamina + (-delta / 4.5 if sprinting else delta / 5.0), 0.0, 1.0)
 
 	var speed: float = 0.0 if operating else (C.SPRINT_SPEED if sprinting else C.WALK_SPEED)
 	# Downed hook: crawling is slow; a teammate over your shoulder slows you down.
 	if downed:
 		speed = CRAWL_SPEED
+	elif diving:
+		# SPRINT-DIVE HOOK: an instant burst beyond sprint speed that decays back down to crouch
+		# speed over DIVE_DURATION, so the dive reads as a lunge-then-slide rather than a teleport.
+		var dive_k: float = 1.0 - clampf(_dive_t / DIVE_DURATION, 0.0, 1.0)
+		speed = lerpf(C.CROUCH_SPEED, C.SPRINT_SPEED * DIVE_SPEED_MULT, dive_k)
 	elif crouching:
 		speed = C.CROUCH_SPEED   # SWEEP 4A HOOK (controls): crouching is slow, on top of everything else
 	elif carrying != 0:
 		speed *= CARRY_SPEED_K
 	elif dragging_monster >= 0:
 		speed *= CombatScript.DRAG_SPEED_K   # SWEEP 3 HOOK (combat): dragging a sedated monster
-	var dir := (transform.basis * Vector3(input_dir.x, 0.0, input_dir.y)).normalized()
-	var target := dir * speed + _knock
+	# SPRINT-DIVE HOOK: the lunge keeps its launch heading fixed instead of following live steering,
+	# so mid-air/mid-slide mouse turns don't let it curve like a normal walk.
+	var target := (_dive_dir if diving else dir) * speed + _knock
 	var a: float = ACCEL if is_on_floor() else AIR_ACCEL
 	velocity.x = move_toward(velocity.x, target.x, a * delta * maxf(1.0, _knock.length()))
 	velocity.z = move_toward(velocity.z, target.z, a * delta * maxf(1.0, _knock.length()))
@@ -673,12 +742,14 @@ func _local_step(delta: float) -> void:
 		# release; left mouse with the saw or the needle winds that up (scripts/combat/windup.gd). The
 		# combat system refuses while downed, carrying, dragging, busy or cooling down.
 		if g != null and g.combat != null:
-			if Input.is_action_just_pressed("shove") and not gun_out and _charging_with == "":
+			# SPRINT-DIVE HOOK: no shoving/using mid-dive, same pattern as the other transient
+			# states (downed/dragging/winding) already gate these two actions below.
+			if Input.is_action_just_pressed("shove") and not gun_out and _charging_with == "" and not diving:
 				if g.combat.local_shove_begin(self):
 					_charging_with = "shove"
 			# SWEEP 3 HOOK: left mouse uses the held item when it has a use (saw, anesthetic), else it
 			# shoves like Q.
-			if Input.is_action_just_pressed("use") and not gun_out and not downed and carrying == 0 and dragging_monster < 0:
+			if Input.is_action_just_pressed("use") and not gun_out and not downed and carrying == 0 and dragging_monster < 0 and not diving:
 				if g.combat.is_usable(selected_stack().kind):
 					g.combat.local_try_use(self)
 				elif _charging_with == "" and g.combat.local_shove_begin(self):
@@ -688,7 +759,8 @@ func _local_step(delta: float) -> void:
 				g.combat.local_shove_release(self)
 		# SWEEP 4A HOOK (pharmacy, chunk 3): hold the drop key to charge a throw, release to fire
 		# it; a quick tap still reports ~0 charge, the old gentle drop. Client-owned charge timer.
-		if Input.is_action_just_pressed("drop") and selected_stack().kind != "" and dragging_monster < 0 and not winding:
+		# SPRINT-DIVE HOOK: no starting a drop charge mid-dive either.
+		if Input.is_action_just_pressed("drop") and selected_stack().kind != "" and dragging_monster < 0 and not winding and not diving:
 			_drop_holding = true
 			_drop_hold_t = 0.0
 		if _drop_holding:
@@ -700,8 +772,9 @@ func _local_step(delta: float) -> void:
 				drop_count += 1
 		# SWEEP 4A HOOK (controls): Alt+1..4 fires an ability slot; plain 1..4 still picks an item
 		# slot. Holding Alt does not block movement or anything else.
+		# SPRINT-DIVE HOOK: no ability use mid-dive; switching the selected item slot is still fine.
 		var alt_down: bool = Input.is_action_pressed("ability_alt")
-		if alt_down:
+		if alt_down and not diving:
 			for i in ability_slot_press.size():
 				if Input.is_action_just_pressed("slot_%d" % (i + 1)):
 					ability_slot_press[i] = int(ability_slot_press[i]) + 1
@@ -744,7 +817,10 @@ func _local_step(delta: float) -> void:
 ## ceiling" refusal; a remote copy just follows the replicated bit and only resizes visually.
 func _apply_crouch(delta: float, authoritative: bool = true) -> void:
 	if authoritative:
-		var want_down: bool = _want_crouch and not downed and carried_by == 0 and not on_table
+		# SPRINT-DIVE HOOK: `diving` forces the capsule down through this same path for its whole
+		# window, even if the crouch key is released mid-dive, so the low-ceiling refusal-to-stand
+		# check below still runs once and only once the dive actually ends.
+		var want_down: bool = (_want_crouch or diving) and not downed and carried_by == 0 and not on_table
 		if crouching and not want_down:
 			var from: Vector3 = global_position + Vector3.UP * C.CROUCH_HEIGHT
 			var to: Vector3 = global_position + Vector3.UP * C.PLAYER_HEIGHT
@@ -797,6 +873,7 @@ func _pinned_step(delta: float) -> void:
 	_knock = Vector3.ZERO
 	moving = false
 	sprinting = false
+	diving = false   # SPRINT-DIVE HOOK: picked up or tabled mid-dive ends it
 	var pose: Transform3D = game.pinned_pose(self) if game != null else global_transform
 	global_position = pose.origin
 	_target_pos = pose.origin
@@ -1357,6 +1434,8 @@ func revive_full() -> void:
 	hive_view = false   # SWEEP 3 HOOK (brains)
 	crouching = false   # SWEEP 4A HOOK (controls)
 	scan_holding = false
+	diving = false   # SPRINT-DIVE HOOK
+	_dive_cooldown = 0.0
 	_clear_downed()
 	_set_visible_alive(true)
 

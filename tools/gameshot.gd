@@ -81,6 +81,15 @@ func _ready() -> void:
 		{"name": "17_orscreen_amputation", "fn": _pose_screen_amputation, "settle": 40},
 		{"name": "40_ability_bar_idle", "fn": _pose_ability_bar_idle, "settle": 30},
 		{"name": "41_ability_bar_alt", "fn": _pose_ability_bar_alt, "settle": 30},
+		# SPRINT-DIVE HOOK: a teammate sprinting (42, "before") then mid-dive (43): bot_dive is
+		# bumped in the second pose, once the first pose's settle has actually gotten `sprinting`
+		# to true (the dive's trigger reads last frame's `sprinting`, so bumping it in the same
+		# pose call that first sets bot_sprint would race and miss the edge). Kept short (6 frames,
+		# ~0.1s) so she is still close to her spawn point -- the same distance _pose_human_gait
+		# uses for a visible teammate in this corridor -- rather than sprinting off into the
+		# distance (or through the far wall) before the dive even fires.
+		{"name": "42_sprint_dive_before", "fn": _pose_sprint_dive_prep, "settle": 6},
+		{"name": "43_sprint_dive_mid", "fn": _pose_sprint_dive, "settle": 9},
 	]
 	# HANDS HOOK (docs/HANDS_AND_FEEDBACK.md "Done when"): hands, wind-ups, the stun window and the
 	# carry camera. `--only=hands` runs just these (plus the lobby shots that set the scene up).
@@ -151,6 +160,36 @@ func _pose_clockin() -> void:
 func _pose_clock() -> void:
 	var c := game.clock_pos()
 	_look_from(c + Vector3(2.6, 0, 2.6), c + Vector3(0, 1.4, 0))
+
+
+## Same "longest clear sightline" search _pose_corridor uses below, factored out so other poses
+## (the sprint-dive) can also find a long stretch of open floor instead of a short entrance nook
+## that a sprinting/diving bot can run face-first into a wall or door within a few metres.
+## Returns [from: Vector3, dir: Vector3, len: float].
+func _longest_sightline() -> Array:
+	var candidates: Array = game.level_info.get("monster_spawns", [])
+	if candidates.is_empty():
+		candidates = game.level_info.get("tool_spawns", [])
+	if candidates.is_empty():
+		return [game.table_pos(), Vector3.FORWARD, 6.0]
+	var space := bot.get_world_3d().direct_space_state
+	var best_len := -1.0
+	var best_from: Vector3 = candidates[0]
+	var best_dir := Vector3.FORWARD
+	for spot in candidates:
+		var eye: Vector3 = spot + Vector3.UP * C.EYE_H
+		for i in 16:
+			var a := TAU * i / 16.0
+			var dir := Vector3(cos(a), 0, sin(a))
+			var q := PhysicsRayQueryParameters3D.create(eye, eye + dir * 40.0)
+			q.collision_mask = C.L_WORLD
+			var hit := space.intersect_ray(q)
+			var reach: float = 40.0 if hit.is_empty() else eye.distance_to(hit.position)
+			if reach > best_len:
+				best_len = reach
+				best_from = spot
+				best_dir = dir
+	return [best_from, best_dir, best_len]
 
 
 ## Find the longest clear sightline in the level and stand at one end of it,
@@ -460,6 +499,41 @@ func _pose_ability_bar_alt() -> void:
 	_look_from(t + Vector3(0.6, 0, 3.4), t + Vector3(0, 1.0, 0))
 	bot.bot_aim_id = ""
 	Input.action_press("ability_alt")
+
+
+## SPRINT-DIVE HOOK: a teammate sprinting down open ground, set up to fire the dive next pose.
+## Reuses the exact open-ground / distance/offset formula _pose_human_gait uses for a visible
+## teammate in this same corridor (`bot`'s own over-the-shoulder body sits close to the camera
+## either way -- the default camera now, always -- so the fix is standing her far enough back that
+## the two don't overlap, the same distance gait already relies on, not a different camera angle).
+func _pose_sprint_dive_prep() -> void:
+	_reset_hands_scene()
+	_ensure_shift()
+	# _open_ground() (the entrance neutral zone _pose_human_gait uses) turned out too short here --
+	# the teammate's dive burst reached a wall/door within a few frames and the collision killed
+	# the very velocity this shot is supposed to show. _longest_sightline() (same search
+	# _pose_corridor uses) finds real open room to run in.
+	var sl := _longest_sightline()
+	var from: Vector3 = sl[0]
+	var dir: Vector3 = sl[1]
+	var side := dir.cross(Vector3.UP)
+	var a := _teammate()
+	_give(a, "")
+	a.teleport(game._floor_at(from + dir * 6.0 - side * 0.8))
+	a.bot_yaw = atan2(dir.x, dir.z)
+	a.bot_pitch = 0.0
+	a.bot_crouch = false
+	a.bot_move = Vector2(0, -1)
+	a.bot_sprint = true
+	bot.set_flashlight(true)
+	_look_from(from, from + dir * 5.0 + Vector3(0, 1.0, 0))
+
+
+## Fires the dive on the now-sprinting teammate from _pose_sprint_dive_prep; the 14-frame settle
+## (~0.23s of the ~0.4s window) lands the shot mid-lunge, still fast and still flattened.
+func _pose_sprint_dive() -> void:
+	var a := _teammate()
+	a.bot_dive += 1
 
 
 ## Actually operating: the surgery camera, the minigame and the surgery HUD together.
