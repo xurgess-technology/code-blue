@@ -12,7 +12,6 @@ extends Node
 ##   sensitivity    mouse look multiplier, 1.0 is the old fixed sensitivity
 ##   fov            player camera vertical field of view in degrees
 ##   quality        0 low, 1 medium, 2 high (main.gd's presets)
-##   default_camera "shoulder" or "first_person" for ordinary play (scripts/camera/carry_camera.gd)
 ##   carry_camera   "shoulder" or "first_person" while carrying or dragging (scripts/camera/carry_camera.gd)
 ##
 ## This node applies what is global itself (audio buses, window mode). Scene-specific
@@ -27,8 +26,7 @@ const SECTION := "settings"
 const LEGACY_PREFS := "user://prefs.cfg"
 
 const WINDOW_MODES: PackedStringArray = ["fullscreen", "borderless", "windowed"]
-## HANDS HOOK: the over-the-shoulder camera while carrying a body or dragging a monster, and
-## (default_camera) the smaller over-the-shoulder offset for ordinary play.
+## HANDS HOOK: the over-the-shoulder camera while carrying a body or dragging a monster.
 const CARRY_CAMERA_MODES: PackedStringArray = ["shoulder", "first_person"]
 
 const DEFAULTS := {
@@ -40,7 +38,6 @@ const DEFAULTS := {
 	"sensitivity": 1.0,
 	"fov": 78.0,
 	"quality": 1,
-	"default_camera": "shoulder",   # HANDS HOOK: "shoulder" | "first_person", ordinary play
 	"carry_camera": "shoulder",   # HANDS HOOK: "shoulder" | "first_person", carrying/dragging
 	# SWEEP 4A HOOK (controls): rebindable keys, stored as a physical_keycode int. Applied to the
 	# matching InputMap action (see REBIND_ACTIONS / _apply) so the whole game (not just the
@@ -201,7 +198,7 @@ func _load() -> void:
 
 func _sanitize(key: String, v):
 	var def = DEFAULTS[key]
-	if key == "carry_camera" or key == "default_camera":   # HANDS HOOK
+	if key == "carry_camera":   # HANDS HOOK
 		var c := str(v)
 		return c if CARRY_CAMERA_MODES.has(c) else def
 	if key == "window_mode":

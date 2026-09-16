@@ -85,8 +85,6 @@ func _run() -> void:
 	_check(Settings.get_value("window_mode") == "windowed", "bad window mode falls back to windowed")
 	Settings.set_value("carry_camera", "banana")   # HANDS HOOK
 	_check(Settings.get_value("carry_camera") == "shoulder", "bad carry camera mode falls back to shoulder")
-	Settings.set_value("default_camera", "banana")   # HANDS HOOK
-	_check(Settings.get_value("default_camera") == "shoulder", "bad default camera mode falls back to shoulder")
 	Settings.set_value("quality", 7)
 	_check(Settings.get_value("quality") == 2, "quality clamps to 2")
 
@@ -104,7 +102,6 @@ func _run() -> void:
 	Settings.set_value("fov", 95.0)
 	Settings.set_value("quality", 0)
 	Settings.set_value("carry_camera", "first_person")   # HANDS HOOK
-	Settings.set_value("default_camera", "first_person")   # HANDS HOOK
 	Settings.set_value("key_crouch", KEY_C)   # SWEEP 4A HOOK (controls)
 	Settings.set_value("key_jump", KEY_J)
 	Settings.set_value("key_ability_alt", KEY_X)
@@ -199,11 +196,6 @@ func _run() -> void:
 	_check(Settings.get_value("carry_camera") == "first_person", "carry camera buttons write the setting")
 	Settings.set_value("carry_camera", "shoulder")
 	_check((ui._choices["carry_camera"]["shoulder"] as Button).button_pressed, "the screen follows the carry camera setting")
-	# HANDS HOOK: the default (ordinary play) camera toggle.
-	(ui._choices["default_camera"]["first_person"] as Button).button_pressed = true
-	_check(Settings.get_value("default_camera") == "first_person", "default camera buttons write the setting")
-	Settings.set_value("default_camera", "shoulder")
-	_check((ui._choices["default_camera"]["shoulder"] as Button).button_pressed, "the screen follows the default camera setting")
 	var f11 := InputEventAction.new()
 	f11.action = "fullscreen"
 	f11.pressed = true
