@@ -66,7 +66,9 @@ static func smooth(u: float) -> float:
 
 
 ## The pose of the hand an action moves, from its rest pose, given combat.action_of(). `keys` is the
-## [wind-up, strike] pair. Wind-ups ease out (fast start), strikes snap, recoveries ease back.
+## [wind-up, strike] pair. Wind-ups ease out (fast start), strikes snap then decelerate all the way
+## to rest so the hand arrives at the strike pose with no leftover velocity (its `sqrt` used to still
+## be moving at u=1, which popped into RECOVER's zero-velocity start), recoveries ease back.
 static func action_pose(rest: Dictionary, keys: Array, act: Dictionary) -> Dictionary:
 	var ph := int(act.ph)
 	var u := float(act.u)
@@ -74,5 +76,5 @@ static func action_pose(rest: Dictionary, keys: Array, act: Dictionary) -> Dicti
 		WindupScript.WINDUP:
 			return blend(rest, keys[0], 1.0 - pow(1.0 - clampf(u, 0.0, 1.0), 2.2))
 		WindupScript.STRIKE:
-			return blend(keys[0], keys[1], sqrt(clampf(u, 0.0, 1.0)))
+			return blend(keys[0], keys[1], 1.0 - pow(1.0 - clampf(u, 0.0, 1.0), 2.0))
 	return blend(keys[1], rest, smooth(u))
