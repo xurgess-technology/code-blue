@@ -1089,3 +1089,29 @@ Players, Bob, the paramedics and the downed player on the table use the Blender 
   giving ~0.40-0.42 m gaps: comfortable margin above the defibrillator's width, still well short
   of `C.PLAYER_RADIUS * 2` (0.8 m) so the "no body fits through" rule holds. Unrelated to the OR
   doors change itself; caught only because it happened to fail on this run's dev-room pass.
+
+## Fog lot rework (2026-09-15, user follow-up)
+
+- **The fog belt was rebuilt for a hard, opaque transition instead of a gradual haze.** Prior
+  tuning still left the border wall faintly visible and let the flashlight visibly punch through
+  the fog. Changed: `fog_ring.gd`'s `BLIND_M`/`STEER_START_M`/`SNAP_M` are all much smaller now
+  (full blindness lands within ~2m of the clear area's edge, not ~5m), the screen-space fog's max
+  density and depth range were raised for genuine near-camera opacity (with `fog_light_energy`
+  cut low to avoid a bright nearby light blooming into a white haze -- caught by an actual
+  screenshot showing the ambulance's headlights washing the whole frame white before this fix),
+  and `hospital_builder.gd`'s real `FogVolume` was rebuilt as 3 strips (west/east/south; the
+  entrance/north side needs none) that start exactly at `FogRing.inner_rect()`'s own edge instead
+  of the old single box centred on the whole lot with a soft `edge_fade` -- the visible atmosphere
+  and the "you are now blind" screen-space math begin at the same line. The player's own flashlight
+  is now also explicitly dampened (range/energy/volumetric-fog-energy) as fog depth rises, fully
+  off by 60% of the way to blind, local-only (`Player._set_flashlight_fog_dampen`) -- otherwise a
+  bright close-range spotlight kept partially cutting through even very dense ambient fog.
+- Verified with fresh `tools/fogshot.tscn` screenshots (the wall is not visible in any of the
+  three shots; the flashlight produces no visible beam once fully in the fog), `fogtest.tscn`
+  (0 failures), `mapcheck.gd` (20 seeds, determinism holds), `perfprobe.tscn`'s "lot, facing the
+  fog" scenario (60fps all tiers), and `playtest --god --seed=1` (PASS).
+- Not independently verified: the ambulance's headlights are still meant to "glow through" the fog
+  by design (`docs/SWEEP4A.md`), and the tuning above was chosen to keep that visible without
+  reintroducing the earlier white-blowout bug, but only checked at the one seed/pose the
+  screenshot tool uses -- worth another look on a live playtest with a human watching the
+  ambulance sequence end to end.

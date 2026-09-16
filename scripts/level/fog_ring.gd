@@ -15,14 +15,17 @@ extends RefCounted
 
 ## How far in from the lot's outer edge the fog belt runs.
 const MARGIN_M := 7.0
-## Depth at which visibility/sound are effectively gone.
-const BLIND_M := 5.0
-## Depth at which heading starts bending back toward the lot.
-const STEER_START_M := 1.5
+## SWEEP 4A FOLLOW-UP: depth at which visibility/sound are effectively gone -- was 5.0, which
+## read as a slow gradual fade-out rather than "walking well-lit ground and immediately hitting
+## thick fog." Blindness now lands fast, within a couple of steps of the clear area's edge.
+const BLIND_M := 2.2
+## Depth at which heading starts bending back toward the lot. Small but non-zero so the very
+## first step into the fog doesn't already yank the camera.
+const STEER_START_M := 0.6
 ## Depth at which a fully blinded player is turned to face the lot outright.
-const SNAP_M := 4.4
+const SNAP_M := 1.9
 ## Max turn rate approaching SNAP_M, radians/second.
-const STEER_MAX_RATE := 1.6
+const STEER_MAX_RATE := 2.4
 const FOG_COLOR := Color(0.60, 0.63, 0.61)
 
 
@@ -117,10 +120,24 @@ static func apply_camera_fog(cam: Camera3D, depth01: float, cache: Dictionary) -
 		var env: Environment = base.duplicate() if base != null else Environment.new()
 		env.fog_enabled = true
 		env.fog_light_color = FOG_COLOR
-		env.fog_light_energy = 1.0
+		# SWEEP 4A FOLLOW-UP: 1.0 here plus a high density scattered a bright nearby light (the
+		# ambulance's headlights) into a blown-out white haze instead of a dark wall of fog --
+		# this is how much the fog itself re-emits/scatters ambient light, separate from real
+		# lights volumetrically scattering through it. Low, so the fog reads as dark, not lit.
+		env.fog_light_energy = 0.15
 		env.fog_sun_scatter = 0.0
 		env.fog_aerial_perspective = 0.0
+		# SWEEP 4A FOLLOW-UP: override depth begin/end locally regardless of whatever the base
+		# (indoor-tuned) environment uses, so the fog ramp is steep at outdoor-lot scale (metres),
+		# not the corridor-scale distances look.gd tunes fog_depth_end for.
+		env.fog_depth_begin = 0.0
+		env.fog_depth_end = 5.0
+		env.fog_depth_curve = 1.0
 		cache["env"] = env
 	var env: Environment = cache.env
-	env.fog_density = lerpf(0.0, 1.35, depth01)
+	# SWEEP 4A FOLLOW-UP: was capped at 1.35, which still let a bright light (the flashlight)
+	# visibly punch through -- "the flashlight shouldn't permeate the fog... it should just be
+	# fog." High enough that transmittance over a couple of metres is effectively zero, without
+	# going so high it blows out into a white haze near a bright light (see fog_light_energy above).
+	env.fog_density = lerpf(0.0, 6.0, depth01)
 	cam.environment = env

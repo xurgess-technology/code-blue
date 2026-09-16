@@ -116,33 +116,64 @@ static func build(gen: Dictionary, info: Dictionary) -> Node3D:
 ## visible atmosphere from anywhere on the lot (including standing at the doors, not yet inside
 ## the fog_ring.gd belt) instead of only a per-camera tint that activates once a player's own
 ## position is deep in the ring. Without this the lot's border wall was plainly visible in the
-## distance since nothing occluded it. One box sized to the whole neutral_rect (already world-
-## space metres, see finish_info) plus a pad past its outer edge so it also swallows the border
-## wall; `edge_fade` softens the box's own boundary instead of a hard cutoff. Local density only
-## (the doc asks to prefer this over raising the tuned global volumetric fog everywhere).
+## distance since nothing occluded it. Local density only (the doc asks to prefer this over
+## raising the tuned global volumetric fog everywhere).
+##
+## SWEEP 4A FOLLOW-UP: a single box over the whole lot (inner clear area included) with a soft
+## `edge_fade` read as a slow gradual haze, not "walking well-lit ground and immediately hitting
+## thick fog," and it never fully hid the border wall. Rebuilt as a ring of 3 strips (west, east,
+## south -- the entrance/north side needs none, the canopy already shields it and fog_ring.gd's
+## own `inner_rect` never puts a margin there) that starts exactly at `FogRing.inner_rect()`'s own
+## edge, the same boundary the screen-space steer/blind math in fog_ring.gd uses, so the visible
+## atmosphere and "you are now blind" both begin at the same line instead of drifting apart. Edge
+## fade is small for a sharp wall of fog, not a gradient; density is high enough with the local
+## screen-space fog (see fog_ring.gd's own FOG_DENSITY note) that nothing including a flashlight
+## should read through it once inside.
 const FOG_BELT_PAD_M := 6.0
 const FOG_BELT_HEIGHT_M := 8.0
-const FOG_BELT_DENSITY := 3.0
-const FOG_BELT_EDGE_FADE := 5.0
+## SWEEP 4A FOLLOW-UP: 9.0 scattered the ambulance's headlights into a blown-out white haze
+## instead of a dark wall of fog (real Light3Ds scatter through a real FogVolume, unlike the
+## screen-space override). Lower, relying more on FogRing's own screen-space fog (which now has
+## its own light_energy turned down too) for the "can't see anything" guarantee once a player's
+## own depth is high, while this volume still reads as atmosphere from a distance.
+const FOG_BELT_DENSITY := 4.0
+const FOG_BELT_EDGE_FADE := 0.8
 
 
 static func _build_fog_belt(info: Dictionary, root: Node3D) -> void:
 	if not info.has("neutral_rect"):
 		return
-	var r: Rect2 = info.neutral_rect
-	if r.size == Vector2.ZERO:
+	var outer: Rect2 = info.neutral_rect
+	if outer.size == Vector2.ZERO:
 		return
+	var inner: Rect2 = FogRingScript.inner_rect(info)
 	var mat := FogMaterial.new()
 	mat.density = FOG_BELT_DENSITY
 	mat.albedo = FogRingScript.FOG_COLOR
 	mat.edge_fade = FOG_BELT_EDGE_FADE
+	var far_x0 := outer.position.x - FOG_BELT_PAD_M
+	var far_x1 := outer.end.x + FOG_BELT_PAD_M
+	var far_z1 := outer.end.y + FOG_BELT_PAD_M
+	# West strip: from the padded outer edge in to the clear area's own west edge, full depth.
+	_add_fog_strip(root, mat, far_x0, inner.position.x, outer.position.y, far_z1)
+	# East strip: clear area's east edge out to the padded outer edge, full depth.
+	_add_fog_strip(root, mat, inner.end.x, far_x1, outer.position.y, far_z1)
+	# South strip: clear area's south edge out past the padded outer edge, full width (overlaps
+	# the west/east strips at the corners so there is no gap to see through).
+	_add_fog_strip(root, mat, far_x0, far_x1, inner.end.y, far_z1)
+
+
+static func _add_fog_strip(root: Node3D, mat: FogMaterial, x0: float, x1: float, z0: float, z1: float) -> void:
+	var w := x1 - x0
+	var d := z1 - z0
+	if w <= 0.01 or d <= 0.01:
+		return
 	var vol := FogVolume.new()
 	vol.name = "FogBelt"
 	vol.shape = 3   # FogVolume box shape (this Godot build exposes no GDScript-visible enum constant for it)
 	vol.material = mat
-	vol.size = Vector3(r.size.x + FOG_BELT_PAD_M * 2.0, FOG_BELT_HEIGHT_M, r.size.y + FOG_BELT_PAD_M * 2.0)
-	var c := r.get_center()
-	vol.position = Vector3(c.x, FOG_BELT_HEIGHT_M * 0.5, c.y)
+	vol.size = Vector3(w, FOG_BELT_HEIGHT_M, d)
+	vol.position = Vector3(x0 + w * 0.5, FOG_BELT_HEIGHT_M * 0.5, z0 + d * 0.5)
 	root.add_child(vol)
 
 

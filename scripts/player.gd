@@ -604,9 +604,11 @@ func _local_step(delta: float) -> void:
 			if fx != null:
 				(fx as CameraFX).set_fog(fog01)
 			Audio.set_fog_muffle(fog01)
+			_set_flashlight_fog_dampen(fog01)
 	elif is_local and fx != null:
 		(fx as CameraFX).set_fog(0.0)
 		Audio.set_fog_muffle(0.0)
+		_set_flashlight_fog_dampen(0.0)
 
 	# DEV HOOK (scripts/dev): noclip flies through walls; nothing below applies.
 	if noclip and g != null and g.dev != null:
@@ -1224,6 +1226,27 @@ static func _tp_scale(kind: String) -> float:
 func set_flashlight(on: bool) -> void:
 	flashlight_on = on
 	flashlight.visible = on
+
+
+## SWEEP 4A FOLLOW-UP (fog lot): "the flashlight shouldn't permeate the fog" -- cranking the
+## screen-space/volumetric fog density alone still let a bright close-range light carve a visible
+## beam and light up whatever it hit (the whole point of a spotlight). Cut the flashlight's own
+## range and energy directly as fog01 rises, local-only (every other machine still sees this
+## player's flashlight at full strength -- from their own body it's just as swallowed by the fog
+## in front of them, not literally dimmer). Reaches zero well before full blindness (BLIND_M)
+## so there is no beam left by the time nothing should be visible at all.
+const FLASHLIGHT_BASE_ENERGY := 4.5
+var _flashlight_fog01 := -1.0
+
+
+func _set_flashlight_fog_dampen(fog01: float) -> void:
+	if flashlight == null or is_equal_approx(_flashlight_fog01, fog01):
+		return
+	_flashlight_fog01 = fog01
+	var k := clampf(1.0 - fog01 / 0.6, 0.0, 1.0)   # fully gone by 60% of the way to blind
+	flashlight.spot_range = C.CONE_RANGE * k
+	flashlight.light_energy = FLASHLIGHT_BASE_ENERGY * k
+	flashlight.light_volumetric_fog_energy = 2.8 * k
 
 
 ## Does this surgeon's light fall on a world point? Used by the Lurker's freeze rule.
