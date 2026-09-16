@@ -558,9 +558,15 @@ func _sc_economy():
 			return
 		if game.money != want_money:
 			return _end(false, "an unfinished forced clock-out changed the money: $%d, expected $%d" % [game.money, want_money])
-		_send("check", {"money": want_money})
 		print("[marker] economy_bought")
-		if not await _until(func(): return _count_msgs("late_seen") > 0, 120.0, "the late joiner to see the money"):
+		# The runner only starts the late joiner on the marker, so "check" goes out again until it
+		# answers (an RPC sent before a peer connects never reaches it).
+		var resend := {"at": 0.0}
+		var check := func():
+			if _wall() >= float(resend.at):
+				resend.at = _wall() + 2.0
+				_send("check", {"money": want_money})
+		if not await _do_until(check, func(): return _count_msgs("late_seen") > 0, 120.0, "the late joiner to see the money"):
 			return
 		await _finish_together("client sold $%d of loot and bought %d pill bottles; everyone sees $%d" % [total, PILL_BUYS, want_money])
 		return
@@ -628,7 +634,12 @@ func _sc_economy():
 	_say("sold everything: $%d" % game.money)
 	for i in PILL_BUYS:
 		var before := game.money
-		if not await _do_until(func(): _press_at(game.economy.pharmacy.kiosk.global_position, "pharmacy_kiosk"), func(): return game.money < before, 40.0, "buying pills %d" % (i + 1)):
+		# Hub rebuild, chunk 3: the fax form is local UI; SEND FAX is economy.request_order, which a
+		# client sends to the host by RPC.
+		var fax: Node3D = game.economy.pharmacy.terminal
+		_press_at(fax.global_position, "pharmacy_fax")
+		game.economy.request_order({"placebo_pills": 1})
+		if not await _until(func(): return game.money < before, 40.0, "buying pills %d" % (i + 1)):
 			return
 	_say("bought %d bottles, $%d left" % [PILL_BUYS, game.money])
 	if not me.holding(KEEP):
@@ -975,14 +986,18 @@ func _sc_downed():
 		if not await _start_shift_when_full():
 			return
 		game._clear_monsters()
-		if not await _until(func(): return not game.player_table.is_empty(), 20.0, "the player table"):
+		# Hub rebuild, chunk 2: the hub has no player table of its own; a downed teammate goes on any
+		# free patient table. Other levels keep theirs.
+		if not game.downed_any_table and not await _until(func(): return not game.player_table.is_empty(), 20.0, "the player table"):
 			return
+		var ti: int = game.free_patient_table() if game.downed_any_table else -1
+		var table_at: Vector3 = game.table_position(ti) if ti >= 0 else game.player_table.position
 		var downed_id: int = _peer_of(1)
 		var carrier_id: int = _peer_of(2)
 		var p1 = game.players[downed_id]
 		var p2 = game.players[carrier_id]
-		# Down client 1 a few metres from the player table.
-		_send("stand", {"peer": downed_id, "pos": game.player_table.position + Vector3(0.0, 0.0, 3.5)})
+		# Down client 1 a few metres from the table.
+		_send("stand", {"peer": downed_id, "pos": table_at + Vector3(0.0, 0.0, 3.5)})
 		if not await _until(func(): return _count_msgs("standing") > 0, 30.0, "client 1 in place"):
 			return
 		await _wall_wait(0.5)
@@ -991,7 +1006,7 @@ func _sc_downed():
 		game.shelf_node.show_stock(game.shelf)
 		if not await _until(func(): return _count_msgs("crawled") > 0, 30.0, "client 1 to crawl"):
 			return
-		_send("downed", {"peer": downed_id, "carrier": carrier_id})
+		_send("downed", {"peer": downed_id, "carrier": carrier_id, "table": ti})
 		var seen := {"carry": false, "follow": false, "table": false, "op": false}
 		var watch := func():
 			if p2.carrying == downed_id and p1.carried_by == carrier_id:
@@ -1072,13 +1087,16 @@ func _sc_downed():
 	me.bot_move = Vector2.ZERO
 	if target.global_position.distance_to(me.global_position) > 1.8 or me.carrying != target_id:
 		return _end(false, "the carried teammate is not on my shoulder")
-	var place := func(): _press_at(game.player_table.position, "player_table")
+	var ti := int(_msgs("downed")[0].data.get("table", -1))
+	var table_at: Vector3 = game.table_position(ti) if ti >= 0 else game.player_table.position
+	var table_id: String = game.table_interact_id(ti) if ti >= 0 else "player_table"
+	var place := func(): _press_at(table_at + Vector3.UP * 0.9, table_id)
 	if not await _do_until(place, func(): return target.on_table, 40.0, "laying them on the table"):
 		return
 	game.player_surgery.surgery.bot_skill = 1.0
 	var operate := func():
 		if not game.player_surgery.surgery.is_local_operating():
-			_press_at(game.player_table.position, "player_table")
+			_press_at(table_at + Vector3.UP * 0.9, table_id)
 	if not await _do_until(operate, func(): return game.player_surgery.surgery.is_local_operating() or not target.downed, 40.0, "starting the stitches"):
 		return
 	if not await _until(func(): return not target.downed and target.alive, 90.0, "the stitches to finish"):
