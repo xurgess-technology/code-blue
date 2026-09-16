@@ -1125,3 +1125,21 @@ Players, Bob, the paramedics and the downed player on the table use the Blender 
   Nurse's model rendering correctly, but not a clean wide view of the walls/archway/fire-through-
   a-hole read from a few metres back. Worth a dedicated wide shot next time inventoryshot.gd is
   touched.
+
+**Follow-up (2026-09-16, independent verification before merge):** reproduced the `looptest.gd`
+(seed 4242) death independently -- 2 of 3 unmodified runs failed the same way. Instrumented
+`_go_use()` and confirmed the bot wedges at world position (52.128, -0.00003, 44.967), tile
+(2.75, -4) relative to the entrance origin exactly as reported above -- position frozen to the
+float, zero drift, for the entire stall (`alive=true downed=false stun=0.00`, `bot_move` held
+forward the whole time), so this is a physical wedge against static geometry in that wing, not a
+gate/flag blocking input. Ran the same seed 26/40-seed `mapcheck.gd` sweep on `main` before this
+branch existed and got the identical "1 containers/anchors out of reach" failure at the same
+morgue tray anchor -- confirms the wing-side issue is pre-existing and unrelated to the hub
+redesign's footprint, not a regression it introduced. Root cause of the *wedge itself* is still
+unfixed (needs the wing nav/collision owner, starting from that exact tile). What IS fixed here:
+`_go_use()`'s stuck-recovery only ever applied to item pickups (`id.begins_with("it_")`) -- a
+stall on a non-item target (`"shelf"`, a patient table, a container) had no recovery at all and
+would hang the bot, and the whole shift, forever. Added a generic recovery: after 15s stuck on
+any target, warp the bot to it and force a repath, same as a player would eventually route around
+after strafing off a wedge. Re-verified: 7 of 8 runs clean after the fix; the one remaining
+failure was the already-documented furnace-throw flake below, not this death cascade.

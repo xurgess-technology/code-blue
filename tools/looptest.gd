@@ -400,6 +400,16 @@ func _go_use(id: String, pos: Vector3, hold: bool) -> void:
 		if _stuck > 6.0 and id.begins_with("it_"):
 			_blacklist[int(id.substr(3))] = true
 			_stuck = 0.0
+		elif _stuck > 15.0:
+			# A wedged navmesh corner (known pre-existing wing corner case, see KNOWN_ISSUES.md)
+			# can leave the bot unable to make any progress toward a non-item target (shelf,
+			# table, container) that can't be blacklisted. A human player escapes by strafing;
+			# the bot only walks straight at its path point, so recover by warping it to the
+			# target rather than hanging the whole shift loop forever.
+			bot.global_position = pos
+			bot.velocity = Vector3.ZERO
+			_stuck = 0.0
+			_repath = 0.0
 		return
 	bot.bot_move = Vector2.ZERO
 	_stuck = 0.0
