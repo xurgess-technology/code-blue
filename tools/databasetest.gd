@@ -67,10 +67,9 @@ func _scan_unlocks_tier2() -> void:
 	me.bot_pitch = 0.0
 	me.bot_scan = true
 	var pin: Vector3 = wi.global_position
-	# HANDS HOOK: the local player's default camera may sit over the shoulder (Settings
-	# "default_camera"), offset from the body's own yaw-to-target line, so nudge by the angular
-	# error of the real camera ray (same idea as carrycamtest.gd's _aim_camera) instead of aiming
-	# from the player's own position.
+	# Aim from the real camera position/basis rather than the player's own position, so this still
+	# works correctly whenever the camera isn't exactly at the head (e.g. while carrying/dragging;
+	# same idea as carrycamtest.gd's _aim_camera).
 	var track := func():
 		wi.global_position = pin
 		var cam: Vector3 = me.camera.global_position

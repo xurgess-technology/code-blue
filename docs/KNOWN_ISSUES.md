@@ -1373,6 +1373,21 @@ against colourblind palettes or at ultra-low resolutions.
   multiplayer with more than one real client was not tested (this is local-only per the file's own
   doc comment, so nothing changes there, but it also was not re-verified with `nettest.gd`).
 
+**Reverted (2026-09-16, same day, user follow-up):** ordinary play is locked to true first person
+again. The shoulder camera is carry/drag only, same as before this entry -- the user's intent for
+the "over-the-shoulder default camera" audit item was specifically the carry/sling-a-body-or-
+monster-over-your-shoulder camera (which already existed), not a permanent third-person-ish default
+view. Removed `DEFAULT_OFFSET`/`default_setting_on()`/the `default_camera` Settings key and its
+settings-screen row entirely (not just re-defaulted, since there is no longer a "default camera"
+concept to toggle) from `scripts/camera/carry_camera.gd`, `scripts/settings.gd` and
+`scripts/settings_screen.gd`; `CarryCameraScript.wants()` is back to returning true only while
+`carrying != 0 or dragging_monster >= 0`. Left the generalizations that don't depend on the default
+case -- `aim_segment(range)` taking a range parameter, `hides_hands()` tracking `_body_shown` -- in
+place, since they're strictly correct improvements to the carry/drag case itself and cost nothing
+now that the default case doesn't exist. `tools/carrycamtest.gd` and `tools/settingstest.gd` had
+their `default_camera`-specific checks removed; `carrycamtest.gd` now asserts ordinary play is
+locked first person (`blend 0.0`, hands visible) instead of exercising a setting toggle.
+
 ## Sprint + crouch-dive (2026-09-16)
 
 Added a "sprint + crouch-dive" move to `scripts/player.gd`'s `_local_step`: pressing crouch while
