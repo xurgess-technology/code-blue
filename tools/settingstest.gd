@@ -214,13 +214,40 @@ func _run() -> void:
 	main._toggle_pause()
 	await _frames(2)
 	_check(game.paused and ui._pause_button.visible, "pause shows the Settings button")
+	_check(ui._exit_menu_button.visible and ui._exit_desktop_button.visible,
+		"pause shows the Exit to Main Menu / Exit to Desktop buttons")
 	ui._pause_button.pressed.emit()
 	await _frames(1)
 	_check(ui.is_open() and not ui._pause_button.visible, "pause Settings button opens the screen")
+	_check(not ui._exit_menu_button.visible and not ui._exit_desktop_button.visible,
+		"the exit buttons hide while the settings screen is open")
 	get_viewport().push_input(esc)
 	await _frames(1)
 	_check(not ui.is_open() and game.paused, "Esc from the screen returns to the pause overlay")
+	_check(ui._exit_menu_button.visible and ui._exit_desktop_button.visible,
+		"the exit buttons come back after closing the screen")
 	main._toggle_pause()
+
+	# "Exit to Main Menu": ends the session cleanly (same path Q already uses to walk out
+	# mid-shift) and lands back at the menu, same as a fresh launch.
+	main._toggle_pause()
+	await _frames(2)
+	_check(ui._exit_menu_button.visible, "pause shows Exit to Main Menu before using it")
+	ui._exit_menu_button.pressed.emit()
+	await _frames(2)
+	_check(game.phase == Game.Phase.MENU and main.menu.visible, "Exit to Main Menu returns to the menu")
+	_check(not Net.active and game.players.is_empty() and game.level == null,
+		"Exit to Main Menu tears the session down: active=%s players=%d level=%s" %
+		[str(Net.active), game.players.size(), str(game.level)])
+	_check(not game.paused, "Exit to Main Menu clears the pause flag")
+
+	# Back in for the rest of the file: a fresh solo session, same as before this block.
+	main.menu.hide_menu()
+	Net.start_solo("Settings")
+	game.start_session(778)
+	await _frames(3)
+	me = game.local_player()
+	_check(me != null, "local player exists again after Exit to Main Menu")
 
 	# Default brightness restores the shipped look exactly.
 	Settings.set_value("brightness", 0.5)

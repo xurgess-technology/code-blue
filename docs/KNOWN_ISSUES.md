@@ -1115,3 +1115,23 @@ Players, Bob, the paramedics and the downed player on the table use the Blender 
   reintroducing the earlier white-blowout bug, but only checked at the one seed/pose the
   screenshot tool uses -- worth another look on a live playtest with a human watching the
   ambulance sequence end to end.
+
+## Pause menu exit buttons (exit-menu-buttons, 2026-09-15)
+
+- **No confirmation dialog on either exit button.** Both "Exit to Main Menu" and "Exit to
+  Desktop" fire immediately on click, same as the existing Q-to-walk-out shove action and F11/F2
+  shortcuts elsewhere in the game. Consistent with the game's existing minimal-friction pause
+  controls, but a misclick mid-shift now has no undo (Exit to Main Menu at least keeps you in the
+  app; Exit to Desktop does not). Worth a confirm-are-you-sure step if playtesting shows misclicks.
+- **The two new buttons are plain `Button` nodes stacked under the pause-only "Settings" button
+  in `scripts/settings_screen.gd`, not part of the HUD's immediate-mode pause overlay text** (the
+  "PAUSED / Esc to resume, Q to walk out" lines drawn by `hud.gd`). This matches how the existing
+  Settings button was already built (real controls can't live in an immediate-mode `_draw()`), but
+  means the HUD's own hint text still doesn't mention the new buttons, and a future redesign of
+  the pause overlay should keep this split in mind rather than expecting one place owns "everything
+  drawn while paused."
+- **Not verified**: an actual mouse click on the buttons in a real (non-headless) session — the
+  automated tests exercise them via `pressed.emit()`/`_toggle_pause()`, and the nettest host_quit /
+  host_kill scenarios (which cover the same `Net.leave()` teardown path "Exit to Main Menu"
+  reuses) both still pass. Layout/positioning has not been screenshot-checked at other
+  resolutions.
