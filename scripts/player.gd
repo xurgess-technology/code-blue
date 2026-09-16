@@ -94,10 +94,15 @@ var _sprint_grace: float = 0.0
 ## Slide-out after landing, not counting the time in the air.
 const DIVE_DURATION := 0.4
 const DIVE_SPEED_MULT := 1.45
-## Upward launch speed: ~0.44 m peak, ~0.44 s airborne under the 18 m/s^2 gravity below. The body
-## stays upright in the air (so the rise is felt) and only goes prone on touchdown.
-const DIVE_HOP_VELOCITY := 4.0
+## Upward launch speed and the softer gravity used while airborne in a dive: ~0.54 m peak, ~0.6 s
+## in the air. The view rises with the body, then sinks toward prone height on the way down so it
+## meets the floor as the body does.
+const DIVE_HOP_VELOCITY := 3.6
+const DIVE_GRAVITY := 12.0
 const DIVE_LAND_THUD := 0.8
+const DIVE_LAND_SHAKE := 0.35
+var _dive_launch_y: float = 0.0
+var _dive_peak_y: float = 0.0
 const DIVE_SPRINT_GRACE := 0.2
 ## Stamina (0..1) spent per dive; stamina also doesn't recover mid-dive. About five back-to-back
 ## dives from a full bar.
@@ -716,6 +721,8 @@ func _local_step(delta: float) -> void:
 		_stance_want = PRONE
 		stamina -= DIVE_STAMINA_COST
 		dive_hop = true
+		_dive_launch_y = global_position.y
+		_dive_peak_y = global_position.y
 		# Instant burst, not a ramp-up: the acceleration-chase below would otherwise take several
 		# frames to catch up to sprint*MULT, which reads as a slow speed-up rather than a lunge.
 		velocity.x = dir.x * C.SPRINT_SPEED * DIVE_SPEED_MULT
@@ -772,7 +779,7 @@ func _local_step(delta: float) -> void:
 			and ((can_move and not bot_active and Input.is_action_just_pressed("jump")) or (bot_active and _bot_jump_fire))
 	_bot_jump_fire = false
 	if not is_on_floor():
-		velocity.y -= 18.0 * delta
+		velocity.y -= (DIVE_GRAVITY if diving and _dive_airborne else 18.0) * delta
 	else:
 		velocity.y = minf(velocity.y, 0.0) + _knock.y
 	if want_jump:
@@ -785,11 +792,16 @@ func _local_step(delta: float) -> void:
 	var was_air := not is_on_floor()
 	var fall_speed := velocity.y
 	move_and_slide()
+	if diving and _dive_airborne:
+		_dive_peak_y = maxf(_dive_peak_y, global_position.y)
 	if diving and _dive_airborne and was_air and is_on_floor():
 		# Touchdown: hit the floor prone, with a thud.
 		_dive_airborne = false
 		if fx.has_method("land"):
 			fx.land(DIVE_LAND_THUD)
+		if fx.has_method("add_shake"):
+			fx.add_shake(DIVE_LAND_SHAKE, 0.35)
+		Audio.play("thud", global_position, -6.0, 0.1)
 	elif was_air and is_on_floor() and fall_speed < -4.0 and fx.has_method("land"):
 		fx.land(clampf(-fall_speed / 14.0, 0.0, 1.0))
 
@@ -1607,6 +1619,12 @@ func _update_down_pose(delta: float) -> void:
 			eye = 0.28
 		elif carried_by != 0:
 			eye = 0.3
+		elif diving and _dive_airborne:
+			# Rising: stay at full height. Falling: sink toward prone eye height in step with the fall.
+			var fall01 := 0.0
+			if velocity.y < 0.0:
+				fall01 = clampf((_dive_peak_y - global_position.y) / maxf(_dive_peak_y - _dive_launch_y, 0.05), 0.0, 1.0)
+			eye = lerpf(C.EYE_H, C.PRONE_EYE_H, fall01)
 		elif prone:
 			eye = C.PRONE_EYE_H
 		elif down and alive:

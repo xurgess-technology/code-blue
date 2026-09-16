@@ -1533,3 +1533,13 @@ hop is `DIVE_HOP_VELOCITY` 4.0 (~0.41 m peak, ~0.47 s airborne measured), the sp
 through the air, and touchdown goes prone with a camera thud (`fx.land(DIVE_LAND_THUD)` 0.8) and a
 fast eye drop (14 m/s while diving vs the usual 6). `controlstest` 48/48; the low-ceiling check now
 drops its ceiling after touchdown, since an upright body in the air would otherwise overlap it.
+
+**Dive fall + landing (2026-09-16, playtest):** "quickly pulled to the floor" was the view riding at
+standing height all the way down and then dropping ~1.3 m in under 0.1 s at touchdown. Now the eye
+stays at full height on the way up and sinks toward prone height in step with the fall
+(`_dive_peak_y`/`_dive_launch_y`), so it meets the floor with the body; airborne gravity is softer
+(`DIVE_GRAVITY` 12 vs 18) with `DIVE_HOP_VELOCITY` 3.6 (~0.51 m peak, ~0.63 s airborne measured).
+Touchdown adds a camera shake (`DIVE_LAND_SHAKE` 0.35, trauma ~0.46 measured) and the existing
+"thud" sound on top of the landing dip. `controlstest` 50/50. Its scanner block now clears the
+database first: `user://database.save` is shared with any open copy of the game, and a live
+playtest running alongside the test left the Walk-In already scanned.

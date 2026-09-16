@@ -167,6 +167,10 @@ func _sprint_dive() -> void:
 		return not me._dive_airborne
 	, 1.5)
 	var land_speed: float = Vector2(me.velocity.x, me.velocity.z).length()
+	var land_eye: float = me.head.position.y
+	var land_trauma: float = me.fx.get_trauma() if me.fx.has_method("get_trauma") else 0.0
+	_check(land_eye < 1.0, "the view has sunk most of the way down by touchdown (eye %.2f m)" % land_eye)
+	_check(land_trauma > 0.1, "touchdown shakes the camera (trauma %.2f)" % land_trauma)
 	_check(peak[0] > 0.3, "real airtime: rises %.2f m" % peak[0])
 	_check(air_frames[0] >= 18, "in the air for %d frames (~%.2f s)" % [air_frames[0], air_frames[0] / 60.0])
 	_check(landed and me.diving, "the dive lands and is still going (sliding out)")
@@ -294,6 +298,8 @@ func _ability_slots() -> void:
 
 func _scanner() -> void:
 	_say("---- scanner: range, line of sight, reset, scanned")
+	# The database persists in user://, shared with any other run or open copy of the game.
+	game.database.clear()
 	var here: Vector3 = me.global_position
 	var wi: Node3D = game.brains.spawn_walk_in(game._floor_at(here + Vector3(0, 0, 6))) as Node3D
 	await _frames(2)
