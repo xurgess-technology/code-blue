@@ -49,3 +49,19 @@ logged: the pharmacy/crematorium footprints can still overlap lobby furniture on
 this chunk's fix to make — flagged for whoever owns entrance.gd's lobby layout); the pill hit
 check is a per-frame distance poll, not swept, and untested under lag; chunk 4 owns the placebo
 pill database/terminal entry.
+
+## Chunk 4: Database terminal, guide removal, Hive Eyes and Echo polish (`s4a-database`)
+Landed: computer terminal in the break room replaces the guide binder entirely (Monsters/
+Abilities/Items & Procedures sections, tiered monster entries — sighted/scanned/harvested — with
+an X-ray silhouette and level tables, placebo pill entry included); host-owned database saved to
+`user://`, survives a wipe and a reload, syncs to guests; Hive Eyes fly-through camera (navmesh
+path or straight-line glide in, quick glide out, instant snap on a hit, glazed eyes for
+teammates); Echo now shows a visible pulse ring and body pose on every machine. Tests (run
+independently by the orchestrator, not just the build agent): databasetest (new, 12/12),
+braintest (85/85), devtest, dissectiontest, `playtest --god --seed=1`, all clean. Merged with
+conflicts against chunk 3 (both touched items.gd/item_models.gd — guide removal vs. placebo
+pills — and KNOWN_ISSUES.md); resolved keeping both chunks' work, re-verified after resolving.
+Known issues logged: Hive Eyes cycling and the hold-to-exit key (level 2+) were not wired up
+(scope-trimmed, `hive_view.gd` has a ready `_begin_cycle()` for later); the Monsters list is
+hand-written, not from a shared registry; the X-ray is a 2D silhouette, not a real model render;
+the terminal's look is plain, no CRT/scanline styling.
