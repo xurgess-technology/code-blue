@@ -375,6 +375,7 @@ func on_case_finished(c: Dictionary, won: bool) -> void:
 	var pos := _brain_spot(table)
 	var node = spawn_brain(String(c.patient_id), quality, pos)
 	last_brain = {"kind": brain_kind(String(c.patient_id)), "quality": quality, "pos": pos, "node": node}
+	game.mark_db(String(c.patient_id), "harvested")   # SWEEP 4A HOOK (database terminal, chunk 4): tier 3
 	_fx_flatline(table)
 	game._broadcast("dx_flatline", {"tb": table})
 	game._sound("flatline", at)

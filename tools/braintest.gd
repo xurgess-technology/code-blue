@@ -283,10 +283,18 @@ func _hive_eyes() -> void:
 	me.bot_ability += 1
 	await _frames(3)
 	_check(b.last_result == "hive" and me.hive_view and b.local_hive_active() and b.camera() != null, "Hive Eyes: my view jumps into the Walk-In (%s)" % b.last_result)
-	await _frames(3)
+	# SWEEP 4A HOOK (Hive Eyes fly-through, chunk 4): the camera leaves my head and flies along the
+	# navmesh (or a straight line) before settling; it should not already be at the Walk-In's eyes.
+	await _frames(6)
+	var mid_cam: Camera3D = b.camera()
+	var mid_d := mid_cam.global_position.distance_to(wi.global_position + Vector3.UP * 1.7) if mid_cam != null else 0.0
+	_check(mid_d > 0.5, "still mid-flight a tenth of a second in (%.2f m off)" % mid_d)
+	var left_mid: float = float(b._hive[me.peer_id][1]) - game.world_time
+	_check(left_mid > b.hive_seconds(1) + 0.5, "the duration timer still has flight time left on it mid-flight (%.2f left, duration alone is %.2f)" % [left_mid, b.hive_seconds(1)])
+	await _frames(int(b.hive_view.FLIGHT_IN * 60) + 6)
 	var cam: Camera3D = b.camera()
 	var eye_d := cam.global_position.distance_to(wi.global_position + Vector3.UP * 1.7) if cam != null else 99.0
-	_check(eye_d < 0.7, "the camera rides at the Walk-In's eyes (%.2f m off)" % eye_d)
+	_check(eye_d < 0.7, "the camera lands at the Walk-In's eyes after the flight (%.2f m off)" % eye_d)
 	_check(bool(me.report_full().get("hv", false)), "the player report carries hv")
 	# Helpless: the body does not move.
 	var p0 := me.global_position
@@ -294,24 +302,30 @@ func _hive_eyes() -> void:
 	await _frames(30)
 	me.bot_move = Vector2.ZERO
 	_check(me.global_position.distance_to(p0) < 0.05, "the body stands still while looking elsewhere (moved %.2f)" % me.global_position.distance_to(p0))
-	# R ends it.
+	# R ends it. The host's flag clears at once; the local camera gets a quick fly-back first
+	# (docs/SWEEP4A.md "Normal exit: a quick fly back to the body", sweep 4a chunk 4).
 	me.bot_ability += 1
 	await _frames(3)
-	_check(not me.hive_view and not b.local_hive_active() and b.camera() == null, "R brings me back")
+	_check(not me.hive_view, "R ends Hive Eyes on the host at once")
 	_check(b.cooldown_left(me.peer_id, "walk_in") > 10.0, "Hive Eyes cooldown about 12 s after it ends")
+	await _frames(int(b.hive_view.FLIGHT_OUT * 60) + 6)
+	_check(not b.local_hive_active() and b.camera() == null, "and the quick fly-back finishes shortly after")
 	me.bot_ability += 1
 	await _frames(40)
 	me.bot_ability += 1
 	await _frames(3)
 	_check(b.last_result == "cooldown", "R during the cooldown: not ready (%s)" % b.last_result)
-	# Ends by itself: 5 s + 2 per level.
+	# Ends by itself: the flight-in (1.2 s) plus 5 s + 2 per level -- the duration timer starts
+	# only after the fly-in lands (docs/SWEEP4A.md "Host's duration timer starts after the flight
+	# lands", sweep 4a chunk 4).
 	b._cd.clear()
 	me.bot_ability += 1
 	await _frames(3)
 	var started := game.world_time
-	await _until(func(): return not me.hive_view, 10.0)
+	await _until(func(): return not me.hive_view, 12.0)
 	var lasted := game.world_time - started
-	_check(absf(lasted - 7.0) < 0.3, "level 1 lasts about 7 s (%.2f)" % lasted)
+	var want := b.hive_view.FLIGHT_IN + 7.0
+	_check(absf(lasted - want) < 0.3, "level 1 lasts about flight-in + 7 s = %.1f (%.2f)" % [want, lasted])
 	# A hit ends it.
 	b._cd.clear()
 	b._press_grace.clear()

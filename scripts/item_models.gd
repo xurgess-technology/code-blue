@@ -13,7 +13,7 @@ const ItemsDB := preload("res://scripts/items.gd")
 ## Colour coding (inventory worker, sweep 2): surgical supplies get a teal rim, sellable loot a
 ## gold one, so it is obvious in the dark what the surgery needs. One cached overlay shader,
 ## two cached materials, applied as `material_overlay` so shared or imported materials are
-## never modified. The guide binder is neither.
+## never modified.
 const TINT_TEAL := Color(0.25, 0.95, 0.85)
 const TINT_GOLD := Color(1.0, 0.72, 0.22)
 const TINT_SHADER := """
@@ -48,7 +48,6 @@ static func make(kind: String, count: int = 1) -> Node3D:
 		"forceps": _forceps(root)
 		"tourniquet": _tourniquet(root)
 		"bone_saw": _bone_saw(root)
-		"guide": _guide(root)
 		"suture_kit": _suture_kits(root, clampi(count, 1, 4))
 		_:
 			if LootTable.has(kind):
@@ -133,7 +132,6 @@ static func footprint(kind: String) -> Vector3:
 		"forceps": return Vector3(0.2, 0.03, 0.08)
 		"tourniquet": return Vector3(0.28, 0.05, 0.1)
 		"bone_saw": return Vector3(0.52, 0.05, 0.16)
-		"guide": return Vector3(0.24, 0.06, 0.31)
 		"suture_kit": return Vector3(0.16, 0.05, 0.11)
 	if LootTable.has(kind):
 		return LootModels.footprint(kind)
@@ -604,12 +602,3 @@ static func _suture_kits(root: Node3D, n: int) -> void:
 		_add(root, pack, Vector3(i * 0.004, y, i * 0.003), Vector3(0, (i * 11) % 14 - 7, 0))
 
 
-static func _guide(root: Node3D) -> void:
-	var gm := "res://scripts/guide/guide_models.gd"
-	if ResourceLoader.exists(gm):
-		var s: GDScript = load(gm)
-		var book: Node3D = s.make_book()
-		if book != null:
-			root.add_child(book)
-			return
-	_add(root, _box(Vector3(0.24, 0.05, 0.31), Color("6b2a22")), Vector3(0, 0.025, 0))

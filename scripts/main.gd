@@ -6,8 +6,8 @@ var game: Game
 var hud: Hud
 var menu: Menu
 var post = null
-## The medical guide UI (a CanvasLayer with open/close/is_open).
-var guide: CanvasLayer = null
+## The database terminal UI (a CanvasLayer with open/close/is_open).
+var terminal_ui: CanvasLayer = null
 
 ## 0 low, 1 medium, 2 high. Medium is the default: it keeps the volumetric fog that
 ## sells the atmosphere, and renders below native resolution so integrated GPUs cope.
@@ -101,11 +101,12 @@ func _ready() -> void:
 	_build_invite_button()
 	game.notice.connect(func(_t, _s): pass)
 
-	# The medical guide binder. The guide worker's UI when present, the stub otherwise.
-	var guide_script: GDScript = load("res://scripts/guide/guide_ui.gd")
-	guide = guide_script.new()
-	guide.name = "Guide"
-	add_child(guide)
+	# The database terminal: monsters, abilities, items and procedures. Replaces the old guide.
+	var terminal_script: GDScript = load("res://scripts/database/terminal_ui.gd")
+	terminal_ui = terminal_script.new()
+	terminal_ui.name = "TerminalUI"
+	terminal_ui.game = game
+	add_child(terminal_ui)
 
 	# Settings hook: the settings screen, opened from the title menu and the pause overlay.
 	settings_ui = load("res://scripts/settings_screen.gd").new()
@@ -328,8 +329,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	if game.phase == Game.Phase.MENU:
 		return
 
-	# The open guide owns the keyboard until it closes itself.
-	if guide != null and guide.is_open():
+	# The open terminal owns the keyboard until it closes itself.
+	if terminal_ui != null and terminal_ui.is_open():
 		return
 
 	# SWEEP 3 HOOK (brains): Esc while looking through a Walk-In's eyes comes back instead of pausing.
@@ -349,10 +350,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 
-	if event.is_action_pressed("read") and not game.paused:
+	if event.is_action_pressed("database") and not game.paused:
 		var me = game.local_player()
-		if me != null and me.alive and _can_read(me):
-			guide.open("")
+		if me != null and me.alive and _can_use_terminal(me):
+			terminal_ui.open()
 			get_viewport().set_input_as_handled()
 			return
 
@@ -375,23 +376,18 @@ func _toggle_pause() -> void:
 	_set_mouse(not game.paused)
 
 
-## You can read the guide while holding it or while looking at it.
-func _can_read(me) -> bool:
+## You can open the database terminal while looking at it (no carryable version, sweep 4a).
+func _can_use_terminal(me) -> bool:
 	if me.get("hive_view"):
-		return false   # SWEEP 3 HOOK (brains): R comes back from Hive Eyes
-	if me.holding("guide"):
-		return true
-	if me.aim_id.begins_with("it_"):
-		var node := game.find_interactable(me.aim_id)
-		return node != null and node.get("kind") == "guide"
-	return false
+		return false   # SWEEP 3 HOOK (brains): Esc comes back from Hive Eyes
+	return me.aim_id == "terminal"
 
 
-## One place decides the mouse: free for menus, pause, the guide and the surgery view,
+## One place decides the mouse: free for menus, pause, the terminal and the surgery view,
 ## captured for walking around.
 func _update_mouse() -> void:
 	var free: bool = menu.visible or game.phase == Game.Phase.MENU or game.paused \
-		or (guide != null and guide.is_open()) \
+		or (terminal_ui != null and terminal_ui.is_open()) \
 		or game.surgery_wants_mouse() \
 		or (dev_panel != null and dev_panel.is_open())  # DEV HOOK
 	var want := Input.MOUSE_MODE_VISIBLE if free else Input.MOUSE_MODE_CAPTURED

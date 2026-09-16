@@ -452,22 +452,64 @@ NurseRig.WALK_SPEED 1.0      # m/s at which Walk's planted foot keeps pace; rate
   lying or dissection body. `make_lying("night_nurse")` returns her rest pose if anyone asks.
 - The dev room's corpse (`dev_gun.gd monster_corpse`) shows her `Frozen` pose with `slump` 1.
 
-## Medical guide (guide worker)
+## Database terminal (sweep 4a chunk 4, replaces the medical guide binder)
+
+The guide binder, its lectern grip and the `read` action are gone. A computer terminal in the
+break room (same reserved spot the lectern used, `level_info.lectern` / `lectern_node`; see
+`HospitalBuilder._commit_lectern` / `LegacyBuilder._place_shelf_and_lectern`,
+`scripts/database/terminal_model.gd`) replaces it: no carryable version.
 
 ```gdscript
-# scripts/guide/guide_ui.gd, a CanvasLayer the main scene creates
-func open(page: String = "") -> void     # page: an item kind, "procedure:<ailment>", or "" for the index
+# scripts/database/terminal_ui.gd, a CanvasLayer main.gd creates (main.terminal_ui)
+func open() -> void
 func close() -> void
 func is_open() -> bool
-signal closed
-# scripts/guide/guide_models.gd
-static func make_book() -> Node3D        # the binder as a world object, origin at its base
-static func make_lectern() -> Node3D     # visual only, origin at the floor
+# scripts/database/database_pages.gd (moved from the old scripts/guide/guide_pages.gd unchanged
+# in content): Items & Procedures section data, plus a standalone PLACEBO entry (sweep 4a chunk 3
+# adds the real item; this keeps the terminal's copy independent of its exact shape)
+# scripts/database/monster_pages.gd: static Monsters-section content (walk_in, discharged,
+# night_nurse -- add a new one here when a species is added)
 ```
 
-The main scene opens the guide when the local player presses R while holding the guide or
-looking at it. While it is open the mouse is visible and the player cannot move; in co-op the
-world keeps running.
+- Opens with E while aiming at the terminal (`game._add_proxy("terminal", ...)`, aim/prompt only
+  -- `TerminalUI.open()` is called directly from `main.gd`'s input handling, the same local,
+  no-host-round-trip pattern the old guide's `read` used, just retargeted at the terminal instead
+  of an item kind). Full-screen, the player cannot move (main.gd frees the mouse while
+  `terminal_ui.is_open()`, same hook the guide used).
+- Sections: Monsters, Abilities, Items & Procedures. Monster entries unlock in tiers, read from
+  `game.database` (below): 1 sighted (name, silhouette), 2 scanned (behaviour, senses, threat,
+  sedative doses, an X-ray with a brain-site marker), 3 harvested (the brain's look/spoil/ability,
+  a level table via `game.brains.echo_radius/echo_seconds/hive_range/hive_seconds`). The Night
+  Nurse has no brain path (`MonsterPages.ENTRIES.night_nurse.growth_site == "unknown"`), so her
+  tier 3 never unlocks. Items & Procedures are unlocked from the start, as the guide was.
+
+### The database (host-authoritative, saved to disk)
+
+```gdscript
+# scripts/database/db_record.gd
+class DbRecord { kind, sighted, scanned, harvested }
+func to_dict() -> Dictionary / func from_dict(d: Dictionary) -> void
+# scripts/database/database_store.gd
+static func load_into(database: Dictionary) -> void   # user://database.save -> kind -> DbRecord
+static func save(database: Dictionary) -> void
+# game.gd
+game.database: Dictionary            # kind -> DbRecord, host-only, loaded once in Game._ready()
+game.db_record(kind) -> DbRecord      # creates one on first touch
+game.mark_db(kind, field)             # host: sets a field true (once), saves to disk, and
+    # broadcasts "db_update" {kind, field} so every client's own mirror of `database` (used only
+    # by its terminal) stays current. A client's terminal calls game.request_database_sync() on
+    # open, which asks the host (any_peer rpc `_rpc_request_database`) for a one-off full copy
+    # ("db_full" event) -- there is no continuous replication of the database.
+```
+
+- `mark_db` is what `game._tick_scan` (sighted/scanned), `dissection.on_case_finished` (a won
+  monster case: harvested) and `brains.drink` (an absorbed brain: harvested) call. It is not
+  cleared by `reset_money()` (a wipe): species knowledge is meant to survive a wipe, and
+  `DatabaseStore.save`/`load_into` make it survive a full reload too.
+- A guest's scan or harvest is recorded exactly like the host's own: `_tick_scan` and the
+  dissection/brains hooks are already host-only and iterate every player (`alive_players()`),
+  so whichever peer is aiming or holding the brain, the record it changes is `game.database` on
+  the host. Guests never keep their own copy; their terminal only ever shows a fetched mirror.
 
 ## Hospital (hospital worker, sweep 2 wave 1)
 
@@ -1379,8 +1421,10 @@ SEDATION_SECONDS 120, SAW_MULT 2.5, THRASH_BOTCH 1.5, THRASH_EVERY 3.0, SHRIEK_N
 - **Brain condition** is the case's `vitals`: `_sim_shift` does not drain it, and the host clamps it
   so it never rises (the +8 of `surgery_step_done` is taken back). At 0 the case is lost ("The brain
   is ruined."). Winning the last step: `spawn_brain(kind, condition / 100, pos)` at the specimen tray
-  beside the head (+0.12 m), event `dx_flatline`, the case becomes `stable` and is removed 6 s later
-  (dead cases too). `ShiftLoop.pay_for` pays 0; monster cases never block clocking out.
+  beside the head (+0.12 m), `game.mark_db(patient_id, "harvested")` (sweep 4a chunk 4: unlocks
+  tier 3 of the database terminal for that species), event `dx_flatline`, the case becomes
+  `stable` and is removed 6 s later (dead cases too). `ShiftLoop.pay_for` pays 0; monster cases
+  never block clocking out.
 - **Bodies** (`PatientBody.create` dispatches `Procedures.is_monster(id)` to
   `scripts/dissection/monster_builder.gd`; the node is a normal `PatientBody`): lying along X, head
   -X, sites `injection`, `skull`, `brain`, leather straps over chest/arms, hips/wrists, thighs, shins
@@ -1480,6 +1524,12 @@ Replication (networking section of `scripts/game.gd`):
 - `Player.report_state() -> Array` (client -> host) is positional; see its comment.
 - Anything new that must reach clients: add it to a report (continuous state) or send a reliable
   `_event` (one-off). Do not add new full-state RPCs.
+- **Exception, deliberately (sweep 4a chunk 4):** `game.database` (the terminal's data) is small,
+  changes rarely and only a handful of clients ever look at it (whoever has the terminal open), so
+  it is neither a report field nor pushed unprompted. `mark_db` sends a one-off `_event`
+  `"db_update" {kind, field}` to everyone when a field flips; a client's terminal additionally asks
+  for a full copy on open (`game.request_database_sync()` -> `any_peer` reliable rpc
+  `_rpc_request_database` -> the host answers that one peer with `_event` `"db_full" {all}`).
 - `game.waiting_peers` (peer id -> true, replicated): peers that joined mid-shift. They exist as
   not-alive Players, `all_players_out()` skips them, and `start_lobby` spawns them. Anything that
   counts or revives dead players must skip them.
@@ -1569,21 +1619,44 @@ game.brains.dev_request(sender, action, args)   # "br_spawn_brain" {kind, qualit
   `echo_view.start`: a dark veil quad on the camera and at most 40 things / 150 mesh outlines
   (monsters red, other players white, surgical items teal, loot gold, containers dim) through walls
   (`depth_test_disabled`, `ignore_occlusion_culling`), lit as a 26 m/s wave passes. Freed when it ends.
+  **Echo polish (sweep 4a chunk 4):** every machine that gets the `br_echo` event (not just the
+  shrieker's) spawns a quick expanding ring (`Brains._spawn_echo_pulse`, a self-freeing tween on a
+  torus, no state kept) at `pos` and starts a local one-shot pose timer
+  (`Brains._echo_pose_until[shrieker peer] = world_time + 0.5`, not replicated -- every machine
+  sets it the same way from the same reliable event) that leans the shrieker's `body_visual` back
+  briefly (`Player._update_down_pose`'s tilt calc), so the shriek visibly comes from them too.
 - **Hive Eyes** (host): the nearest `kind == "walk_in"` monster within range (through walls, not
   `is_sedated()`); `Player.hive_view = true` (report key `hv`), `br.hv[peer] = [monster id, end
   world_time]`, event `br_hive {id, on}`. Ends on time, its slot / E / Esc, the monster leaving
   `game.monsters` (killed, strapped) or `is_sedated()`, and the player's hp dropping, being downed,
   stunned or carried. While `hive_view` the Player ignores movement, mouse look, aim, use, shove,
   drop and interact (E bumps the Hive Eyes slot's `ability_slot_press`); remote copies droop the
-  head and lean.
+  head and lean, and show a glazed-eyes glow (`Player._hive_glaze`, an emissive quad on the head,
+  sweep 4a chunk 4 -- teammates only, toggled in `_remote_step`).
+  **Fly-through (sweep 4a chunk 4, `scripts/brains/hive_view.gd`, local/cosmetic only):** `end_at`
+  now carries `HiveView.FLIGHT_IN` (1.2 s) on top of `hive_seconds(lvl)`, so the duration timer
+  only really starts once the flight lands. The local camera leaves the player's own camera
+  transform and glides along `NavigationServer3D.map_get_path` (the default map; a straight line
+  when none is found) to the Walk-In's eyes over `FLIGHT_IN`, looking ahead along the path;
+  `hive_view._phase` is `"in"` (flying), `"settled"` (riding the eyes, the original sweep 3
+  behaviour) or `"out"` (a `FLIGHT_OUT`, 0.3 s, glide back to wherever the body currently is).
+  Ending is instant (no `"out"` phase) when the monster is gone, or when the local player's hp
+  dropped since the flight started, or they are downed/carried (`hive_view._begin_end`'s own
+  comparison against `_start_hp`, captured client-side -- nothing new was added to the wire for
+  this). A quiet end (the slot again, or time running out) gets the `"out"` glide instead.
+  **Known gap:** cycling between Walk-Ins at level 2+ and the hold-to-exit key are not wired up
+  this pass (`hive_view._begin_cycle` exists but nothing calls it) -- see KNOWN_ISSUES.md.
 - **Replication:** `net_state()` = `{"p": {peer: [walk_in, discharged]}, "hv": {peer: [id, end]},
   "bh": {peer: progress}, "ab": {peer: [4 ability ids]}}` (copies, quantized; empty dictionaries
   when idle).
 - Sounds `brains_squelch`, `brains_blend`, `brains_gulp`, `brains_shriek`, `brains_hive_in`,
   `brains_hive_out` (`tools/gen_audio_brains.mjs`).
-- Tests: `tools/braintest.tscn` (headless), nettest scenario `brains`,
-  `tools/brainshot.tscn` (windowed shots to `tools/brain_shots/`), `tools/perfprobe.tscn -- --brains`,
-  `tools/controlstest.tscn` (sweep 4a: crouch/jump, Alt+1..4 slot dispatch, the scanner).
+- Tests: `tools/braintest.tscn` (headless; sweep 4a chunk 4 added the fly-through/fly-back timing
+  cases), nettest scenario `brains`, `tools/brainshot.tscn` (windowed shots to `tools/brain_shots/`),
+  `tools/perfprobe.tscn -- --brains`, `tools/controlstest.tscn` (sweep 4a chunk 1: crouch/jump,
+  Alt+1..4 slot dispatch, the scanner), `tools/databasetest.tscn` (sweep 4a chunk 4: scan/harvest
+  unlocking tiers, persistence across a wipe and a reload, a second peer's scan landing in the
+  host's database, the guide binder and `read` action being gone).
 
 ### Ability bar (HUD, local-only, sweep 4a)
 
@@ -1607,11 +1680,12 @@ same way every machine computes its own aim/prompt (`Player._update_scan_progres
 noise events (monsters cannot hear a scan).
 
 `game.database: Dictionary` (kind -> `scripts/database/db_record.gd` `DbRecord {kind, sighted,
-scanned}`), host-only, in memory (lost on restart). `game.db_record(kind) -> DbRecord` creates one
-on first touch. "Sighted" is broader than scanning: any monster within scan range and visible
-(frustum + line of sight, `Perception.in_view`) to any living player marks it sighted, whether or
-not anyone is aiming at it to scan. Chunk 4 (`docs/backlog/SWEEP4B.md`) extends `DbRecord` and
-saves it to disk; nothing here persists across a restart yet.
+scanned, harvested}`), host-only. `game.db_record(kind) -> DbRecord` creates one on first touch;
+`game.mark_db(kind, field)` is the only thing that sets a field, since it also saves to disk and
+tells clients (see "Database terminal" above). "Sighted" is broader than scanning: any monster
+within scan range and visible (frustum + line of sight, `Perception.in_view`) to any living player
+marks it sighted, whether or not anyone is aiming at it to scan. Sweep 4a chunk 4 added
+`harvested`, disk persistence and the terminal that reads all three.
 
 ## Doors and the per-shift wings (doors worker, 2026-09-14)
 

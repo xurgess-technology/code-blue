@@ -90,7 +90,7 @@ const POSES := {
 	"none": {},
 	# One-handed carry: the right forearm raised in front, the thing held forward.
 	"hold": {"arm_r": [Vector3(-0.28, -0.3, 0.91), 1.0]},
-	# Bulky loot and the guide: both arms forward, hands on its sides.
+	# Bulky loot: both arms forward, hands on its sides.
 	"hold_both": {"arm_r": [Vector3(-0.12, -0.42, 0.9), 1.0], "arm_l": [Vector3(0.12, -0.42, 0.9), 1.0]},
 	# A fireman's carry on the right shoulder: the right arm up over the legs in front.
 	"carry": {"arm_r": [Vector3(-0.35, 0.72, 0.6), 1.0], "torso": [0.08, 0.0, 1.0]},

@@ -1593,7 +1593,7 @@ func _shift_bot(st: Dictionary) -> void:
 			me.selected = i
 			_press_at(game.shelf_node.global_position, "shelf")
 			return
-		if s.kind != "" and not short.has(s.kind) and s.kind != "guide":
+		if s.kind != "" and not short.has(s.kind):
 			me.selected = i
 			me.drop_count += 1   # not needed any more
 			return

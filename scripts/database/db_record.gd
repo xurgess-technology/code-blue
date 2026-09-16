@@ -1,14 +1,27 @@
 class_name DbRecord
 extends RefCounted
-## SWEEP 4A HOOK (scanner, docs/SWEEP4A.md "Scanner"): one species' record in the host's in-memory
-## monster database. `sighted` (seen by any player, in range, with line of sight) and `scanned`
-## (a player held R on it long enough) are both host-only for now, kept in memory and lost on
-## restart; chunk 4 (docs/backlog/SWEEP4B.md) extends this class and saves it to disk.
+## One species' record in the host's monster database (docs/CONTRACTS.md "Brains" ->
+## "The database terminal", sweep 4a chunk 4). `sighted` (seen by any player, in range, with
+## line of sight), `scanned` (a player held R on it long enough) and `harvested` (a brain of this
+## species was pulled out on a dissection table, or one was absorbed at the blender) gate the
+## terminal's three tiers. Host-only; DatabaseStore (scripts/database/database_store.gd) saves
+## and loads the whole set to disk under user://, so it survives a wipe and a reload.
 
 var kind: String = ""
 var sighted: bool = false
 var scanned: bool = false
+var harvested: bool = false
 
 
 func _init(k: String = "") -> void:
 	kind = k
+
+
+func to_dict() -> Dictionary:
+	return {"sighted": sighted, "scanned": scanned, "harvested": harvested}
+
+
+func from_dict(d: Dictionary) -> void:
+	sighted = bool(d.get("sighted", false))
+	scanned = bool(d.get("scanned", false))
+	harvested = bool(d.get("harvested", false))

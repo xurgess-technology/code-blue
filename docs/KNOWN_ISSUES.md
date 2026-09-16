@@ -925,3 +925,48 @@ Players, Bob, the paramedics and the downed player on the table use the Blender 
   120 in this pass, always a morgue tray). Reproduced on both this branch and (by inspection) code
   paths this chunk never touches (`room_furnish.gd` / container placement); left alone as out of
   scope for the fog lot work, worth a look from whoever owns the morgue/container layout.
+
+## Database terminal, guide removal, Hive Eyes and Echo polish (sweep 4a chunk 4, docs/SWEEP4A.md)
+
+- **Hive Eyes cycling and the hold-to-exit key (level 2+) were not built.** `docs/SWEEP4A.md`
+  asks for: at level 1 tapping the slot ends it (built, unchanged from sweep 3); at level 2+
+  tapping cycles to another Walk-In in range and holding the slot ~0.4 s ends it. Cycling needs
+  `brains.ability_slot()` to pick a different Walk-In and retarget the same hive session instead
+  of ending it, and holding-vs-tapping needs real key-hold timing, not just the existing discrete
+  press counter (`Player.ability_slot_press`, incremented once per press with no duration). Both
+  would mean widening the replicated ability-press protocol; judged out of proportion to this
+  chunk's budget. What *is* built: `hive_view.gd`'s state machine already has a `_begin_cycle()`
+  path (a short fly-through between two Walk-Ins) ready for whoever wires the trigger up, and
+  ending Hive Eyes still works today exactly as it did in sweep 3 (the slot again, or Esc, both via
+  `ability_slot_press`). At any level, only the nearest Walk-In in range is ever picked.
+- **The fly-through's "no path" straight-line glide was exercised, but only informally**: the test
+  hospital's break room to a nearby Walk-In always has a navmesh path in practice, so
+  `databasetest`/`braintest` never hit the `NavigationServer3D.map_get_path` returning empty case
+  in a real level. `hive_view._path_from` falls back to a straight line correctly by inspection
+  (and the fallback branch is exercised by construction whenever the map iteration id is 0, e.g.
+  the very first physics frame after a level loads), but nobody has watched it happen on a level
+  where the Walk-In truly has no path to the player (e.g. across a locked door).
+- **The database terminal's Monsters section is a fixed, hand-written list**
+  (`scripts/database/monster_pages.gd`), not derived from any shared "monster kind" registry --
+  there isn't one yet. Adding a new monster kind means adding an entry there by hand; nothing
+  checks that the list matches whatever `Monster.kind` values actually exist at runtime.
+- **The X-ray is a simple 2D silhouette-plus-marker drawn in the terminal UI**
+  (`TerminalUI.TerminalSilhouette`), not a real render of the creature's actual 3D model with its
+  brain highlighted inside it. Reads clearly as "here is roughly where the brain sits" but is not
+  a literal X-ray of the in-game model.
+- **The database terminal's own UI is plain Controls and Labels**, not a bespoke "computer
+  terminal" look (no CRT curvature, no scanlines, no monospace terminal font) -- functional and
+  readable, but visually plainer than the old guide binder's hand-crafted paper aesthetic it
+  replaces. No custom shader was added for it either way, so this did not need a
+  `Minigame.cached_shader()` registration or a `warmup.gd` entry.
+- **The terminal and Hive Eyes' glazed-eyes glow use plain `StandardMaterial3D`s**, not registered
+  in `scripts/warmup.gd`: neither is a custom shader, and both are visually similar to dozens of
+  other emissive materials already exercised well before a player can reach the break room or
+  trigger Hive Eyes, so a compile-time hitch was judged very unlikely. Not measured with
+  `perfprobe` specifically for this chunk (chunk 4 was not asked to run it).
+- **A guest's own scan/harvest is recorded on the host correctly (tested with a second bot `Player`
+  at a different peer id in the same process, `databasetest._guest_scan_lands_in_host_db`), but the
+  client-side "your terminal sees the host's data" path (`db_update` / `db_full` /
+  `request_database_sync`) was only exercised by direct function calls, not over real ENet/Steam
+  with lag** -- this chunk was told not to run `nettest_run.gd`; that is the final integration
+  step's job.

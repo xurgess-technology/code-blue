@@ -76,6 +76,10 @@ var _blend: Dictionary = {}
 ## add_ability() / set_level() / slot_of() below.
 var _slots: Dictionary = {}
 
+# SWEEP 4A HOOK (Echo polish, chunk 4): peer id -> world_time the shriek pose ends. Not
+# replicated: every machine sets it the same way, locally, from the reliable br_echo event.
+var _echo_pose_until: Dictionary = {}
+
 # host only
 var _hive_hp: Dictionary = {}          # peer id -> hp when the view started
 var _cd: Dictionary = {}               # "echo:<peer>" / "hive:<peer>" -> world_time it is ready
@@ -373,6 +377,7 @@ func drink(p: Node) -> void:
 	var before := level(p.peer_id, path)
 	p.clear_slot(head)
 	add_points(p.peer_id, path, pts)
+	game.mark_db(path, "harvested")   # SWEEP 4A HOOK (database terminal, chunk 4): an absorbed brain also unlocks tier 3
 	var lvl := level(p.peer_id, path)
 	var at: Vector3 = blender.global_position if blender != null and is_instance_valid(blender) else p.global_position
 	_emit("br_drink", {"id": p.peer_id, "kind": kind, "pos": at, "cond": condition(f)})
@@ -464,7 +469,9 @@ func _start_hive(p: Node, lvl: int) -> void:
 		game.tell(p, "No Walk-In close enough to see through.", 2.0)
 		return
 	var peer: int = p.peer_id
-	_hive[peer] = [int(m.monster_id), snappedf(float(game.world_time) + hive_seconds(lvl), 0.1)]
+	# SWEEP 4A HOOK (Hive Eyes fly-through, chunk 4): the duration only starts once the local
+	# fly-through has landed, so the authoritative end time carries the flight time too.
+	_hive[peer] = [int(m.monster_id), snappedf(float(game.world_time) + HiveViewScript.FLIGHT_IN + hive_seconds(lvl), 0.1)]
 	_hive_hp[peer] = int(p.hp)
 	p.hive_view = true
 	_emit("br_hive", {"id": peer, "on": true})
@@ -758,7 +765,12 @@ func on_event(kind: String, data: Dictionary) -> void:
 	match kind:
 		"br_echo":
 			var pos: Vector3 = data.get("pos", Vector3.ZERO)
-			var mine := int(data.get("id", 0)) == Net.my_id()
+			var shrieker := int(data.get("id", 0))
+			var mine := shrieker == Net.my_id()
+			# SWEEP 4A HOOK (Echo polish, chunk 4): every machine, not just the shrieker's, so the
+			# shriek visibly comes from whoever used it (docs/SWEEP4A.md "Echo").
+			_echo_pose_until[shrieker] = float(game.world_time) + 0.5
+			_spawn_echo_pulse(pos)
 			if mine:
 				Audio.play("brains_shriek", null, 0.0)
 				var me = game.local_player()
@@ -774,6 +786,35 @@ func on_event(kind: String, data: Dictionary) -> void:
 				blender.drain()
 		"br_hive":
 			pass   # the local view follows `_hive`; the event keeps the one-off moment ordered
+
+
+## SWEEP 4A HOOK (Echo polish, chunk 4): a quick expanding ring at `pos`, on every machine, so a
+## shriek is visible as well as audible, whether or not you are the one who used it.
+func _spawn_echo_pulse(pos: Vector3) -> void:
+	if game == null or game.level == null or not is_instance_valid(game.level):
+		return
+	var ring := MeshInstance3D.new()
+	ring.name = "EchoPulse"
+	var torus := TorusMesh.new()
+	torus.inner_radius = 0.05
+	torus.outer_radius = 0.3
+	torus.rings = 16
+	ring.mesh = torus
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.albedo_color = Color(0.6, 0.85, 1.0, 0.85)
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.emission_enabled = true
+	m.emission = Color(0.5, 0.8, 1.0)
+	m.emission_energy_multiplier = 1.6
+	ring.material_override = m
+	ring.position = pos + Vector3.UP * 1.2
+	ring.rotation_degrees.x = 90.0
+	game.level.add_child(ring)
+	var tw := ring.create_tween()
+	tw.tween_property(ring, "scale", Vector3.ONE * 12.0, 0.6).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_property(m, "albedo_color:a", 0.0, 0.6)
+	tw.tween_callback(ring.queue_free)
 
 
 # =========================================================================
