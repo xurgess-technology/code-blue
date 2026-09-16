@@ -115,7 +115,11 @@ func _physics_process(_delta: float) -> void:
 func _place() -> void:
 	var safe_zone: Dictionary = _info.get("safe_zone", {}) if _info.get("safe_zone") is Dictionary else {}
 	var spots: Dictionary = {}
-	if safe_zone.has("pharmacy_rect") and safe_zone.has("crematorium_rect"):
+	if safe_zone.has("pharmacy_spot") and safe_zone.has("crematorium_spot"):
+		# Hub rebuild: the hub says exactly where each goes and which way it faces.
+		mode = "reserve"
+		spots = {"shop": _placed_spot(safe_zone.pharmacy_spot), "furnace": _placed_spot(safe_zone.crematorium_spot)}
+	elif safe_zone.has("pharmacy_rect") and safe_zone.has("crematorium_rect"):
 		mode = "reserve"
 		spots = {"shop": _rect_spot(safe_zone.pharmacy_rect), "furnace": _rect_spot(safe_zone.crematorium_rect)}
 	elif _info.get("economy") is Dictionary and (_info.economy as Dictionary).has("shop"):
@@ -131,9 +135,13 @@ func _place() -> void:
 	pharmacy = PharmacyScript.create(game)
 	root.add_child(pharmacy)
 	_put(pharmacy, spots.get("shop"))
-	furnace = FurnaceScript.create(game)
+	# The hub builds it into a wall with a chamber behind; anywhere else (the dev room) it is the
+	# compact free-standing block, hatch left open.
+	furnace = FurnaceScript.create(game, mode != "reserve")
 	root.add_child(furnace)
 	_put(furnace, spots.get("furnace"))
+	if mode != "reserve":
+		furnace.set_hatch(true, false)
 
 
 ## The centre of a reserved world-space rect (Rect2, x/z plane), floor height found by a ray, and
@@ -149,6 +157,14 @@ func _rect_spot(r: Rect2) -> Dictionary:
 	var probe := Vector3(cx, 0.3, cz)
 	var pos: Vector3 = game._floor_at(probe) if game != null else probe
 	return {"position": pos, "yaw": 0.0}
+
+
+## A hub spot {position, yaw}, dropped onto the floor (probed low, same as _rect_spot).
+func _placed_spot(s: Dictionary) -> Dictionary:
+	var at: Vector3 = s.get("position", Vector3.ZERO)
+	var probe := Vector3(at.x, 0.3, at.z)
+	var pos: Vector3 = game._floor_at(probe) if game != null else probe
+	return {"position": pos, "yaw": float(s.get("yaw", 0.0))}
 
 
 ## Put a node at a {position, yaw} spot.

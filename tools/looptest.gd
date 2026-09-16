@@ -439,7 +439,15 @@ func _go_throw(furn: Node3D) -> void:
 		_walk_to(stand)
 		return
 	bot.bot_move = Vector2.ZERO
-	var aim: Vector3 = target_pos + Vector3.UP * 1.0   # the fire zone's height, not the floor
+	# Hub rebuild: open the hatch with E first (the real interact path), then throw through the
+	# middle of the window.
+	if furn.has_method("set_hatch") and not furn.hatch_open:
+		bot.head.rotation.x = 0.0
+		bot._pitch = 0.0
+		_go_use("furnace_hatch", furn.global_transform * Vector3(0, 1.5, 0.2), false)
+		return
+	bot.bot_aim_id = ""
+	var aim: Vector3 = target_pos + Vector3.UP * 1.5
 	var to := aim - bot.head.global_position
 	bot.bot_yaw = atan2(-to.x, -to.z)
 	bot._yaw = bot.bot_yaw

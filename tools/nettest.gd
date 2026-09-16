@@ -599,6 +599,12 @@ func _sc_economy():
 				_press_at(it.global_position, "it_%d" % item_id)
 		if not await _do_until(take, func(): return me.holding(kind), 40.0, "picking up " + kind):
 			return
+	# Hub rebuild: the furnace hatch starts shut; client 1 opens it through the real interact path
+	# (host-authoritative, replicated as "fh").
+	var furn: Node3D = game.economy.furnace
+	var hatch_at: Vector3 = furn.global_transform * Vector3(0, 1.5, 0.2)
+	if not await _do_until(func(): _press_at(hatch_at, "furnace_hatch"), func(): return furn.hatch_open, 30.0, "opening the furnace hatch"):
+		return
 	for kind in SELL.keys():
 		# A charged throw can miss the grate (design intent -- "missed throws bounce off the
 		# frame"), same as a real player's; if it bounces back onto the floor, pick it up and
@@ -1907,7 +1913,7 @@ func _throw_at(pos: Vector3, furn_basis_z: Vector3 = Vector3(0.0, 0.0, 1.0)) -> 
 	var stand: Vector3 = pos + furn_basis_z * 1.1
 	if Vector2(stand.x - me.global_position.x, stand.z - me.global_position.z).length() > 0.3:
 		me.teleport(_stand_spot(stand))
-	var aim: Vector3 = pos + Vector3.UP * 1.0   # the furnace fire zone's height, not the floor
+	var aim: Vector3 = pos + Vector3.UP * 1.5   # the middle of the furnace window, not the floor
 	var to := aim - me.head.global_position
 	me.bot_yaw = atan2(-to.x, -to.z)
 	me._yaw = me.bot_yaw

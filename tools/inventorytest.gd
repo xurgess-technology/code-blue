@@ -236,7 +236,10 @@ func _loot_spawn() -> void:
 			supply = it
 	_check(supply != null and _overlay_of(supply) == teal, "a supply world item wears the teal rim")
 	me.take_into("laptop", 1, 100)
-	await _frames(3)
+	# Process frames, not physics frames: the held model is rebuilt in Player._process, and after the
+	# shift's loot spawn several physics frames can run before the next process frame.
+	for i in 3:
+		await get_tree().process_frame
 	var held: Node3D = me.get_node("Head/FX/Camera/HeldFirstPerson")
 	var held_overlay = _overlay_of(held)
 	_check(held_overlay == ItemModels.tint_material("laptop", true), "the held laptop wears the (softer) gold rim too")
@@ -254,8 +257,9 @@ func _money() -> void:
 	# Selling is a charged throw into the furnace: stand close, face it, and fire.
 	var furn: Node3D = game.economy.furnace
 	_check(furn != null, "the furnace is placed")
+	furn.set_hatch(true, false)   # hub rebuild: the hatch over the window starts shut
 	me.teleport(furn.global_position + furn.global_basis.z * 1.05)
-	var aim_furn: Vector3 = furn.global_position + Vector3.UP * 1.0   # the fire zone's height
+	var aim_furn: Vector3 = furn.global_position + Vector3.UP * 1.5   # the middle of the window
 	var to := aim_furn - me.head.global_position
 	me.rotation.y = atan2(-to.x, -to.z)
 	me._yaw = me.rotation.y
@@ -341,8 +345,9 @@ func _pharmacy_pills() -> void:
 	me.take_into("placebo_pills", 10)
 	me.selected = 0
 	var furn: Node3D = game.economy.furnace
+	furn.set_hatch(true, false)
 	me.teleport(furn.global_position + furn.global_basis.z * 1.05)
-	var aim_furn2: Vector3 = furn.global_position + Vector3.UP * 1.0
+	var aim_furn2: Vector3 = furn.global_position + Vector3.UP * 1.5
 	var to := aim_furn2 - me.head.global_position
 	me.rotation.y = atan2(-to.x, -to.z)
 	me._yaw = me.rotation.y

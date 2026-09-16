@@ -22,7 +22,8 @@ extends RefCounted
 const ItemsData := preload("res://scripts/items.gd")
 const ProceduresData := preload("res://scripts/procedures.gd")
 
-const SAFE_ROOMS := ["or", "scrub_room", "break_room", "locker_room", "lobby", "entrance", "neutral", "anteroom", "clockin"]
+const SAFE_ROOMS := ["or", "or_storage", "or_lockers", "hub_crematorium", "break_room", "hub_unassigned",
+		"hub_waiting", "lobby", "hub_pharmacy", "entrance", "neutral", "anteroom", "clockin"]
 ## Horizontal metres from the table that count as "far".
 const FAR_M := 24.0
 ## Stacks of one kind try to stay at least this far apart.

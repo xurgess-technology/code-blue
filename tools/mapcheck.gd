@@ -606,8 +606,8 @@ class Runner extends Node:
 		if not nr.grow(0.1).has_point(Vector2(amb.x, amb.z)):
 			_fail("%s: the ambulance spot is not outside" % tag)
 		var wings: Array = info.get("wings", [])
-		if wings.size() < 3 or wings.size() > 4:
-			_fail("%s: %d wings" % [tag, wings.size()])
+		if wings.size() != 3:
+			_fail("%s: %d wings, expected 3" % [tag, wings.size()])
 		for wd in wings:
 			if not (wd.rect is Rect2) or not wd.has("id") or not wd.has("depth"):
 				_fail("%s: malformed wing %s" % [tag, str(wd)])
@@ -629,8 +629,17 @@ class Runner extends Node:
 		for key in ["shelf", "lectern"]:
 			if not info.has(key):
 				_fail("%s: no %s spot" % [tag, key])
-		if info.has("shelf") and Vector2(info.shelf.position.x - info.table.x, info.shelf.position.z - info.table.z).length() > 4.6:
-			_fail("%s: OR shelf spot is far from the table" % tag)
+		# Hub rebuild (2026-09-16): the supply shelf stands in the OR's storage closet, a few steps
+		# from the tables rather than beside them.
+		if info.has("shelf"):
+			var in_closet := false
+			for r in info.get("rooms", []):
+				if String(r.kind) == "or_storage" and (r.rect as Rect2).has_point(Vector2(info.shelf.position.x, info.shelf.position.z)):
+					in_closet = true
+			if not in_closet:
+				_fail("%s: the supply shelf is not in the OR's storage closet" % tag)
+			if Vector2(info.shelf.position.x - info.table.x, info.shelf.position.z - info.table.z).length() > 10.0:
+				_fail("%s: OR shelf spot is far from the table" % tag)
 		if (info.nav_region as NavigationRegion3D).navigation_mesh.get_polygon_count() <= 0:
 			_fail("%s: navigation mesh has no polygons" % tag)
 		# DOORS: a door node in every doorway, standing in its doorway, closed, blocking it.

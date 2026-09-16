@@ -56,11 +56,12 @@ const REQUIRED := {
 	"morgue": [["morgue_fridge", "morgue_fridge_open"], "autopsy_table"],
 	"janitor_closet": ["mop_sink"],
 	"cafeteria": ["serving_counter", "cafeteria_table", "school_chair"],
-	"break_room": ["time_clock", "wall_phone", "break_table", "sofa"],
-	"or": ["or_table", "surgical_lamp", "anesthesia_cart"],
-	"scrub_room": ["scrub_sink"],
-	"lobby": ["reception_desk", "chair_row"],
-	"locker_room": ["lockers", "bench"],
+	# The hub (scripts/level/entrance.gd, hub rebuild 2026-09-16).
+	"break_room": ["time_clock", "break_table"],
+	"or": ["or_table", "surgical_lamp", "scrub_sink"],
+	"or_lockers": ["lockers"],
+	"lobby": ["reception_desk", "wall_phone"],
+	"hub_waiting": ["chair_row", "tv_wall"],
 }
 
 ## Containers every room of a kind must end up with.

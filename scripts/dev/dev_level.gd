@@ -37,7 +37,9 @@ const LECTERN := Vector3(13.0, 0.0, 17.3)
 ## inventory (sweep 2): the loot rack's first cubby x, and the economy spots.
 const RACK_X0 := 1.4
 const SHOP := Vector3(17.6, 0.0, 17.25)
-const FURNACE := Vector3(21.2, 0.0, 17.3)   # SWEEP 4A HOOK (pharmacy, chunk 3): was SELL_BIN
+## Hub rebuild: the compact furnace block is 1.8 m deep behind its face, so the face stands that far
+## off the south wall.
+const FURNACE := Vector3(21.2, 0.0, 16.15)
 const LootTableScript := preload("res://scripts/economy/loot_table.gd")
 
 ## Every nav obstacle as [centre, size] on the floor; filled while building.
@@ -264,7 +266,7 @@ static func build(info: Dictionary) -> Node3D:
 		"furnace": {"position": FURNACE, "yaw": PI},
 	}
 	_obstacles.append([SHOP, Vector3(1.6, 0, 0.8)])
-	_obstacles.append([FURNACE, Vector3(1.6, 0, 1.4)])
+	_obstacles.append([FURNACE + Vector3(0, 0, 0.9), Vector3(3.3, 0, 1.9)])
 
 	# ---- lights ------------------------------------------------------------------
 	var lights_root := Node3D.new()

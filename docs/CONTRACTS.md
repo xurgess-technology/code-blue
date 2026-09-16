@@ -569,8 +569,10 @@ game.mark_db(kind, field)             # host: sets a field true (once), saves to
 ## Hospital (hospital worker, sweep 2 wave 1)
 
 `MapGen.generate(seed)` (`scripts/mapgen.gd`, parts in `scripts/level/`) lays out one floor:
-an entrance building (28 x 20 tiles: main hall, break room, locker room, OR, scrub room, lobby),
-three or four wings around it (`west`, `north` or `north_west` + `north_east`, `east`) and the
+an entrance building (the hub, 33 x 33 tiles since the 2026-09-16 hub rebuild, after Zach's floorplan:
+hallway, spine, OR with its supply storage closet and locker bay, crematorium with the furnace built
+into its wall, break room, unassigned room, waiting room, lobby, pharmacy, vestibule; see the header of
+`scripts/level/entrance.gd`), exactly three wings around it (`west`, `north`, `east`) and the
 neutral area outside the main doors. `HospitalBuilder.build(gen, info)` builds it and fills
 `info`. Maps without furniture data (hand-made tile maps, `tools/monster_lab.gd`) go through
 `scripts/level/legacy_builder.gd` with the old keys only.
@@ -601,7 +603,7 @@ rows, size, nav_region          # nav_region: one NavigationRegion3D over the wh
 # new
 tables: [{position: Vector3, yaw: float, kind: "patient" | "player"}]   # 2 patient tables, then the player table, all in the OR
 or_screen: {position: Vector3 (centre of the screen, on the OR wall, at its height), yaw (faces into the OR), size: Vector2 (2.2 x 1.3)}
-phone: {position: Vector3 (the wall phone, at its height, on the break room wall), yaw (faces into the room)}
+phone: {position: Vector3 (the wall phone, at its height, on the lobby wall behind the triage desk), yaw (faces into the lobby)}
 entrance: {position (just outside the main doors), yaw (faces out)}
 entrance_rect: Rect2            # world XZ of the whole entrance building, walls included
 # SWEEP 4A HOOK (fog lot worker, chunk 2, 2026-09-15): the lot is stripped to asphalt, stall
@@ -616,14 +618,16 @@ ambulance: {position (the bay, where paramedics get out), yaw (faces the doors),
 neutral: {spawn_points: [Vector3] (8, now inside the lobby near the main doors), shop: {position (a placeholder in the reserved pharmacy space), yaw},
           sell_bin: {position (the dumpster), yaw, front: Vector3 (where to stand)}, gold_pile: {position}}
 neutral_rect: Rect2             # world XZ of the outdoor lot (asphalt + the fog belt around it; no fence any more)
-safe_zone: {pharmacy_rect: Rect2, crematorium_rect: Rect2}   # world XZ, off the lobby; fixed spots for chunk 3, not furniture-cleared
+safe_zone: {pharmacy_rect: Rect2, crematorium_rect: Rect2,   # world XZ, the two rooms' floors
+           pharmacy_spot: {position, yaw}, crematorium_spot: {position, yaw}}   # hub rebuild: where economy.gd builds the
+           # pharmacy window (in the pharmacy's wall window) and the furnace (the room face of its wall window); +Z faces out
 wings: [{id, rect: Rect2 (world XZ), depth: int, tile_rect: Rect2i}]   # depth 1 = shallowest; deeper = bigger area
 rooms: [{id, kind, wing, depth, rect: Rect2 (world XZ, interior), tiles: Rect2i, doors: [Vector3]}]
 zones: {grid, width, height, names}   # HospitalBuilder.zone_of(info, pos) -> wing id, "entrance", "neutral" or ""
 ```
 
-- Room kinds: `or`, `scrub_room`, `break_room`, `locker_room`, `lobby` (wing `"entrance"`,
-  depth 0) and `patient_room`, `supply_closet`, `pharmacy`, `nurse_station`, `waiting_room`,
+- Room kinds: `or`, `or_storage`, `or_lockers`, `hub_crematorium`, `break_room`, `hub_unassigned`,
+  `hub_waiting`, `lobby`, `hub_pharmacy` (wing `"entrance"`, depth 0, `Entrance.ROOM_KINDS`) and `patient_room`, `supply_closet`, `pharmacy`, `nurse_station`, `waiting_room`,
   `restroom`, `office`, `lab`, `radiology`, `morgue`, `janitor_closet`, `cafeteria`. Anchors and
   containers outside rooms report `room_kind` `"corridor"` (wing hallways), `"entrance"` or
   `"neutral"`.

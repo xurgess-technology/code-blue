@@ -31,6 +31,8 @@ func _ready() -> void:
 	main = load("res://scenes/main.tscn").instantiate()
 	add_child(main)
 	await get_tree().process_frame
+	if main.launching:
+		await main.launched   # the launch printout covers the screen until then
 	game = main.game
 	main.menu.hide_menu()
 	Net.start_solo("Camera")
@@ -55,6 +57,19 @@ func _ready() -> void:
 		["break_room", _pose_break_room],
 		["or_tables", _pose_or],
 		["hallway_long", _pose_hallway],
+		# The hub rebuild (scripts/level/entrance.gd), from fixed tiles of the building's plan.
+		["hub_lobby_in", _pose_hub.bind(Vector2(19.5, 31.0), Vector2(16.0, 19.0), 1.2)],
+		["hub_spine", _pose_hub.bind(Vector2(16.5, 21.0), Vector2(16.5, 2.0), 1.4)],
+		["hub_hallway", _pose_hub.bind(Vector2(2.0, 2.5), Vector2(31.0, 2.5), 1.4)],
+		["hub_or", _pose_hub.bind(Vector2(13.0, 11.8), Vector2(5.5, 7.5), 0.9)],
+		["hub_storage", _pose_hub.bind(Vector2(6.0, 7.5), Vector2(1.5, 7.0), 1.0)],
+		["hub_crematorium", _pose_hub.bind(Vector2(19.8, 9.0), Vector2(29.0, 9.0), 1.3)],
+		["hub_furnace_open", _pose_furnace_open],
+		["hub_crematorium_doors", _pose_hub.bind(Vector2(15.3, 12.5), Vector2(18.0, 9.0), 2.2)],
+		["hub_break_room", _pose_hub.bind(Vector2(13.0, 17.8), Vector2(1.5, 14.8), 1.0)],
+		["hub_unassigned", _pose_hub.bind(Vector2(17.0, 16.5), Vector2(31.0, 16.5), 1.2)],
+		["hub_waiting", _pose_hub.bind(Vector2(14.0, 24.5), Vector2(1.5, 21.0), 1.0)],
+		["hub_pharmacy", _pose_hub.bind(Vector2(18.5, 26.5), Vector2(23.5, 24.0), 1.4)],
 	]
 	for k in ROOM_KINDS:
 		shots.append(["room_" + k, _pose_room.bind(k)])
@@ -150,6 +165,28 @@ func _pose_or() -> bool:
 		c += t.position
 	c /= maxf(1.0, tables.size())
 	_look_from(Vector3(rect.position.x + 1.0, 0, rect.end.y - 0.9), c + Vector3(0, 0.8, -1.0))
+	return true
+
+
+## Stand at tile `from` of the entrance building's plan and look at tile `at`, `h` metres up.
+func _pose_hub(from: Vector2, at: Vector2, h: float) -> bool:
+	var er: Rect2 = game.level_info.get("entrance_rect", Rect2())
+	if er.size == Vector2.ZERO:
+		return false
+	var f := er.position + from * C.TILE
+	var t := er.position + at * C.TILE
+	_look_from(Vector3(f.x, 0, f.y), Vector3(t.x, h, t.y))
+	return true
+
+
+## Close up on the crematorium's furnace window with its hatch open, from off to one side.
+func _pose_furnace_open() -> bool:
+	var furn: Node3D = game.economy.furnace
+	if furn == null:
+		return false
+	furn.set_hatch(true, false)
+	var front: Vector3 = furn.global_transform * Vector3(-1.4, 0, 3.6)
+	_look_from(front, furn.global_transform * Vector3(0, 1.4, -1.0))
 	return true
 
 

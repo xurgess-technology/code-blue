@@ -1660,3 +1660,45 @@ Rebuilt around that:
   the feed-in (its screenshots stall frames, so the feed looks slower there than it is).
 - Verified: `devtest` pass, `settingstest` 97/97. Not run: `nettest` (reads `menu._status.text`,
   which still holds the bare message).
+
+## Hub rebuild, chunk 1: the building (2026-09-16)
+
+- **`scripts/level/entrance.gd` is Zach's floorplan** (hospital-entrance-floorplan_2.html): 33 x 33
+  tiles. Hallway across the top with gates to the west/east wings at its ends and the north wing at
+  the top of a 3-tile spine; OR (supply storage closet + locker bay) across the spine from the
+  crematorium; break room across from an empty, dark "unassigned" room; waiting room | lobby
+  (triage desk, wall phone) | pharmacy behind a wall with a window; vestibule and main doors south.
+  Always exactly three wings now (the 42% chance of two north wings is gone).
+- Moved: the time clock (break room, by its door), the phone (lobby wall behind the triage desk;
+  validate checks "lobby"), the supply shelf (OR storage closet; mapcheck checks the closet and <= 10 m
+  from the table instead of <= 4.6 m), the lockers and scrub sinks (into the OR), the database terminal
+  (break room south wall), the pharmacy window (in the pharmacy's west-wall window, facing the lobby)
+  and the furnace (backed onto the crematorium's east wall, facing its doors). Both economy props now
+  get an exact spot and yaw (`spots.economy_spots` -> `safe_zone.pharmacy_spot` / `crematorium_spot`).
+- Gone: the locker room, scrub room, the old corner pharmacy/crematorium rooms and the break room's
+  sofa, notice-board phone and TV. Room kinds: `or`, `or_storage`, `or_lockers`, `hub_crematorium`,
+  `break_room`, `hub_unassigned`, `hub_waiting`, `lobby`, `hub_pharmacy` (`Entrance.ROOM_KINDS`; all
+  in every SAFE_ROOMS list).
+- Chunk 1 keeps today's 2 patient tables + player table and the OR wall screen (chunk 2 changes them).
+- Verified: mapcheck 300 seeds / 12 builds, failing only on seeds 1 and 226's morgue tray anchor (the
+  known wing-side issue above). looptest was stopped at ~10 min (Zach: not worth the wait per chunk):
+  everything through shift 1, clock-out and the pharmacy passed; "threw the loot into the furnace"
+  failed (known flake, but the furnace moved, so unconfirmed) and "last shift's untouched loot was
+  cleared" failed as a knock-on (the unsold loot stayed on the hub floor). doortest not run yet.
+- **The crematorium, after Zach's playtest** (same day): the furnace is built into the wall now
+  (`scripts/economy/furnace.gd` rewritten). The crematorium room is cols 19-28; col 29 has a 2-tile
+  window (rows 8-9) into a sealed 2 x 2 fire chamber (cols 30-31, plain floor, no room). The furnace
+  builds the window's jambs/sill (0.95 m, above a jump)/lintel, a brick-lined chamber with a raised
+  hearth of embers and additive flame cards, and a grated hatch hinged on one side: E on the opening
+  (`HatchAim`, interact_id `furnace_hatch`, L_INTERACT only) opens/shuts it; shut, its collider blocks
+  throws. Host-authoritative `hatch_open`, replicated as game snapshot "fh". Firelight: an omni in the
+  chamber, a wide flickering spot thrown out of the window onto the ceiling and a glow in front; the
+  room's only ceiling fixture is dead. Floor, walls and ceiling are `HospitalBuilder.CHARRED_ROOMS`
+  black (`CHAR_COLOR`, the furnace brick's colour); the CREMATORIUM sign is over its doors on the spine.
+  Unsellable throws are pushed back out of the window. The dev room gets the compact build (0.4 m wall,
+  1.4 m chamber, hatch left open), its face 1.8 m off the south wall.
+- Tests that throw into the furnace open the hatch first and aim at the window's middle (1.5 m):
+  looptest (the bot presses E on it), nettest (client 1 presses E, checking the replication),
+  inventorytest and braintest (set_hatch directly). inventorytest's "held laptop wears the gold rim"
+  waited 3 physics frames, which after the bigger hub's loot spawn can all run before Player._process
+  rebuilds the held model; it waits process frames now (92/92).

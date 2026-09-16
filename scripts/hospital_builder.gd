@@ -25,7 +25,8 @@ const PegboardScript := preload("res://scripts/containers/pegboard.gd")
 const TERMINAL_MODEL_PATH := "res://scripts/database/terminal_model.gd"
 
 ## Places where nothing a case needs is placed and monsters never spawn.
-const SAFE_ROOMS := ["or", "break_room", "locker_room", "lobby", "entrance", "neutral", "anteroom", "clockin"]
+const SAFE_ROOMS := ["or", "or_storage", "or_lockers", "hub_crematorium", "break_room", "hub_unassigned",
+		"hub_waiting", "lobby", "hub_pharmacy", "entrance", "neutral", "anteroom", "clockin"]
 
 ## Kept for perception.gd and tools/monster_lab.gd.
 const LIGHT_RANGE := 5.2
@@ -49,9 +50,13 @@ const CANOPY_Y := 3.15
 const OUTDOOR_LIGHT_RANGE := 9.0
 const OUTDOOR_LIGHT_ENERGY := 3.6
 
-const TILE_FLOOR_ROOMS := ["restroom", "morgue", "or", "janitor_closet", "lab", "radiology", "locker_room"]
-const WARM_FLOOR_ROOMS := ["lobby", "break_room", "waiting_room", "cafeteria", "office"]
+const TILE_FLOOR_ROOMS := ["restroom", "morgue", "or", "or_storage", "or_lockers", "hub_crematorium", "janitor_closet", "lab", "radiology"]
+const WARM_FLOOR_ROOMS := ["lobby", "break_room", "waiting_room", "hub_waiting", "cafeteria", "office"]
 const TILE_WALL_ROOMS := ["restroom", "or", "morgue"]
+## Hub rebuild: floor, walls and ceiling all charred black brick, the colour of the furnace's brick
+## (economy/furnace.gd uses CHAR_COLOR too).
+const CHARRED_ROOMS := ["hub_crematorium"]
+const CHAR_COLOR := Color(0.11, 0.085, 0.07)
 
 const WING_LABELS := {"west": "WEST WING", "east": "EAST WING", "north": "NORTH WING",
 		"north_west": "NORTH WING A", "north_east": "NORTH WING B"}
@@ -450,6 +455,7 @@ static func _geo_material(key: String) -> Material:
 		"facade": return surface_mat("mat/concrete", Color(0.42, 0.42, 0.40), 0.9)
 		"paint_white": return _paint_mat("white", Color(0.78, 0.78, 0.74))
 		"paint_yellow": return _paint_mat("yellow", Color(0.8, 0.6, 0.1))
+		"char": return _paint_mat("char", CHAR_COLOR)
 	return surface_mat("mat/wall", Color(0.62, 0.64, 0.60), 0.85)
 
 
@@ -641,11 +647,15 @@ static func _build_surfaces(gen: Dictionary, geo: GeoChunks, part: int = PART_BA
 				if part_of(gen, tx, ty) != part:
 					continue
 				var fkey := "linoleum"
+				var ckey := "ceiling"
 				if c == ",":
 					fkey = "pavement" if ty - nr.position.y < 4 else "asphalt"
 				else:
 					var kind := place_kind(gen, tx, ty)
-					if TILE_FLOOR_ROOMS.has(kind):
+					if CHARRED_ROOMS.has(kind):
+						fkey = "char"
+						ckey = "char"
+					elif TILE_FLOOR_ROOMS.has(kind):
 						fkey = "tile"
 					elif WARM_FLOOR_ROOMS.has(kind) or kind == "entrance":
 						fkey = "floor"
@@ -653,7 +663,7 @@ static func _build_surfaces(gen: Dictionary, geo: GeoChunks, part: int = PART_BA
 						Vector2(x0, z0), Vector2(x1, z0), Vector2(x1, z1), Vector2(x0, z1))
 				if c != ",":
 					var y := C.WALL_H
-					geo.quad(cx, cy, "ceiling", Vector3(x0, y, z0), Vector3(x0, y, z1), Vector3(x1, y, z1), Vector3(x1, y, z0),
+					geo.quad(cx, cy, ckey, Vector3(x0, y, z0), Vector3(x0, y, z1), Vector3(x1, y, z1), Vector3(x1, y, z0),
 							Vector2(x0, z0), Vector2(x0, z1), Vector2(x1, z1), Vector2(x1, z0))
 				if c == "+" or _is_archway(gen, tx, ty):
 					_lintel(geo, gen, tx, ty)
@@ -670,10 +680,12 @@ static func _build_surfaces(gen: Dictionary, geo: GeoChunks, part: int = PART_BA
 				var outdoor := nc == ","
 				if outdoor:
 					mat = "facade"
+				elif CHARRED_ROOMS.has(place_kind(gen, nx, ny)):
+					mat = "char"
 				elif TILE_WALL_ROOMS.has(place_kind(gen, nx, ny)):
 					mat = "wall_tile"
 				var top := FENCE_H if fence else (C.WALL_H + (1.2 if outdoor else 0.0))
-				var split := 0.0 if (outdoor or mat == "wall_tile") else 1.05
+				var split := 0.0 if (outdoor or mat == "wall_tile" or mat == "char") else 1.05
 				_wall_face(geo, cx, cy, tx, ty, d, 0.0, split, "wall_low", false)
 				_wall_face(geo, cx, cy, tx, ty, d, split, top, mat, false)
 				_collision_face(geo, rows, tx, ty, d, maxf(top, C.WALL_H), cx, cy)
@@ -1340,13 +1352,15 @@ static func _sign_specs(gen: Dictionary, part: int) -> Array:
 	for r in gen.rooms:
 		if count >= MAX_SIGNS:
 			break
-		if int(r.zone) == S.ZONE_ENTRANCE and String(r.kind) != "or" and String(r.kind) != "break_room":
+		if int(r.zone) == S.ZONE_ENTRANCE and not String(r.kind) in ["or", "break_room", "hub_crematorium"]:
 			continue
 		var label: String = Rooms.KINDS.get(r.kind, {}).get("label", "")
 		if String(r.kind) == "or":
 			label = "OPERATING"
 		elif String(r.kind) == "break_room":
 			label = "STAFF ONLY"
+		elif String(r.kind) == "hub_crematorium":
+			label = "CREMATORIUM"
 		if label == "":
 			continue
 		var door := Vector2i(-1, -1)
@@ -1355,7 +1369,7 @@ static func _sign_specs(gen: Dictionary, part: int) -> Array:
 		if not (r.doors as Array).is_empty():
 			door = r.doors[0]
 			mid = Vector2(door) + Vector2(0.5, 0.5)
-			if r.has("door2") or (String(r.kind) == "or" and (r.doors as Array).size() == 2):
+			if r.has("door2") or (String(r.kind) in ["or", "hub_crematorium"] and (r.doors as Array).size() == 2):
 				mid = (Vector2(r.doors[0]) + Vector2(r.doors[1])) * 0.5 + Vector2(0.5, 0.5)
 		elif not (r.get("open", []) as Array).is_empty():
 			var op: Array = r.open
@@ -1461,6 +1475,11 @@ static func _fill_contract(gen: Dictionary, info: Dictionary) -> void:
 			if reserve.has(key):
 				var r: Rect2i = reserve[key]
 				sz[key + "_rect"] = Rect2(Vector2(r.position) * C.TILE, Vector2(r.size) * C.TILE)
+			# Hub rebuild: exactly where economy.gd builds the pharmacy window and the furnace, and
+			# which way they face (world position, yaw).
+			var econ: Dictionary = spots.get("economy_spots", {})
+			if econ.has(key):
+				sz[key + "_spot"] = {"position": _w(econ[key].pos), "yaw": float(econ[key].yaw)}
 		info["safe_zone"] = sz
 	var wings: Array = []
 	var names := {S.ZONE_ENTRANCE: "entrance", S.ZONE_OUTDOOR: "neutral"}

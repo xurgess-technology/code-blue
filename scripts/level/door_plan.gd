@@ -56,7 +56,10 @@ static func plan(st: S, er: Rect2i) -> Array:
 		main.append(Vector2i(ox + c, oy + Ent.H - 1))
 	groups.append({"kind": "sliding", "tiles": main})
 	# The OR's doors: manual double doors (polish-or-doors), same as the cafeteria/radiology/morgue.
-	groups.append({"kind": "double", "tiles": [Vector2i(ox + 13, oy + 7), Vector2i(ox + 13, oy + 8)]})
+	var or_tiles: Array = []
+	for t in Ent.OR_DOORS:
+		or_tiles.append(Vector2i(ox + t.x, oy + t.y))
+	groups.append({"kind": "double", "tiles": or_tiles})
 	# The gates into the wings.
 	for wd in st.wings:
 		groups.append({"kind": "gate", "tiles": (wd.entry as Array).duplicate(), "wing": String(wd.id)})

@@ -1,10 +1,10 @@
 class_name MapGen
 extends RefCounted
-## Deterministic procedural hospital: one floor, an entrance building, three or four wings, and
-## a fenced neutral area outside the main doors.
+## Deterministic procedural hospital: one floor, an entrance building, three wings (west, north,
+## east: hub rebuild 2026-09-16, always three), and a neutral area outside the main doors.
 ##
 ##   +------------+-----------------+------------+
-##   |            |  north wing(s)  |            |
+##   |            |   north wing    |            |
 ##   | west wing  +-----------------+ east wing  |
 ##   |            | entrance bldg.  |            |
 ##   +------------+-------++--------+------------+
@@ -44,8 +44,8 @@ const MIN_MONSTERS := 8
 const MONSTER_MIN_DIST := 18
 const MAX_ATTEMPTS := 8
 
-## Rooms where monsters never spawn and nothing a case needs is placed.
-const SAFE_ROOMS := ["or", "scrub_room", "break_room", "locker_room", "lobby"]
+## Rooms where monsters never spawn and nothing a case needs is placed: every room of the hub.
+const SAFE_ROOMS := Entrance.ROOM_KINDS
 ## Wing ids of the zones that are not wings.
 const SAFE_WINGS := ["entrance", "neutral"]
 
@@ -111,11 +111,10 @@ const WING_REACH := Vector2i(22, 34)
 
 static func _attempt(seed: int, wing_seed: int, attempt: int) -> Dictionary:
 	var sub := wing_seed if attempt == 0 else (wing_seed * 7919 + attempt * 104729) & 0x7FFFFFFF
-	# The run's own stream: the wing count and the neutral area's parked cars never change
-	# within a run.
+	# The run's own stream: the entrance building's light fixtures and the neutral area never
+	# change within a run.
 	var run_rng := Rng.new(seed)
 	var rng := Rng.new(sub)
-	var four := run_rng.chance(0.42)
 	var ww := rng.rint(SIDE_WING_W.x, SIDE_WING_W.y)
 	var ew := rng.rint(SIDE_WING_W.x, SIDE_WING_W.y)
 	var ex := ENTRANCE_ORIGIN.x
@@ -133,20 +132,10 @@ static func _attempt(seed: int, wing_seed: int, attempt: int) -> Dictionary:
 	var tw: int = top.call()
 	defs.append({"id": "west", "rect": Rect2i(ex - ww, tw, ww + 1, ey1 - tw + 1),
 			"entry": [Vector2i(ex, ey + side[0]), Vector2i(ex, ey + side[1])], "dir": Vector2i(-1, 0)})
-	if four:
-		var a: Array = Entrance.NORTH_DOORS_TWO[0]
-		var b: Array = Entrance.NORTH_DOORS_TWO[1]
-		var t1: int = top.call()
-		var t2: int = top.call()
-		defs.append({"id": "north_west", "rect": Rect2i(ex, t1, 15, ey - t1 + 1),
-				"entry": [Vector2i(ex + a[0], ey), Vector2i(ex + a[1], ey)], "dir": Vector2i(0, -1)})
-		defs.append({"id": "north_east", "rect": Rect2i(ex + 14, t2, Entrance.W - 14, ey - t2 + 1),
-				"entry": [Vector2i(ex + b[0], ey), Vector2i(ex + b[1], ey)], "dir": Vector2i(0, -1)})
-	else:
-		var c: Array = Entrance.NORTH_DOORS_ONE
-		var tn: int = top.call()
-		defs.append({"id": "north", "rect": Rect2i(ex, tn, Entrance.W, ey - tn + 1),
-				"entry": [Vector2i(ex + c[0], ey), Vector2i(ex + c[1], ey)], "dir": Vector2i(0, -1)})
+	var c: Array = Entrance.NORTH_DOORS
+	var tn: int = top.call()
+	defs.append({"id": "north", "rect": Rect2i(ex, tn, Entrance.W, ey - tn + 1),
+			"entry": [Vector2i(ex + c[0], ey), Vector2i(ex + c[1], ey)], "dir": Vector2i(0, -1)})
 	var te: int = top.call()
 	defs.append({"id": "east", "rect": Rect2i(ex + Entrance.W - 1, te, ew + 1, ey1 - te + 1),
 			"entry": [Vector2i(ex + Entrance.W - 1, ey + side[0]), Vector2i(ex + Entrance.W - 1, ey + side[1])], "dir": Vector2i(1, 0)})
@@ -167,7 +156,7 @@ static func _attempt(seed: int, wing_seed: int, attempt: int) -> Dictionary:
 	st.wings = defs
 
 	# ---- entrance building and neutral area ----------------------------------------------
-	Entrance.build(st, ex, ey, 2 if four else 1)
+	Entrance.build(st, ex, ey)
 	var neutral_rect := Neutral.build(st, ex + Entrance.DOOR_X, ey1 + 1, run_rng)
 
 	# SWEEP 4A HOOK (fog lot, chunk 2): the run's start and every respawn now use the lobby's
@@ -545,16 +534,16 @@ static func validate(gen: Dictionary) -> PackedStringArray:
 					problems.append("room %s at %d,%d contains a wall at %d,%d" % [r.kind, r.x, r.y, x, y])
 				elif st.room_at[y * w + x] != int(r.id):
 					problems.append("room %s at %d,%d overlaps another room at %d,%d" % [r.kind, r.x, r.y, x, y])
-	for k in ["or", "scrub_room", "break_room", "lobby", "locker_room"]:
+	for k in Entrance.ROOM_KINDS:
 		if int(kind_count.get(k, 0)) != 1:
 			problems.append("expected 1 '%s' room, found %d" % [k, kind_count.get(k, 0)])
 	for k in ["pharmacy", "morgue", "lab", "radiology", "cafeteria", "waiting_room"]:
 		if int(kind_count.get(k, 0)) < 1:
 			problems.append("no %s on the map" % k)
 
-	# Wings: 3 or 4, depths 1..n, each with its essential rooms.
-	if wings.size() < 3 or wings.size() > 4:
-		problems.append("expected 3 or 4 wings, found %d" % wings.size())
+	# Wings: exactly 3 (west, north, east), depths 1..3, each with its essential rooms.
+	if wings.size() != 3:
+		problems.append("expected 3 wings, found %d" % wings.size())
 	var depths := {}
 	for wd in wings:
 		depths[int(wd.depth)] = true
@@ -597,8 +586,18 @@ static func validate(gen: Dictionary) -> PackedStringArray:
 	for key in ["clock", "lectern"]:
 		if spots.has(key) and String(room_of.call(spots[key].pos).get("kind", "")) != "break_room":
 			problems.append("%s is not in the break room" % key)
-	if spots.has("phone") and String(room_of.call(spots.phone.pos + Vector2(0.3, 0.0)).get("kind", "")) != "break_room":
-		problems.append("phone is not on a break room wall")
+	# The phone hangs on the triage wall of the lobby (hub rebuild): the room just in front of it.
+	if spots.has("phone"):
+		var ph_yaw := float(spots.phone.yaw)
+		var in_front: Vector2 = spots.phone.pos + Vector2(-sin(ph_yaw), -cos(ph_yaw)) * 0.3
+		if String(room_of.call(in_front).get("kind", "")) != "lobby":
+			problems.append("phone is not on a lobby wall")
+	var econ: Dictionary = spots.get("economy_spots", {})
+	for key in ["pharmacy", "crematorium"]:
+		if not econ.has(key):
+			problems.append("economy spot '%s' was never placed" % key)
+		elif not Rect2(er).has_point(econ[key].pos):
+			problems.append("economy spot '%s' is outside the entrance building" % key)
 	if spots.has("ambulance") and not Rect2(nr).grow(0.01).has_point(spots.ambulance.pos):
 		problems.append("ambulance is outside the neutral area")
 	# SWEEP 4A HOOK (fog lot, chunk 2): the shop moved indoors (the van it stood behind is gone);

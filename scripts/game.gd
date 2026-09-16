@@ -3309,6 +3309,7 @@ func _global_fields() -> Dictionary:
 		"wp": waiting_peers.keys(),
 		"dv": dev.net_state() if dev_mode else {},  # DEV HOOK
 		"mn": money,  # inventory: team money
+		"fh": economy.furnace.hatch_open if economy.furnace != null and is_instance_valid(economy.furnace) else false,  # hub: the furnace hatch
 		"pn": pill_notes.duplicate(),  # SWEEP 4A HOOK (pharmacy, chunk 3): OR green blip notes
 		# SWEEP 3 HOOK: small dictionaries of quantized values only (see docs/SWEEP3.md)
 		"cb": combat.net_state(), "dx": dissection.net_state(), "br": brains.net_state(),
@@ -3531,6 +3532,9 @@ func _apply_state(state: Dictionary, msg: Dictionary, keyframe: bool) -> void:
 		if String(k).begins_with("lp."):
 			lp[String(k).substr(3)] = g[k]
 	loop.apply_net_state(lp)
+	# Hub rebuild: the crematorium furnace's hatch.
+	if economy.furnace != null and is_instance_valid(economy.furnace) and g.has("fh"):
+		economy.furnace.set_hatch(bool(g.fh))
 	# inventory: money.
 	var new_money := int(g.get("mn", money))
 	if new_money != money:
