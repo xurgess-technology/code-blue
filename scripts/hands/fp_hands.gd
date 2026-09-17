@@ -13,6 +13,7 @@ const Arms := preload("res://scripts/hands/fp_arms.gd")
 const Poses := preload("res://scripts/hands/hand_poses.gd")
 const Grips := preload("res://scripts/hands/grips.gd")
 const WindupScript := preload("res://scripts/combat/windup.gd")
+const ThrowPoseScript := preload("res://scripts/hands/throw_pose.gd")   # THROW HOOK
 
 const HANDS_LAYER := 1 << 18
 ## First-person stack sizes: bulky / two-handed things fit this longest side, big loot this one.
@@ -47,6 +48,7 @@ var _last_look := Vector2.INF
 var _pull := 0.0
 var _wall_t := 0.0
 var _shake_t := 0.0
+var _throw = ThrowPoseScript.new()   # THROW HOOK
 
 
 func setup(p: Node) -> void:
@@ -148,13 +150,33 @@ func update(delta: float) -> void:
 	if two and (act.is_empty() or String(act.k) != "shove"):
 		pr = right_both
 
+	# ---- THROW HOOK: the drop key's charged throw (scripts/hands/throw_pose.gd)
+	_throw.update(delta, float(player.throw_wind) if act.is_empty() else 0.0, two)
+	if _throw.active():
+		var ww: float = _throw.wind_w()
+		var sw: float = _throw.strike_w()
+		if _throw.two:
+			# Both hands carry the thing's centre up over the head, then heave it out in front.
+			var c: Vector3 = centre.lerp(Poses.THROW_BOTH_CENTRE[0], ww).lerp(Poses.THROW_BOTH_CENTRE[1], sw)
+			var lw := Poses.blend(Poses.blend(Poses.BOTH_LEFT, Poses.THROW_BOTH_LEFT[0], ww), Poses.THROW_BOTH_LEFT[1], sw)
+			# Full charge: a small tremble, the same on both palms so the thing between them shakes too.
+			var jig: Vector3 = _throw.jig(0.0) * 0.0045
+			if two:
+				pl = _offset(lw, c + Vector3(-half, 0.0, 0.0) + jig)
+				pr = _offset(Poses.mirror(lw), c + Vector3(half, 0.0, 0.0) + jig)
+			else:
+				# The last of it just left the hands: the left hand still follows through.
+				pl = Poses.blend(pl, _offset(lw, c), maxf(ww, sw))
+		else:
+			pl = Poses.blend(Poses.blend(pl, Poses.THROW_LEFT[0], ww), Poses.THROW_LEFT[1], sw)
+
 	# ---- life: bob, sway, raise, sprint, walls
 	var speed01 := 0.0
 	if player.is_on_floor():
 		speed01 = clampf(Vector2(player.velocity.x, player.velocity.z).length() / C.SPRINT_SPEED, 0.0, 1.0)
 	_speed = lerpf(_speed, speed01, clampf(delta * 8.0, 0.0, 1.0))
 	_bob = fmod(_bob + delta * (7.5 + 4.0 * _speed) * maxf(_speed, 0.05), TAU)
-	var sprint_on: bool = player.sprinting and act.is_empty()
+	var sprint_on: bool = player.sprinting and act.is_empty() and not _throw.active()
 	_sprint = move_toward(_sprint, 1.0 if sprint_on else 0.0, delta * 4.0)
 	var look := Vector2(player.rotation.y, player.head.rotation.x)
 	if _last_look == Vector2.INF:
