@@ -1320,6 +1320,7 @@ func pickup_item(p: Node, it: Node) -> void:
 	if float(it.bt) > -100000.0:
 		p.slots[i]["bt"] = float(it.bt)   # SWEEP 3 HOOK (brains): the spoil clock travels with it
 	var pos: Vector3 = it.global_position
+	mark_db(String(it.kind), "sighted", p)   # wall terminal: an item this player has held shows in their database
 	world_items.erase(it.item_id)
 	it.queue_free()
 	_sound("pickup", pos)
@@ -2157,10 +2158,7 @@ func _scan_aim(p: Node, m: Node) -> bool:
 	var to_m: Vector3 = (m.global_position as Vector3) + Vector3.UP * 1.0
 	if from.distance_to(to_m) > C.SCAN_RANGE:
 		return false
-	var q := PhysicsRayQueryParameters3D.create(from, from + dir * C.SCAN_RANGE)
-	q.collision_mask = C.L_WORLD | C.L_MONSTER | C.L_SCAN
-	q.exclude = [p.get_rid()]
-	var hit := get_world_3d().direct_space_state.intersect_ray(q)
+	var hit: Dictionary = Player.scan_ray(get_world_3d().direct_space_state, from, from + dir * C.SCAN_RANGE, [p.get_rid()])
 	if hit.is_empty():
 		return false
 	var col = hit.get("collider")

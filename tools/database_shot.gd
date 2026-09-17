@@ -59,6 +59,20 @@ func _ready() -> void:
 			{"name": "76_wall_surge", "fn": _pose_wall_surge, "settle": 3},
 			{"name": "77_projector_off", "fn": _pose_projector_off, "settle": 10},
 		]
+	# --wall2: the wall terminal's drill-down (chunk 2), straight on, projector on.
+	if OS.get_cmdline_user_args().has("--wall2"):
+		shots = [
+			{"name": "80_wall_home", "fn": _pose_wall2.bind({"kind": "home"}), "settle": 30},
+			{"name": "81_wall_monsters", "fn": _pose_wall2.bind({"kind": "section", "id": "monsters", "index": 0}), "settle": 20},
+			{"name": "82_wall_walk_in", "fn": _pose_wall2.bind({"kind": "entry", "section": "monsters", "key": "walk_in"}), "settle": 45},
+			{"name": "83_wall_other", "fn": _pose_wall2.bind({"kind": "section", "id": "other", "index": 1}), "settle": 20},
+			{"name": "84_wall_gunshot", "fn": _pose_wall2.bind({"kind": "entry", "section": "procedures", "key": "amputation"}), "settle": 45},
+			{"name": "85_wall_tool_hover", "fn": _pose_wall2_tool.bind(false), "settle": 4},
+			{"name": "85b_wall_tool_clicked", "fn": _pose_wall2_tool.bind(true), "settle": 45},
+		]
+	# --nurse: scan the waiting room's Night Nurse the way a player would (she keeps running).
+	if OS.get_cmdline_user_args().has("--nurse"):
+		shots = [{"name": "86_scan_nurse", "fn": _pose_scan_nurse, "settle": 1}]
 	# --terminal: every kind of page the 3D viewer shows instead.
 	if OS.get_cmdline_user_args().has("--terminal"):
 		shots = [
@@ -132,6 +146,95 @@ func _pose_scan_ring() -> void:
 		bot.bot_yaw = atan2(-d.x, -d.z)
 		bot.bot_pitch = clampf(atan2(d.y, Vector2(d.x, d.z).length()), -1.0, 1.0)
 		await get_tree().process_frame
+
+
+func _pose_scan_nurse() -> void:
+	var wn: Node3D = game.economy.waiting_nurse
+	# From each side of her (one has the bench in the way): does a held scan finish?
+	for ang in [0.0, PI * 0.5, PI, PI * 1.5]:
+		game.database.erase("night_nurse")
+		var dir := Basis(Vector3.UP, ang) * -wn.global_basis.z
+		bot.bot_scan = false
+		bot.teleport(game._floor_at(wn.global_position + dir * 2.5))
+		await get_tree().process_frame
+		bot.bot_scan = true
+		var t0 := Time.get_ticks_msec()
+		while Time.get_ticks_msec() - t0 < 6000 and not bool(game.db_record("night_nurse").scanned):
+			var head: Vector3 = wn.global_position + Vector3.UP * 1.1
+			var d: Vector3 = head - bot.camera.global_position
+			var fwd: Vector3 = -bot.camera.global_transform.basis.z
+			bot.bot_yaw += wrapf(atan2(-d.x, -d.z) - atan2(-fwd.x, -fwd.z), -PI, PI)
+			bot.bot_pitch = clampf(bot.bot_pitch + atan2(d.y, Vector2(d.x, d.z).length()) - atan2(fwd.y, Vector2(fwd.x, fwd.z).length()), -1.2, 1.2)
+			await get_tree().process_frame
+		print("[database_shot] NURSE side=%.0f scanned=%s after %d ms" % [rad_to_deg(ang), str(game.db_record("night_nurse").scanned), Time.get_ticks_msec() - t0])
+	bot.bot_scan = false
+
+
+## Chunk 2: stand square to the screen with the projector on and open `to` (a scanned Walk-In with
+## Hive Eyes at level 1, a stethoscope picked up).
+func _pose_wall2(to: Dictionary) -> void:
+	var wt: Node3D = _level_wall_terminal()
+	if wt == null:
+		return
+	game._set_projector(true)
+	game.database.clear()
+	game.mark_db("walk_in", "sighted")
+	game.mark_db("walk_in", "scanned")
+	game.mark_db("stethoscope", "sighted")
+	game.brains.set_level(bot.peer_id, "hive_in", 1)
+	bot.set_flashlight(false)
+	var glass: Node3D = wt.glass
+	var n: Vector3 = glass.global_basis.z.normalized()
+	var stand: Vector3 = glass.global_position + n * 4.6
+	bot.teleport(game._floor_at(Vector3(stand.x, 0.0, stand.z)))
+	await get_tree().process_frame
+	for i in 20:
+		var d: Vector3 = glass.global_position - bot.camera.global_position
+		var fwd: Vector3 = -bot.camera.global_transform.basis.z
+		bot.bot_yaw += wrapf(atan2(-d.x, -d.z) - atan2(-fwd.x, -fwd.z), -PI, PI)
+		bot.bot_pitch = clampf(bot.bot_pitch + atan2(d.y, Vector2(d.x, d.z).length()) - atan2(fwd.y, Vector2(fwd.x, fwd.z).length()), -1.2, 1.2)
+		await get_tree().process_frame
+	if String(to.kind) == "home":
+		wt.ui.go_home()
+	else:
+		wt.ui.open(to)
+
+
+## Point at the amputation page's second tool on the turntable (its name shows); `click` opens it.
+func _pose_wall2_tool(click: bool) -> void:
+	var wt: Node3D = _level_wall_terminal()
+	var pv = wt.ui._preview
+	var holders: Array = []
+	for h in pv._pivot.get_children():
+		if h.has_meta("box"):
+			holders.append(h)
+	if holders.size() < 2:
+		print("[database_shot] no tools on the turntable")
+		return
+	var h: Node3D = holders[1]
+	var px: Vector2 = pv.screen_rect(h).get_center() + pv.position
+	var label := String(h.get_child(0).get_meta("preview_label", "?"))
+	if click:
+		wt.click(px)
+	else:
+		# Keep pointing through the settle, as a held laser does.
+		for f in 12:
+			px = pv.screen_rect(h).get_center() + pv.position
+			wt.point(px)
+			await get_tree().process_frame
+		var tag: Node3D = h.get_node_or_null("Tag")
+		print("[database_shot] hover=%s tag_visible=%s" % [str(pv._hover), str(tag.visible if tag else null)])
+	await get_tree().process_frame
+	print("[database_shot] tool %s -> page %s" % [label, str(wt.ui.page)])
+
+
+func _pose_wall2_step() -> void:
+	var wt: Node3D = _level_wall_terminal()
+	for c in wt.ui._body.get_children():
+		if c is Button and String(c.text).begins_with("3."):
+			c.pressed.emit()
+			break
+	await get_tree().process_frame
 
 
 ## Stand back from the wall terminal; `card` >= 0 aims the laser at that home card (R held).

@@ -1157,10 +1157,7 @@ func _update_scan_progress(delta: float) -> void:
 		var seg: Array = carry_cam.aim_segment(C.SCAN_RANGE)
 		from = seg[0]
 		to = seg[1]
-	var q := PhysicsRayQueryParameters3D.create(from, to)
-	q.collision_mask = C.L_WORLD | C.L_MONSTER | C.L_SCAN
-	q.exclude = [get_rid()]
-	var hit := get_world_3d().direct_space_state.intersect_ray(q)
+	var hit := scan_ray(get_world_3d().direct_space_state, from, to, [get_rid()])
 	var target_id := -1
 	if not hit.is_empty():
 		var collider = hit.get("collider")
@@ -1188,6 +1185,30 @@ func _update_scan_progress(delta: float) -> void:
 	else:
 		scan_progress = 0.0
 		_scan_beep_accum = 0.0
+
+
+## What a scan (or the scan laser) aimed from `from` to `to` lands on. A monster or scan prop just
+## behind the first thing hit still counts (SCAN_SEE_THROUGH): the waiting room's Night Nurse sits
+## inside her bench's collider, and a ray at her body from the side reaches the bench first.
+const SCAN_SEE_THROUGH := 1.0
+
+static func scan_ray(space: PhysicsDirectSpaceState3D, from: Vector3, to: Vector3, exclude: Array) -> Dictionary:
+	var q := PhysicsRayQueryParameters3D.create(from, to)
+	q.collision_mask = C.L_WORLD | C.L_MONSTER | C.L_SCAN
+	q.exclude = exclude
+	var hit := space.intersect_ray(q)
+	if hit.is_empty():
+		return hit
+	var col = hit.get("collider")
+	if col != null and ("monster_id" in col or (col is Node and (col as Node).get_parent() != null and "scan_id" in (col as Node).get_parent())):
+		return hit
+	var dir := (to - from).normalized()
+	var p: Vector3 = hit.position
+	var q2 := PhysicsRayQueryParameters3D.create(p, p + dir * SCAN_SEE_THROUGH)
+	q2.collision_mask = C.L_MONSTER | C.L_SCAN
+	q2.exclude = exclude
+	var behind := space.intersect_ray(q2)
+	return behind if not behind.is_empty() else hit
 
 
 static func empty_slot() -> Dictionary:

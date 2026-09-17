@@ -11,6 +11,8 @@ extends SubViewportContainer
 ##                                     "preview_bounds" = its AABB (origin on the floor) when mesh
 ##                                     bounds would lie (skinned rigs).
 ##   clear()
+##   pick(local) -> Node3D                  the model under a point in the viewer (null: none)
+##   set_hover(model)                       show that model's "preview_label" over it (null: none)
 
 const TURN_SPEED := 0.45
 const GAP := 0.12
@@ -22,6 +24,8 @@ var _cam: Camera3D
 var _pivot: Node3D
 var _floor: MeshInstance3D
 var _key := ""
+var _hover: Node3D = null
+const PICK_SLACK := 14.0
 static var _black: StandardMaterial3D = null
 
 
@@ -94,6 +98,7 @@ func current_key() -> String:
 
 func clear() -> void:
 	_key = ""
+	_hover = null
 	for c in _pivot.get_children():
 		if c != _floor:
 			c.queue_free()
@@ -119,6 +124,7 @@ func show_models(key: String, models: Array, silhouette := false) -> void:
 			m.scale = Vector3.ONE * float(m.get_meta("preview_scale"))
 		# A skinned rig's mesh bounds are its rest pose, not what stands there: models can say.
 		boxes.append(m.get_meta("preview_bounds") if m.has_meta("preview_bounds") else _bounds(holder))
+		holder.set_meta("box", boxes[-1])
 	# Several models share the turntable in a small grid (a row of tools spins as a wide circle and
 	# ends up tiny), one cell each, cells as big as the largest footprint.
 	var cols := ceili(sqrt(float(models.size())))
@@ -141,6 +147,22 @@ func show_models(key: String, models: Array, silhouette := false) -> void:
 		all = placed if i == 0 else all.merge(placed)
 		if silhouette:
 			_blacken(holder)
+		if models[i].has_meta("preview_label"):
+			var tag := Label3D.new()
+			tag.name = "Tag"
+			tag.text = String(models[i].get_meta("preview_label")).to_upper()
+			tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+			tag.fixed_size = true
+			tag.pixel_size = 0.0012
+			tag.font_size = 40
+			tag.outline_size = 10
+			tag.modulate = Color(0.75, 1.0, 0.8)
+			tag.outline_modulate = Color(0.0, 0.08, 0.03)
+			tag.no_depth_test = true
+			tag.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM   # sits above the model
+			tag.position = Vector3(b.get_center().x, b.end.y + 0.06, b.get_center().z)
+			tag.visible = false
+			holder.add_child(tag)
 	# The disc under everything, and a camera far enough back to fit it all while it turns.
 	var radius := maxf(Vector2(all.size.x, all.size.z).length() * 0.5, 0.05)
 	_floor.scale = Vector3(radius * 1.15, 1.0, radius * 1.15)
@@ -161,6 +183,48 @@ func show_models(key: String, models: Array, silhouette := false) -> void:
 	_cam.look_at(centre, Vector3.UP)
 	_cam.near = maxf(0.01, dist * 0.02)
 	_cam.far = dist * 6.0 + 10.0
+
+
+## The model under `local` (a point in this viewer, in pixels); null for none. Forgiving: a laser
+## wobbles and tools are small, so each model's on-screen box counts, plus PICK_SLACK pixels.
+func pick(local: Vector2) -> Node3D:
+	if local.x < 0.0 or local.y < 0.0 or local.x > size.x or local.y > size.y:
+		return null
+	var best: Node3D = null
+	var best_d := INF
+	for holder in _pivot.get_children():
+		if holder == _floor or not holder.has_meta("box") or holder.get_child_count() == 0:
+			continue
+		var r := screen_rect(holder)
+		if not r.grow(PICK_SLACK).has_point(local):
+			continue
+		var d := r.get_center().distance_to(local)
+		if d < best_d:
+			best_d = d
+			best = holder.get_child(0) as Node3D
+	return best
+
+
+## A model holder's box as it appears in this viewer, in pixels.
+func screen_rect(holder: Node3D) -> Rect2:
+	var box: AABB = holder.get_meta("box")
+	var r := Rect2()
+	for n in 8:
+		var corner := holder.global_transform * box.get_endpoint(n)
+		var at := _cam.unproject_position(corner) * (size / Vector2(_vp.size))
+		r = Rect2(at, Vector2.ZERO) if n == 0 else r.expand(at)
+	return r
+
+
+func set_hover(model: Node3D) -> void:
+	if model == _hover:
+		return
+	for m in [_hover, model]:
+		if m != null and is_instance_valid(m) and m.get_parent() != null:
+			var tag: Node3D = m.get_parent().get_node_or_null("Tag")
+			if tag != null:
+				tag.visible = m == model
+	_hover = model
 
 
 ## The visual bounds of everything under `root`, in `root`'s parent space (the pivot).
