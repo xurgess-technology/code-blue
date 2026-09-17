@@ -23,6 +23,9 @@ var settings_ui: CanvasLayer = null
 ## The tip fax (scripts/tips/tip_fax.gd): first-time memos at the bottom of the screen.
 var tips: CanvasLayer = null
 
+## The shift assignment fax (scripts/shift_fax.gd): covers a session start from the title menu.
+var shift_fax: CanvasLayer = null
+
 ## DEV HOOK: the dev room panel (a CanvasLayer, hidden outside the dev room).
 var dev_panel: CanvasLayer = null
 const DevPanelScript := preload("res://scripts/dev/dev_panel.gd")
@@ -83,6 +86,11 @@ func _ready() -> void:
 	menu.name = "Menu"
 	menu_layer.add_child(menu)
 
+	shift_fax = load("res://scripts/shift_fax.gd").new()
+	shift_fax.name = "ShiftFax"
+	shift_fax.menu = menu
+	add_child(shift_fax)
+
 	menu.chose_solo.connect(_start_solo)
 	menu.chose_host.connect(_start_host)
 	menu.chose_join.connect(_start_join)
@@ -97,7 +105,7 @@ func _ready() -> void:
 	# net hooks: Steam hosting, invites, and the pause-menu invite button.
 	menu.chose_host_steam.connect(_start_host_steam)
 	Net.host_ready.connect(_on_steam_hosted)
-	Net.host_failed.connect(func(reason): menu.show_menu(reason))
+	Net.host_failed.connect(func(reason): _show_menu(reason))
 	Net.invite_accepted.connect(_on_steam_invite)
 	_build_invite_button()
 	game.notice.connect(func(_t, _s): pass)
@@ -113,7 +121,9 @@ func _ready() -> void:
 	settings_ui.name = "SettingsUI"
 	settings_ui.menu = menu
 	add_child(settings_ui)
-	menu.chose_settings.connect(settings_ui.open)
+	menu.chose_settings.connect(func():
+		if not shift_fax.is_active():   # the sign-in sheet may still be ejecting for a session start
+			settings_ui.open())
 	# Pause-only buttons: tear the session down and return to the menu (same path Q already
 	# uses to walk out mid-shift), or quit the app outright.
 	settings_ui.exit_to_menu_requested.connect(func(): _back_to_menu(""))
@@ -242,7 +252,7 @@ func _basic_environment() -> WorldEnvironment:
 # =========================================================================
 
 func _start_solo(player_name: String) -> void:
-	if not await _loading_screen_up():
+	if not await _loading_screen_up("solo", player_name):
 		return
 	var run_seed := randi()
 	await game.prebuild_level(run_seed, 1)
@@ -250,22 +260,39 @@ func _start_solo(player_name: String) -> void:
 	game.start_session(run_seed)
 	hud.host_info = ""
 	_enter_game()
-	Loading.end("session")
+	shift_fax.end("session")
 
 
-## Put the loading screen up and let it draw before any loading work starts.
+## Put the shift assignment fax up (the sign-in sheet ejects, the new page feeds in) and let it
+## draw before any loading work starts. It stays until the player is in and frames have settled.
 ## False if a session start is already underway (a double click).
-func _loading_screen_up() -> bool:
+func _loading_screen_up(mode: String, player_name: String) -> bool:
 	await _after_launch()
-	if Loading.is_active():
+	if _starting():
 		return false
-	Loading.begin("session", "SCRUBBING IN...")
-	await Loading.drawn()
+	shift_fax.begin("session", mode, player_name)
+	await shift_fax.drawn()
 	return true
 
 
+## A session start (or its fax) is underway.
+func _starting() -> bool:
+	return shift_fax.is_active() or Loading.is_active()
+
+
+## Back to the title menu with `reason` on the sign-in sheet. If the shift fax is up (a start that
+## failed), its page ejects first and a fresh sign-in sheet feeds into the same printer.
+func _show_menu(reason: String) -> void:
+	if not shift_fax.is_active():
+		menu.show_menu(reason)
+		return
+	shift_fax.cancel(func():
+		menu.show_menu(reason)
+		menu.feed_in(0.0, 0.0, int(menu.page_no) + 2))
+
+
 func _start_host(player_name: String) -> void:
-	if not await _loading_screen_up():
+	if not await _loading_screen_up("host", player_name):
 		return
 	# The hospital first, then open the server: nobody can connect to a session that isn't there yet.
 	var run_seed := randi()
@@ -273,30 +300,28 @@ func _start_host(player_name: String) -> void:
 	var err := Net.host(player_name)
 	if not err.is_empty():
 		game._discard_prebuilt()
-		Loading.end("session")
-		menu.show_menu(err)
+		_show_menu(err)
 		return
 	game.start_session(run_seed)
 	var addresses := Net.local_addresses()
 	hud.host_info = "Friends join at: %s" % ", ".join(addresses.map(func(a): return "%s:%d" % [a, C.DEFAULT_PORT])) \
 		if not addresses.is_empty() else "Hosting on port %d" % C.DEFAULT_PORT
 	_enter_game()
-	Loading.end("session")
+	shift_fax.end("session")
 
 
-## Joining: the screen stays up from the click until the host's hospital is built here (or the
+## Joining: the fax stays up from the click until the host's hospital is built here (or the
 ## join fails / is abandoned).
 func _start_join(player_name: String, address: String) -> void:
 	await _after_launch()
-	if Loading.is_active():
+	if _starting():
 		return
 	var parsed := Net.parse_address(address)
 	menu.set_status("Joining %s:%d..." % [parsed.address, parsed.port])
-	Loading.begin("join", "CONNECTING...")
+	shift_fax.begin("join", "join", player_name)
 	var err := Net.join(parsed.address, parsed.port, player_name)
 	if not err.is_empty():
-		Loading.end("join")
-		menu.show_menu(err)
+		_show_menu(err)
 
 
 
@@ -308,13 +333,13 @@ func _start_host_steam(_player_name: String) -> void:
 
 
 func _on_steam_hosted() -> void:
-	await _loading_screen_up()
+	await _loading_screen_up("steam", menu.player_name())
 	var run_seed := randi()
 	await game.prebuild_level(run_seed, 1)
 	game.start_session(run_seed)
 	hud.host_info = "Steam lobby open (friends only). Esc, then Invite friends, or invite from the Steam overlay."
 	_enter_game()
-	Loading.end("session")
+	shift_fax.end("session")
 
 
 ## Accepted an invite or clicked "Join game" on a friend: leave whatever we were doing and go.
@@ -324,11 +349,10 @@ func _on_steam_invite(lobby: int) -> void:
 		_back_to_menu("")
 	menu.set_enabled(false)
 	menu.set_status("Joining your friend's Steam lobby...")
-	Loading.begin("join", "CONNECTING...")
+	shift_fax.begin("join", "join", menu.player_name())
 	var err := Net.join_steam(lobby)
 	if not err.is_empty():
-		Loading.end("join")
-		menu.show_menu(err)
+		_show_menu(err)
 
 
 var _invite_button: Button
@@ -361,14 +385,14 @@ func _on_joined() -> void:
 
 
 func _on_join_failed(reason: String) -> void:
-	Loading.end("join")
-	menu.show_menu(reason)
+	_show_menu(reason)
 
 
 func _enter_game() -> void:
 	menu.hide_menu()
 	game.paused = false
-	_set_mouse(true)
+	# The shift fax keeps the mouse (and so the surgeon) until its page has gone: _update_mouse.
+	_set_mouse(not shift_fax.holds_input())
 
 
 func _back_to_menu(reason: String) -> void:
@@ -376,8 +400,7 @@ func _back_to_menu(reason: String) -> void:
 	game.end_session("")
 	game.paused = false
 	_set_mouse(false)
-	Loading.end("join")
-	menu.show_menu(reason)
+	_show_menu(reason)
 	Audio.set_music_intensity(0.0)
 
 
@@ -410,6 +433,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	if game.phase == Game.Phase.MENU:
+		return
+	# The shift fax is still going: nothing reaches the shift (no pause fax over it) until it has gone.
+	if shift_fax.holds_input():
+		get_viewport().set_input_as_handled()
 		return
 
 	# Hub rebuild, chunk 3: the pharmacy's fax order form owns the keyboard until it closes.
@@ -470,6 +497,7 @@ func _toggle_pause() -> void:
 ## captured for walking around.
 func _update_mouse() -> void:
 	var free: bool = menu.visible or game.phase == Game.Phase.MENU or game.paused \
+		or shift_fax.holds_input() \
 \
 		or (game.economy != null and game.economy.fax_ui_open()) \
 		or game.surgery_wants_mouse() \
@@ -497,8 +525,8 @@ func _process(_delta: float) -> void:
 	if _fps_label.visible:
 		_fps_label.text = "%d fps  %s" % [Engine.get_frames_per_second(), QUALITY_NAMES[quality]]
 	_update_mouse()
-	if game.phase != Game.Phase.MENU and Loading.has_reason("join"):
-		Loading.end("join")   # the host's hospital is built here (its warmup, if any, keeps the screen up)
+	if game.phase != Game.Phase.MENU and shift_fax.has_reason("join"):
+		shift_fax.end("join")   # the host's hospital is built here; the fax goes once frames settle
 	_invite_button.visible = game.paused and Net.backend == "steam" and game.phase != Game.Phase.MENU
 	# While operating, the surgery view's camera wins; otherwise whoever we are watching.
 	var surgery_cam: Camera3D = game.surgery_camera() if game.phase != Game.Phase.MENU else null  # downed hook: either table
