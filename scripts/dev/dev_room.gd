@@ -679,7 +679,7 @@ func _apply_request(sender: int, action: String, a: Dictionary) -> void:
 			for m in game.monsters.values().duplicate():
 				game.kill_monster(m)
 		"patient":
-			set_patient(String(a.get("patient", "bob")), String(a.get("ailment", "gunshot")))
+			set_patient(String(a.get("patient", "bob")), String(a.get("ailment", "gunshot")), bool(a.get("dead", false)))
 		"clear_patient":
 			# loop: every patient, on the tables and on the way.
 			for c in game.cases.duplicate():
@@ -871,7 +871,8 @@ func set_nurse_walk(mode: String, who: Node) -> void:
 		nurse_loop.append(NavigationServer3D.map_get_closest_point(map, p) if has_nav else p)
 
 
-func set_patient(patient_id: String, ailment_id: String) -> void:
+## `dead`: they flatline at once and stay on the table as a body (for the furnace).
+func set_patient(patient_id: String, ailment_id: String, dead := false) -> void:
 	if not is_host() or Procedures.patient(patient_id).is_empty() or Procedures.ailment(ailment_id).is_empty() \
 			or Procedures.is_player_only(ailment_id):
 		return
@@ -884,7 +885,10 @@ func set_patient(patient_id: String, ailment_id: String) -> void:
 			game.remove_case(int(there.id))
 	if game.phase == game.Phase.LOBBY:
 		game.clock_in()   # a patient before clocking in: clock in first
-	game.add_case({"patient_id": patient_id, "ailment_id": ailment_id, "table": table, "state": "on_table"})
+	var id: int = game.add_case({"patient_id": patient_id, "ailment_id": ailment_id, "table": table, "state": "on_table"})
+	if dead:
+		game.finish_case(id, false)
+		return
 	game.say("%s is on the table: %s." % [Procedures.patient(patient_id).name, Procedures.ailment(ailment_id).name], 3.0)
 
 

@@ -270,7 +270,9 @@ func _draw_home() -> void:
 		# Two-word titles on two lines (SURGERY / ITEMS), so they never run off the card.
 		var t := _label(String(s.title).replace(" ", "
 "), 46, GREEN)
-		t.position = Vector2(240, ch * 0.5 - 31.0 * float(t.get_line_count()))
+		t.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		t.position = Vector2(240, 0)
+		t.size = Vector2(cw - 260, ch)
 		card.add_child(t)
 
 
