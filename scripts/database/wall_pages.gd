@@ -3,16 +3,17 @@ extends RefCounted
 ## sections, the entries in each, and every entry's page. wall_terminal_ui.gd draws it.
 ##
 ##   SECTIONS                          [{id, title}] in home-grid order
-##   entries(section, game) -> Array   [{key, title, known}]; unknown entries show "???" and can't open
-##   page(section, key, game) -> Dict  {title, subtitle, paragraphs: [String], hint, models: [{monster} |
+##   entries(section, view) -> Array   [{key, title, known}]; unknown entries show "???" and can't open
+##   page(section, key, view) -> Dict  {title, subtitle, paragraphs: [String], hint, models: [{monster} |
 ##                                      {item, count, link, label}], ability: {name, levels: [String]}
 ##                                      (monsters); a procedure's steps are a paragraph and its tools
 ##                                      links (link: a surgery item's key, label over it when pointed at)
 ##
+## `view` is whose database the screen shows (wall_session.gd view()): {db: {kind: bits (1 sighted,
+## 2 scanned, 4 harvested)}, peer, brains}; nobody signed in is an empty db and peer 0.
 ## Known: surgery items and procedures always; a monster once scanned; any other item once picked
 ## up (game.mark_db(kind, "sighted", player) in pickup_item). Ability names show once harvested,
-## each level's numbers once the player's brain level reaches it. Reads this machine's database
-## (the signed-in player's comes with chunk 3).
+## each level's numbers once the player's brain level reaches it.
 
 const MonsterPages := preload("res://scripts/database/monster_pages.gd")
 const Pages := preload("res://scripts/database/database_pages.gd")
@@ -82,12 +83,12 @@ const LOOT_BLURBS := {
 # ---------------------------------------------------------------------------
 # entries
 
-static func entries(section: String, game: Node) -> Array:
+static func entries(section: String, view: Dictionary) -> Array:
 	var out: Array = []
 	match section:
 		"monsters":
 			for kind in MonsterPages.ORDER:
-				out.append({"key": kind, "title": String(MonsterPages.entry(kind).get("name", kind)), "known": _tier(game, kind) >= 2})
+				out.append({"key": kind, "title": String(MonsterPages.entry(kind).get("name", kind)), "known": _tier(view, kind) >= 2})
 		"procedures":
 			for id in ProceduresDB.AILMENTS.keys():
 				out.append({"key": id, "title": String(ProceduresDB.AILMENTS[id].get("name", id)), "known": true})
@@ -97,7 +98,7 @@ static func entries(section: String, game: Node) -> Array:
 					out.append({"key": kind, "title": ItemsDB.display_name(kind), "known": true})
 		"other":
 			for kind in _other_kinds():
-				out.append({"key": kind, "title": ItemsDB.display_name(kind), "known": _found(game, kind)})
+				out.append({"key": kind, "title": ItemsDB.display_name(kind), "known": _found(view, kind)})
 	return out
 
 
@@ -115,10 +116,10 @@ static func _other_kinds() -> Array:
 # ---------------------------------------------------------------------------
 # pages
 
-static func page(section: String, key: String, game: Node) -> Dictionary:
+static func page(section: String, key: String, view: Dictionary) -> Dictionary:
 	match section:
 		"monsters":
-			return _monster(key, game)
+			return _monster(key, view)
 		"procedures":
 			return _procedure(key)
 		"surgery":
@@ -128,7 +129,7 @@ static func page(section: String, key: String, game: Node) -> Dictionary:
 	return {}
 
 
-static func _monster(kind: String, game: Node) -> Dictionary:
+static func _monster(kind: String, view: Dictionary) -> Dictionary:
 	var e := MonsterPages.entry(kind)
 	var p := {
 		"title": String(e.get("name", kind)).to_upper(),
@@ -136,19 +137,20 @@ static func _monster(kind: String, game: Node) -> Dictionary:
 		"paragraphs": MONSTER_TEXT.get(kind, []),
 		"models": [{"monster": kind}],
 	}
-	var tier := _tier(game, kind)
+	var tier := _tier(view, kind)
 	var name := "???"
 	var levels: Array = ["???", "???", "???"]
 	if ABILITY.has(kind):
-		var lvl := _level(game, kind)
+		var lvl := _level(view, kind)
 		if tier >= 3 or lvl >= 1:
 			name = String(ABILITY[kind]).to_upper()
 		for n in range(1, 4):
-			if lvl >= n and game != null and game.brains != null:
+			var brains = view.get("brains")
+			if lvl >= n and brains != null:
 				if kind == "walk_in":
-					levels[n - 1] = "Reach %.0f m, watch for %.1f s" % [game.brains.hive_range(n), game.brains.hive_seconds(n)]
+					levels[n - 1] = "Reach %.0f m, watch for %.1f s" % [brains.hive_range(n), brains.hive_seconds(n)]
 				else:
-					levels[n - 1] = "Radius %.0f m, lasts %.1f s" % [game.brains.echo_radius(n), game.brains.echo_seconds(n)]
+					levels[n - 1] = "Radius %.0f m, lasts %.1f s" % [brains.echo_radius(n), brains.echo_seconds(n)]
 	p["ability"] = {"name": name, "levels": levels}
 	return p
 
@@ -211,22 +213,21 @@ static func _other(kind: String) -> Dictionary:
 # ---------------------------------------------------------------------------
 # what this player knows
 
-static func _tier(game: Node, kind: String) -> int:
-	if game == null or not game.get("database") is Dictionary or not (game.database as Dictionary).has(kind):
-		return 0
-	var rec = game.database[kind]
-	if bool(rec.harvested):
+static func _tier(view: Dictionary, kind: String) -> int:
+	var bits := int((view.get("db", {}) as Dictionary).get(kind, 0))
+	if bits & 4:
 		return 3
-	if bool(rec.scanned):
+	if bits & 2:
 		return 2
-	return 1 if bool(rec.sighted) else 0
+	return 1 if bits & 1 else 0
 
 
-static func _found(game: Node, kind: String) -> bool:
-	return _tier(game, kind) >= 1
+static func _found(view: Dictionary, kind: String) -> bool:
+	return _tier(view, kind) >= 1
 
 
-static func _level(game: Node, path: String) -> int:
-	if game == null or game.get("brains") == null or game.local_player() == null:
+static func _level(view: Dictionary, path: String) -> int:
+	var brains = view.get("brains")
+	if brains == null or int(view.get("peer", 0)) == 0:
 		return 0
-	return int(game.brains.level(game.local_player().peer_id, path))
+	return int(brains.level(int(view.peer), path))

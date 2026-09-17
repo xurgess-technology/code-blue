@@ -8,7 +8,9 @@ extends Node
 ## pointer, always: a beam from the hand and a dot where it lands. On the break room's wall screen
 ## (wall_terminal.gd) the dot is a mouse cursor and a left click (Player.laser_clicks) clicks under
 ## it; anywhere else a left click fires a surge down the beam. The host's _tick_scan still decides
-## what the database records; nothing here is replicated yet (chunk 4 shares the screen).
+## what the database records. Chunks 3 and 4: clicks go through game.wall (wall_session.gd, the host
+## presses them); holding left click on HOLD TO SIGN IN for HOLD_SECONDS signs in; everyone else's
+## laser shows too (from their flashlight, along their view), with its dot on the screen.
 
 const MonsterPages := preload("res://scripts/database/monster_pages.gd")
 
@@ -56,6 +58,9 @@ var _dot_light: OmniLight3D
 var _beam_mat: StandardMaterial3D
 var _surge := 0.0
 var _clicks_seen := -1
+var _hold := 0.0                     # left click held on HOLD TO SIGN IN, seconds
+var _hold_done := false              # signed in on this hold: let go before another
+var _others := {}                    # peer id -> {beam, mat, dot}: other players' lasers
 var _pointed: Node = null           # the wall terminal the laser is on, if any
 var _lens: MeshInstance3D = null     # the local torch's lens while it is scanner-blue
 var _lens_saved: Material = null
@@ -145,6 +150,7 @@ func _process(delta: float) -> void:
 	if _flash <= 0.0:
 		_flash_target = null
 	_update_laser(me, monster, delta)
+	_update_others(me)
 	_tick_rings(delta)
 
 
@@ -209,6 +215,7 @@ func _update_laser(me, monster: Node3D, delta: float) -> void:
 		_dot_light.visible = false
 		_point_at(null, Vector2(-1, -1))
 		_clicks_seen = int(me.laser_clicks) if me != null else -1
+		_set_hold(null, 0.0)
 		return
 	var cam: Camera3D = me.camera
 	# Out of the torch's lens when the first-person torch is showing, else from about where it would be.
@@ -225,27 +232,22 @@ func _update_laser(me, monster: Node3D, delta: float) -> void:
 		to = monster.global_position + Vector3.UP * _height_of(monster) * 0.6
 		landed = true
 	else:
-		var ray_from := cam.global_position
-		var ray_to := ray_from - cam.global_transform.basis.z * LASER_RANGE
-		if me.carry_cam != null and me.carry_cam.active:
-			var seg: Array = me.carry_cam.aim_segment(LASER_RANGE)
-			ray_from = seg[0]
-			ray_to = seg[1]
-		var q := PhysicsRayQueryParameters3D.create(ray_from, ray_to)
-		q.collision_mask = C.L_WORLD | C.L_MONSTER | C.L_SCAN
-		q.exclude = [me.get_rid()]
-		var hit: Dictionary = me.get_world_3d().direct_space_state.intersect_ray(q)
-		if hit.is_empty():
-			to = ray_to
-		else:
-			to = hit.position
-			landed = true
-			terminal = _terminal_of(hit.get("collider"))
-			if terminal != null:
-				px = terminal.pixel_at(to)
-				if px.x < 0.0:
-					terminal = null
+		var l: Dictionary = game.wall.laser_of(me)
+		to = l.to
+		landed = l.landed
+		terminal = l.terminal
+		px = l.px
 	_point_at(terminal, px)
+	# Held on HOLD TO SIGN IN: fills, then signs this player in.
+	var on_sign: bool = terminal != null and bool(me.laser_held) and terminal.ui.sign_rect().has_point(px)
+	if not bool(me.laser_held):
+		_hold_done = false
+	_set_hold(terminal, _hold + delta if on_sign and not _hold_done else 0.0)
+	if _hold >= game.wall.HOLD_SECONDS:
+		_hold_done = true
+		_set_hold(terminal, 0.0)
+		game.wall.sign_in()
+		_sfx("click", -2.0)
 	# A click: on the screen it presses what is under the dot; anywhere else, a surge down the beam.
 	var clicks := int(me.laser_clicks)
 	if _clicks_seen < 0:
@@ -253,7 +255,7 @@ func _update_laser(me, monster: Node3D, delta: float) -> void:
 	if clicks != _clicks_seen:
 		_clicks_seen = clicks
 		if terminal != null:
-			terminal.click(px)
+			game.wall.click(px)
 			_sfx("click", -4.0)
 		else:
 			_surge = 1.0
@@ -286,6 +288,69 @@ func _draw_beam(from: Vector3, to: Vector3, landed: bool) -> void:
 		_dot.scale = Vector3.ONE * (1.0 + 2.5 * _surge)
 		_dot_light.global_position = at - y * 0.08
 		_dot_light.light_energy = 0.8 + 2.5 * _surge
+
+
+func _set_hold(terminal: Node, t: float) -> void:
+	_hold = t
+	var wt: Node = terminal if terminal != null else game.wall_terminal()
+	if wt != null and is_instance_valid(wt):
+		wt.ui.set_hold(t / game.wall.HOLD_SECONDS)
+
+
+## Everyone else's laser: a beam from their flashlight to where their view lands, and their dot on the
+## screen. Nothing on the wire: their aim and scan_holding already are.
+func _update_others(me) -> void:
+	var cursors: Array = []
+	var seen := {}
+	for p in game.players.values():
+		if p == me or not is_instance_valid(p) or not p.alive or not bool(p.scan_holding) or p.flashlight == null:
+			continue
+		var id := int(p.peer_id)
+		seen[id] = true
+		if not _others.has(id):
+			_others[id] = _new_other()
+		var o: Dictionary = _others[id]
+		var l: Dictionary = game.wall.laser_of(p)
+		var from: Vector3 = (p.flashlight as Node3D).global_position
+		var d: Vector3 = l.to - from
+		var len := d.length()
+		o.beam.visible = len > 0.05
+		if len > 0.05:
+			var y := d / len
+			var x := y.cross(Vector3.UP)
+			if x.length() < 0.01:
+				x = y.cross(Vector3.RIGHT)
+			x = x.normalized()
+			o.beam.global_transform = Transform3D(Basis(x, y * len, x.cross(y)), from + d * 0.5)
+		o.dot.visible = bool(l.landed)
+		if l.landed:
+			o.dot.global_position = l.to - d.normalized() * 0.01
+		if l.terminal != null:
+			cursors.append(l.px)
+	for id in _others.keys():
+		if not seen.has(id):
+			_others[id].beam.queue_free()
+			_others[id].dot.queue_free()
+			_others.erase(id)
+	var wt: Node = game.wall_terminal()
+	if wt != null and is_instance_valid(wt):
+		wt.ui.set_remote_cursors(cursors)
+
+
+func _new_other() -> Dictionary:
+	var beam := MeshInstance3D.new()
+	beam.mesh = _beam.mesh
+	beam.material_override = _beam_mat
+	beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	beam.top_level = true
+	add_child(beam)
+	var dot := MeshInstance3D.new()
+	dot.mesh = _dot.mesh
+	dot.material_override = _dot.material_override
+	dot.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	dot.top_level = true
+	add_child(dot)
+	return {"beam": beam, "dot": dot}
 
 
 func _dim_flashlight(me) -> void:
@@ -329,15 +394,6 @@ func _tint_lens(lens: MeshInstance3D) -> void:
 		_lens_mat.emission_energy_multiplier = 0.9
 	_lens_saved = lens.material_override
 	lens.material_override = _lens_mat
-
-
-func _terminal_of(collider) -> Node:
-	if not (collider is Node):
-		return null
-	for c in (collider as Node).get_children():
-		if c.is_in_group("wall_terminal"):
-			return c
-	return null
 
 
 func _point_at(terminal: Node, px: Vector2) -> void:

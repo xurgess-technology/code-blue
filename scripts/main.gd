@@ -7,7 +7,6 @@ var hud: Hud
 var menu: Menu
 var post = null
 ## The database terminal UI (a CanvasLayer with open/close/is_open).
-var terminal_ui: CanvasLayer = null
 
 ## 0 low, 1 medium, 2 high. Medium is the default: it keeps the volumetric fog that
 ## sells the atmosphere, and renders below native resolution so integrated GPUs cope.
@@ -104,13 +103,6 @@ func _ready() -> void:
 	Net.invite_accepted.connect(_on_steam_invite)
 	_build_invite_button()
 	game.notice.connect(func(_t, _s): pass)
-
-	# The database terminal: monsters, abilities, items and procedures. Replaces the old guide.
-	var terminal_script: GDScript = load("res://scripts/database/terminal_ui.gd")
-	terminal_ui = terminal_script.new()
-	terminal_ui.name = "TerminalUI"
-	terminal_ui.game = game
-	add_child(terminal_ui)
 
 	# The tip fax: first-time memos (the break room's time clock, the crematorium's furnace).
 	tips = load("res://scripts/tips/tip_fax.gd").new()
@@ -444,10 +436,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if game.phase == Game.Phase.MENU:
 		return
 
-	# The open terminal owns the keyboard until it closes itself.
-	if terminal_ui != null and terminal_ui.is_open():
-		return
-	# Hub rebuild, chunk 3: so does the pharmacy's fax order form.
+	# Hub rebuild, chunk 3: the pharmacy's fax order form owns the keyboard until it closes.
 	if game.economy != null and game.economy.fax_ui_open():
 		return
 	if event.is_action_pressed("interact") and not game.paused:
@@ -505,7 +494,7 @@ func _toggle_pause() -> void:
 ## captured for walking around.
 func _update_mouse() -> void:
 	var free: bool = menu.visible or game.phase == Game.Phase.MENU or game.paused \
-		or (terminal_ui != null and terminal_ui.is_open()) \
+\
 		or (game.economy != null and game.economy.fax_ui_open()) \
 		or game.surgery_wants_mouse() \
 		or (dev_panel != null and dev_panel.is_open())  # DEV HOOK

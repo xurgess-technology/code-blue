@@ -4,7 +4,9 @@ extends Node
 ## a harvest (dissection or an absorbed brain) unlocks tier 3, the database survives a wipe and a
 ## reload (saved under user://), each player's database is their own (another player's scan never
 ## lands in yours), the waiting room's Night Nurse can be scanned, and no `read` action or guide
-## binder code remains in the project.
+## binder code remains in the project. Terminal redesign, chunk 4: on the break room screen, holding
+## the laser on HOLD TO SIGN IN signs in and fills the cards with your database (nobody signed in:
+## "???"), and SIGN OUT, walking away and the idle timeout each sign you out.
 ##
 ##   godot --headless --fixed-fps 60 --path . tools/databasetest.tscn [-- --seed=N]
 ##
@@ -48,6 +50,7 @@ func _run() -> void:
 	await _harvest_unlocks_tier3()
 	await _guest_scan_stays_theirs()
 	await _scan_waiting_nurse()
+	await _wall_sign_in_and_out()
 	_persists_across_wipe_and_reload()
 	_no_guide_code_remains()
 
@@ -181,13 +184,90 @@ func _persists_across_wipe_and_reload() -> void:
 	_check(fresh.has("night_nurse") and bool(fresh["night_nurse"].sighted), "the save file on disk also has it (survives a reload)")
 
 
+func _wall_sign_in_and_out() -> void:
+	_say("---- the break room screen: sign in by holding, sign out three ways")
+	var wt: Node3D = game.wall_terminal()
+	_check(wt != null, "the level has the screen")
+	if wt == null:
+		return
+	game._set_projector(true)
+	game.database.clear()
+	game.mark_own_db("walk_in", "sighted")
+	game.mark_own_db("walk_in", "scanned")
+	wt.ui.go_home()
+	var glass: Node3D = wt.glass
+	var out: Vector3 = glass.global_basis.z.normalized()
+	var stand: Vector3 = glass.global_position + out * 4.6
+	me.teleport(game._floor_at(Vector3(stand.x, 0.0, stand.z)))
+	await _frames(3)
+	_check(not _walk_in_known(), "signed out: the Walk-In is ??? on the screen")
+	var aim := func(px: Vector2):
+		var at: Vector3 = glass.global_transform * Vector3((px.x / wt.TEX.x - 0.5) * wt.SIZE.x, (0.5 - px.y / wt.TEX.y) * wt.SIZE.y, 0.0)
+		var d: Vector3 = at - me.camera.global_position
+		var fwd: Vector3 = -me.camera.global_transform.basis.z
+		me.bot_yaw += wrapf(atan2(-d.x, -d.z) - atan2(-fwd.x, -fwd.z), -PI, PI)
+		me.bot_pitch = clampf(me.bot_pitch + atan2(d.y, Vector2(d.x, d.z).length()) - atan2(fwd.y, Vector2(fwd.x, fwd.z).length()), -1.2, 1.2)
+	var sign_px: Vector2 = wt.ui.sign_rect().get_center()
+	me.bot_scan = true
+	for i in 30:
+		aim.call(sign_px)
+		await _frames(1)
+	me.bot_laser_hold = true
+	for i in 45:   # 0.75 s: not yet
+		aim.call(sign_px)
+		await _frames(1)
+	_check(int(game.wall.user) == 0, "half a hold does not sign in")
+	for i in 60:
+		aim.call(sign_px)
+		await _frames(1)
+	me.bot_laser_hold = false
+	_check(int(game.wall.user) == me.peer_id, "a 1.5 s hold on HOLD TO SIGN IN signs in")
+	_check(_walk_in_known(), "signed in: my scanned Walk-In fills its card")
+	game.mark_own_db("discharged", "scanned")
+	_check(int(game.wall.view().db.get("discharged", 0)) & 2 != 0, "a scan while signed in reaches the screen")
+	# SIGN OUT is a click.
+	wt.ui.open({"kind": "section", "id": "monsters", "index": 0})
+	var out_px: Vector2 = wt.ui._sign.position + wt.ui._sign.size * 0.5
+	for i in 20:
+		aim.call(out_px)
+		await _frames(1)
+	me.bot_laser_click += 1
+	await _frames(3)
+	_check(int(game.wall.user) == 0 and String(wt.ui.page.kind) == "home", "SIGN OUT signs out and goes HOME")
+	# Walking away.
+	game.wall.sign_in()
+	_check(int(game.wall.user) == me.peer_id, "signed in again")
+	me.bot_scan = false
+	me.teleport(game._floor_at(glass.global_position + out * 4.0 + glass.global_basis.x.normalized() * 12.0))
+	await _frames(3)
+	_check(int(game.wall.user) == 0, "walking %.0f m away signs out" % game.wall.WALK_AWAY_M)
+	# Idle.
+	me.teleport(game._floor_at(Vector3(stand.x, 0.0, stand.z)))
+	await _frames(3)
+	game.wall.sign_in()
+	game.wall._idle = game.wall.IDLE_SECONDS - 0.5
+	await _frames(10)
+	_check(int(game.wall.user) == me.peer_id, "still signed in just before the idle timeout")
+	await _frames(30)
+	_check(int(game.wall.user) == 0, "nobody's laser on the screen for %.0f s signs out" % game.wall.IDLE_SECONDS)
+	me.bot_scan = false
+
+
+func _walk_in_known() -> bool:
+	var wt: Node3D = game.wall_terminal()
+	for e in wt.ui.Pages.entries("monsters", game.wall.view()):
+		if String(e.key) == "walk_in":
+			return bool(e.known)
+	return false
+
+
 func _no_guide_code_remains() -> void:
 	_say("---- the guide binder and its `read` action are gone")
 	_check(not ResourceLoader.exists("res://scripts/guide/guide_ui.gd"), "guide_ui.gd is gone")
 	_check(not ResourceLoader.exists("res://scripts/guide/guide_models.gd"), "guide_models.gd is gone")
 	_check(not InputMap.has_action("read"), "the `read` input action is gone")
 	_check(Items.def("guide").is_empty(), "\"guide\" is no longer an item kind")
-	_check(main.terminal_ui != null, "the database terminal UI replaces it")
+	_check(game.wall != null and game.wall_terminal() != null, "the break room screen replaces it")
 
 
 # =========================================================================

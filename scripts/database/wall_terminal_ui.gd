@@ -10,7 +10,15 @@ extends Control
 ##             three levels, a procedure's steps, each step opening its surgery item), the entry's
 ##             3D model turning on the right (model_preview.gd)
 ## BACK goes up one page (a procedure's item goes back to the procedure), HOME to the top.
-## Chunk 3 adds signing in; chunk 4 shares the page between players.
+## Chunks 3 and 4 (wall_session.gd): HOLD TO SIGN IN / SIGN OUT in the header and the signed-in
+## player's name in the title; whose database fills the cards comes from the session; the host's
+## screen takes every click and everyone else's follows it (set_view); other players' laser dots.
+##
+##   page, history(), set_view(page, history), refresh()
+##   link_at(px) -> String, open_link(key)   a procedure's tool on the turntable under px, and opening it
+##   sign_rect() -> Rect2      where HOLD TO SIGN IN is (empty while someone is signed in)
+##   set_hold(k)               how far this machine's player's hold on it is, 0..1
+##   set_cursor(px, on), set_remote_cursors([px]), pulse(px)
 
 const Pages := preload("res://scripts/database/wall_pages.gd")
 const ModelPreview := preload("res://scripts/database/model_preview.gd")
@@ -43,6 +51,10 @@ var _cursor_on := false
 var _pulse_at := Vector2.ZERO
 var _pulse_t := -1.0
 var _overlay: Control
+var _title: Label
+var _sign: Button
+var _hold := 0.0
+var _remote: Array = []
 
 
 func _ready() -> void:
@@ -53,9 +65,9 @@ func _ready() -> void:
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(bg)
 
-	var title := _label("COUNTY GENERAL  /  STAFF DATABASE", 30, GREEN)
-	title.position = Vector2(MARGIN, 26)
-	add_child(title)
+	_title = _label("STAFF DATABASE", 30, GREEN)
+	_title.position = Vector2(MARGIN, 26)
+	add_child(_title)
 	_crumb = _label("", 22, GREEN_DIM)
 	_crumb.position = Vector2(MARGIN + 2, 70)
 	add_child(_crumb)
@@ -67,6 +79,14 @@ func _ready() -> void:
 	_back.position = Vector2(W - MARGIN - 130 - 16 - 150, 30)
 	_back.pressed.connect(back)
 	add_child(_back)
+	# Signing in is a hold (scan_fx.gd times it); SIGN OUT is a click.
+	_sign = _button("HOLD TO SIGN IN", Vector2(250, 56), 22)
+	_sign.position = Vector2(_back.position.x - 16 - 250, 30)
+	_sign.pressed.connect(func():
+		var g := _game()
+		if g != null and g.wall != null and int(g.wall.user) != 0:
+			g.wall.sign_out())
+	add_child(_sign)
 
 	var line := ColorRect.new()
 	line.color = Color(GREEN, 0.35)
@@ -110,6 +130,48 @@ func _game() -> Node:
 # ---------------------------------------------------------------------------
 # navigation
 
+func history() -> Array:
+	return _history
+
+
+## The host's screen: this page, got to by `hist`.
+func set_view(to: Dictionary, hist: Array) -> void:
+	page = to
+	_history = hist
+	_show()
+
+
+## Redraw the page (whose database it shows changed).
+func refresh() -> void:
+	_show()
+
+
+func _view() -> Dictionary:
+	var g := _game()
+	if g == null or g.get("wall") == null:
+		return {"db": {}, "peer": 0, "brains": null}
+	return g.wall.view()
+
+
+func sign_rect() -> Rect2:
+	var g := _game()
+	if not _sign.visible or (g != null and g.get("wall") != null and int(g.wall.user) != 0):
+		return Rect2()
+	return Rect2(_sign.position, _sign.size)
+
+
+func set_hold(k: float) -> void:
+	if not is_equal_approx(k, _hold):
+		_hold = k
+		_overlay.queue_redraw()
+
+
+func set_remote_cursors(points: Array) -> void:
+	if points != _remote:
+		_remote = points
+		_overlay.queue_redraw()
+
+
 func go_home() -> void:
 	_history.clear()
 	page = {"kind": "home"}
@@ -134,6 +196,10 @@ func _show() -> void:
 	_back.visible = not at_home
 	_home.visible = not at_home
 	_preview.visible = false
+	var g := _game()
+	var who: String = g.wall.user_name() if g != null and g.get("wall") != null else ""
+	_title.text = "STAFF DATABASE  /  %s" % (who.to_upper() if who != "" else "GUEST")
+	_sign.text = "SIGN OUT" if who != "" else "HOLD TO SIGN IN"
 	match String(page.kind):
 		"home":
 			_crumb.text = "HOME"
@@ -181,7 +247,7 @@ func _draw_home() -> void:
 # a section: 3x3 cards, a page at a time
 
 func _draw_section(id: String, index: int) -> void:
-	var list := Pages.entries(id, _game())
+	var list := Pages.entries(id, _view())
 	var pages := maxi(1, ceili(float(list.size()) / PER_PAGE))
 	index = clampi(index, 0, pages - 1)
 	page["index"] = index
@@ -225,7 +291,7 @@ func _draw_section(id: String, index: int) -> void:
 # an entry: text on the left, the model turning on the right
 
 func _draw_entry(section: String, key: String) -> void:
-	var p := Pages.page(section, key, _game())
+	var p := Pages.page(section, key, _view())
 	_crumb.text = "HOME  >  %s  >  %s" % [_section_title(section), String(p.get("title", key))]
 	var col_w := 640.0
 	var y := 0.0
@@ -302,12 +368,26 @@ func _input(event: InputEvent) -> void:
 
 
 func _gui_input(event: InputEvent) -> void:
-	if not _preview.visible or not (event is InputEventMouseButton) or not (event as InputEventMouseButton).pressed:
+	if not (event is InputEventMouseButton) or not (event as InputEventMouseButton).pressed:
 		return
-	var hit: Node3D = _preview.pick((event as InputEventMouse).position - _preview.position)
-	if hit != null and hit.has_meta("preview_link"):
-		open({"kind": "entry", "section": "surgery", "key": String(hit.get_meta("preview_link"))})
+	var link := link_at((event as InputEventMouse).position)
+	if link != "":
+		open_link(link)
 		accept_event()
+
+
+## The linked model under px on this machine's turntable ("" for none). Each machine turns its own, so
+## a guest's click says which one it hit (wall_session.gd).
+func link_at(px: Vector2) -> String:
+	if not _preview.visible:
+		return ""
+	var hit: Node3D = _preview.pick(px - _preview.position)
+	return String(hit.get_meta("preview_link")) if hit != null and hit.has_meta("preview_link") else ""
+
+
+func open_link(key: String) -> void:
+	if String(page.kind) == "entry" and String(page.get("section", "")) == "procedures":
+		open({"kind": "entry", "section": "surgery", "key": key})
 
 
 # ---------------------------------------------------------------------------
@@ -326,6 +406,12 @@ func pulse(px: Vector2) -> void:
 
 
 func _draw_overlay() -> void:
+	if _hold > 0.0 and _sign.visible:
+		var r := Rect2(_sign.position, Vector2(_sign.size.x * clampf(_hold, 0.0, 1.0), _sign.size.y))
+		_overlay.draw_rect(r.grow(-3.0), Color(CURSOR, 0.45), true)
+	for rp in _remote:
+		_overlay.draw_circle(rp, 6.0, Color(CURSOR, 0.8))
+		_overlay.draw_arc(rp, 13.0, 0.0, TAU, 28, Color(CURSOR, 0.45), 2.0)
 	if _pulse_t >= 0.0:
 		var k := _pulse_t / 0.35
 		_overlay.draw_arc(_pulse_at, lerpf(8.0, 46.0, k), 0.0, TAU, 32, Color(CURSOR, 1.0 - k), 4.0)

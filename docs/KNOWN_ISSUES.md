@@ -1835,3 +1835,27 @@ Rebuilt around that:
   places new wings with the new grid ("light_pending" until then). Cost: draw calls up 30-50%
   (geometry chunks split by area), perfprobe frame rates unchanged. Gaps: volumetric fog still
   glows through walls; a light within a tile of a doorway reaches the other side's surfaces near it.
+
+## Wall terminal chunks 2-4: card drill-down, sign-in, shared screen (2026-09-16)
+
+- **Chunk 2:** the screen's drill-down (HOME 2x2 cards, 3x3 sections with PREV/NEXT, entry pages
+  with a turning 3D model), short plain descriptions, wrapped text in a 640 px column. A procedure's
+  tools on the turntable are links (name over the one pointed at, click opens it). Mouse motion
+  pushed into the viewport never reaches the UI's `_gui_input` (nothing under the pointer takes it),
+  so hover reads `_input`; clicks still use `_gui_input`. Picking is forgiving: each model's on-screen
+  box plus 14 px.
+- **The waiting room's Night Nurse** could not be scanned from the bench side: the bench's collider
+  took the ray first. `Player.scan_ray` looks up to 1 m past a first hit that isn't a monster or scan
+  prop (`player._update_scan_progress` and `game._scan_aim`).
+- **Chunks 3 and 4:** sign-in by holding the laser on HOLD TO SIGN IN, the signed-in player's database
+  on the cards, sign-out by button / walking away / idle, and the page, sign-in and lasers shared over
+  the network (`wall_session.gd`, docs/CONTRACTS.md "Database terminal"). The old full-screen terminal
+  (`terminal_ui.gd`, `terminal_screen_live.gd`, `main.terminal_ui`) is deleted.
+- Gaps: another player's hold on SIGN IN fills the button only on their own machine; hover highlights
+  are each machine's own; the host decides clicks, so a guest's click waits one round trip (the ring
+  shows at once). Test: `databasetest` (sign in/out paths, solo), `nettest --only=wall` (two guests).
+- Failing on main before this work too (checked on e1c63e4 in a separate worktree, 2026-09-17):
+  doortest "the crew pushed the OR's doors open to bring the gurney through" (every run), looptest
+  "the bot threw the loot into the furnace and sold it for $52" (every run), braintest "nobody is
+  left looking through a Walk-In" after a game over (flaky, about 1 in 2), mapcheck seed 1's morgue
+  tray (known).

@@ -17,7 +17,6 @@ extends RefCounted
 ##   make_terminal()   origin on the floor, screen faces -Z (out into the room, the reader's side)
 
 const SCREEN_GLOW := Color(0.35, 0.9, 0.55)
-const ScreenLive := preload("res://scripts/database/terminal_screen_live.gd")
 const WallTerminal := preload("res://scripts/database/wall_terminal.gd")
 
 

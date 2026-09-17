@@ -79,6 +79,9 @@ var scan_holding: bool = false
 ## scan_fx.gd reads the count on the local machine.
 var laser_clicks: int = 0
 var bot_laser_click: int = 0
+## Chunk 3: left click held down while scanning (holding it on HOLD TO SIGN IN signs in). Local only.
+var laser_held := false
+var bot_laser_hold := false
 var _bot_laser_click_seen: int = 0
 ## SPRINT-DIVE HOOK: pressing crouch while sprinting forward launches a dive that lands prone.
 ## Purely client-owned local movement, like the rest of _local_step (see docs/KNOWN_ISSUES.md
@@ -619,6 +622,7 @@ func _local_step(delta: float) -> void:
 			_bot_crouch_press_seen = bot_crouch_press
 			crouch_pressed = true
 		scan_holding = bot_scan and not hive_view and not downed and not diving
+		laser_held = scan_holding and bot_laser_hold
 		if bot_laser_click != _bot_laser_click_seen:
 			_bot_laser_click_seen = bot_laser_click
 			if scan_holding:
@@ -829,6 +833,7 @@ func _local_step(delta: float) -> void:
 			# Terminal redesign: while the scan laser is out, left mouse clicks with it; no shoving.
 			if scan_holding and Input.is_action_just_pressed("use"):
 				laser_clicks += 1
+			laser_held = scan_holding and Input.is_action_pressed("use")
 			if Input.is_action_just_pressed("shove") and not gun_out and _charging_with == "" and not diving and not scan_holding:
 				if g.combat.local_shove_begin(self):
 					_charging_with = "shove"
@@ -1773,6 +1778,7 @@ func report_full() -> Dictionary:
 		"hv": hive_view,   # SWEEP 3 HOOK (brains)
 		"cr": crouching,   # SWEEP 4A HOOK (controls)
 		"pr": prone,
+		"sh": scan_holding,   # terminal redesign, chunk 4: everyone sees everyone's laser
 	}
 
 
@@ -1823,5 +1829,6 @@ func apply_remote_full(s: Dictionary) -> void:
 	set_flashlight(s.fl)
 	sprinting = s.sp
 	crouching = bool(s.get("cr", false))   # SWEEP 4A HOOK (controls)
+	scan_holding = bool(s.get("sh", false))   # terminal redesign, chunk 4
 	prone = bool(s.get("pr", false))
 	moving = s.mv

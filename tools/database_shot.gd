@@ -38,7 +38,6 @@ func _ready() -> void:
 	await get_tree().process_frame
 
 	var shots := [
-		{"name": "60_terminal_monster_tier2", "fn": _pose_terminal, "settle": 20},
 		{"name": "61_scan_ring", "fn": _pose_scan_ring, "settle": 6},
 		{"name": "62_hive_flight", "fn": _pose_hive_flight, "settle": 1},
 	]
@@ -62,6 +61,8 @@ func _ready() -> void:
 	# --wall2: the wall terminal's drill-down (chunk 2), straight on, projector on.
 	if OS.get_cmdline_user_args().has("--wall2"):
 		shots = [
+			{"name": "78_wall_signing_in", "fn": _pose_wall_sign_in.bind(0.8), "settle": 1},
+			{"name": "79_wall_signed_in", "fn": _pose_wall_sign_in.bind(1.2), "settle": 10},
 			{"name": "80_wall_home", "fn": _pose_wall2.bind({"kind": "home"}), "settle": 30},
 			{"name": "81_wall_monsters", "fn": _pose_wall2.bind({"kind": "section", "id": "monsters", "index": 0}), "settle": 20},
 			{"name": "82_wall_walk_in", "fn": _pose_wall2.bind({"kind": "entry", "section": "monsters", "key": "walk_in"}), "settle": 45},
@@ -73,17 +74,6 @@ func _ready() -> void:
 	# --nurse: scan the waiting room's Night Nurse the way a player would (she keeps running).
 	if OS.get_cmdline_user_args().has("--nurse"):
 		shots = [{"name": "86_scan_nurse", "fn": _pose_scan_nurse, "settle": 1}]
-	# --terminal: every kind of page the 3D viewer shows instead.
-	if OS.get_cmdline_user_args().has("--terminal"):
-		shots = [
-			{"name": "63_terminal_walk_in_t1", "fn": _pose_page.bind(0, 0, {"walk_in": ["sighted"]}), "settle": 30},
-			{"name": "64_terminal_discharged_t2", "fn": _pose_page.bind(0, 1, {"discharged": ["sighted", "scanned"]}), "settle": 30},
-			{"name": "65_terminal_walk_in_t3", "fn": _pose_page.bind(0, 0, {"walk_in": ["sighted", "scanned", "harvested"]}), "settle": 30},
-			{"name": "66_terminal_nurse_t2", "fn": _pose_page.bind(0, 2, {"night_nurse": ["sighted", "scanned"]}), "settle": 30},
-			{"name": "67_terminal_ability", "fn": _pose_page.bind(1, 0, {}), "settle": 30},
-			{"name": "68_terminal_item", "fn": _pose_page.bind(2, 2, {}), "settle": 30},
-			{"name": "69_terminal_procedure", "fn": _pose_procedure, "settle": 30},
-		]
 	for shot in shots:
 		await shot.fn.call()
 		for i in int(shot.get("settle", 20)):
@@ -96,43 +86,8 @@ func _ready() -> void:
 	get_tree().quit(0)
 
 
-## The database terminal open on the Monsters section, tier 2 (scanned) for the Walk-In, with its
-## X-ray showing.
-func _pose_terminal() -> void:
-	bot.teleport(game.table_pos() + Vector3(0, 0, -2.0))
-	game.database.clear()
-	game.mark_db("walk_in", "sighted")
-	game.mark_db("walk_in", "scanned")
-	main.terminal_ui.open()
-	main.terminal_ui._tab = main.terminal_ui.Tab.MONSTERS
-	main.terminal_ui._index = 0
-	await get_tree().process_frame
-
-
-## The terminal open on section `tab`, row `index`, with the database holding `marks`.
-func _pose_page(tab: int, index: int, marks: Dictionary) -> void:
-	game.database.clear()
-	for kind in marks.keys():
-		for m in marks[kind]:
-			game.mark_db(kind, m)
-	main.terminal_ui.open()
-	main.terminal_ui._tab = tab
-	main.terminal_ui._index = index
-	await get_tree().process_frame
-
-
-func _pose_procedure() -> void:
-	var entries: Array = main.terminal_ui.Pages.entries()
-	for i in entries.size():
-		if String(entries[i].type) == "procedure":
-			await _pose_page(2, i, {})
-			return
-
-
 ## Aiming at a monster mid-scan: the HUD's crosshair progress ring.
 func _pose_scan_ring() -> void:
-	main.terminal_ui.close()
-	await get_tree().process_frame
 	var here: Vector3 = game.table_pos() + Vector3(0, 0, -2.0)
 	bot.teleport(here)
 	var wi: Node3D = game.brains.spawn_walk_in(game._floor_at(here + Vector3(0, 0, 4))) as Node3D
@@ -177,6 +132,8 @@ func _pose_wall2(to: Dictionary) -> void:
 	if wt == null:
 		return
 	game._set_projector(true)
+	bot.bot_scan = false
+	bot.bot_laser_hold = false
 	game.database.clear()
 	game.mark_db("walk_in", "sighted")
 	game.mark_db("walk_in", "scanned")
@@ -194,10 +151,46 @@ func _pose_wall2(to: Dictionary) -> void:
 		bot.bot_yaw += wrapf(atan2(-d.x, -d.z) - atan2(-fwd.x, -fwd.z), -PI, PI)
 		bot.bot_pitch = clampf(bot.bot_pitch + atan2(d.y, Vector2(d.x, d.z).length()) - atan2(fwd.y, Vector2(fwd.x, fwd.z).length()), -1.2, 1.2)
 		await get_tree().process_frame
+	if int(game.wall.user) == 0:
+		game.wall.sign_in()
 	if String(to.kind) == "home":
 		wt.ui.go_home()
 	else:
 		wt.ui.open(to)
+
+
+## Chunk 3: the bot's laser held on HOLD TO SIGN IN for `secs` (the first call starts signed out).
+func _pose_wall_sign_in(secs: float) -> void:
+	var wt: Node3D = _level_wall_terminal()
+	if wt == null:
+		return
+	if secs < 1.0:
+		await _pose_wall2({"kind": "home"})
+		game.wall.sign_out()
+		await get_tree().process_frame
+	var r: Rect2 = wt.ui.sign_rect()
+	var target: Vector3 = _screen_point(wt, r.get_center() if r.size.x > 0 else Vector2(640, 360))
+	bot.bot_scan = true
+	bot.bot_laser_hold = true
+	var t0 := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0 < int(secs * 1000.0):
+		_aim_bot(target)
+		await get_tree().process_frame
+	print("[database_shot] sign-in after %.1f s: user=%d name=%s" % [secs, int(game.wall.user), game.wall.user_name()])
+	if secs >= 1.0:
+		bot.bot_laser_hold = false
+
+
+func _screen_point(wt: Node3D, px: Vector2) -> Vector3:
+	var local := Vector3((px.x / wt.TEX.x - 0.5) * wt.SIZE.x, (0.5 - px.y / wt.TEX.y) * wt.SIZE.y, 0.0)
+	return wt.glass.global_transform * local
+
+
+func _aim_bot(at: Vector3) -> void:
+	var d: Vector3 = at - bot.camera.global_position
+	var fwd: Vector3 = -bot.camera.global_transform.basis.z
+	bot.bot_yaw += wrapf(atan2(-d.x, -d.z) - atan2(-fwd.x, -fwd.z), -PI, PI)
+	bot.bot_pitch = clampf(bot.bot_pitch + atan2(d.y, Vector2(d.x, d.z).length()) - atan2(fwd.y, Vector2(fwd.x, fwd.z).length()), -1.2, 1.2)
 
 
 ## Point at the amputation page's second tool on the turntable (its name shows); `click` opens it.

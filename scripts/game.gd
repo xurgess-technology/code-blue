@@ -85,6 +85,9 @@ var scan_props: Array = []
 ## Terminal redesign: the break room projector (the wall terminal) is on. Host authoritative, "pj" in
 ## the snapshot; E on the projector toggles it.
 var projector_on := false
+## Terminal redesign, chunks 3 and 4: the break room screen everyone shares (who is signed in, the
+## page on it, clicks from every machine). scripts/database/wall_session.gd.
+var wall: Node = null
 ## Room-bound lighting (scripts/level/light_rooms.gd): nodes that joined the level this frame, placed
 ## on their area's render bits once their transforms are set.
 var _light_queue: Array = []
@@ -226,6 +229,10 @@ func _ready() -> void:
 	scan_fx.name = "ScanFx"
 	add_child(scan_fx)
 	scan_fx.setup(self)
+	wall = preload("res://scripts/database/wall_session.gd").new()
+	wall.name = "WallSession"
+	add_child(wall)
+	wall.setup(self)
 	# DEV HOOK: the dev room lives on every machine at the same path so its RPCs line up.
 	dev = DevRoomScript.new()
 	dev.name = "Dev"
@@ -1939,6 +1946,13 @@ func _route_operator_report(peer_id: int, report: Dictionary) -> void:
 		sys.receive_operator_report(peer_id, report)
 
 
+## Terminal redesign, chunk 4: a guest's click, sign-in or database for the break room screen.
+@rpc("any_peer", "reliable", "call_remote")
+func _rpc_wall(kind: String, data: Dictionary) -> void:
+	if is_host():
+		wall.on_rpc(multiplayer.get_remote_sender_id(), kind, data)
+
+
 @rpc("any_peer", "unreliable_ordered", "call_remote")
 func _rpc_operator_report(report: Dictionary) -> void:
 	if is_host():
@@ -2113,6 +2127,8 @@ func mark_own_db(kind: String, field: String) -> void:
 	if not bool(rec.get(field)):
 		rec.set(field, true)
 		DatabaseStoreScript.save(database)
+		if wall != null:
+			wall.own_db_changed()   # signed in on the break room screen: it shows the change
 
 
 ## A scan target by id: a monster (id >= 0) or a scan prop (negative id), null when gone.
@@ -3522,6 +3538,7 @@ func _global_fields() -> Dictionary:
 	# and which wings the level has ("wg").
 	g.merge(doors.net_fields())
 	g["wg"] = wing_loader.generation
+	g.merge(wall.net_fields())   # terminal redesign: the break room screen ("wt", "wu", "wd")
 	return g
 
 
@@ -3710,9 +3727,10 @@ func _apply_state(state: Dictionary, msg: Dictionary, keyframe: bool) -> void:
 		if String(k).begins_with("lp."):
 			lp[String(k).substr(3)] = g[k]
 	loop.apply_net_state(lp)
-	# Terminal redesign: the break room projector.
+	# Terminal redesign: the break room projector, and what its screen shows.
 	if g.has("pj") and bool(g.pj) != projector_on:
 		_set_projector(bool(g.pj))
+	wall.apply_net(g)
 	# Hub rebuild: the crematorium furnace's hatch.
 	if economy.furnace != null and is_instance_valid(economy.furnace) and g.has("fh"):
 		economy.furnace.set_hatch(bool(g.fh))
@@ -3882,6 +3900,8 @@ func _event(kind: String, data: Dictionary) -> void:
 			# SWEEP 4A HOOK (database terminal, chunk 4): this player sighted, scanned or harvested
 			# something (the host's mark_db): it goes in their own database, saved on this machine.
 			mark_own_db(String(data.kind), String(data.field))
+		"wt_pulse":
+			wall.on_pulse(data)   # terminal redesign: someone clicked the break room screen
 		"sound":
 			Audio.play(data.cue, data.get("at"))
 		"sting":

@@ -50,6 +50,11 @@ extends Node
 ##                    clock-in, opens and closes a hinged door with E; client 2 joins mid-shift and
 ##                    sees the doors as they are and the same wings; at the next shift both clients
 ##                    rebuild the new wings (same layout as the host) and see the gates unlock
+##   wall             (terminal redesign, chunk 4) the break room screen is shared: client 1 holds its
+##                    laser on SIGN IN and its own database (not the host's) fills the cards, and a scan
+##                    it makes while signed in reaches them too; it clicks MONSTERS and the host and
+##                    client 2 follow, client 2 sees client 1's laser dot; client 1 walks away and
+##                    everyone is signed out and back HOME
 ##
 ## Shifts start the way the loop does (sweep 2): the host clocks in, skips the grace period,
 ## answers the phone, and the paramedics wheel the patient onto a table.
@@ -152,12 +157,110 @@ func _run() -> void:
 		"dissection": await _sc_dissection()
 		"pockets": await _sc_pockets()   # POCKETS
 		"doors": await _sc_doors()   # DOORS HOOK
+		"wall": await _sc_wall()   # terminal redesign, chunk 4
 		_: _end(false, "unknown scenario " + scenario)
 
 
 # =========================================================================
 # scenarios
 # =========================================================================
+
+## Terminal redesign, chunk 4: the break room screen, shared.
+func _sc_wall():
+	if role == "host":
+		if not await _until(func(): return Net.names.size() == clients + 1 and game.players.size() == clients + 1 and game.wall_terminal() != null, 90.0, "everyone and the screen"):
+			return
+		game.database.clear()   # the host's own database is empty: the cards must be client 1's
+		game._set_projector(true)
+		await _wall_wait(1.0)
+		_send("wall_go", {})
+		var c1 := _peer_of(1)
+		if not await _until(func(): return int(game.wall.user) == c1, 60.0, "client 1 signed in on the host"):
+			return
+		if not await _until(func(): return int(game.wall.view().db.get("walk_in", 0)) & 2 != 0 and int(game.wall.view().db.get("discharged", 0)) & 2 != 0, 30.0, "client 1's database (walk_in, then a discharged scan) on the host: %s" % str(game.wall.view().db)):
+			return
+		if game.database.has("walk_in"):
+			return _end(false, "client 1's scan landed in the host's own database")
+		_say("client 1 signed in, its database on the host: %s" % str(game.wall.view().db))
+		var wt: Node3D = game.wall_terminal()
+		if not await _until(func(): return String(wt.ui.page.kind) == "section" and String(wt.ui.page.get("id", "")) == "monsters", 40.0, "client 1's click on MONSTERS on the host (page %s)" % str(wt.ui.page)):
+			return
+		if not await _until(func(): return _count_msgs("wall_seen") >= 1, 40.0, "client 2 to see the page and client 1's laser"):
+			return
+		_send("wall_leave", {})
+		if not await _until(func(): return int(game.wall.user) == 0 and String(wt.ui.page.kind) == "home", 40.0, "client 1 signed out by walking away"):
+			return
+		_send("wall_out", {})
+		await _finish_together("client 1 signed in with its own database, clicked MONSTERS for everyone and was signed out walking away")
+		return
+	if not await _until(func(): return game.phase != Game.Phase.MENU and _me() != null and game.wall_terminal() != null and _count_msgs("wall_go") > 0 and game.projector_on, 90.0, "the screen and the go"):
+		return
+	var me := _me()
+	me.bot_active = true
+	me.bot_invulnerable = true
+	var wt: Node3D = game.wall_terminal()
+	var glass: Node3D = wt.glass
+	var out: Vector3 = glass.global_basis.z.normalized()
+	var stand: Vector3 = glass.global_position + out * (4.6 if index == 1 else 3.4) + glass.global_basis.x.normalized() * (0.0 if index == 1 else 1.2)
+	me.teleport(game._floor_at(Vector3(stand.x, 0.0, stand.z)))
+	await _wall_wait(0.5)
+	var aim := func(px: Vector2):
+		var at: Vector3 = glass.global_transform * Vector3((px.x / wt.TEX.x - 0.5) * wt.SIZE.x, (0.5 - px.y / wt.TEX.y) * wt.SIZE.y, 0.0)
+		var d: Vector3 = at - me.camera.global_position
+		var fwd: Vector3 = -me.camera.global_transform.basis.z
+		me.bot_yaw += wrapf(atan2(-d.x, -d.z) - atan2(-fwd.x, -fwd.z), -PI, PI)
+		me.bot_pitch = clampf(me.bot_pitch + atan2(d.y, Vector2(d.x, d.z).length()) - atan2(fwd.y, Vector2(fwd.x, fwd.z).length()), -1.2, 1.2)
+	if index == 1:
+		game.database.clear()
+		game.mark_own_db("walk_in", "sighted")
+		game.mark_own_db("walk_in", "scanned")
+		# Hold the laser on HOLD TO SIGN IN.
+		var sign_px: Vector2 = wt.ui._sign.position + wt.ui._sign.size * 0.5
+		me.bot_scan = true
+		me.bot_laser_hold = true
+		if not await _do_until(func(): aim.call(sign_px), func(): return int(game.wall.user) == Net.my_id(), 40.0, "signed in (user %d)" % int(game.wall.user)):
+			return
+		me.bot_laser_hold = false
+		_say("signed in as %s" % game.wall.user_name())
+		game.mark_own_db("discharged", "scanned")   # while signed in: the screen shows it too
+		if not await _until(func(): return int(game.wall.view().db.get("discharged", 0)) & 2 != 0, 20.0, "my later scan on the screen"):
+			return
+		# Click MONSTERS (the first home card).
+		var card: Control = wt.ui._body.get_child(0)
+		var card_px: Vector2 = wt.ui._body.position + card.position + card.size * 0.5
+		for i in 20:
+			aim.call(card_px)
+			await get_tree().physics_frame
+		me.bot_laser_click += 1
+		if not await _do_until(func(): aim.call(card_px), func(): return String(wt.ui.page.kind) == "section", 20.0, "the MONSTERS page back from the host"):
+			return
+		# Keep the laser on the screen for client 2 until told to walk away.
+		if not await _do_until(func(): aim.call(Vector2(640, 520)), func(): return _count_msgs("wall_leave") > 0, 60.0, "the host's go to walk away"):
+			return
+		me.bot_scan = false
+		me.teleport(game._floor_at(glass.global_position + out * 30.0))
+		if not await _until(func(): return int(game.wall.user) == 0 and String(wt.ui.page.kind) == "home", 30.0, "signed out on my machine"):
+			return
+		await _finish_together("signed in, clicked, walked away")
+		return
+	# Client 2 watches.
+	var c1 := _peer_of(1)
+	var sees := func() -> bool:
+		if String(wt.ui.page.kind) != "section" or int(game.wall.user) != c1:
+			return false
+		var known := false
+		for e in wt.ui.Pages.entries("monsters", game.wall.view()):
+			if String(e.key) == "walk_in":
+				known = bool(e.known)
+		return known and wt.ui._remote.size() >= 1
+	if not await _until(sees, 60.0, "MONSTERS with client 1's Walk-In and its laser dot (page %s user %d dots %d)" % [str(wt.ui.page), int(game.wall.user), wt.ui._remote.size()]):
+		return
+	_say("I see MONSTERS, client 1's Walk-In and its laser dot")
+	_send("wall_seen", {})
+	if not await _until(func(): return _count_msgs("wall_out") > 0 and int(game.wall.user) == 0 and String(wt.ui.page.kind) == "home", 60.0, "everyone signed out and HOME"):
+		return
+	await _finish_together("followed the screen")
+
 
 func _sc_names():
 	if not await _until(func(): return Net.names.size() == clients + 1 and game.players.size() == clients + 1, 60.0, "everyone in the roster"):

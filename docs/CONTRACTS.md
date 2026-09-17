@@ -489,54 +489,52 @@ NurseRig.WALK_SPEED 1.0      # m/s at which Walk's planted foot keeps pace; rate
   lying or dissection body. `make_lying("night_nurse")` returns her rest pose if anyone asks.
 - The dev room's corpse (`dev_gun.gd monster_corpse`) shows her `Frozen` pose with `slump` 1.
 
-## Database terminal (sweep 4a chunk 4, replaces the medical guide binder)
+## Database terminal (terminal redesign, 2026-09-16: the break room projector screen)
 
-The guide binder, its lectern grip and the `read` action are gone. A computer terminal in the
-break room (same reserved spot the lectern used, `level_info.lectern` / `lectern_node`; see
-`HospitalBuilder._commit_lectern` / `LegacyBuilder._place_shelf_and_lectern`,
-`scripts/database/terminal_model.gd`) replaces it: no carryable version.
-
-- **HUB REDESIGN (2026-09-15)**: it is a full standing desk now (a wide slab, steel legs, a real
-  monitor and keyboard), not a narrow lectern-shaped stand, and its screen faces -Z out into the
-  break room, not into the wall it stands against (the old model's screen was built facing +Z
-  while `entrance.gd` gave it the same yaw every wall-mounted piece gets assuming a -Z front, so
-  at yaw 0 it silently faced away from the room; fixed in the model, not the placement code). The
-  aim proxy (`game._add_proxy("terminal", ...)`) radius grew from 1.1 to 1.5 to match.
-- **The live screen** (`scripts/database/terminal_screen_live.gd`): while nobody has the terminal
-  open, its monitor shows a live mirror of whatever the nearby player is aiming at -- a SubViewport
-  plus a Camera3D that copies `get_viewport().get_camera_3d()`'s transform every frame, drawn onto
-  the screen quad in place of its static idle glow, the same SubViewport-and-screen-quad shape the
-  OR wall monitor already uses (`scripts/orscreen/or_screen.gd`), except that one draws a 2D
-  Control from replicated state and this one renders the real 3D scene from a mirrored camera.
-  Purely local and cosmetic (each machine only ever reads its own live camera, so this needs no
-  network traffic and nothing here is host-authoritative); it only renders within 4.5 m of the
-  terminal, at 8 Hz, at 192x120, and the SubViewport is fully `UPDATE_DISABLED` (no render pass at
-  all) outside that range or before anyone has ever come close, falling back to the static glow
-  material rather than freezing on a stale frame.
+The guide binder, the desk computer, its E prompt and `main.terminal_ui` are gone. The database is
+a pull-down projector screen in the break room (`scripts/database/wall_terminal.gd`, placed on the
+reserved lectern spot through `terminal_model.gd make_terminal()`), public: everyone sees the same
+page, anyone can click it, and signing in only decides whose database fills the cards.
 
 ```gdscript
-# scripts/database/terminal_ui.gd, a CanvasLayer main.gd creates (main.terminal_ui)
-func open() -> void
-func close() -> void
-func is_open() -> bool
-# scripts/database/database_pages.gd (moved from the old scripts/guide/guide_pages.gd unchanged
-# in content): Items & Procedures section data, plus a standalone PLACEBO entry (sweep 4a chunk 3
-# adds the real item; this keeps the terminal's copy independent of its exact shape)
-# scripts/database/monster_pages.gd: static Monsters-section content (walk_in, discharged,
-# night_nurse -- add a new one here when a species is added)
+# wall_terminal.gd: the screen, projector and SubViewport (1280x720)
+func set_on(on) / func pixel_at(world_point) -> Vector2 / func point(px) / func click(px) / func clear_pointer()
+# wall_terminal_ui.gd: the drill-down drawn into it
+var page: Dictionary   # {kind: "home"} | {kind: "section", id, index} | {kind: "entry", section, key}
+func history() -> Array / func set_view(page, history) / func refresh()
+func sign_rect() -> Rect2 / func set_hold(k) / func set_remote_cursors(points) / func pulse(px)
+func link_at(px) -> String / func open_link(key)
+# wall_pages.gd: content; view = wall_session.view()
+static func entries(section, view) -> Array   # [{key, title, known}]
+static func page(section, key, view) -> Dictionary
+# wall_session.gd (game.wall): who is signed in, the shared page, clicks and lasers
+var user: int                          # signed-in peer, 0 for nobody
+func view() -> Dictionary              # {db: {kind: bits 1 sighted 2 scanned 4 harvested}, peer, brains}
+func click(px) / func sign_in() / func sign_out() / func own_db_changed()
+func laser_of(player) -> Dictionary    # {from, to, landed, terminal, px}
 ```
 
-- Opens with E while aiming at the terminal (`game._add_proxy("terminal", ...)`, aim/prompt only
-  -- `TerminalUI.open()` is called directly from `main.gd`'s input handling, the same local,
-  no-host-round-trip pattern the old guide's `read` used, just retargeted at the terminal instead
-  of an item kind). Full-screen, the player cannot move (main.gd frees the mouse while
-  `terminal_ui.is_open()`, same hook the guide used).
-- Sections: Monsters, Abilities, Items & Procedures. Monster entries unlock in tiers, read from
-  `game.database` (below): 1 sighted (name, silhouette), 2 scanned (behaviour, senses, threat,
-  sedative doses, an X-ray with a brain-site marker), 3 harvested (the brain's look/spoil/ability,
-  a level table via `game.brains.echo_radius/echo_seconds/hive_range/hive_seconds`). The Night
-  Nurse has no brain path (`MonsterPages.ENTRIES.night_nurse.growth_site == "unknown"`), so her
-  tier 3 never unlocks. Items & Procedures are unlocked from the start, as the guide was.
+- **Driving it:** R is always a laser (`scan_fx.gd`). On the screen its dot is the cursor (hover is
+  local to each machine); a left click while scanning (`Player.laser_clicks`) goes to
+  `game.wall.click(px)`. The host pushes the click into its own viewport, so Buttons only ever press
+  on the host; a guest sends `_rpc_wall("click", {px, link})`, `link` being the tool its own turntable
+  had under the dot (each machine turns its own). Everyone sees a click's ring (event "wt_pulse").
+- **Pages:** HOME is 2x2 cards (Monsters, Procedures, Surgery Items, Other Items); a section is 3x3
+  cards with PREV/NEXT; "???" cards (monsters not scanned, other items never picked up) can't open.
+  An entry has a header, subtitle, short paragraphs (a monster's ability and 3 levels; a procedure's
+  steps as a numbered paragraph) and its 3D model turning on the right (`model_preview.gd`). A
+  procedure's tools on the turntable are links: pointed at, the name shows over it; clicked, it opens
+  the surgery item. BACK goes up one page, HOME to the top.
+- **Signing in:** holding left click on HOLD TO SIGN IN for `HOLD_SECONDS` (1.5, timed in
+  `scan_fx.gd` with `Player.laser_held`) signs that player in: their machine sends its database
+  (`_rpc_wall("sign_in", {db})`), and every change to it while signed in (`game.mark_own_db` ->
+  `own_db_changed`). Only one player at a time. Signed out by SIGN OUT (a click), walking
+  `WALK_AWAY_M` (9 m) from the screen, leaving, or `IDLE_SECONDS` (60) with nobody's laser on the
+  screen; signing out goes HOME. Ability levels read `game.brains.level(user, path)` (replicated).
+- **Net:** global snapshot fields "wt" {p: page, h: history}, "wu" user, "wd" the user's database
+  bits, "pj" the projector; a player's `scan_holding` travels in `report_full` ("sh") so every
+  machine draws everyone's laser (from their flashlight, along their view) and their dot on the
+  screen, with no extra traffic.
 
 ### The database (host-authoritative, saved to disk)
 
@@ -548,7 +546,7 @@ func to_dict() -> Dictionary / func from_dict(d: Dictionary) -> void
 static func load_into(database: Dictionary) -> void   # user://database.save -> kind -> DbRecord
 static func save(database: Dictionary) -> void
 # game.gd
-game.database: Dictionary            # kind -> DbRecord, host-only, loaded once in Game._ready()
+game.database: Dictionary            # kind -> DbRecord: THIS machine's player's own, loaded once in Game._ready()
 game.db_record(kind) -> DbRecord      # creates one on first touch
 game.mark_db(kind, field)             # host: sets a field true (once), saves to disk, and
     # broadcasts "db_update" {kind, field} so every client's own mirror of `database` (used only
