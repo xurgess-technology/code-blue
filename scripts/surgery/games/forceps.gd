@@ -947,10 +947,25 @@ func _skin_params(m: ShaderMaterial) -> void:
 	m.set_shader_parameter("patch_r", bbox.size * 0.5 + Vector2(0.05, 0.05))
 
 
+## The skin patch sits a little above the body, and a gown's folds rise higher still: have the body
+## clear its clothing under the patch (it reads as the gown pulled back) while the step is up.
+func _expose_body(c: Vector2, radii: Vector2) -> void:
+	var body = ctx.get("body")
+	if body != null and is_instance_valid(body) and body.has_method("expose_site"):
+		body.expose_site(String(ctx.get("step", {}).get("site", "gunshot")), c, radii)
+
+
+func _cover_body() -> void:
+	var body = ctx.get("body")
+	if _brain_game == null and body != null and is_instance_valid(body) and body.has_method("cover_site"):
+		body.cover_site()
+
+
 func _build_skin() -> void:
 	var c := bbox.get_center()
 	var rx := bbox.size.x * 0.5 + 0.05
 	var rz := bbox.size.y * 0.5 + 0.05
+	_expose_body(c, Vector2(rx, rz))
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var rings := 10
@@ -1067,6 +1082,7 @@ var _channel_task := -1
 
 
 func _exit_tree() -> void:
+	_cover_body()
 	# Never free the node while its geometry is still being built on another thread.
 	if _channel_task >= 0:
 		WorkerThreadPool.wait_for_task_completion(_channel_task)

@@ -10,7 +10,9 @@ extends RefCounted
 ##   Human             body, gown, socks (skinned); the right upper arm ends in a stump cap at the cut
 ##   Human_Forearm_R   the right forearm and hand past the cut, with its own cut cap: hidden when amputated,
 ##                     baked from the current pose for make_severed_limb
-##   Human_GownPanel   the gown over the gunshot site: hidden for the gunshot ailment, so the wound is bare
+##   Human_GownPanel   the gown over the gunshot site: hidden for the gunshot ailment, so the wound is bare;
+##                     while a step exposes the site (PatientBody.expose_site) it is back, with the gown
+##                     cut away round the step's skin patch instead (the cloth shader's `expose`)
 ##   Site_injection / Site_gunshot / Site_limb / Site_limb_cut   on forearm.L / hips / upperarm.R / forearm.R
 ## The model is posed by hand every frame (no AnimationPlayer runs): the Lying clip at the body's
 ## breathing rate, with stirs, fidgets and twitches turned onto the arm, leg and head bones.
@@ -197,9 +199,23 @@ static func animate(b, jolt: float, env: float, fidget: float, twitch: float, t:
 	HM.turn_bone(skel, bones["hand.R"], Quaternion(Vector3(1, 0, 0), hand_curl))
 	HM.turn_bone(skel, bones["hand.L"], Quaternion(Vector3(1, 0, 0), hand_curl * 0.8))
 	var panel: Node3D = st.panel
-	var bare: bool = b.ailment_id == "gunshot"
+	var ex: Dictionary = b.exposure
+	var bare: bool = b.ailment_id == "gunshot" and ex.is_empty()
 	if panel.visible == bare:
 		panel.visible = not bare
+	# The gown pulled back round an exposed site: its folds rise above the site plane and would poke
+	# through the step's skin patch (the forceps step on the gunshot wound).
+	var cloth: ShaderMaterial = HM.cloth_of(st.root)
+	if cloth != null:
+		if not ex.is_empty():
+			cloth.set_shader_parameter(&"expose", 1.0)
+			cloth.set_shader_parameter(&"expose_inv", b.site_transform(String(ex.site)).affine_inverse())
+			cloth.set_shader_parameter(&"expose_c", ex.centre)
+			cloth.set_shader_parameter(&"expose_r", ex.radii)
+			st.exposed = true
+		elif st.get("exposed", false):
+			cloth.set_shader_parameter(&"expose", 0.0)
+			st.exposed = false
 
 
 static func set_limb_removed(b, removed: bool) -> void:
