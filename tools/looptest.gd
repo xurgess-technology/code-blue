@@ -449,8 +449,16 @@ func _go_throw(furn: Node3D) -> void:
 	var target_pos: Vector3 = furn.global_position
 	var stand: Vector3 = target_pos + furn.global_basis.z * 1.1
 	var d := Vector2(stand.x - bot.global_position.x, stand.z - bot.global_position.z).length()
-	# The navmesh can stop the bot short of the spot in front of the window: close enough to throw.
-	if d > 0.5 and not (d < 2.4 and _stuck > 1.0):
+	if d > 0.5:
+		# The navmesh stops the bot about 1.8 m short of the spot in front of the window (the furnace
+		# block's obstacle): once it is wedged there, step it the rest of the way, the same recovery
+		# _go_use uses for wedged corners.
+		if _stuck > 2.0 and d < 3.0:
+			bot.global_position = game._floor_at(stand)
+			bot.velocity = Vector3.ZERO
+			_stuck = 0.0
+			_repath = 0.0
+			return
 		_walk_to(stand)
 		return
 	bot.bot_move = Vector2.ZERO

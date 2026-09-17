@@ -6,7 +6,7 @@ extends Node
 ##
 ## A body is its case in `game.cases`, so it replicates with the cases: `table` -1 once it is off the
 ## table, `bc` the carrier's peer id (0 none), `bp` / `by` where it lies on the floor, `cremated` once
-## it is gone. The carrier's `Player.carrying` holds BODY_BASE + the case id (the downed teammate carry
+## it is gone. The carrier's `Player.carrying` holds BODY_BASE - the case id (the downed teammate carry
 ## otherwise: slower, over the shoulder, dropped when hit).
 ##
 ## Host: lift(q, id), put_down(q), cremate(q). Every machine: the bodies' nodes off the table (over a
@@ -15,8 +15,10 @@ extends Node
 const BodyScript := preload("res://scripts/patient_body.gd")
 const HM := preload("res://scripts/human/human_model.gd")
 
-## Player.carrying at or above this is a body (BODY_BASE + case id), below it a teammate's peer id.
-const BODY_BASE := 1000000
+## Player.carrying at or below this is a body (BODY_BASE - case id); anything else non-zero is a
+## teammate's id. Far below every id a player can have: peer ids are positive up to 2^31 - 1 (a
+## client's is a large random one) and bots and dummies are small negatives.
+const BODY_BASE := -1000000000
 const PROXY_PREFIX := "corpse_"
 const SLIDE_SECONDS := 1.3
 
@@ -33,7 +35,7 @@ func setup(g: Node) -> void:
 # queries (every machine)
 
 static func is_body(carrying: int) -> bool:
-	return carrying >= BODY_BASE
+	return carrying <= BODY_BASE
 
 
 ## A finished case that is a body still in the building: a death, or a strapped monster whose
@@ -61,7 +63,7 @@ static func label(c: Dictionary) -> String:
 
 
 func carried_label(q: Node) -> String:
-	var c := corpse_by_id(int(q.carrying) - BODY_BASE)
+	var c := corpse_by_id(BODY_BASE - int(q.carrying))
 	return label(c) if not c.is_empty() else "the body"
 
 
@@ -107,7 +109,7 @@ func lift(q: Node, id: int) -> void:
 		return
 	c["table"] = -1
 	c["bc"] = int(q.peer_id)
-	q.carrying = BODY_BASE + id
+	q.carrying = BODY_BASE - id
 	game._end_operations(q)
 	q.refresh_downed_visuals()
 	game._apply_cases_locally()
@@ -118,7 +120,7 @@ func lift(q: Node, id: int) -> void:
 func put_down(q: Node) -> void:
 	if not game.is_host() or q == null:
 		return
-	var c := corpse_by_id(int(q.carrying) - BODY_BASE)
+	var c := corpse_by_id(BODY_BASE - int(q.carrying))
 	q.carrying = 0
 	q.refresh_downed_visuals()
 	if c.is_empty():
@@ -150,7 +152,7 @@ func carrier_pressed(q: Node, aim: String) -> void:
 
 func cremate(q: Node) -> void:
 	var furnace: Node3D = game.economy.furnace if game.economy != null else null
-	var id := int(q.carrying) - BODY_BASE
+	var id := BODY_BASE - int(q.carrying)
 	var c := corpse_by_id(id)
 	if not game.is_host() or c.is_empty() or furnace == null:
 		return
