@@ -1124,6 +1124,16 @@ func _update_aim_core() -> void:
 		aim_prompt = String(da[1])
 		return
 	# Downed hook: a carrier can only put someone on the player table, or down anywhere else.
+	# Patient exits: carrying a body, it only goes into the furnace (its window) or down on the floor.
+	if carrying != 0 and game != null and game.corpses != null and game.corpses.is_body(carrying):
+		var what: String = game.corpses.carried_label(self)
+		var fid := String(node.get_meta("interact_id")) if node != null and node.has_meta("interact_id") else ""
+		if fid == "furnace_hatch":
+			aim_id = fid
+			aim_prompt = "Put %s in the furnace" % what
+		else:
+			aim_prompt = "Put %s down" % what
+		return
 	if carrying != 0:
 		var who = game.players.get(carrying) if game != null else null
 		var drop_text := "Put %s down" % (who.player_name if who != null else "them")

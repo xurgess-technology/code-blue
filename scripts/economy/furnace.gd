@@ -386,6 +386,14 @@ func _burst() -> void:
 	_burst_t = 0.6
 
 
+## Patient exits (corpses.gd): a body went in. A bigger, longer flare than a sale, and a roar.
+func flare() -> void:
+	_burst_t = 1.6
+	if is_inside_tree() and DisplayServer.get_name() != "headless":
+		Audio.play("economy_sell", global_transform * Vector3(0, 1.4, 0.3), 2.0, 0.05)
+		Audio.play("dissection_crack", global_transform * Vector3(0, 1.2, -0.8), -6.0, 0.1)
+
+
 func _show_amount(value: int) -> void:
 	if _amount_label == null:
 		return
@@ -408,7 +416,7 @@ func _process(delta: float) -> void:
 	var boost := 0.0
 	if _burst_t > 0.0:
 		_burst_t -= delta
-		boost = clampf(_burst_t / 0.6, 0.0, 1.0)
+		boost = clampf(_burst_t / 0.6, 0.0, 1.6)
 	for i in _flame_cards.size():
 		var c: MeshInstance3D = _flame_cards[i]
 		c.scale = Vector3(1.0 + 0.1 * sin(_flame_t * (4.0 + i) + i),

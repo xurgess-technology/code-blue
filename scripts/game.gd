@@ -114,6 +114,9 @@ var patient_tables: Array = []
 var surgery_bot_skill: float = -1.0
 ## loop: the shift loop (scripts/loop/shift_loop.gd), child "Loop": grace, phone, paramedics, pay.
 var loop: Node = null
+## Patient exits: the dead on (and off) the tables, carried to the furnace (scripts/loop/corpses.gd).
+const CorpsesScript := preload("res://scripts/loop/corpses.gd")
+var corpses: Node = null
 var shelf_node: Node3D = null
 var message: String = ""
 var message_timer: float = 0.0
@@ -224,6 +227,11 @@ func _ready() -> void:
 	loop.name = "Loop"
 	add_child(loop)
 	loop.setup(self)
+	# Patient exits: bodies carried to the furnace (scripts/loop/corpses.gd).
+	corpses = CorpsesScript.new()
+	corpses.name = "Corpses"
+	add_child(corpses)
+	corpses.setup(self)
 	# SWEEP 4A HOOK (scanner): the local scan hologram, beam, completion ring and banner.
 	var scan_fx: Node = preload("res://scripts/scan_fx.gd").new()
 	scan_fx.name = "ScanFx"
@@ -977,13 +985,16 @@ func _table_prompt(p, table_index: int) -> String:
 	if phase != Phase.SHIFT:
 		return ""
 	if downed_any_table and p != null:
-		if p.carrying != 0:
+		if p.carrying != 0 and not corpses.is_body(p.carrying):
 			return _downed_place_prompt(p, table_index)
 		if int(player_table.get("index", -1)) == table_index:
 			return player_surgery.operate_prompt(p)
 	var c := case_on_table(table_index)
 	if c.is_empty() or String(c.get("patient_id", "")) == "player":
 		return ""
+	# Patient exits: a body waiting for the furnace (a patient or a dissected monster).
+	if p != null and not dev_mode and corpses.is_corpse(c):
+		return corpses.lift_prompt(p, c)
 	if dissection.owns_case(c):
 		return dissection.table_prompt(p, table_index)   # SWEEP 3 HOOK (dissection): re-dose / sedation
 	var pname: String = Procedures.patient(String(c.patient_id)).get("name", "The patient")
@@ -1076,6 +1087,8 @@ func _proxy_used(id: String, p: Node) -> void:
 		if downed_any_table and int(player_table.get("index", -1)) == int(t.index):
 			player_surgery.begin(p)   # the downed teammate lying on this table
 			return
+		if not dev_mode and corpses.is_corpse(case_on_table(int(t.index))):
+			return   # patient exits: a body is lifted with a hold (_tick_carry_holds), a tap does nothing
 		if dissection.table_used(p, int(t.index)):
 			return   # SWEEP 3 HOOK (dissection): anesthetic in hand re-doses a strapped monster
 		var sys := surgery_for_table(int(t.index))
@@ -1666,6 +1679,10 @@ func finish_case(id: int, won: bool) -> void:
 	c.state = "stable" if won else "dead"
 	if not won:
 		c.vitals = 0.0
+	var operated_by := 0
+	for s in surgeries:
+		if int(s.table_index) == int(c.get("table", -2)) and s.operator_peer() != 0:
+			operated_by = s.operator_peer()
 	for s in surgeries:
 		if int(s.table_index) == int(c.get("table", -2)):
 			s.end_current()
@@ -1692,6 +1709,8 @@ func finish_case(id: int, won: bool) -> void:
 		say("%s flatlined." % pname, 5.0)
 	if dev_mode:
 		_dev_case_clear[id] = world_time + 4.0  # DEV HOOK: the dev room clears the table again
+	elif won and String(c.patient_id) != "player":
+		loop.walkers.schedule(c, operated_by)   # patient exits: up off the table, thanks, out the doors
 	loop.on_case_finished(c)
 
 
@@ -2564,6 +2583,16 @@ func _tick_carry_holds(delta: float) -> void:
 		var target = null
 		if q.wants_interact and q.aim_id.begins_with("pl_"):
 			target = players.get(int(q.aim_id.substr(3)))
+		# Patient exits: holding E on a body (on a table or on the floor) lifts it the same way.
+		if target == null and q.wants_interact and not dev_mode:
+			var body: Dictionary = corpses.aimed_body(q.aim_id)
+			var aim_node: Node = find_interactable(q.aim_id) if not body.is_empty() else null
+			if not body.is_empty() and corpses.can_lift(q, body) and (aim_node == null or _within_reach(q, aim_node)):
+				q.carry_hold += delta
+				if q.carry_hold >= CARRY_HOLD:
+					q.carry_hold = 0.0
+					corpses.lift(q, int(body.id))
+				continue
 		if target != null and can_pick_up(q, target) and _within_reach(q, target.downed_aim):
 			q.carry_hold += delta
 			if q.carry_hold >= CARRY_HOLD:
@@ -2590,6 +2619,9 @@ func start_carry(q: Node, p: Node) -> void:
 func drop_carried(q: Node) -> void:
 	if not is_host() or q == null:
 		return
+	if corpses.is_body(q.carrying):
+		corpses.put_down(q)   # patient exits: a body goes down on the floor
+		return
 	var p = players.get(q.carrying)
 	q.carrying = 0
 	q.refresh_downed_visuals()
@@ -2613,6 +2645,9 @@ func drop_carried(q: Node) -> void:
 ## Host: a carrier pressed E. On the player table it lays them there, anywhere else it puts them down.
 func carrier_pressed_interact(q: Node, aim: String) -> void:
 	if not is_host() or q.carrying == 0:
+		return
+	if corpses.is_body(q.carrying):
+		corpses.carrier_pressed(q, aim)   # patient exits: into the furnace, or down on the floor
 		return
 	if aim == "player_table":
 		var node := find_interactable("player_table")
@@ -2901,8 +2936,9 @@ func player_shoved(p: Node, charge: float = -1.0) -> void:
 			say("%s shoved %s off the monster." % [p.player_name, q.player_name], 3.0)
 		elif q.carrying != 0:
 			var carried = players.get(q.carrying)
+			var what: String = corpses.carried_label(q) if corpses.is_body(q.carrying) else (carried.player_name if carried != null else "someone")
 			drop_carried(q)
-			say("%s shoved %s, who dropped %s." % [p.player_name, q.player_name, carried.player_name if carried != null else "someone"], 3.0)
+			say("%s shoved %s, who dropped %s." % [p.player_name, q.player_name, what], 3.0)
 		elif q.hands_empty():
 			say("%s shoved %s. Very professional." % [p.player_name, q.player_name], 3.0)
 		else:
@@ -3904,6 +3940,8 @@ func _event(kind: String, data: Dictionary) -> void:
 			wall.on_pulse(data)   # terminal redesign: someone clicked the break room screen
 		"sound":
 			Audio.play(data.cue, data.get("at"))
+		"cremate":
+			corpses.play_cremation(data)   # patient exits: a body into the furnace
 		"sting":
 			Audio.sting(String(data.cue))  # loop: a patient saved or lost
 		"loop":

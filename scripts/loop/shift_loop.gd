@@ -25,6 +25,7 @@ const PhoneScript := preload("res://scripts/loop/phone.gd")
 const CrewScript := preload("res://scripts/loop/crew.gd")
 const HudScript := preload("res://scripts/loop/loop_hud.gd")
 const AmbulanceScript := preload("res://scripts/loop/ambulance.gd")   # SWEEP 4A HOOK (fog lot, chunk 2)
+const WalkersScript := preload("res://scripts/loop/walkers.gd")   # patient exits: saved patients leaving
 
 ## Legacy grace period before the first call: 0 now (the first call rings immediately at
 ## clock-in). Kept as a named constant for tests/tools that still reference it.
@@ -86,6 +87,8 @@ var _rng := RandomNumberGenerator.new()
 
 # ---- local ----
 var phone: Node3D = null
+## Patient exits: saved patients getting up, saying thanks and walking out (scripts/loop/walkers.gd).
+var walkers: Node = null
 var hud: CanvasLayer = null
 var _crew_nodes := {}
 var _ring_timer := 0.0
@@ -104,6 +107,10 @@ func setup(g: Node) -> void:
 	hud.name = "LoopHud"
 	hud.loop = self
 	add_child(hud)
+	walkers = WalkersScript.new()
+	walkers.name = "Walkers"
+	add_child(walkers)
+	walkers.setup(self)
 
 
 ## Everything back to "not on shift" (a new lobby, a new run, the menu). Every machine.
@@ -131,6 +138,8 @@ func reset() -> void:
 ## The level exists (game._add_landmarks, not in the dev room): place the break-room phone.
 func on_level_built(level: Node3D, info: Dictionary) -> void:
 	phone = null
+	if walkers != null:
+		walkers.clear()   # a new hospital: nobody is still walking out of the old one
 	var spot := _phone_spot(info)
 	if spot.is_empty():
 		return
@@ -167,7 +176,9 @@ func physics_tick(delta: float) -> void:
 		return
 	if game.is_host():
 		_host_tick(delta)
+		walkers.host_tick(delta)
 	_local_tick(delta)
+	walkers.local_tick(delta)
 
 
 func _host_tick(delta: float) -> void:
@@ -495,6 +506,10 @@ func _clock_out_blocker() -> String:
 		return "No patient yet. The phone will ring."
 	if call_state == "talking":
 		return "Listen to the call first."
+	# Patient exits: every body goes to the crematorium before anyone clocks out.
+	var body: Dictionary = game.corpses.any_left() if game.corpses != null else {}
+	if not body.is_empty():
+		return "Take %s to the crematorium first." % game.corpses.label(body)
 	for c in game.cases:
 		if String(c.get("patient_id", "")) == "player":
 			continue
@@ -930,7 +945,7 @@ func net_state() -> Dictionary:
 		cr[id] = [(c.p as Vector3).snappedf(0.02), snappedf(float(c.y), 1.0 / 64.0), String(c.ph), String(c.pt), String(c.ai), int(c.tb)]
 	var s := {
 		"gr": ceili(grace_left), "ck": call_kind, "cs": call_state, "ct": floori(call_t), "sub": subtitle,
-		"fc": first_called, "cr": cr, "pay": pay_note,
+		"fc": first_called, "cr": cr, "pay": pay_note, "wk": walkers.net_state(),
 	}
 	# SWEEP 4A HOOK (fog lot, chunk 2): the ambulance, host authoritative like everything else here.
 	if not ambulance.is_empty():
@@ -948,6 +963,7 @@ func apply_net_state(s: Dictionary) -> void:
 	call_t = float(s.get("ct", 0))
 	subtitle = String(s.get("sub", ""))
 	first_called = bool(s.get("fc", false))
+	walkers.apply_net_state(s.get("wk", {}))
 	pay_note = String(s.get("pay", ""))
 	crews.clear()
 	var cr: Dictionary = s.get("cr", {})

@@ -36,6 +36,14 @@ const TIPS := {
 			"Once every patient is stable or gone, hold E on it again to clock out and get paid.",
 		],
 	},
+	"bodies": {
+		"title": "THE DEAD",
+		"text": [
+			"Nobody who dies on a table stays there. Hold E on the body to lift it.",
+			"Carry it to the crematorium and press E at the furnace window to put it in.",
+			"Nobody clocks out while a body is still in the building.",
+		],
+	},
 	"furnace": {
 		"title": "THE FURNACE",
 		"text": [
@@ -133,6 +141,7 @@ func _process(delta: float) -> void:
 		if _check_t <= 0.0:
 			_check_t = CHECK_EVERY
 			_check_rooms()
+			_check_events()
 		_tick(delta)
 	_canvas.queue_redraw()
 
@@ -154,6 +163,16 @@ func _check_rooms() -> void:
 			_seen[id] = true
 			_save()
 			show_tip(id)
+
+
+## Things that happen rather than places: the first body waiting for the furnace.
+func _check_events() -> void:
+	if _seen.has("bodies") or game.corpses == null or game.dev_mode:
+		return
+	if not game.corpses.any_left().is_empty():
+		_seen["bodies"] = true
+		_save()
+		show_tip("bodies")
 
 
 # ---------------------------------------------------------------------------
