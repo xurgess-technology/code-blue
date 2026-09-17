@@ -279,6 +279,15 @@ func _run() -> void:
 	_check(game.loop.call_state == "ringing" and game.loop.call_kind == "extra", "the extra call rings")
 	ok = await _do_until(func(): _halt(), func(): return game.loop.call_state == "", 40.0)
 	_check(ok and game.cases.size() == 1, "ignored, the extra call declines itself: no new case (%d cases)" % game.cases.size())
+	# Patient exits: the body has to go into the furnace before anyone can clock out.
+	_check(not game.loop.can_clock_out() and game.loop._clock_out_blocker().contains("body"), "the body holds up the clock-out ('%s')" % game.loop._clock_out_blocker())
+	var kept_slots: Array = bot.slots.duplicate(true)
+	bot.slots = Player.empty_slots()
+	game.corpses.lift(bot, c2_id)
+	game.corpses.cremate(bot)
+	bot.slots = kept_slots
+	await _frames(3)
+	_check(game.loop.can_clock_out(), "cremated, the clock-out is free ('%s')" % game.loop._clock_out_blocker())
 	m0 = game.money
 	ok = await _do_until(func(): _go_use("clock", game.clock_pos(), true), func(): return game.phase == Game.Phase.WON, 120.0)
 	_check(ok, "clock out with a dead patient")
@@ -440,7 +449,8 @@ func _go_throw(furn: Node3D) -> void:
 	var target_pos: Vector3 = furn.global_position
 	var stand: Vector3 = target_pos + furn.global_basis.z * 1.1
 	var d := Vector2(stand.x - bot.global_position.x, stand.z - bot.global_position.z).length()
-	if d > 0.5:
+	# The navmesh can stop the bot short of the spot in front of the window: close enough to throw.
+	if d > 0.5 and not (d < 2.4 and _stuck > 1.0):
 		_walk_to(stand)
 		return
 	bot.bot_move = Vector2.ZERO

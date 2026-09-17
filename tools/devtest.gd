@@ -498,33 +498,17 @@ func _loot_and_money() -> void:
 	var furn: Node3D = game.economy.furnace
 	furn.set_hatch(true, false)   # hub rebuild: the hatch over the window starts shut
 	var value: int = int(me.selected_stack().get("v", 0))
+	# The throw itself is inventorytest's and looptest's; here the dropped stack goes straight into
+	# the fire chamber, which is what selling needs.
 	me.teleport(furn.global_position + furn.global_basis.z * 1.1)
-	_look_at(furn.global_position + Vector3.UP * 1.0)
-	me._yaw = me.bot_yaw
-	me.rotation.y = me.bot_yaw
-	me.head.rotation.x = me.bot_pitch
-	me._pitch = me.bot_pitch
-	game.drop_selected(me, 1.0)
+	await _frames(2)
+	game.drop_selected(me, 0.0)
+	await _frames(2)
+	var chamber: Node3D = furn.get_node("FireZone").get_child(1)
+	for it in game.world_items.values():
+		if it.kind == "defibrillator":
+			it.global_position = chamber.global_position
 	var sold := false
-	for _attempt in 8:
-		if game.money != money_before + 1000:
-			sold = true
-			break
-		if not me.holding("defibrillator"):
-			var it_id := -1
-			for it in game.world_items.values():
-				if it.kind == "defibrillator":
-					it_id = it.item_id
-					break
-			if it_id >= 0:
-				await _use("it_%d" % it_id)
-				if me.holding("defibrillator"):
-					for i in me.slots.size():
-						if String(me.slots[i].get("kind", "")) == "defibrillator":
-							me.selected = i
-							break
-					game.drop_selected(me, 1.0)
-		await _frames(6)
 	if not sold:
 		sold = await _until(func(): return game.money != money_before + 1000, 3.0)
 	_check(sold and game.money == money_before + 1000 + value, "the furnace burns a dispensed defibrillator for $%d" % value)

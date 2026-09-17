@@ -323,7 +323,10 @@ func play_cremation(data: Dictionary) -> void:
 
 
 func _tick_slides(delta: float) -> void:
-	var furnace: Node3D = game.economy.furnace if game.economy != null else null
+	if _sliding.is_empty():
+		return
+	var f = game.economy.furnace if game.economy != null else null
+	var furnace: Node3D = f if is_instance_valid(f) else null   # gone with its level (the menu)
 	for s in _sliding.duplicate():
 		s.t = float(s.t) + delta
 		var node: Node3D = s.node
