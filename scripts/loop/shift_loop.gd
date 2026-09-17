@@ -25,8 +25,6 @@ const PhoneScript := preload("res://scripts/loop/phone.gd")
 const CrewScript := preload("res://scripts/loop/crew.gd")
 const HudScript := preload("res://scripts/loop/loop_hud.gd")
 const AmbulanceScript := preload("res://scripts/loop/ambulance.gd")   # SWEEP 4A HOOK (fog lot, chunk 2)
-const CasePrinterScript := preload("res://scripts/loop/case_printer.gd")   # hub rebuild, chunk 4
-const CaseSheetUIScript := preload("res://scripts/loop/case_sheet_ui.gd")
 
 ## Legacy grace period before the first call: 0 now (the first call rings immediately at
 ## clock-in). Kept as a named constant for tests/tools that still reference it.
@@ -88,10 +86,6 @@ var _rng := RandomNumberGenerator.new()
 
 # ---- local ----
 var phone: Node3D = null
-## Hub rebuild, chunk 4: the break room printer that prints each taken call's case sheet, and the
-## local reader main.gd opens on it.
-var printer: Node3D = null
-var sheet_ui: CanvasLayer = null
 var hud: CanvasLayer = null
 var _crew_nodes := {}
 var _ring_timer := 0.0
@@ -110,9 +104,6 @@ func setup(g: Node) -> void:
 	hud.name = "LoopHud"
 	hud.loop = self
 	add_child(hud)
-	sheet_ui = CaseSheetUIScript.new()
-	sheet_ui.name = "CaseSheetUI"
-	add_child(sheet_ui)
 
 
 ## Everything back to "not on shift" (a new lobby, a new run, the menu). Every machine.
@@ -140,13 +131,6 @@ func reset() -> void:
 ## The level exists (game._add_landmarks, not in the dev room): place the break-room phone.
 func on_level_built(level: Node3D, info: Dictionary) -> void:
 	phone = null
-	printer = null
-	var ps := _printer_spot(info)
-	if not ps.is_empty():
-		printer = CasePrinterScript.create(game)
-		level.add_child(printer)
-		printer.global_position = ps.position
-		printer.rotation.y = float(ps.yaw)
 	var spot := _phone_spot(info)
 	if spot.is_empty():
 		return
@@ -904,35 +888,6 @@ func _phone_spot(info: Dictionary) -> Dictionary:
 			continue
 		return {"position": p, "yaw": _facing_away_from_wall(rows, p)}
 	return {"position": clock + Vector3(1.5, 0, 0), "yaw": 0.0}
-
-
-## Hub rebuild, chunk 4: level_info.printer (the hub's break room), else beside the database terminal
-## (the dev room and fallback levels), else none.
-func _printer_spot(info: Dictionary) -> Dictionary:
-	var given = info.get("printer")
-	if given is Dictionary and given.has("position"):
-		return {"position": given.position, "yaw": float(given.get("yaw", 0.0))}
-	var lectern: Dictionary = info.get("lectern", {})
-	if not lectern.has("position"):
-		return {}
-	var yaw := float(lectern.get("yaw", 0.0))
-	# The terminal's screen faces its local -Z; the printer's front (+Z) faces the same way.
-	return {"position": (lectern.position as Vector3) + Basis(Vector3.UP, yaw) * Vector3(1.0, 0.0, 0.0), "yaw": yaw + PI}
-
-
-## Local: open the sheets on the printer the local player is aiming at. False when there are none.
-func open_case_sheets() -> bool:
-	if printer == null or not is_instance_valid(printer) or sheet_ui == null:
-		return false
-	var ids: Array = printer.sheet_ids()
-	if ids.is_empty():
-		return false
-	sheet_ui.open(game, ids)
-	return true
-
-
-func case_sheets_open() -> bool:
-	return sheet_ui != null and sheet_ui.is_open()
 
 
 static func _floor_free(rows: PackedStringArray, p: Vector3, r: float) -> bool:

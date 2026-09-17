@@ -1810,3 +1810,28 @@ Rebuilt around that:
   are ready" messages (shift_loop's lobby_message, clock_in_message, after_case_hint).
 - `tools/tipshot.tscn` (windowed) shows both memos and the Esc tear-off, and forgets the seen tips
   before and after so a real game still shows them. Worktrees share user://, so running it resets them.
+
+## Wall terminal chunk 1, projector, room-bound lighting (2026-09-16)
+
+- **The break room database terminal is a projector setup** (`scripts/database/wall_terminal.gd`): a
+  pull-down screen on the south wall (4.4 x 2.475 m picture), a projector hung from the ceiling 5 m
+  out, a faint light cone, and the UI (`wall_terminal_ui.gd`, 1280x720 SubViewport) projected with
+  grey blacks and a faint flicker. It starts OFF; E on the projector (proxy "projector") toggles it,
+  host authoritative ("pj" in the snapshot). The desk computer, the E prompt/database key on the
+  terminal and the break room case printer + case sheet reader are gone.
+- **The scan laser** (`scan_fx.gd`): holding R is a laser from the torch's lens (the lens glows blue,
+  the flashlight's light goes out until R is released). On the screen the dot is a cursor (mouse
+  motion pushed into the viewport) and a left click while scanning (`Player.laser_clicks`) clicks;
+  elsewhere a left click fires a surge. No shoving or using while R is held. Local only for now:
+  the screen's page and other players' lasers are not replicated yet (chunk 4).
+- **Room-bound lighting** (`scripts/level/light_rooms.gd`): lights without shadows lit through walls.
+  The map is split into areas (rooms, strips of floor outside rooms; doorways/archways and small
+  strips joining areas are joints carrying every neighbour's bits; a nook opening onto one area is
+  part of it), coloured with 14 render layer bits so areas within 6 tiles differ (the entrance
+  building coloured first, alone, so it keeps its bits whatever the wings are). Level geometry and
+  furniture chunks render on their area's bit (not layer 1); every light's cull mask is the bits of
+  the 3x3 tiles around it plus layer 1; players, monsters, items and anything marked "light_dynamic"
+  stay on layer 1. `game._on_node_added` places anything added to the level later; the wing loader
+  places new wings with the new grid ("light_pending" until then). Cost: draw calls up 30-50%
+  (geometry chunks split by area), perfprobe frame rates unchanged. Gaps: volumetric fog still
+  glows through walls; a light within a tile of a doorway reaches the other side's surfaces near it.

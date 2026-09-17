@@ -75,6 +75,11 @@ const STAND := 0
 const CROUCH := 1
 const PRONE := 2
 var scan_holding: bool = false
+## Terminal redesign: left clicks made while scanning (the laser's click), counted like bot_press;
+## scan_fx.gd reads the count on the local machine.
+var laser_clicks: int = 0
+var bot_laser_click: int = 0
+var _bot_laser_click_seen: int = 0
 ## SPRINT-DIVE HOOK: pressing crouch while sprinting forward launches a dive that lands prone.
 ## Purely client-owned local movement, like the rest of _local_step (see docs/KNOWN_ISSUES.md
 ## "Sprint + crouch-dive"). Not replicated as its own field: it forces `prone` for its duration
@@ -614,6 +619,10 @@ func _local_step(delta: float) -> void:
 			_bot_crouch_press_seen = bot_crouch_press
 			crouch_pressed = true
 		scan_holding = bot_scan and not hive_view and not downed and not diving
+		if bot_laser_click != _bot_laser_click_seen:
+			_bot_laser_click_seen = bot_laser_click
+			if scan_holding:
+				laser_clicks += 1
 		if bot_jump != _bot_jump_seen:
 			_bot_jump_seen = bot_jump
 			_bot_jump_fire = true
@@ -817,12 +826,15 @@ func _local_step(delta: float) -> void:
 		if g != null and g.combat != null:
 			# SPRINT-DIVE HOOK: no shoving/using mid-dive, same pattern as the other transient
 			# states (downed/dragging/winding) already gate these two actions below.
-			if Input.is_action_just_pressed("shove") and not gun_out and _charging_with == "" and not diving:
+			# Terminal redesign: while the scan laser is out, left mouse clicks with it; no shoving.
+			if scan_holding and Input.is_action_just_pressed("use"):
+				laser_clicks += 1
+			if Input.is_action_just_pressed("shove") and not gun_out and _charging_with == "" and not diving and not scan_holding:
 				if g.combat.local_shove_begin(self):
 					_charging_with = "shove"
 			# SWEEP 3 HOOK: left mouse uses the held item when it has a use (saw, anesthetic), else it
 			# shoves like Q.
-			if Input.is_action_just_pressed("use") and not gun_out and not downed and carrying == 0 and dragging_monster < 0 and not diving:
+			if Input.is_action_just_pressed("use") and not gun_out and not downed and carrying == 0 and dragging_monster < 0 and not diving and not scan_holding:
 				if g.combat.is_usable(selected_stack().kind):
 					g.combat.local_try_use(self)
 				elif _charging_with == "" and g.combat.local_shove_begin(self):

@@ -83,9 +83,10 @@ func _ready() -> void:
 		["hub_nurse_reading", _pose_nurse_reading],
 		["hub_fax_desk", _pose_fax_desk],
 		["hub_computer", _pose_hub.bind(Vector2(9.2, 16.4), Vector2(10.3, 18.9), 0.75)],
-		["hub_printing", _pose_printer.bind(1.6)],
-		["hub_printed", _pose_printer.bind(4.0)],
-		["hub_case_sheet", _pose_case_sheet],
+		["hub_projector", _pose_hub.bind(Vector2(4.6, 14.5), Vector2(10.0, 18.6), 1.2)],
+		["hub_leak_waiting", _pose_hub_leak.bind(Vector2(6.0, 21.2), Vector2(9.0, 20.0), 1.8, true)],
+		["hub_leak_unassigned", _pose_hub_leak.bind(Vector2(27.0, 17.5), Vector2(28.5, 14.0), 1.5, false)],
+		["hub_projector_behind", _pose_hub.bind(Vector2(10.0, 14.2), Vector2(10.0, 19.0), 1.4)],
 		["hub_waiting_nurse", _pose_waiting_nurse.bind(Vector3(0.9, 0.5, -2.6))],
 		["hub_waiting_nurse_side", _pose_waiting_nurse.bind(Vector3(-1.9, 0.3, -0.6))],
 		["hub_waiting_nurse_close", _pose_waiting_nurse.bind(Vector3(-0.7, 0.0, -1.3))],
@@ -211,26 +212,14 @@ func _pose_fax_form() -> bool:
 	return true
 
 
-## Chunk 4: a call taken (an incoming case), the break room printer `after` seconds into printing it.
-func _pose_printer(after: float) -> bool:
-	if game.economy.fax_ui_open():
-		game.economy.fax_ui.close()
-	var pr: Node3D = game.loop.printer
-	if pr == null:
-		return false
-	if pr.sheet_ids().is_empty() and not pr.is_printing():
-		game.add_case({"patient_id": "bob", "ailment_id": "amputation", "table": -1, "state": "incoming"})
-	var from: Vector3 = pr.global_transform * Vector3(0.35, 0.0, 1.25)
-	_look_from(from, pr.global_transform * Vector3(0.0, 0.85, 0.0))
-	var t := Time.get_ticks_msec()
-	while Time.get_ticks_msec() - t < int(after * 1000.0):
-		await get_tree().process_frame
-	return true
-
-
-## Chunk 4: the case sheet reader open on that sheet.
-func _pose_case_sheet() -> bool:
-	return game.loop.open_case_sheets()
+## Light leak checks: the projector on, the flashlight off, looking at the wall a neighbour's light
+## used to shine through.
+func _pose_hub_leak(from: Vector2, at: Vector2, h: float, projector: bool) -> bool:
+	if projector:
+		game._set_projector(true)
+	if bot.has_method("set_flashlight"):
+		bot.set_flashlight(false)
+	return _pose_hub(from, at, h)
 
 
 ## The pickup drawer pulled out through its slot, seen from the lobby at an angle.

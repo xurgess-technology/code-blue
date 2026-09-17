@@ -12,6 +12,7 @@ extends Node3D
 
 enum Phase { MENU, LOBBY, SHIFT, WON, LOST }
 
+const LightRoomsScript := preload("res://scripts/level/light_rooms.gd")
 const SNAPSHOT_HZ := 20.0
 const NOISE_MEMORY := 2.0
 const SUPPLY_CHECK_SECONDS := 3.0
@@ -81,6 +82,12 @@ var _scan_target: Dictionary = {}     # peer id -> scan target id (monster id, o
 ## Scannable things that are not monsters (the waiting room's Night Nurse): nodes with `kind`,
 ## `height` and a negative `scan_id`, a collider on C.L_SCAN. They add and remove themselves.
 var scan_props: Array = []
+## Terminal redesign: the break room projector (the wall terminal) is on. Host authoritative, "pj" in
+## the snapshot; E on the projector toggles it.
+var projector_on := false
+## Room-bound lighting (scripts/level/light_rooms.gd): nodes that joined the level this frame, placed
+## on their area's render bits once their transforms are set.
+var _light_queue: Array = []
 var world_items: Dictionary = {}  # item id -> WorldItem
 ## loop: the PatientBody on the first patient case's table, or null.
 var patient_body: Node3D:
@@ -201,6 +208,7 @@ var clock_in_pending := false
 
 
 func _ready() -> void:
+	get_tree().node_added.connect(_on_node_added)   # room-bound lighting
 	_entities = Node3D.new()
 	_entities.name = "Entities"
 	add_child(_entities)
@@ -920,15 +928,12 @@ func _add_landmarks() -> void:
 		_add_proxy(table_interact_id(ti), (t.position as Vector3) + Vector3.UP * 1.1, 1.2, 0.0,
 			func(p): return _table_prompt(p, ti))
 	_add_player_table()  # downed: the OR's player table
-
-	# SWEEP 4A HOOK (database terminal, chunk 4): the break-room terminal replaces the old guide
-	# lectern spot. Its aim/prompt is purely for the HUD and local "use" detection (main.gd,
-	# terminal opens instantly, client-side, no host round trip); interact() itself is a no-op.
-	var tinfo: Dictionary = level_info.get("lectern", {})
-	if not tinfo.is_empty():
-		# HUB REDESIGN: the terminal is a full standing desk now, wider than the old lectern spot.
-		_add_proxy("terminal", (tinfo.position as Vector3) + Vector3.UP * 0.95, 1.5, 0.0,
-			func(_p): return "Use the database terminal")
+	# Terminal redesign: E on the projector hung across the break room switches it on and off.
+	var wt := wall_terminal()
+	if wt != null:
+		wt.set_on(projector_on)
+		_add_proxy("projector", wt.projector_position(), 0.45, 0.0,
+			func(_p): return "Turn the projector off" if projector_on else "Turn the projector on")
 
 
 class Proxy extends Area3D:
@@ -989,7 +994,70 @@ func _table_prompt(p, table_index: int) -> String:
 	return "Operate: %s" % step.label
 
 
+## Room-bound lighting: every mesh and light that joins the level (built with it, or added later, like
+## the economy's props, the OR monitors, the phone) is put on its area's bits at the end of the frame.
+func _on_node_added(n: Node) -> void:
+	if not (n is VisualInstance3D) or level == null or not is_instance_valid(level) or not level.is_ancestor_of(n):
+		return
+	if _light_queue.is_empty():
+		_flush_light_queue.call_deferred()
+	_light_queue.append(n)
+
+
+func _flush_light_queue() -> void:
+	var grid: Dictionary = level_info.get("light_grid", {})
+	var queue := _light_queue
+	_light_queue = []
+	if grid.is_empty():
+		return
+	for n in queue:
+		if not is_instance_valid(n) or not (n as Node).is_inside_tree() or _light_skip(n):
+			continue
+		if n is Light3D:
+			if not (n is DirectionalLight3D):
+				(n as Light3D).light_cull_mask = ((n as Light3D).light_cull_mask & ~LightRoomsScript.ALL) \
+						| LightRoomsScript.light_mask(grid, (n as Node3D).global_position) | LightRoomsScript.DYNAMIC
+		elif (n as VisualInstance3D).layers == LightRoomsScript.DYNAMIC and not (n is Decal) and not (n is ReflectionProbe):
+			(n as VisualInstance3D).layers = LightRoomsScript.mask_at(grid, (n as Node3D).global_position)
+
+
+## Things that move (marked "light_dynamic"), a wing set still loading ("light_pending", the wing
+## loader places those itself) and anything inside a SubViewport keep their own layers.
+static func _light_skip(n: Node) -> bool:
+	var p := n
+	while p != null:
+		if p.has_meta("light_dynamic") or p.has_meta("light_pending") or p is SubViewport:
+			return true
+		p = p.get_parent()
+	return false
+
+
+## The level's wall terminal (the break room projector and its screen), or null.
+func wall_terminal() -> Node3D:
+	var sb = level_info.get("lectern_node")
+	if sb == null or not is_instance_valid(sb):
+		return null
+	for c in (sb as Node).get_children():
+		if c.is_in_group("wall_terminal"):
+			return c
+	return null
+
+
+func _set_projector(value: bool) -> void:
+	projector_on = value
+	var wt := wall_terminal()
+	if wt != null:
+		wt.set_on(value)
+
+
 func _proxy_used(id: String, p: Node) -> void:
+	if id == "projector":
+		if is_host():
+			_set_projector(not projector_on)
+			var wt := wall_terminal()
+			if wt != null:
+				_sound("click", wt.projector_position())
+		return
 	if id == "player_table":
 		_player_table_used(p)   # downed
 		return
@@ -3420,6 +3488,7 @@ func _global_fields() -> Dictionary:
 		"dv": dev.net_state() if dev_mode else {},  # DEV HOOK
 		"mn": money,  # inventory: team money
 		"fh": economy.furnace.hatch_open if economy.furnace != null and is_instance_valid(economy.furnace) else false,  # hub: the furnace hatch
+		"pj": projector_on,  # terminal redesign: the break room projector
 		"wn": economy.waiting_nurse.net_state() if economy.waiting_nurse != null and is_instance_valid(economy.waiting_nurse) else {},  # hub: the waiting room's Night Nurse
 		"pn": pill_notes.duplicate(),  # SWEEP 4A HOOK (pharmacy, chunk 3): OR green blip notes
 		# SWEEP 3 HOOK: small dictionaries of quantized values only (see docs/SWEEP3.md)
@@ -3643,6 +3712,9 @@ func _apply_state(state: Dictionary, msg: Dictionary, keyframe: bool) -> void:
 		if String(k).begins_with("lp."):
 			lp[String(k).substr(3)] = g[k]
 	loop.apply_net_state(lp)
+	# Terminal redesign: the break room projector.
+	if g.has("pj") and bool(g.pj) != projector_on:
+		_set_projector(bool(g.pj))
 	# Hub rebuild: the crematorium furnace's hatch.
 	if economy.furnace != null and is_instance_valid(economy.furnace) and g.has("fh"):
 		economy.furnace.set_hatch(bool(g.fh))

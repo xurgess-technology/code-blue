@@ -49,6 +49,16 @@ func _ready() -> void:
 			{"name": "71_scan_complete", "fn": _pose_scan_complete, "settle": 1},
 			{"name": "72_scan_nothing", "fn": _pose_scan_nothing, "settle": 20},
 		]
+	# --wall: the break room's wall terminal (terminal redesign chunk 1): from across the room, the
+	# laser on a card, and after clicking it.
+	if OS.get_cmdline_user_args().has("--wall"):
+		shots = [
+			{"name": "73_wall_terminal", "fn": _pose_wall.bind(-1), "settle": 30},
+			{"name": "74_wall_laser_hover", "fn": _pose_wall.bind(0), "settle": 20},
+			{"name": "75_wall_after_click", "fn": _pose_wall_click, "settle": 20},
+			{"name": "76_wall_surge", "fn": _pose_wall_surge, "settle": 3},
+			{"name": "77_projector_off", "fn": _pose_projector_off, "settle": 10},
+		]
 	# --terminal: every kind of page the 3D viewer shows instead.
 	if OS.get_cmdline_user_args().has("--terminal"):
 		shots = [
@@ -122,6 +132,66 @@ func _pose_scan_ring() -> void:
 		bot.bot_yaw = atan2(-d.x, -d.z)
 		bot.bot_pitch = clampf(atan2(d.y, Vector2(d.x, d.z).length()), -1.0, 1.0)
 		await get_tree().process_frame
+
+
+## Stand back from the wall terminal; `card` >= 0 aims the laser at that home card (R held).
+func _pose_wall(card: int) -> void:
+	var wt: Node3D = _level_wall_terminal()
+	if wt == null:
+		print("[database_shot] no wall terminal")
+		return
+	var glass: Node3D = wt.glass
+	var n: Vector3 = glass.global_basis.z.normalized()
+	var stand: Vector3 = glass.global_position + n * 3.2
+	bot.teleport(game._floor_at(Vector3(stand.x, 0.0, stand.z)))
+	await get_tree().process_frame
+	var target: Vector3 = glass.global_position
+	if card >= 0:
+		var w := (1184.0 - 72.0) / 4.0
+		var px := Vector2(48.0 + card * (w + 24.0) + w * 0.5, 140.0 + 140.0 + 165.0)
+		target = glass.global_transform * Vector3((px.x / 1280.0 - 0.5) * wt.SIZE.x, (0.5 - px.y / 720.0) * wt.SIZE.y, 0.0)
+	for i in 30:
+		var d: Vector3 = target - bot.camera.global_position
+		var fwd: Vector3 = -bot.camera.global_transform.basis.z
+		bot.bot_yaw += wrapf(atan2(-d.x, -d.z) - atan2(-fwd.x, -fwd.z), -PI, PI)
+		bot.bot_pitch = clampf(bot.bot_pitch + atan2(d.y, Vector2(d.x, d.z).length()) - atan2(fwd.y, Vector2(fwd.x, fwd.z).length()), -1.2, 1.2)
+		await get_tree().process_frame
+	bot.bot_scan = card >= 0
+
+
+## The level's own wall terminal (the warmup's hidden copy is in the group too).
+func _level_wall_terminal() -> Node3D:
+	for n in get_tree().get_nodes_in_group("wall_terminal"):
+		if game.level != null and game.level.is_ancestor_of(n):
+			return n
+	return null
+
+
+func _pose_wall_click() -> void:
+	bot.bot_laser_click += 1
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var wt: Node3D = _level_wall_terminal()
+	print("[database_shot] wall page after click: ", wt.ui.page if wt != null else "?")
+
+
+## E on the projector (through its proxy, as the host) switches it off; the laser on the dark screen.
+func _pose_projector_off() -> void:
+	var node := game.find_interactable("projector")
+	print("[database_shot] projector proxy: %s, flashlight lit while scanning: %s" % [str(node != null), str(bot.flashlight.visible)])
+	if node != null:
+		node.interact(bot)
+	await get_tree().process_frame
+	print("[database_shot] projector on after E: %s, prompt '%s'" % [str(game.projector_on), node.interact_prompt(bot) if node != null else ""])
+	await _pose_wall(0)
+
+
+func _pose_wall_surge() -> void:
+	bot.bot_yaw += 1.2
+	for i in 4:
+		await get_tree().process_frame
+	bot.bot_laser_click += 1
+	await get_tree().process_frame
 
 
 ## Keep scanning the Walk-In from _pose_scan_ring until it completes, a few frames into the ring.

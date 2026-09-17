@@ -4,10 +4,11 @@ extends Node
 ## hologram overlay (scanlines, a rim, and a bright band sweeping up and down it, faster as the
 ## scan builds) and a thin beam runs from the player's hand to it. When the scan completes: the
 ## overlay flashes, a ring rolls out across the floor from its feet, a chime, and the HUD's
-## "SCAN COMPLETE" banner (hud.gd show_scan_banner). Holding R at all, target or not, turns the
-## flashlight scanner-blue and sweeps a projected scan line up and down straight ahead, so pressing
-## R always visibly does something. Purely cosmetic: the host's _tick_scan still
-## decides what the database records, and nothing here is replicated.
+## "SCAN COMPLETE" banner (hud.gd show_scan_banner). Terminal redesign: holding R is a laser
+## pointer, always: a beam from the hand and a dot where it lands. On the break room's wall screen
+## (wall_terminal.gd) the dot is a mouse cursor and a left click (Player.laser_clicks) clicks under
+## it; anywhere else a left click fires a surge down the beam. The host's _tick_scan still decides
+## what the database records; nothing here is replicated yet (chunk 4 shares the screen).
 
 const MonsterPages := preload("res://scripts/database/monster_pages.gd")
 
@@ -15,12 +16,9 @@ const COLOR := Color(0.36, 0.88, 0.82)
 const FLASH_SECONDS := 0.6
 const RING_SECONDS := 0.9
 const RING_RADIUS := 3.2
-## Holding R: the flashlight's colour, how fast it fades in and out, and the sweeping line.
-const SCAN_LIGHT := Color(0.35, 0.72, 1.0)
-const LIGHT_FADE := 6.0
-const SWEEP_DEG := 17.0
-const SWEEP_SPEED := 2.4
-const LINE_RANGE := 11.0
+## The laser: how far it reaches, and a click's surge down the beam.
+const LASER_RANGE := 14.0
+const SURGE_SECONDS := 0.35
 
 const SHADER := """
 shader_type spatial;
@@ -53,10 +51,16 @@ var _flash := 0.0
 var _flash_target: Node3D = null
 var _rings: Array = []              # [{node, t}]
 var _t := 0.0
-var _scan_k := 0.0                  # 0 warm flashlight .. 1 scanning blue
-var _warm := Color(1.0, 0.86, 0.62)
-var _warm_of: Object = null         # the flashlight _warm was read from
-var _line: SpotLight3D
+var _dot: MeshInstance3D
+var _dot_light: OmniLight3D
+var _beam_mat: StandardMaterial3D
+var _surge := 0.0
+var _clicks_seen := -1
+var _pointed: Node = null           # the wall terminal the laser is on, if any
+var _lens: MeshInstance3D = null     # the local torch's lens while it is scanner-blue
+var _lens_saved: Material = null
+var _lens_mat: StandardMaterial3D
+var _dimmed: Object = null           # the flashlight put out while the laser is on
 
 
 func setup(g: Node) -> void:
@@ -67,8 +71,8 @@ func setup(g: Node) -> void:
 	_mat.shader = sh
 	_beam = MeshInstance3D.new()
 	var cyl := CylinderMesh.new()
-	cyl.top_radius = 0.006
-	cyl.bottom_radius = 0.012
+	cyl.top_radius = 0.005
+	cyl.bottom_radius = 0.007
 	cyl.height = 1.0
 	cyl.radial_segments = 6
 	cyl.rings = 1
@@ -83,18 +87,30 @@ func setup(g: Node) -> void:
 	_beam.visible = false
 	_beam.top_level = true
 	add_child(_beam)
-	# The scan line: a spot light projecting one bright horizontal stripe, swept up and down.
-	_line = SpotLight3D.new()
-	_line.light_color = SCAN_LIGHT
-	_line.light_energy = 0.0
-	_line.spot_range = LINE_RANGE
-	_line.spot_angle = 26.0
-	_line.spot_attenuation = 0.8
-	_line.shadow_enabled = true
-	_line.light_projector = _line_texture()
-	_line.top_level = true
-	_line.visible = false
-	add_child(_line)
+	_beam_mat = bm
+	# Where the laser lands: a bright dot and a little light of its own.
+	_dot = MeshInstance3D.new()
+	var sph := SphereMesh.new()
+	sph.radius = 0.018
+	sph.height = 0.036
+	sph.radial_segments = 10
+	sph.rings = 5
+	_dot.mesh = sph
+	var dm := StandardMaterial3D.new()
+	dm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	dm.albedo_color = Color(0.75, 1.0, 0.97)
+	_dot.material_override = dm
+	_dot.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_dot.top_level = true
+	_dot.visible = false
+	add_child(_dot)
+	_dot_light = OmniLight3D.new()
+	_dot_light.light_color = COLOR
+	_dot_light.light_energy = 0.8
+	_dot_light.omni_range = 0.7
+	_dot_light.top_level = true
+	_dot_light.visible = false
+	add_child(_dot_light)
 
 
 func _process(delta: float) -> void:
@@ -128,47 +144,8 @@ func _process(delta: float) -> void:
 	_flash = maxf(0.0, _flash - delta / FLASH_SECONDS)
 	if _flash <= 0.0:
 		_flash_target = null
-	_update_beam(me, monster)
+	_update_laser(me, monster, delta)
 	_tick_rings(delta)
-	_update_scan_light(me, delta)
-
-
-## Holding R: the flashlight goes blue and the scan line sweeps straight ahead, target or not.
-func _update_scan_light(me, delta: float) -> void:
-	var holding: bool = me != null and me.alive and bool(me.scan_holding) and me.camera != null
-	_scan_k = move_toward(_scan_k, 1.0 if holding else 0.0, delta * LIGHT_FADE)
-	var flash: SpotLight3D = me.flashlight if me != null else null
-	if flash != null and is_instance_valid(flash):
-		if _warm_of != flash:
-			_warm_of = flash
-			_warm = flash.light_color
-		flash.light_color = _warm.lerp(SCAN_LIGHT, _scan_k)
-	if _scan_k <= 0.001 or me == null or me.camera == null:
-		_line.visible = false
-		return
-	_line.visible = true
-	_line.light_energy = 9.0 * _scan_k
-	var cam: Camera3D = me.camera
-	var pitch := deg_to_rad(SWEEP_DEG) * sin(_t * SWEEP_SPEED)
-	var basis := cam.global_transform.basis.orthonormalized() * Basis(Vector3.RIGHT, pitch)
-	var origin: Vector3 = flash.global_position if flash != null and is_instance_valid(flash) else cam.global_position
-	_line.global_transform = Transform3D(basis, origin)
-
-
-## A thin bright horizontal stripe across the middle, soft edges, a faint glow around it.
-static func _line_texture() -> ImageTexture:
-	var w := 128
-	var h := 64
-	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
-	for y in h:
-		var d := absf(float(y) - (h - 1) * 0.5)
-		var core := clampf(1.0 - d / 1.6, 0.0, 1.0)
-		var glow := exp(-d * d / 60.0) * 0.18
-		var v := clampf(core + glow, 0.0, 1.0)
-		for x in w:
-			var edge := clampf(minf(float(x), float(w - 1 - x)) / 10.0, 0.0, 1.0)
-			img.set_pixel(x, y, Color(v * edge, v * edge, v * edge, 1.0))
-	return ImageTexture.create_from_image(img)
 
 
 func _complete(monster: Node3D) -> void:
@@ -216,30 +193,164 @@ func _height_of(m: Node3D) -> float:
 	return float(h) if h != null else 1.9
 
 
-# ---- the beam ----
+# ---- the laser ----
 
-func _update_beam(me, monster: Node3D) -> void:
-	if me == null or monster == null or me.camera == null:
+## Holding R: the beam from the hand to wherever it lands (a monster being scanned: its middle), the
+## dot there, the wall screen's cursor, and clicks.
+func _update_laser(me, monster: Node3D, delta: float) -> void:
+	_surge = maxf(0.0, _surge - delta / SURGE_SECONDS)
+	var holding: bool = me != null and me.alive and bool(me.scan_holding) and me.camera != null
+	# One beam at a time: the torch's light goes out while it is a laser, back on (if it was) after.
+	_dim_flashlight(me if holding else null)
+	if not holding:
+		_tint_lens(null)
 		_beam.visible = false
+		_dot.visible = false
+		_dot_light.visible = false
+		_point_at(null, Vector2(-1, -1))
+		_clicks_seen = int(me.laser_clicks) if me != null else -1
 		return
 	var cam: Camera3D = me.camera
-	var from: Vector3 = cam.global_transform * Vector3(0.22, -0.24, -0.45)
-	var to: Vector3 = monster.global_position + Vector3.UP * _height_of(monster) * 0.6
+	# Out of the torch's lens when the first-person torch is showing, else from about where it would be.
+	var lens := _torch_lens(me)
+	_tint_lens(lens)
+	var from: Vector3 = lens.global_position if lens != null and lens.is_visible_in_tree() else cam.global_transform * Vector3(0.22, -0.24, -0.45)
+	var aim_dir := -cam.global_transform.basis.z
+	from += aim_dir * 0.03   # just past the lens, so the beam's end never hides the blue tip
+	var to: Vector3
+	var landed := false
+	var terminal: Node = null
+	var px := Vector2(-1, -1)
+	if monster != null:
+		to = monster.global_position + Vector3.UP * _height_of(monster) * 0.6
+		landed = true
+	else:
+		var ray_from := cam.global_position
+		var ray_to := ray_from - cam.global_transform.basis.z * LASER_RANGE
+		if me.carry_cam != null and me.carry_cam.active:
+			var seg: Array = me.carry_cam.aim_segment(LASER_RANGE)
+			ray_from = seg[0]
+			ray_to = seg[1]
+		var q := PhysicsRayQueryParameters3D.create(ray_from, ray_to)
+		q.collision_mask = C.L_WORLD | C.L_MONSTER | C.L_SCAN
+		q.exclude = [me.get_rid()]
+		var hit: Dictionary = me.get_world_3d().direct_space_state.intersect_ray(q)
+		if hit.is_empty():
+			to = ray_to
+		else:
+			to = hit.position
+			landed = true
+			terminal = _terminal_of(hit.get("collider"))
+			if terminal != null:
+				px = terminal.pixel_at(to)
+				if px.x < 0.0:
+					terminal = null
+	_point_at(terminal, px)
+	# A click: on the screen it presses what is under the dot; anywhere else, a surge down the beam.
+	var clicks := int(me.laser_clicks)
+	if _clicks_seen < 0:
+		_clicks_seen = clicks
+	if clicks != _clicks_seen:
+		_clicks_seen = clicks
+		if terminal != null:
+			terminal.click(px)
+			_sfx("click", -4.0)
+		else:
+			_surge = 1.0
+			_sfx("dev_zap_01", -10.0)
+	_draw_beam(from, to, landed)
+
+
+func _draw_beam(from: Vector3, to: Vector3, landed: bool) -> void:
 	var d := to - from
 	var len := d.length()
 	if len < 0.05:
 		_beam.visible = false
 		return
 	_beam.visible = true
-	# The cylinder runs along +Y: point it from the hand to the monster, flickering a little.
 	var y := d / len
 	var x := y.cross(Vector3.UP)
 	if x.length() < 0.01:
 		x = y.cross(Vector3.RIGHT)
 	x = x.normalized()
 	var z := x.cross(y)
-	var wobble := 1.0 + 0.35 * sin(_t * 40.0)
-	_beam.global_transform = Transform3D(Basis(x * wobble, y * len, z * wobble), from + d * 0.5)
+	var thick := (1.0 + 0.25 * sin(_t * 40.0)) * (1.0 + 1.6 * _surge)
+	_beam.global_transform = Transform3D(Basis(x * thick, y * len, z * thick), from + d * 0.5)
+	_beam_mat.albedo_color = Color(COLOR.lerp(Color.WHITE, 0.6 * _surge), 0.55 + 0.45 * _surge)
+	_dot.visible = landed
+	_dot_light.visible = landed
+	if landed:
+		# Just off the surface toward the hand, so it never sinks into what it lights.
+		var at := to - y * 0.01
+		_dot.global_position = at
+		_dot.scale = Vector3.ONE * (1.0 + 2.5 * _surge)
+		_dot_light.global_position = at - y * 0.08
+		_dot_light.light_energy = 0.8 + 2.5 * _surge
+
+
+func _dim_flashlight(me) -> void:
+	var flash: SpotLight3D = me.flashlight if me != null else null
+	if flash == _dimmed:
+		if flash != null and flash.visible:
+			flash.visible = false   # toggled back on mid-scan: stays out until R is let go
+		return
+	if _dimmed != null and is_instance_valid(_dimmed):
+		var owner = (_dimmed as Node).get_parent()
+		while owner != null and not ("flashlight_on" in owner):
+			owner = owner.get_parent()
+		(_dimmed as SpotLight3D).visible = bool(owner.flashlight_on) if owner != null else true
+	_dimmed = flash
+	if flash != null:
+		flash.visible = false
+
+
+func _torch_lens(me) -> MeshInstance3D:
+	var hands = me.get("hands")
+	if hands == null or not is_instance_valid(hands) or hands.get("torch") == null:
+		return null
+	return hands.torch.get_node_or_null("Lens") as MeshInstance3D
+
+
+## The lens glows the laser's blue while scanning; `lens` null puts the last one back.
+func _tint_lens(lens: MeshInstance3D) -> void:
+	if lens == _lens:
+		return
+	if _lens != null and is_instance_valid(_lens):
+		_lens.material_override = _lens_saved
+	_lens = lens
+	_lens_saved = null
+	if lens == null:
+		return
+	if _lens_mat == null:
+		_lens_mat = StandardMaterial3D.new()
+		_lens_mat.albedo_color = Color(0.1, 0.55, 0.62)
+		_lens_mat.emission_enabled = true
+		_lens_mat.emission = Color(0.05, 0.6, 0.85)
+		_lens_mat.emission_energy_multiplier = 0.9
+	_lens_saved = lens.material_override
+	lens.material_override = _lens_mat
+
+
+func _terminal_of(collider) -> Node:
+	if not (collider is Node):
+		return null
+	for c in (collider as Node).get_children():
+		if c.is_in_group("wall_terminal"):
+			return c
+	return null
+
+
+func _point_at(terminal: Node, px: Vector2) -> void:
+	if _pointed != null and is_instance_valid(_pointed) and _pointed != terminal:
+		_pointed.clear_pointer()
+	_pointed = terminal
+	if terminal != null:
+		terminal.point(px)
+
+
+func _sfx(cue: String, db: float) -> void:
+	if DisplayServer.get_name() != "headless":
+		Audio.play(cue, null, db, 0.05, Audio.BUS_UI)
 
 
 # ---- the ring ----

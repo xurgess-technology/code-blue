@@ -10,6 +10,7 @@ extends RefCounted
 ##
 ## Maps without furniture data (hand-made tile maps in tools) go through the legacy builder.
 
+const LightRooms := preload("res://scripts/level/light_rooms.gd")
 const MG := preload("res://scripts/mapgen.gd")
 const S := preload("res://scripts/level/level_state.gd")
 const Defs := preload("res://scripts/level/piece_defs.gd")
@@ -237,6 +238,8 @@ static func prepare(gen: Dictionary, part: int) -> Dictionary:
 		"anchors": [], "containers": [], "lights": [], "signs": [], "doors": [], "occluder": [],
 		"out": {"containers": [], "lights": [], "anchors": [], "doors": [], "lectern_node": null}}
 	var geo := GeoChunks.new()
+	# Room-bound lighting (light_rooms.gd): every surface goes on the render bits of the area it faces.
+	geo.grid = LightRooms.ensure(gen)
 	_build_surfaces(gen, geo, part)
 	p.geo = geo.to_arrays()
 	p.faces = geo.faces_by_chunk
@@ -318,6 +321,8 @@ static func commit_steps(p: Dictionary, parent: Node3D) -> Array:
 				mi.name = String(k).replace(",", "_").replace("|", "_")
 				mi.mesh = mesh
 				mi.material_override = _geo_material(String(k).get_slice("|", 1))
+				if String(k).get_slice_count("|") >= 3:
+					mi.layers = int(String(k).get_slice("|", 2))   # room-bound lighting
 				holder.add_child(mi))
 	var labels: Array = []
 	p["step_labels"] = labels
@@ -404,6 +409,7 @@ static var _SIGN_CACHE := {}
 
 ## Fill `info` from the committed base and wings parts (docs/CONTRACTS.md, "Hospital").
 static func finish_info(gen: Dictionary, info: Dictionary, base: Dictionary, wings: Dictionary) -> void:
+	info["light_grid"] = LightRooms.ensure(gen)   # room-bound lighting: game.gd places later nodes with it
 	var rows: PackedStringArray = gen.rows
 	info["size"] = Vector2i(rows[0].length(), rows.size())
 	info["rows"] = rows
@@ -583,7 +589,10 @@ static func _box_shape(size: Vector3, xf: Transform3D, nm: String) -> CollisionS
 
 ## Merged geometry, bucketed by chunk and material.
 class GeoChunks extends RefCounted:
-	var buckets := {}   # "cx,cy|mat" -> SurfaceTool
+	var buckets := {}   # "cx,cy|mat|layers" -> SurfaceTool
+	## light_rooms.gd's grid, and the render bits the next faces go on (set per tile while building).
+	var grid := {}
+	var mask := 1
 	var faces_by_chunk := {}   # "cx,cy" -> PackedVector3Array (collision triangles)
 
 	func add_faces(cx: int, cy: int, tris: Array) -> void:
@@ -604,7 +613,7 @@ class GeoChunks extends RefCounted:
 		return out
 
 	func st_for(cx: int, cy: int, mat: String) -> SurfaceTool:
-		var k := "%d,%d|%s" % [cx, cy, mat]
+		var k := "%d,%d|%s|%d" % [cx, cy, mat, mask]
 		if not buckets.has(k):
 			var st := SurfaceTool.new()
 			st.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -646,6 +655,7 @@ static func _build_surfaces(gen: Dictionary, geo: GeoChunks, part: int = PART_BA
 			if _open_char(c):
 				if part_of(gen, tx, ty) != part:
 					continue
+				geo.mask = LightRooms.tile_mask(geo.grid, tx, ty)
 				var fkey := "linoleum"
 				var ckey := "ceiling"
 				if c == ",":
@@ -676,6 +686,7 @@ static func _build_surfaces(gen: Dictionary, geo: GeoChunks, part: int = PART_BA
 				var nc := _at(rows, nx, ny)
 				if not _open_char(nc) or part_of(gen, nx, ny) != part:
 					continue
+				geo.mask = LightRooms.tile_mask(geo.grid, nx, ny)   # the room this face looks into
 				var mat := "wall"
 				var outdoor := nc == ","
 				if outdoor:
@@ -690,10 +701,12 @@ static func _build_surfaces(gen: Dictionary, geo: GeoChunks, part: int = PART_BA
 				_wall_face(geo, cx, cy, tx, ty, d, split, top, mat, false)
 				_collision_face(geo, rows, tx, ty, d, maxf(top, C.WALL_H), cx, cy)
 			if fence and part == PART_BASE:
+				geo.mask = LightRooms.ALL
 				var y := FENCE_H
 				geo.quad(cx, cy, "facade", Vector3(x0, y, z0), Vector3(x1, y, z0), Vector3(x1, y, z1), Vector3(x0, y, z1),
 						Vector2(x0, z0), Vector2(x1, z0), Vector2(x1, z1), Vector2(x0, z1))
 	if part == PART_BASE:
+		geo.mask = LightRooms.ALL   # out on the lot: whatever lights it
 		_canopy(geo, gen)
 		_ground_paint(geo, gen)
 
@@ -877,8 +890,9 @@ static func _canopy(geo: GeoChunks, gen: Dictionary) -> void:
 ## for MultiMesh.buffer), the box colliders, and the loose-item anchors on top of the pieces.
 static func _prep_furniture(gen: Dictionary, p: Dictionary) -> void:
 	var part := int(p.part)
-	var batches := {}     # "cx,cy" -> {mesh -> Array[Transform3D]}
-	var colliders := {}   # "cx,cy" -> [[size, centre]]
+	var batches := {}     # "cx,cy|layers" -> {mesh -> Array[Transform3D]}
+	var colliders := {}   # "cx,cy|layers" -> [[size, centre]]
+	var grid := LightRooms.ensure(gen)
 	var anchors: Array = p.anchors
 	var count := 0
 	for e in gen.furniture:
@@ -890,7 +904,8 @@ static func _prep_furniture(gen: Dictionary, p: Dictionary) -> void:
 			continue
 		var pos := _w(p2, float(e.get("y", 0.0)))
 		var xf := Transform3D(Basis(Vector3.UP, float(e.yaw)), pos)
-		var ck := "%d,%d" % [int(p2.x) / CHUNK, int(p2.y) / CHUNK]
+		# Room-bound lighting: chunked by the render bits of the tile it stands on, too.
+		var ck := "%d,%d|%d" % [int(p2.x) / CHUNK, int(p2.y) / CHUNK, LightRooms.tile_mask(grid, int(floor(p2.x)), int(floor(p2.y)))]
 		if not batches.has(ck):
 			batches[ck] = {}
 		var b: Dictionary = batches[ck]
@@ -999,8 +1014,10 @@ static func _commit_furniture_chunk(p: Dictionary, ck: String, holder: Node3D) -
 		mm.instance_count = int(e[0])
 		mm.buffer = e[1]
 		var mmi := MultiMeshInstance3D.new()
-		mmi.name = "MM_%s_%d" % [ck.replace(",", "_"), i]
+		mmi.name = "MM_%s_%d" % [ck.replace(",", "_").replace("|", "_"), i]
 		mmi.multimesh = mm
+		if ck.get_slice_count("|") >= 2:
+			mmi.layers = int(ck.get_slice("|", 1))
 		mmi.visibility_range_end = FURNITURE_RANGE
 		mmi.visibility_range_end_margin = 4.0
 		holder.add_child(mmi)
@@ -1008,7 +1025,7 @@ static func _commit_furniture_chunk(p: Dictionary, ck: String, holder: Node3D) -
 	var cols: Array = p.colliders.get(ck, [])
 	if not cols.is_empty():
 		var sb := StaticBody3D.new()
-		sb.name = "Collide_" + ck.replace(",", "_")
+		sb.name = "Collide_" + ck.replace(",", "_").replace("|", "_")
 		sb.collision_layer = C.L_WORLD
 		sb.collision_mask = 0
 		var n := 0
@@ -1217,8 +1234,6 @@ static func _fill_landmarks(gen: Dictionary, info: Dictionary) -> void:
 		info["shelf"] = {"position": _w(spots.shelf.pos), "yaw": float(spots.shelf.yaw)}
 	if spots.has("lectern"):
 		info["lectern"] = {"position": _w(spots.lectern.pos), "yaw": float(spots.lectern.yaw)}
-	if spots.has("printer"):   # hub rebuild, chunk 4: the break room's case printer
-		info["printer"] = {"position": _w(spots.printer.pos), "yaw": float(spots.printer.yaw)}
 
 
 ## Builds at the "lectern" spot MapGen reserved in the break room (docs/CONTRACTS.md "Hospital"
@@ -1236,9 +1251,13 @@ static func _commit_lectern(p: Dictionary, root: Node3D) -> void:
 	sb.position = _w(spots.lectern.pos)
 	sb.rotation.y = float(spots.lectern.yaw)
 	sb.add_child(terminal)
-	Legacy._fit_collider(terminal)
+	# Terminal redesign: the wall screen says where its own collider goes (up on the wall, the glass);
+	# anything else gets one fitted to its meshes.
+	if not terminal.has_meta("collider_offset"):
+		Legacy._fit_collider(terminal)
 	var size: Vector3 = terminal.get_meta("collider_size")
-	sb.add_child(_box_shape(size, Transform3D(Basis.IDENTITY, Vector3(0.0, terminal.get_meta("collider_y"), 0.0)), "Shape"))
+	var off: Vector3 = terminal.get_meta("collider_offset", Vector3.ZERO)
+	sb.add_child(_box_shape(size, Transform3D(Basis.IDENTITY, Vector3(off.x, terminal.get_meta("collider_y"), off.z)), "Shape"))
 	root.add_child(sb)
 	p.out.lectern_node = sb
 

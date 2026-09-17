@@ -13,7 +13,7 @@ extends RefCounted
 ##
 ## Chunk 1 of the hub rebuild is the building: walls, rooms, doors and today's working pieces in
 ## their new places. The OR's three monitored tables, the triage desk and its phone, the waiting
-## room's Night Nurse, the pharmacy's bars and pickup drawer, the break room's printer and the
+## room's Night Nurse, the pharmacy's bars and pickup drawer, the break room's wall terminal and the
 ## hallway's bodies, blood and dead lights (chunk 5).
 ##
 ## Monsters never spawn here and nothing a case needs is ever placed here.
@@ -159,9 +159,6 @@ static func build(st: S, ox: int, oy: int) -> void:
 	var lectern_pos := Vector2(ox + 10.0, oy + 19.0 - 0.32 / Defs.TILE)
 	st.spots["lectern"] = {"pos": lectern_pos, "yaw": Defs.yaw_facing(N)}
 	st.blocked[st.idx(ox + 10, oy + 18)] = 1
-	# Chunk 4: the case printer on its stand beside the computer (the loop builds it; its front, +Z,
-	# faces the room).
-	st.spots["printer"] = {"pos": Vector2(ox + 10.0 + 0.95 / Defs.TILE, oy + 19.0 - 0.3 / Defs.TILE), "yaw": Defs.yaw_facing(SOUTH)}
 	put.call("notice_board", 7.0, 19.0, N, break_room)
 	put.call("plant", 12.6, 14.5, SOUTH, break_room)
 

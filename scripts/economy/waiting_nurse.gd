@@ -60,6 +60,7 @@ var _clip := ""
 static func create(g: Node, info: Dictionary) -> Node3D:
 	var n: Node3D = (load("res://scripts/economy/waiting_nurse.gd") as GDScript).new()
 	n.name = "WaitingNurse"
+	n.set_meta("light_dynamic", true)   # she walks between chairs: lit like anyone else (light_rooms.gd)
 	n.game = g
 	n.seats = info.get("waiting_seats", [])
 	n.corners = info.get("waiting_corners", [])

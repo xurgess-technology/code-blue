@@ -168,6 +168,7 @@ func _tear_down() -> void:
 	_old_root = info.get("wings_root")
 	var fresh := Node3D.new()
 	fresh.name = "WingsBuilding"
+	fresh.set_meta("light_pending", true)   # room-bound lighting: placed with the new map's grid in _finish
 	game.level.add_child(fresh)
 	_wings_root = fresh
 	info["wings_root"] = fresh
@@ -282,6 +283,10 @@ func _finish() -> void:
 	var base: Dictionary = info.get("base_part", {})
 	var f0 := Time.get_ticks_usec()
 	HB.finish_info(gen, info, base, prep)
+	# Room-bound lighting: the new wings on the new map's areas (light_rooms.gd).
+	if _wings_root != null and is_instance_valid(_wings_root):
+		_wings_root.remove_meta("light_pending")
+		preload("res://scripts/level/light_rooms.gd").apply(_wings_root, info.get("light_grid", {}))
 	var f1 := Time.get_ticks_usec()
 	var region: NavigationRegion3D = info.get("nav_region")
 	if region != null and is_instance_valid(region):
