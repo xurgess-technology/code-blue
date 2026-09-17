@@ -7,23 +7,41 @@ extends CanvasLayer
 ## and the team's money. SEND FAX feeds the page down into the machine, then sends the ticked items and
 ## their quantities to the host (economy.request_order), which takes the money and starts the order.
 ##
+## Motion (docs/FAX.md, timings in scripts/fax_printer.gd): opening, the machine rises in from below and
+## a blank form feeds up out of its slot; CANCEL / Esc ejects the form off the top while the machine
+## sinks; SEND FAX pulls the form down into the machine, then the machine sinks. Control goes back to
+## the player the moment it closes, while it animates away; E again before it has gone brings it back.
+##
 ## DEV HOOK: a quantity of exactly game.DEV_CODE placebo pills is the secret order. It sends whatever
 ## the team has; instead of closing, the machine prints a reply page while the host turns dev mode on
-## and every machine builds the hidden dev room (dev_room.gd), then closes.
+## and every machine builds the hidden dev room (dev_room.gd), then the reply ejects and it closes.
 ##
 ##   open(game)   show it; the player stops (main.gd frees the mouse while is_open())
-##   close()      hide it
+##   close()      send it away (is_open() is false at once)
 ##   is_open()
 
 const Fax := preload("res://scripts/fax_printer.gd")
 
 const LAYER := 61
-const SEND_SECONDS := 1.1
+## The sent form feeding down into the machine.
+const SEND_SECONDS := 0.6
 const BOTTOM_PAD := 22.0
+const PAGE_MARGIN := 30.0
+## Opening, the form starts feeding once the rising machine is this far up.
+const FEED_AFTER_RISE := 0.3
 const MACHINE_LABEL := "PHARMACY ORDER FAX  /  COUNTY GENERAL"
 
 var game: Node = null
 var _open := false
+var _printer := Fax.Motion.new(0.0)   # 1 standing, 0 sunk off the bottom of the screen
+var _feed := Fax.Motion.new(0.0)      # 0 inside the slot, 1 standing out of it
+var _lift := Fax.Motion.new(0.0)      # 0 in place, 1 ejected off the top
+var _lift_from := 0.0
+var _feed_wait := 0.0
+var _feed_tick := 0.0
+var _sent := false        # the form went into the machine (sent): it leaves with the machine
+var _grow_px := 0.0       # the reply page's newest lines still coming up out of the slot
+var _last_h := 0.0
 var _font: Font
 var _root: Control
 var _canvas: Control
@@ -38,9 +56,9 @@ var _send: Button
 var _sending := -1.0
 var _sent_sets := {}
 # DEV HOOK: the reply page after the secret order.
-const REPLY_LINE_SECONDS := 0.42
+const REPLY_LINE_SECONDS := 0.3
 const REPLY_SEND_AT_LINE := 3     # the order goes out once this many lines are on the page
-const REPLY_HOLD_SECONDS := 1.8
+const REPLY_HOLD_SECONDS := 1.2
 const REPLY_TIMEOUT := 15.0
 const SECRET_KIND := "placebo_pills"
 var _reply := -1.0                # seconds since the reply page started, < 0 while not printing
@@ -91,12 +109,28 @@ func open(g: Node) -> void:
 		return
 	game = g
 	_open = true
+	# E again while the form was still ejecting: the same form comes back down onto the machine.
+	var returning := visible and not _sent and _reply < 0.0 and _sheet != null and is_instance_valid(_sheet)
 	_sending = -1.0
 	_reply = -1.0
-	_build_sheet()
+	_reply_wait = null
+	if not returning:
+		_sent = false
+		_build_sheet()
+		_feed.snap(0.0)
+		_lift.snap(0.0)
+		_last_h = 0.0
+		_grow_px = 0.0
 	visible = true
+	_set_live(true)
+	_feed_wait = maxf(0.0, (FEED_AFTER_RISE - _printer.value) * Fax.RISE_SECONDS)
+	_feed_tick = _feed_wait
+	_printer.go(1.0, Fax.RISE_SECONDS, true)
+	_lift.go(0.0, Fax.EJECT_SECONDS, true)
+	_feed.go(1.0, Fax.FEED_SECONDS, true)
 	_layout.call_deferred()
 	_click()
+	Fax.sfx("print_feed", -8.0)
 
 
 func close() -> void:
@@ -106,12 +140,39 @@ func close() -> void:
 	_sending = -1.0
 	_reply = -1.0
 	_reply_wait = null
+	_set_live(false)
+	var focused := get_viewport().gui_get_focus_owner()
+	if focused != null and _root.is_ancestor_of(focused):
+		focused.release_focus()
+	if not _sent:
+		# The form (or the reply) ejects off the top from wherever it is.
+		_feed.snap(_feed.value)
+		_feed_wait = 0.0
+		_lift_from = (1.0 - _feed.value) * _feed_dist()
+		_lift.go(1.0, Fax.EJECT_SECONDS, false)
+		Fax.sfx("print_feed", -8.0)
+	_printer.go(0.0, Fax.DROP_SECONDS, false)
+	if Fax.headless():
+		_finish()
+
+
+## Gone from the screen.
+func _finish() -> void:
 	visible = false
+	_printer.snap(0.0)
+	_lift.snap(0.0)
+
+
+## The form's controls answer the mouse and keyboard only while it is open: on its way out the clicks
+## (a captured mouse again) go to the game.
+func _set_live(on: bool) -> void:
+	_root.mouse_filter = Control.MOUSE_FILTER_STOP if on else Control.MOUSE_FILTER_IGNORE
+	_clip.mouse_behavior_recursive = Control.MOUSE_BEHAVIOR_INHERITED if on else Control.MOUSE_BEHAVIOR_DISABLED
+	_clip.focus_behavior_recursive = Control.FOCUS_BEHAVIOR_INHERITED if on else Control.FOCUS_BEHAVIOR_DISABLED
 
 
 func _click() -> void:
-	if DisplayServer.get_name() != "headless":
-		Audio.play("click", null, -8.0, 0.05, Audio.BUS_UI)
+	Fax.sfx("click", -8.0)
 
 
 func _input(event: InputEvent) -> void:
@@ -123,27 +184,47 @@ func _input(event: InputEvent) -> void:
 
 
 func _process(delta: float) -> void:
-	if not _open:
+	if not visible:
 		return
-	var me = game.local_player() if game != null else null
-	if me == null or not me.alive or me.downed or game.phase == Game.Phase.MENU:
-		close()
+	var dt := Fax.ui_dt(delta)
+	if game == null or game.phase == Game.Phase.MENU:
+		# The session is gone: nothing to animate away over.
+		_open = false
+		_finish()
 		return
-	if _reply >= 0.0:
-		_tick_reply(delta)
-		return
-	if _sending >= 0.0:
-		_sending += delta
-		_layout()
+	if _open:
+		var me = game.local_player()
+		if me == null or not me.alive or me.downed:
+			close()
+	if _open and _reply >= 0.0:
+		_tick_reply(dt)
+	elif _open and _sending >= 0.0:
+		_sending += dt
 		if _sending >= SEND_SECONDS:
+			_sent = true
 			if _is_secret(_sent_sets):
 				_start_reply()
-				return
-			if game != null and game.economy != null:
-				game.economy.request_order(_sent_sets)
-			close()
-		return
-	_refresh()
+			else:
+				if game.economy != null:
+					game.economy.request_order(_sent_sets)
+				close()
+	elif _open:
+		_refresh()
+	_printer.step(dt)
+	_lift.step(dt)
+	if _feed_wait > 0.0:
+		_feed_wait -= dt
+	else:
+		_feed.step(dt)
+		if _open and _feed.moving():
+			_feed_tick -= dt
+			if _feed_tick <= 0.0 and _feed.value < 0.85:
+				_feed_tick = Fax.FEED_TICK
+				Fax.sfx("print_feed", -14.0, 0.1)
+	_grow_px = lerpf(_grow_px, 0.0, clampf(dt * 14.0, 0.0, 1.0))
+	_layout()
+	if not _open and _printer.at(0.0) and not _lift.moving():
+		_finish()
 
 
 # ---------------------------------------------------------------------------
@@ -369,9 +450,28 @@ func _button(text: String, on_press: Callable) -> Button:
 # ---------------------------------------------------------------------------
 # layout and drawing
 
-## How far the page has fed down into the machine while sending: 0 at rest, the whole sheet at the end.
-func _feed() -> float:
-	return 0.0 if _sending < 0.0 else ease(clampf(_sending / SEND_SECONDS, 0.0, 1.0), 2.2)
+## From just inside the slot up to rest: the page's whole height and its margins.
+func _feed_dist() -> float:
+	return _sheet.get_combined_minimum_size().y + BOTTOM_PAD + PAGE_MARGIN if _sheet != null and is_instance_valid(_sheet) else 0.0
+
+
+## How far the sent form has gone down into the machine: 0 at rest, 1 all of it (accelerating).
+func _sink_k() -> float:
+	if _sent:
+		return 1.0
+	return 0.0 if _sending < 0.0 else Fax.ease_in(_sending / SEND_SECONDS)
+
+
+func _printer_drop(l: Dictionary) -> float:
+	return (1.0 - _printer.value) * Fax.printer_gone_px(_root.size, l)
+
+
+## How far above its resting place the page is: negative while down in the machine (coming out of it,
+## going into it, the reply's newest line still in the slot), riding with the machine as it moves.
+func _page_up(l: Dictionary, drop: float) -> float:
+	var up := -(1.0 - _feed.value) * _feed_dist() - _sink_k() * (_feed_dist() + 20.0) - _grow_px
+	up += _lift.value * (float(l.slot_y) + _lift_from + PAGE_MARGIN + 20.0)
+	return up - drop * (1.0 - _lift.value)
 
 
 func _layout() -> void:
@@ -379,11 +479,15 @@ func _layout() -> void:
 		return
 	var sz := _root.size
 	var l := Fax.layout(sz, _font)
-	_clip.position = Vector2(l.px, 0.0)
-	_clip.size = Vector2(l.paper_w, l.slot_y)
+	var drop := _printer_drop(l)
 	var h := _sheet.get_combined_minimum_size().y
+	if _reply >= 0.0 and h > _last_h:
+		_grow_px += h - _last_h   # a new reply line: the paper slides up out of the slot to show it
+	_last_h = h
+	_clip.position = Vector2(l.px, 0.0)
+	_clip.size = Vector2(l.paper_w, float(l.slot_y) + drop)
 	var rest_y: float = float(l.slot_y) - h - BOTTOM_PAD
-	_sheet.position = Vector2(Fax.MARGIN, rest_y + _feed() * (h + BOTTOM_PAD + 20.0))
+	_sheet.position = Vector2(Fax.MARGIN, rest_y - _page_up(l, drop))
 	_sheet.size = Vector2(l.text_w, h)
 	_canvas.queue_redraw()
 	_over.queue_redraw()
@@ -392,20 +496,30 @@ func _layout() -> void:
 func _draw_room() -> void:
 	var sz := _canvas.size
 	var l := Fax.layout(sz, _font)
-	var feed_px := _feed() * 400.0
+	var drop := _printer_drop(l)
 	# No room behind it: in a shift the game stays visible either side of the paper and the machine.
-	# The page is just the order form's size, its top edge a margin above the first line.
-	var page_top := (_sheet.position.y - 30.0) if _sheet != null and is_instance_valid(_sheet) else float(l.slot_y)
-	Fax.draw_paper(_canvas, sz, l, -feed_px, 1.0, INF, false, page_top)
-	var sending := _sending >= 0.0
-	var lcd := "SENDING..." if sending else "READY TO SEND"
-	var head := float(l.tx) + (fmod(_sending * 900.0, float(l.text_w)) if sending else 0.0)
+	# The page is just the order form's size, its top edge a margin above the first line, and below the
+	# slot it is inside the machine.
+	if _sheet != null and is_instance_valid(_sheet):
+		var page_top := _sheet.position.y - PAGE_MARGIN
+		var page_bottom := minf(_sheet.position.y + _sheet.size.y + BOTTOM_PAD, float(l.slot_y) + drop)
+		Fax.draw_paper(_canvas, sz, l, _page_up(l, drop) + _feed_dist(), 1.0, page_bottom, false, page_top)
+	var busy := false
+	var lcd := "READY TO SEND"
+	var head := float(l.tx)
 	if _reply >= 0.0:
-		sending = true
-		lcd = "RECEIVING..." if _reply_done < 0.0 else "RECEIVED"
-		head = float(l.tx) + fmod(_reply * 700.0, float(l.text_w))
-	Fax.draw_printer(_canvas, sz, l, _font, head, lcd, Fax.LCD_WAIT if sending else Fax.LCD_TEXT, 1.0, 0.0, MACHINE_LABEL)
-
+		busy = _reply_done < 0.0
+		lcd = "RECEIVING..." if busy else "RECEIVED"
+		head += fmod(_reply * 700.0, float(l.text_w)) if busy else 0.0
+	elif _sending >= 0.0:
+		busy = true
+		lcd = "SENDING..."
+		head += fmod(_sending * 900.0, float(l.text_w))
+	elif not _open:
+		lcd = "SENT" if _sent else "CANCELLED"
+	elif not _feed.at(1.0):
+		lcd = "PRINTING FORM"
+	Fax.draw_printer(_canvas, sz, l, _font, head, lcd, Fax.LCD_WAIT if busy else Fax.LCD_TEXT, 1.0, drop, MACHINE_LABEL)
 
 ## Nothing over the page: it ends at its own top edge.
 func _draw_over() -> void:
@@ -447,9 +561,11 @@ func _send_order() -> void:
 	if _sent_sets.is_empty() or _sending >= 0.0:
 		return
 	_sending = 0.0
-	if DisplayServer.get_name() != "headless":
-		Audio.play("fax_connect", null, -10.0, 0.0, Audio.BUS_UI)
-		Audio.play("print_feed", null, -6.0, 0.05, Audio.BUS_UI)
+	# The form is on its way into the machine: nothing on it can be changed any more.
+	_clip.mouse_behavior_recursive = Control.MOUSE_BEHAVIOR_DISABLED
+	_clip.focus_behavior_recursive = Control.FOCUS_BEHAVIOR_DISABLED
+	Fax.sfx("fax_connect", -10.0, 0.0)
+	Fax.sfx("print_feed", -6.0)
 
 
 # ---------------------------------------------------------------------------
@@ -457,6 +573,12 @@ func _send_order() -> void:
 
 func _start_reply() -> void:
 	_sending = -1.0
+	# A new page, printed line by line up out of the slot (the sent form is inside the machine).
+	_sent = false
+	_feed.snap(1.0)
+	_lift.snap(0.0)
+	_last_h = 0.0
+	_grow_px = BOTTOM_PAD + PAGE_MARGIN
 	_reply = 0.0
 	_reply_next = 0.0
 	_reply_sent = false
@@ -483,8 +605,6 @@ func _start_reply() -> void:
 		["@rule"],
 		["DEV MODE ON.  F1: DEV PANEL.", Fax.FONT_SIZE, Fax.DEV_INK],
 	]
-	if DisplayServer.get_name() != "headless":
-		Audio.play("fax_connect", null, -10.0, 0.0, Audio.BUS_UI)
 	_layout()
 
 
@@ -523,8 +643,7 @@ func _print_reply_line(line: Array) -> void:
 			_sheet.add_child(_reply_wait)
 		_:
 			_sheet.add_child(_ink(String(line[0]), int(line[1]), line[2]))
-	if DisplayServer.get_name() != "headless":
-		Audio.play("print_feed", null, -12.0, 0.05, Audio.BUS_UI)
+	Fax.sfx("print_line", -12.0)
 
 
 ## A tick box drawn in ink: [ ] LABEL, click to tick or untick.

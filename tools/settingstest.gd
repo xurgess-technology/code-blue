@@ -220,8 +220,8 @@ func _run() -> void:
 	await _frames(1)
 	_check(not ui.is_open() and not game.paused, "Esc closes the screen without pausing")
 
-	# Pause: Esc brings up the settings fax as the pause menu; Esc again sends it away and only then
-	# resumes the shift.
+	# Pause: Esc brings up the settings fax as the pause menu; Esc again resumes the shift at once while
+	# the page animates away (docs/FAX.md).
 	main._toggle_pause()
 	await _frames(2)
 	_check(game.paused and ui.is_open() and ui._pause_button.visible, "pausing brings up the settings fax with Resume")
@@ -229,7 +229,7 @@ func _run() -> void:
 		"the pause page has the Main menu / Quit game buttons")
 	get_viewport().push_input(esc)
 	await _frames(1)
-	_check(not ui.is_open() and game.paused, "Esc sends the page away; still paused while it leaves")
+	_check(not ui.is_open() and not game.paused, "Esc sends the page away and resumes the shift straight away")
 	await _until(func(): return not game.paused, 3.0)
 	_check(not game.paused and not ui._root.visible, "once the page has gone the shift resumes")
 	main._toggle_pause()

@@ -58,8 +58,10 @@ const TIPS := {
 const TEAR_AFTER := 20.0
 const CPS := 75.0
 const LINE_PAUSE := 0.08
-const TEAR_SECONDS := 0.45
+## A torn-off memo flies up and fades in Fax.EJECT_SECONDS; the little machine rises and sinks in this.
 const MACHINE_SECONDS := 0.3
+## How quickly the paper slides up as each new line comes out of the slot (1/s).
+const PAPER_FOLLOW := 16.0
 const CHECK_EVERY := 0.25
 
 const FONT := 18
@@ -79,7 +81,7 @@ var _font: Font
 var _seen := {}
 var _queue: Array = []
 var _cur := {}            # {id, lines: [{text, kind}], total_chars, chars, pause, t, tear_t}
-var _machine_k := 0.0
+var _machine := Fax.Motion.new(0.0)   # 0 below the screen .. 1 standing in the corner
 var _check_t := 0.0
 var _last_line := -1
 
@@ -133,7 +135,7 @@ func _process(delta: float) -> void:
 	if not active:
 		_queue.clear()
 		_cur = {}
-		_machine_k = 0.0
+		_machine.snap(0.0)
 		_canvas.queue_redraw()
 		return
 	if not game.paused:
@@ -142,7 +144,7 @@ func _process(delta: float) -> void:
 			_check_t = CHECK_EVERY
 			_check_rooms()
 			_check_events()
-		_tick(delta)
+		_tick(Fax.ui_dt(delta))
 	_canvas.queue_redraw()
 
 
@@ -181,19 +183,29 @@ func _check_events() -> void:
 func _tick(delta: float) -> void:
 	if _cur.is_empty() and not _queue.is_empty():
 		_start(String(_queue.pop_front()))
-	var want_machine := not _cur.is_empty() or not _queue.is_empty()
-	_machine_k = move_toward(_machine_k, 1.0 if want_machine else 0.0, delta / MACHINE_SECONDS)
+	# The machine stays up while there is a memo on it or one waiting; after the last one it starts
+	# sinking once the torn-off page is half way gone, rather than waiting for it to vanish.
+	var tearing := not _cur.is_empty() and float(_cur.tear_t) >= 0.0
+	var want_machine := not _queue.is_empty() or (not _cur.is_empty()
+			and (not tearing or float(_cur.tear_t) < Fax.EJECT_SECONDS * 0.5))
+	if want_machine:
+		_machine.go(1.0, MACHINE_SECONDS, true)
+	else:
+		_machine.go(0.0, MACHINE_SECONDS, false)
+	_machine.step(delta)
 	if _cur.is_empty():
 		return
-	# The machine slides up before anything prints.
-	if _machine_k < 1.0 and float(_cur.tear_t) < 0.0:
-		return
-	_cur.t = float(_cur.t) + delta
-	if float(_cur.tear_t) >= 0.0:
+	if tearing:
 		_cur.tear_t = float(_cur.tear_t) + delta
-		if float(_cur.tear_t) >= TEAR_SECONDS:
+		if float(_cur.tear_t) >= Fax.EJECT_SECONDS:
 			_cur = {}
 		return
+	# The machine slides up before anything prints.
+	if not _machine.at(1.0):
+		return
+	_cur.t = float(_cur.t) + delta
+	# The paper slides up out of the slot as each line comes out, rather than jumping a line at a time.
+	_cur.h = lerpf(float(_cur.h), _memo_height(), clampf(delta * PAPER_FOLLOW, 0.0, 1.0))
 	if float(_cur.t) >= TEAR_AFTER:
 		_tear()
 		return
@@ -223,7 +235,7 @@ func _start(id: String) -> void:
 	var total := 0
 	for l in lines:
 		total += maxi(1, String(l.text).length())
-	_cur = {"id": id, "lines": lines, "total_chars": total, "chars": 0.0, "pause": 0.0, "t": 0.0, "tear_t": -1.0}
+	_cur = {"id": id, "lines": lines, "total_chars": total, "chars": 0.0, "pause": 0.0, "t": 0.0, "tear_t": -1.0, "h": 0.0}
 	_last_line = -1
 	_sfx("beep", -10.0)
 
@@ -264,18 +276,30 @@ static func _wrap(text: String, width: int) -> Array:
 
 
 func _sfx(cue: String, db: float) -> void:
-	if DisplayServer.get_name() != "headless":
-		Audio.play(cue, null, db, 0.05, Audio.BUS_UI)
+	Fax.sfx(cue, db)
+
+
+## How much paper the memo printed so far needs, out of the slot.
+func _memo_height() -> float:
+	var chars := float(_cur.chars)
+	var text_h := 0.0
+	var n := 0
+	for l in _cur.lines:
+		if chars <= float(n):
+			break
+		text_h += LINE_H * (0.55 if String(l.kind) == "gap" else 1.0)
+		n += maxi(1, String(l.text).length())
+	return PAPER_PAD * 2.0 + text_h + 6.0
 
 
 # ---------------------------------------------------------------------------
 # drawing
 
 func _draw_fax() -> void:
-	if _machine_k <= 0.0:
+	if _machine.value <= 0.0:
 		return
 	var sz := _canvas.size
-	var drop := (1.0 - ease(_machine_k, 0.4)) * (MACHINE.y + BOTTOM_GAP + 8.0)
+	var drop := (1.0 - _machine.value) * (MACHINE.y + BOTTOM_GAP + 8.0)
 	var body := Rect2(LEFT, sz.y - BOTTOM_GAP - MACHINE.y + drop, MACHINE.x, MACHINE.y)
 	var slot_y := body.position.y
 	var paper_x := body.position.x + (MACHINE.x - PAPER_W) * 0.5
@@ -296,20 +320,17 @@ func _draw_fax() -> void:
 func _draw_memo(x: float, slot_y: float) -> void:
 	var lines: Array = _cur.lines
 	var chars := float(_cur.chars)
-	var text_h := 0.0
 	var n := 0
-	for l in lines:
-		if chars <= float(n):
-			break
-		text_h += LINE_H * (0.55 if String(l.kind) == "gap" else 1.0)
-		n += maxi(1, String(l.text).length())
-	var height := PAPER_PAD * 2.0 + text_h + 6.0
+	var height := float(_cur.h)
+	if height < 1.0:
+		return
 	var lift := 0.0
 	var alpha := 1.0
 	if float(_cur.tear_t) >= 0.0:
-		var k := clampf(float(_cur.tear_t) / TEAR_SECONDS, 0.0, 1.0)
-		lift = k * k * 340.0
-		alpha = 1.0 - k
+		# Torn off: up and away, accelerating, fading out as it goes.
+		var k := clampf(float(_cur.tear_t) / Fax.EJECT_SECONDS, 0.0, 1.0)
+		lift = Fax.ease_in(k) * 340.0
+		alpha = 1.0 - Fax.ease_in(k)
 	var bottom := slot_y + 4.0 - lift
 	var top := bottom - height
 	var paper := Rect2(x, top, PAPER_W, height)

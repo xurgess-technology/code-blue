@@ -5,8 +5,8 @@ extends Control
 ##
 ## Same paper as the launch printout (scripts/fax_printer.gd). At launch, main.gd hands over with
 ## feed_in() once the stamped admission page has ejected off the top: this sheet, the next page, feeds
-## up out of the printer and slows to a stop, standing out of the slot. Coming back from a shift, it's
-## simply there. The choices are real
+## up out of the printer and slows to a stop, standing out of the slot; so does every fresh sheet after
+## settings, a failed start or Main menu from the pause page (docs/FAX.md). The choices are real
 ## Buttons and LineEdits (focus, keyboard, disabled all work) drawn as ink on the paper.
 
 signal chose_solo(player_name: String)
@@ -21,13 +21,8 @@ signal chose_host_steam(player_name: String)
 
 const Fax := preload("res://scripts/fax_printer.gd")
 
-## Seconds the sheet takes to feed up out of the printer and settle.
-const FEED_IN := 1.3
-const FEED_TICK := 0.11
-const MAX_STEP := 1.0 / 30.0
+## Feeding up out of the printer and ejecting off the top take Fax.FEED_SECONDS / Fax.EJECT_SECONDS.
 const OPTION_H := 34.0
-## Seconds for the sheet to eject up and off the top when another page takes its place (settings).
-const EJECT_SECONDS := 0.5
 ## Paper left above the sheet's first line, and between its last line and the printer's slot.
 const PAGE_MARGIN := 30.0
 const BOTTOM_PAD := 22.0
@@ -49,17 +44,15 @@ var _over: Control     # the top fade, over the sheet
 var _title_ink := Fax.STAMP_INK
 
 var _base_scroll := 0.0
-var _feed_t := -1.0
-var _feed_dur := FEED_IN
-var _feed_dist := 0.0
-var _feed_p := 1.0      # 0 = sheet still inside the printer, 1 = at rest
+## 0 = the sheet still inside the printer, 1 = standing at rest out of the slot.
+var _feed := Fax.Motion.new(1.0)
+## 0 = at rest (or wherever the feed left it), 1 = gone off the top of the screen.
+var _lift := Fax.Motion.new(0.0)
+var _lift_from := 0.0   # how far below rest the sheet was when it started ejecting
 ## The fax page this sheet is (its header), and the one after it goes to whatever replaces it.
 var page_no := 2
-var _eject_t := -1.0    # seconds into ejecting the sheet, < 0 when not
-var _eject_px := 0.0
-var _eject_done: Callable
+var _eject_done: Array[Callable] = []
 var _feed_tick := 0.0
-var _last_usec := 0
 
 
 func _ready() -> void:
@@ -67,7 +60,6 @@ func _ready() -> void:
 	_fit()
 	get_viewport().size_changed.connect(_fit)
 	_build()
-	_last_usec = Time.get_ticks_usec()
 	resized.connect(_layout)
 	_layout.call_deferred()
 
@@ -159,7 +151,9 @@ func _build() -> void:
 	# Settings hook: not in _buttons, so it stays usable while a join is pending.
 	var settings := _option("SETTINGS", false)
 	settings.name = "SettingsButton"
-	settings.pressed.connect(func(): chose_settings.emit())
+	settings.pressed.connect(func():
+		if _accepting():
+			chose_settings.emit())
 	admin_row.add_child(settings)
 	var gap := Control.new()
 	gap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -312,49 +306,61 @@ func _header_text(page: int) -> String:
 	return ">> FAX  %04d-%02d-%02d  %02d:%02d  PAGE %d" % [dt.year, dt.month, dt.day, dt.hour, dt.minute, page]
 
 
-## The launch printout's hand-off: the sheet starts inside the printer and feeds up, slowing to a
+## The launch printout's hand-off, and every return to the title (Back from settings, a failed start,
+## Main menu from the pause page): a fresh sheet starts inside the printer and feeds up, slowing to a
 ## stop. `scroll_px` keeps the paper's green bars in phase; `page` is its number.
 func feed_in(scroll_px := 0.0, _speed := 0.0, page := 2) -> void:
 	page_no = page
-	_eject_t = -1.0
-	_eject_px = 0.0
 	if _header != null:
 		_header.text = _header_text(page)
-	if DisplayServer.get_name() == "headless":
+	_eject_done.clear()
+	_lift.snap(0.0)
+	if Fax.headless():
+		_feed.snap(1.0)
 		return
 	_base_scroll = scroll_px
-	_feed_dist = _rest_offset()
-	# A fresh sheet out of the slot at its own pace: the page before it has already ejected.
-	_feed_dur = FEED_IN
-	_feed_t = 0.0
-	_feed_p = 0.0
+	_feed.snap(0.0)
+	_feed.go(1.0, Fax.FEED_SECONDS, true)
 	_feed_tick = 0.0
-	_last_usec = Time.get_ticks_usec()
+	_layout()
+
+
+## The sheet waits inside the printer (nothing on the paper yet) until feed_in(): the pause page is
+## still ejecting on its way back to the title.
+func hold_in_printer() -> void:
+	if Fax.headless():
+		return
+	_eject_done.clear()
+	_lift.snap(0.0)
+	_feed.snap(0.0)
 	_layout()
 
 
 func is_feeding() -> bool:
-	return _feed_t >= 0.0
+	return _feed.moving()
 
 
-## Another page is coming (the settings sheet): this one speeds up and out of the top of the screen,
-## the printer staying put, then `done` runs (the caller hides the menu and feeds its own page).
+## Another page is coming (settings, the shift assignment): this one accelerates up and out of the top
+## of the screen from wherever it is (even half fed in), the printer staying put, then `done` runs (the
+## caller hides the menu and feeds its own page). A second call while ejecting waits for the same exit.
 func eject(done: Callable) -> void:
-	if DisplayServer.get_name() == "headless" or not visible:
+	if Fax.headless() or not visible:
 		done.call()
 		return
-	_feed_t = -1.0
-	_feed_p = 1.0
-	_eject_t = 0.0
-	_eject_px = 0.0
-	_eject_done = done
-	_last_usec = Time.get_ticks_usec()
+	_eject_done.append(done)
+	if _eject_done.size() > 1:
+		return
+	_feed.snap(_feed.value)
+	_lift_from = (1.0 - _feed.value) * _rest_offset()
+	_lift.snap(0.0)
+	_lift.go(1.0, Fax.EJECT_SECONDS, false)
 	set_enabled(false)
-	Audio.play("print_feed", null, -8.0, 0.05, Audio.BUS_UI)
+	get_viewport().gui_release_focus()
+	Fax.sfx("print_feed", -8.0)
 
 
 func is_ejecting() -> bool:
-	return _eject_t >= 0.0
+	return not _eject_done.is_empty()
 
 
 ## How far below its resting place the sheet starts: its top edge just inside the slot.
@@ -368,49 +374,47 @@ func _rest_y(l: Dictionary) -> float:
 	return float(l.slot_y) - _sheet.get_combined_minimum_size().y - BOTTOM_PAD
 
 
+## How far above rest the sheet is (negative: still down in the printer).
+func _up_px(l: Dictionary) -> float:
+	if is_ejecting():
+		return -_lift_from + _lift.value * (float(l.slot_y) + _lift_from + 20.0)
+	return -(1.0 - _feed.value) * _rest_offset()
+
+
 func _layout() -> void:
 	if _sheet == null:
 		return
 	var l := Fax.layout(size, _font)
 	_clip.position = Vector2(l.px, 0.0)
 	_clip.size = Vector2(l.paper_w, float(l.slot_y))
-	var down := (1.0 - _feed_p) * _feed_dist
-	_sheet.position = Vector2(Fax.MARGIN, _rest_y(l) + down - _eject_px)
+	_sheet.position = Vector2(Fax.MARGIN, _rest_y(l) - _up_px(l))
 	_sheet.size = Vector2(l.text_w, _sheet.get_combined_minimum_size().y)
 	_canvas.queue_redraw()
 	_over.queue_redraw()
 
 
-func _process(_delta: float) -> void:
-	var now_usec := Time.get_ticks_usec()
-	var dt := minf(float(now_usec - _last_usec) / 1000000.0, MAX_STEP)
-	_last_usec = now_usec
-	if _eject_t >= 0.0 and visible:
-		_eject_t += dt
-		var k := minf(_eject_t / EJECT_SECONDS, 1.0)
-		var l := Fax.layout(size, _font)
-		_eject_px = (float(l.slot_y) + PAGE_MARGIN + 20.0) * k * k   # accelerating up and away
+func _process(delta: float) -> void:
+	if not visible:
+		return
+	var dt := Fax.ui_dt(delta)
+	if is_ejecting():
+		_lift.step(dt)
 		_layout()
-		if k >= 1.0:
-			_eject_t = -1.0
+		if not _lift.moving():
 			set_enabled(true)
-			var done := _eject_done
-			_eject_done = Callable()
-			if done.is_valid():
-				done.call()
+			var calls := _eject_done.duplicate()
+			_eject_done.clear()
+			for done: Callable in calls:
+				if done.is_valid():
+					done.call()
 		return
-	if _feed_t < 0.0 or not visible:
+	if not _feed.moving():
 		return
-	_feed_t += dt
-	var t := minf(_feed_t / _feed_dur, 1.0)
-	_feed_p = 1.0 - (1.0 - t) * (1.0 - t)   # decelerating to a stop
+	_feed.step(dt)
 	_feed_tick -= dt
-	if _feed_tick <= 0.0 and t < 0.85:
-		_feed_tick = FEED_TICK
-		Audio.play("print_feed", null, -14.0, 0.1, Audio.BUS_UI)
-	if t >= 1.0:
-		_feed_t = -1.0
-		_feed_p = 1.0
+	if _feed_tick <= 0.0 and _feed.value < 0.85:
+		_feed_tick = Fax.FEED_TICK
+		Fax.sfx("print_feed", -14.0, 0.1)
 	_layout()
 
 
@@ -421,9 +425,10 @@ func _draw_paper() -> void:
 	# at rest (and while feeding) that runs into the slot; ejecting, the whole page leaves it.
 	var page_top := _sheet.position.y - PAGE_MARGIN
 	var page_bottom := minf(_sheet.position.y + _sheet.size.y + BOTTOM_PAD, float(l.slot_y))
-	Fax.draw_paper(_canvas, sz, l, _base_scroll + _feed_p * _feed_dist, 1.0, page_bottom, true, page_top)
-	var status := "RECEIVING" if _feed_t >= 0.0 else "READY"
-	Fax.draw_printer(_canvas, sz, l, _font, float(l.tx), status, Fax.LCD_TEXT, 1.0)
+	Fax.draw_paper(_canvas, sz, l, _base_scroll + _rest_offset() + _up_px(l), 1.0, page_bottom, true, page_top)
+	# READY only once a sheet stands still in the printer; any motion is a page coming through.
+	var at_rest := not is_ejecting() and _feed.at(1.0)
+	Fax.draw_printer(_canvas, sz, l, _font, float(l.tx), "READY" if at_rest else "RECEIVING", Fax.LCD_TEXT, 1.0)
 
 
 ## Nothing over the sheet any more: the page ends at its own top edge (kept for the node order).
@@ -469,13 +474,26 @@ func set_enabled(on: bool) -> void:
 			o.set_marked(false)
 
 
+## A choice counts only while the sheet is up and not on its way out (Enter in the name field, a double
+## click, Settings while a start is ejecting the sheet); `choice` also needs the tick boxes live (not
+## while a start or a join is already pending).
+func _accepting(choice := false) -> bool:
+	if not visible or is_ejecting():
+		return false
+	return not choice or not _buttons[0].disabled
+
+
 func _on_solo() -> void:
+	if not _accepting(true):
+		return
 	_save_prefs()
 	set_enabled(false)
 	chose_solo.emit(player_name())
 
 
 func _on_host() -> void:
+	if not _accepting(true):
+		return
 	_save_prefs()
 	set_enabled(false)
 	chose_host.emit(player_name())
@@ -488,6 +506,8 @@ func _on_background_input(e: InputEvent) -> void:
 
 
 func _on_host_steam() -> void:
+	if not _accepting(true):
+		return
 	_save_prefs()
 	set_enabled(false)
 	_set_note("Opening a Steam lobby...")
@@ -495,6 +515,8 @@ func _on_host_steam() -> void:
 
 
 func _on_join() -> void:
+	if not _accepting(true):
+		return
 	_save_prefs()
 	if _addr_edit.text.strip_edges().is_empty():
 		_set_note("Type the host's address first.")

@@ -6,11 +6,13 @@ extends CanvasLayer
 ##   1. The sign-in sheet ejects off the top (Menu.eject) and this page feeds up out of the slot.
 ##   2. It stands there, LCD LOADING / CONNECTING, while main.gd builds or joins the session.
 ##   3. Once the player is in the hospital and frames have settled (the first frames of a new level
-##      are the hitchy ones, drawn behind the still-opaque room), the room slowly fades so the
-##      hospital shows faintly through, and a last line prints at the print head: GOOD LUCK...
-##   4. A beat, then the pause fax's leaving animation (scripts/settings_screen.gd close()): the page
-##      lifts up off the top, the printer sinks off the bottom, the rest of the room fades out, and
-##      only then does the mouse go back to the player (main.gd _update_mouse via holds_input()).
+##      are the hitchy ones, drawn behind the still-opaque room), the room fades part way so the
+##      hospital shows faintly through while a last line types at the print head: GOOD LUCK...
+##   4. A short beat, then the pause fax's leaving motion (scripts/settings_screen.gd close()): the page
+##      ejects off the top, the printer sinks off the bottom and the rest of the room fades out. The
+##      mouse and keys go back to the player as that starts (main.gd _update_mouse via holds_input());
+##      only the pause fax waits the moment until this printer has gone.
+##   Steps 3-4 add under 2 s once the world is ready (docs/FAX.md).
 ##
 ## A failed start (connection refused, host gone, hosting failed) calls cancel(): the page ejects
 ## off the top like any other and main.gd feeds a fresh sign-in sheet in with the reason on it.
@@ -32,8 +34,6 @@ const LAYER := 53
 ## Longest step of animation time per frame: a long blocking frame holds the paper up for a moment
 ## instead of skipping most of an animation.
 const MAX_STEP := 0.1
-const FEED_IN := 1.3
-const FEED_TICK := 0.11
 const PAGE_MARGIN := 30.0
 ## Blank paper between the pre-printed lines and the print line the last message goes on.
 const GAP := 0.35
@@ -41,22 +41,21 @@ const GAP := 0.35
 ## seconds) before anything behind the paper is allowed to show.
 const CALM_FRAMES := 8
 const CALM_MS := 50.0
-const SETTLE_MIN := 0.5
+const SETTLE_MIN := 0.3
 const SETTLE_MAX := 8.0
 ## The room fades to ROOM_FLOOR (and the paper to PAPER_FLOOR) over FADE_UP seconds; the last line
-## starts printing MESSAGE_AT of the way in.
-const FADE_UP := 2.4
+## starts printing MESSAGE_AT seconds in.
+const FADE_UP := 0.5
 const ROOM_FLOOR := 0.3
 const PAPER_FLOOR := 0.9
-const MESSAGE_AT := 0.4
+const MESSAGE_AT := 0.08
 const MESSAGE := "GOOD LUCK..."
-const MESSAGE_CPS := 11.0
+const MESSAGE_CPS := 36.0
 ## Extra seconds each trailing dot takes.
-const DOT_PAUSE := 0.3
-const BEAT_SECONDS := 0.8
-## The pause fax's leaving animation, a little slower.
-const OUT_SECONDS := 0.8
-const EJECT_SECONDS := 0.5
+const DOT_PAUSE := 0.06
+const BEAT_SECONDS := 0.25
+## Leaving: the page ejects (Fax.EJECT_SECONDS) while the printer sinks (Fax.DROP_SECONDS).
+const OUT_SECONDS := Fax.DROP_SECONDS
 
 enum State { IDLE, WAIT_MENU, FEED, LOADING, SETTLE, FADE, BEAT, OUT, CANCEL }
 
@@ -73,10 +72,10 @@ var _page := 3
 var _t := 0.0             # seconds into the current state (animation time)
 var _since := 0.0         # wall clock the current state began
 var _calm := 0
-var _feed_dist := 0.0
 var _feed_tick := 0.0
 var _msg_t := -1.0        # seconds into printing the message, < 0 before it starts
 var _cancel_then: Callable
+var _cancel_from := 0.0   # where the page was (see _page_offset) when a cancel sent it away
 var _cancel_pending := false
 var _last_usec := 0
 
@@ -135,9 +134,10 @@ func has_reason(reason: String) -> bool:
 	return _reasons.has(reason)
 
 
-## The player's mouse stays free (and so their surgeon still) until the page has gone.
+## The player's mouse stays free (and so their surgeon still) until the page starts to leave: from
+## then on the shift has the mouse and keys while the page and printer animate away.
 func holds_input() -> bool:
-	return is_active()
+	return is_active() and _state != State.OUT
 
 
 ## Resolves once the page covers the screen (the menu's sheet has gone and this one has drawn).
@@ -167,8 +167,9 @@ func cancel(then: Callable = Callable()) -> void:
 			then.call()
 		return
 	_cancel_then = then
+	_cancel_from = _page_offset(_layout())   # half fed in, it leaves from there
 	_enter(State.CANCEL)
-	Audio.play("print_feed", null, -8.0, 0.05, Audio.BUS_UI)
+	Fax.sfx("print_feed", -8.0)
 
 
 func _on_menu_ejected() -> void:
@@ -187,8 +188,9 @@ func _on_menu_ejected() -> void:
 
 func _start_feed() -> void:
 	visible = true
-	_feed_dist = float(_layout().slot_y) - _page_top_rest(_layout())
+	_canvas.mouse_filter = Control.MOUSE_FILTER_STOP   # no clicking through to the menu mid-load
 	_feed_tick = 0.0
+	Fax.sfx("print_feed", -8.0)
 	_enter(State.FEED)
 	_canvas.queue_redraw()
 
@@ -260,12 +262,11 @@ func _process(_delta: float) -> void:
 	_t += dt
 	match _state:
 		State.FEED:
-			var k := minf(_t / FEED_IN, 1.0)
 			_feed_tick -= dt
-			if _feed_tick <= 0.0 and k < 0.85:
-				_feed_tick = FEED_TICK
-				Audio.play("print_feed", null, -14.0, 0.1, Audio.BUS_UI)
-			if k >= 1.0:
+			if _feed_tick <= 0.0 and _t < Fax.FEED_SECONDS * 0.85:
+				_feed_tick = Fax.FEED_TICK
+				Fax.sfx("print_feed", -14.0, 0.1)
+			if _t >= Fax.FEED_SECONDS:
 				_enter(State.LOADING)
 		State.LOADING:
 			if _world_ready():
@@ -279,24 +280,25 @@ func _process(_delta: float) -> void:
 				if (_calm >= CALM_FRAMES and waited >= SETTLE_MIN) or waited >= SETTLE_MAX:
 					_enter(State.FADE)
 		State.FADE:
-			var k := _t / FADE_UP
-			if _msg_t < 0.0 and k >= MESSAGE_AT:
+			if _msg_t < 0.0 and _t >= MESSAGE_AT:
 				_msg_t = 0.0
-				Audio.play("print_line", null, -11.0, 0.0, Audio.BUS_UI)
+				Fax.sfx("print_line", -11.0, 0.0)
 			elif _msg_t >= 0.0:
 				_msg_t += dt
-			if k >= 1.0 and _message_done():
+			if _t >= FADE_UP and _message_done():
 				_enter(State.BEAT)
 		State.BEAT:
 			if _t >= BEAT_SECONDS:
 				_enter(State.OUT)
-				Audio.play("print_feed", null, -8.0, 0.05, Audio.BUS_UI)
+				# The shift has the mouse back from here (holds_input), so no clicks land on the page.
+				_canvas.mouse_filter = Control.MOUSE_FILTER_IGNORE
+				Fax.sfx("print_feed", -8.0)
 		State.OUT:
-			if _t >= OUT_SECONDS:
+			if _t >= maxf(OUT_SECONDS, Fax.EJECT_SECONDS):
 				_finish()
 				return
 		State.CANCEL:
-			if _t >= EJECT_SECONDS:
+			if _t >= Fax.EJECT_SECONDS:
 				var then := _cancel_then
 				_cancel_then = Callable()
 				_finish()
@@ -338,33 +340,28 @@ func _page_top_rest(l: Dictionary) -> float:
 	return _line_y(0, l) - Fax.LINE_H * 0.7 - PAGE_MARGIN
 
 
-## 1 at rest .. 0 gone, through the leaving animation.
-func _out_k() -> float:
-	return 1.0 - clampf(_t / OUT_SECONDS, 0.0, 1.0) if _state == State.OUT else 1.0
+## From just inside the slot up to rest: the page's whole height.
+func _feed_dist(l: Dictionary) -> float:
+	return float(l.slot_y) - _page_top_rest(l)
 
 
-## scripts/settings_screen.gd _printer_drop(), for the pause fax leaving.
+## How far the printer has sunk off its place: only while the page leaves at the end.
 func _printer_drop(l: Dictionary) -> float:
 	if _state != State.OUT:
 		return 0.0
-	var e := ease(clampf(_out_k() / 0.55, 0.0, 1.0), 0.35)
-	return (1.0 - e) * (_canvas.size.y - float(l.slot_y) + 40.0)
+	return Fax.ease_in(_t / OUT_SECONDS) * Fax.printer_gone_px(_canvas.size, l)
 
 
 ## How far the page has moved up from rest: negative while feeding up out of the slot.
 func _page_offset(l: Dictionary) -> float:
+	var gone := float(l.slot_y) + PAGE_MARGIN + 20.0   # its bottom edge clear of the top of the screen
 	match _state:
 		State.FEED:
-			var k := minf(_t / FEED_IN, 1.0)
-			var p := 1.0 - (1.0 - k) * (1.0 - k)   # decelerating to a stop
-			return -(1.0 - p) * _feed_dist
+			return -(1.0 - Fax.ease_out(_t / Fax.FEED_SECONDS)) * _feed_dist(l)
 		State.OUT:
-			# scripts/settings_screen.gd _page_lift().
-			var e := ease(clampf((_out_k() - 0.2) / 0.8, 0.0, 1.0), 0.35)
-			return (1.0 - e) * (float(l.slot_y) + PAGE_MARGIN + 20.0)
+			return Fax.ease_in(_t / Fax.EJECT_SECONDS) * gone
 		State.CANCEL:
-			var k := minf(_t / EJECT_SECONDS, 1.0)
-			return (float(l.slot_y) + PAGE_MARGIN + 20.0) * k * k   # accelerating up and away
+			return lerpf(_cancel_from, gone, Fax.ease_in(_t / Fax.EJECT_SECONDS))
 	return 0.0
 
 
@@ -375,7 +372,7 @@ func _room_alpha() -> float:
 		State.BEAT:
 			return ROOM_FLOOR
 		State.OUT:
-			return ROOM_FLOOR * ease(_out_k(), 0.6)
+			return ROOM_FLOOR * (1.0 - Fax.ease_out(_t / OUT_SECONDS))
 	return 1.0
 
 
@@ -402,7 +399,7 @@ func _draw_page() -> void:
 	var slot_y: float = l.slot_y
 	var top := _page_top_rest(l) - up
 	var bottom := minf(slot_y - maxf(up, 0.0), slot_y + drop)
-	Fax.draw_paper(_canvas, size, l, _feed_dist + up, a, bottom, false, top)
+	Fax.draw_paper(_canvas, size, l, _feed_dist(l) + up, a, bottom, false, top)
 
 	var tx: float = l.tx
 	var text_w: float = l.text_w
