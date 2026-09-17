@@ -52,8 +52,9 @@ const HUMAN := {
 	"scale": 1.0,
 	# Poses that read differently on a two-bone arm (merged over POSES by pose_of()).
 	"poses": {
-		# The right arm wraps the carried legs across the front of the shoulder instead of pointing up.
-		"carry": {"arm_r": [Vector3(0.8, 0.0, 0.45), 1.0], "torso": [0.12, -0.05, 1.0]},
+		# The left arm wraps the carried legs across the front of the left shoulder instead of pointing
+		# up; the right arm stays free.
+		"carry": {"arm_l": [Vector3(-0.85, -0.25, -0.2), 1.0], "torso": [0.12, 0.05, 1.0]},
 		"hold": {"arm_r": [Vector3(-0.15, -0.35, 0.92), 1.0]},
 		"hold_both": {"arm_r": [Vector3(0.2, -0.05, 1.0), 1.0], "arm_l": [Vector3(-0.2, -0.05, 1.0), 1.0]},
 	},
@@ -92,8 +93,8 @@ const POSES := {
 	"hold": {"arm_r": [Vector3(-0.28, -0.3, 0.91), 1.0]},
 	# Bulky loot: both arms forward, hands on its sides.
 	"hold_both": {"arm_r": [Vector3(-0.12, -0.42, 0.9), 1.0], "arm_l": [Vector3(0.12, -0.42, 0.9), 1.0]},
-	# A fireman's carry on the right shoulder: the right arm up over the legs in front.
-	"carry": {"arm_r": [Vector3(-0.35, 0.72, 0.6), 1.0], "torso": [0.08, 0.0, 1.0]},
+	# A fireman's carry on the left shoulder: the left arm up over the legs in front, the right free.
+	"carry": {"arm_l": [Vector3(0.35, 0.72, 0.6), 1.0], "torso": [0.08, 0.0, 1.0]},
 	# Dragging a monster by the ankles behind: the right arm reaches back and down.
 	"drag": {"arm_r": [Vector3(-0.3, -0.75, -0.58), 1.0], "torso": [0.18, 0.0, 1.0]},
 	# Saw: raised high on the right, then chopped down across the front.

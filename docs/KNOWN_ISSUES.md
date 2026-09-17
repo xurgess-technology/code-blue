@@ -336,7 +336,7 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 - **Solo means game over on the first down.** Nobody can carry you, so `all_players_out()` fails
   the shift at once (the mortal playtest now reports "went down" instead of "died"). The dev room
   never ends the shift for it.
-- **The carry pose is a stiff plank.** The carried body lies straight over the right shoulder (no
+- **The carry pose is a stiff plank.** The carried body lies straight over the left shoulder (no
   bend, no animation), sticking out behind the carrier; with the big-headed surgeon model it is
   mostly hidden from straight in front. The carried player's camera sits a metre behind the
   shoulder point along their own look direction, so looking around orbits a little.
@@ -506,7 +506,7 @@ Players, Bob, the paramedics and the downed player on the table use the Blender 
   Mesh LODs for the skinned bodies or a cheaper distant body are the next step if it matters.
 - **The first-person arms stay the hands worker's `fp_arms`** (a different look from the third-person
   surgeon: tinted sleeve and mitten hand).
-- **The carry reads, but loosely**: the carried body hangs on the carrier's right shoulder from a
+- **The carry reads, but loosely**: the carried body hangs on the carrier's left shoulder (mirrored) from a
   fixed offset (`Player.HUMAN_CARRIED_SHOULDER`, sized for a 1.78 m carrier), so on the 1.68 m
   surgeon B it sits a few centimetres high; the carrier's arm across the legs does not grip them.
 - **Arms are posed by direction, not IK**: held items sit in the hand bone's palm socket, but the
@@ -1859,3 +1859,18 @@ Rebuilt around that:
   "the bot threw the loot into the furnace and sold it for $52" (every run), braintest "nobody is
   left looking through a Walk-In" after a game over (flaky, about 1 in 2), mapcheck seed 1's morgue
   tray (known).
+
+## Right-shoulder carry camera, load on the left shoulder (2026-09-17)
+
+- The carry camera now looks over the RIGHT shoulder and everything carried rides the LEFT
+  (docs/HANDS_AND_FEEDBACK.md section 3). A human's Carried clip is mirrored with an x scale of -1
+  on its root; lighting and culling look right in `tools/game_shots/exit_2_carrying.png`,
+  `29_hands_carry_cam_player.png` and `31_human_teammate_carrying.png`.
+- **The dragged monster is out of frame while dragging.** It lies 1.15 m behind the carrier
+  (`combat.DRAG_BEHIND`), under the camera, so `29_hands_carry_cam_monster.png` shows only the
+  carrier. Seeing it would need a much higher, steeper camera.
+- **The carrier's left arm crosses the chest** below the carried legs rather than gripping them
+  (direction posing, no IK); the fingertips show past the right side of the chest from the camera.
+- **A seal or monster body lies across the shoulders**, its middle out over the left shoulder
+  (`corpses.SHOULDER_AT` -0.38 x): the far end still crosses behind the carrier's head, just left of
+  the crosshair (`exit_10_carrying_seal.png`).

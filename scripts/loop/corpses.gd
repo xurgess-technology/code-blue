@@ -21,6 +21,9 @@ const HM := preload("res://scripts/human/human_model.gd")
 const BODY_BASE := -1000000000
 const PROXY_PREFIX := "corpse_"
 const SLIDE_SECONDS := 1.9
+## Where a body without a Carried clip rests in the carrier's frame (x right): its middle out over the
+## left shoulder, so the end across the back stays left of the over-the-shoulder crosshair.
+const SHOULDER_AT := Vector3(-0.38, 1.62, 0.18)
 
 var game: Node = null
 var _nodes := {}          # case id -> {node, proxy}
@@ -175,15 +178,17 @@ func cremate(q: Node) -> void:
 # ---------------------------------------------------------------------------
 # every machine: the nodes
 
-## A body without a Carried clip (the seal, a monster): across the carrier's shoulders, face down.
+## A body without a Carried clip (the seal, a monster): across the carrier's shoulders, face down,
+## shifted onto the LEFT shoulder (the over-the-shoulder carry camera looks over the right one).
+## The furnace roll-off starts from here too.
 func shoulder_pose(q: Node) -> Transform3D:
 	var cb := Basis(Vector3.UP, q.rotation.y)
 	var b := cb * Basis(Vector3.RIGHT, PI)
-	return Transform3D(b, q.global_position + cb * Vector3(0.0, 1.62, 0.18))
+	return Transform3D(b, q.global_position + cb * SHOULDER_AT)
 
 
-## Bob and the other human patients: his own model on the Carried clip over the carrier's right
-## shoulder, placed the way a carried teammate is (Player.HUMAN_CARRIED_SHOULDER).
+## Bob and the other human patients: his own model on the Carried clip over the carrier's left
+## shoulder, placed the way a carried teammate is (Player.human_carried_pose, mirrored).
 static func _human(pid: String) -> bool:
 	return not Procedures.is_monster(pid) and String(Procedures.patient(pid).get("body", pid)) != "seal" and HM.available("bob")
 
@@ -224,8 +229,7 @@ func _sync_nodes() -> void:
 			if slung != null:
 				node.visible = false
 				slung.visible = true
-				var cb := Basis(Vector3.UP, carrier.rotation.y)
-				slung.global_transform = Transform3D(cb, carrier.global_position + cb * Player.HUMAN_CARRIED_SHOULDER)
+				slung.global_transform = Player.human_carried_pose(carrier)
 			else:
 				node.global_transform = shoulder_pose(carrier)
 			if e.proxy != null:

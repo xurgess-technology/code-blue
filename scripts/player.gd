@@ -263,8 +263,17 @@ var camera: Camera3D
 var flashlight: SpotLight3D
 var body_visual: Node3D
 ## HUMAN HOOK: where a carried human's Carried clip origin (the belly) sits, in the carrier's frame: the
-## human carrier's right shoulder.
-const HUMAN_CARRIED_SHOULDER := Vector3(0.15, 1.535, 0.03)
+## human carrier's LEFT shoulder (the over-the-shoulder carry camera looks over the right one).
+const HUMAN_CARRIED_SHOULDER := Vector3(-0.15, 1.535, 0.03)
+
+
+## HUMAN HOOK: the global transform of a Carried-clip model on `carrier`'s left shoulder, facing where
+## the carrier faces. The clip is authored over a RIGHT shoulder (art/human/README.md), so the
+## model is mirrored across the carrier's left/right axis. Every machine computes this from the
+## replicated carrier, so it matches everywhere. Used for carried teammates and carried bodies.
+static func human_carried_pose(carrier: Node3D) -> Transform3D:
+	var cb := Basis(Vector3.UP, carrier.rotation.y)
+	return Transform3D(cb * Basis.from_scale(Vector3(-1.0, 1.0, 1.0)), carrier.global_position + cb * HUMAN_CARRIED_SHOULDER)
 var name_tag: Label3D
 var hands: Node3D
 var game: Node = null
@@ -1717,17 +1726,15 @@ func _update_down_pose(delta: float) -> void:
 		return
 	if body_hands != null and body_hands.lies_by_clip():
 		# HUMAN HOOK: the human lies, crawls and hangs over the shoulder by its own clips; the Carried
-		# clip's origin (the belly on the shoulder) goes onto the carrier's right shoulder.
-		body_visual.rotation = Vector3(-0.2 if hive_view else 0.0, 0.0, 0.0)
-		body_visual.position = Vector3.ZERO
+		# clip's origin (the belly on the shoulder) goes onto the carrier's left shoulder, mirrored.
+		# The whole transform (not rotation/position) so the carry's mirror never outlives it.
+		body_visual.transform = Transform3D(Basis(Vector3.RIGHT, -0.2 if hive_view else 0.0), Vector3.ZERO)
 		var carrier = game.players.get(carried_by) if carried_by != 0 and game != null else null
 		if carrier != null and is_instance_valid(carrier):
-			# on the carrier's right shoulder, facing where the carrier faces, whatever this body's own yaw
-			var cb := Basis(Vector3.UP, carrier.rotation.y)
-			body_visual.global_transform = Transform3D(cb, carrier.global_position + cb * HUMAN_CARRIED_SHOULDER)
+			body_visual.global_transform = human_carried_pose(carrier)
 		return
 	if carried_by != 0:
-		# A fireman's carry over the right shoulder (game.pinned_pose puts the root there): legs
+		# A fireman's carry over the left shoulder (game.pinned_pose puts the root there): legs
 		# down the front, the rest of the body down the carrier's back.
 		body_visual.rotation = Vector3(PI * 0.5, 0.0, 0.0)
 		body_visual.position = Vector3(0.0, 0.0, -0.6)

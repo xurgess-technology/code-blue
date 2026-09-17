@@ -1298,7 +1298,7 @@ game.downed_view           # scripts/downed/downed_view.gd: blood trails, the lo
 - Carrying: aim at a downed teammate (`pl_<id>`) with empty hands and hold E for `CARRY_HOLD`
   (simulated by the host from `wants_interact` + `aim_id`). E again puts them down in front (a
   reliable `placed` event tells the downed machine where, since it owns its position); E aimed at
-  the `player_table` proxy lays them on it. The carried body rides the right shoulder; the carried
+  the `player_table` proxy lays them on it. The carried body rides the LEFT shoulder (`pinned_pose` -0.55 x); the carried
   player's camera hangs a metre behind that point.
 - Player table: `level_info.tables` entry with `kind == "player"` (the hospital's), else a clear spot
   2.7-3.4 m from the OR table; a table model (`scripts/downed/player_table.gd`) is built only when
@@ -1496,14 +1496,21 @@ Settings "carry_camera": "shoulder" (default) | "first_person"     # carrying/dr
   `Walk` at 1.45x (carrying, dragging, winding up), `Crawl` (downed; frozen when not moving), `Carried`,
   `Lying` (on the table), and the one-shots `PickUp` (an interact aimed at `it_*`) / `Interact` when an
   interact comes in standing still. `body_hands.lies_by_clip()` tells `Player._update_down_pose` not to
-  tip the body; carried, the body is placed each frame at `Player.HUMAN_CARRIED_SHOULDER` (0.15, 1.535, 0.03)
-  in the carrier's frame and yaw, so the Carried clip's belly lands on the carrier's right shoulder. The first-person arms stay `fp_arms`.
-- **Carry camera**: while the local player carries a downed player or drags a monster (setting
-  "shoulder"), `Head/FX` eases (0.35 s) to `CARRY_OFFSET` (-1.0, 0.45, 2.0) in the head's frame (over
-  the left shoulder; the body rides the right) or `DRAG_OFFSET` (0.45, 1.0, 3.6) with a 0.45 rad
-  downward look (the body lies behind). Sphere casts (r 0.16) from the head go up, out to the
-  shoulder, then back: a wall beside moves it in over the head, a wall behind pulls it toward the
-  head; shortening is instant, growing back 2.5 m/s, a teleport snaps. The first-person hands and held
+  tip the body; carried, the body is placed each frame by `Player.human_carried_pose(carrier)`: `HUMAN_CARRIED_SHOULDER` (-0.15, 1.535, 0.03)
+  in the carrier's frame and yaw, mirrored (x scale -1: the clip is authored over a right shoulder), so the Carried clip's belly lands on the carrier's LEFT shoulder; corpses.gd places a carried human body the same way and a seal/monster body across the shoulders at `SHOULDER_AT` (-0.38, 1.62, 0.18), where the furnace roll-off starts. The carrier's `carry` pose wraps the LEFT arm across the legs; the right arm stays free. The first-person arms stay `fp_arms`.
+- **Carry camera** (`scripts/camera/carry_camera.gd`): while the local player carries a downed player
+  or a body, or drags a monster (setting "shoulder"), `Head/FX` eases (0.4 s, smootherstep) over the
+  RIGHT shoulder (the load rides the left), framed like a flagship third-person game: the carrier on
+  the left third, the crosshair clear. In the player's yaw frame: a `PIVOT` (0, -0.2, 0.12) from the
+  eye (the upper back), then `CARRY_ARM` (0.5 right, 0.34 up, 1.15 back) -- at level pitch the camera
+  sits (0.5, 0.14, 1.27) from the eye -- or `DRAG_ARM` (0.58, 0.72, 1.5) with a 0.2 rad downward look.
+  The up/back part of the arm swings around the pivot by `ORBIT_K` (0.45) of the look pitch (looking
+  down lifts it, looking up lowers it) and its back reach shortens up to 25% looking up
+  (`rest_offset(arm, pitch)` gives the wall-free offset); the camera always looks where the head
+  looks. Switching carry/drag eases the arm (6/s). Sphere casts (r 0.16) run head -> pivot ->
+  shoulder -> camera: a wall beside moves it in over the head, a wall behind pulls it toward the
+  head; shortening is instant, growing back 2.5 m/s, a teleport snaps. After a body goes into the
+  furnace it lingers 2.5 s (`linger()`). The first-person hands and held
   stack hide (the camera's cull mask drops `HANDS_LAYER`), the local body shows (no shadows) unless the
   camera is within 0.55 m of the head, the flashlight stays at the head pointed along the camera. The
   aim ray (`aim_segment`) runs along the camera's line from where it passes the head, reaching

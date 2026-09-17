@@ -41,12 +41,16 @@ func _ready() -> void:
 	add_child(main)
 	await get_tree().process_frame
 	game = main.game
+	if main.launching:
+		await main.launched   # the launch fax covers the screen until the warmup is done
 	main.menu.hide_menu()
 	Net.start_solo("Camera")
 	if _pocket != "":
 		preload("res://scripts/level/pockets/pocket_plan.gd").force_kind = _pocket
 	game.start_session(_seed)
 	await get_tree().process_frame
+	while game.get_parent().has_node("WarmupCover"):
+		await get_tree().process_frame
 	bot = game.local_player()
 	bot.bot_active = true
 	bot.bot_invulnerable = true
