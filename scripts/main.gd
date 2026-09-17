@@ -21,6 +21,8 @@ var _fps_label: Label
 var _look: GDScript = null
 ## Settings hook: the settings screen (menu and pause), scripts/settings_screen.gd.
 var settings_ui: CanvasLayer = null
+## The tip fax (scripts/tips/tip_fax.gd): first-time memos at the bottom of the screen.
+var tips: CanvasLayer = null
 
 ## DEV HOOK: the dev room panel (a CanvasLayer, hidden outside the dev room).
 var dev_panel: CanvasLayer = null
@@ -109,6 +111,12 @@ func _ready() -> void:
 	terminal_ui.name = "TerminalUI"
 	terminal_ui.game = game
 	add_child(terminal_ui)
+
+	# The tip fax: first-time memos (the break room's time clock, the crematorium's furnace).
+	tips = load("res://scripts/tips/tip_fax.gd").new()
+	tips.name = "TipFax"
+	tips.game = game
+	add_child(tips)
 
 	# Settings hook: the settings screen, opened from the title menu and the pause overlay.
 	settings_ui = load("res://scripts/settings_screen.gd").new()
@@ -463,6 +471,12 @@ func _unhandled_input(event: InputEvent) -> void:
 	# Esc while operating leaves the operation instead of pausing.
 	if event.is_action_pressed("pause") and game.surgery_wants_mouse():  # downed hook: either table
 		game.surgery_local_exit()
+		get_viewport().set_input_as_handled()
+		return
+
+	# A memo on the tip fax: Esc tears it off, and the pause menu stays shut until it has gone.
+	if event.is_action_pressed("pause") and not game.paused and tips != null and tips.is_showing():
+		tips.dismiss()
 		get_viewport().set_input_as_handled()
 		return
 

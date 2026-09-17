@@ -64,6 +64,7 @@ var _pause_button: Button
 var _exit_menu_button: Button
 var _exit_desktop_button: Button
 var _reset_button: Button
+var _reset_tips_button: Button
 var _back_button: Button
 
 var _open := false
@@ -316,6 +317,10 @@ func _build() -> void:
 	buttons.add_child(_pause_button)
 	_reset_button = _button("RESET", func(): Settings.reset_to_defaults())
 	buttons.add_child(_reset_button)
+	# Every tip on the tip fax (scripts/tips/tip_fax.gd) shows again the next time it comes up.
+	_reset_tips_button = _button("RESET TIPS", _reset_tips)
+	_reset_tips_button.name = "ResetTipsButton"
+	buttons.add_child(_reset_tips_button)
 	_back_button = _button("BACK", close)
 	buttons.add_child(_back_button)
 	var push := Control.new()
@@ -329,6 +334,16 @@ func _build() -> void:
 	_exit_desktop_button.name = "PauseExitToDesktopButton"
 	buttons.add_child(_exit_desktop_button)
 	_sheet.add_child(buttons)
+
+
+func _reset_tips() -> void:
+	var tips := get_tree().get_first_node_in_group("tip_fax")
+	if tips != null:
+		tips.reset_seen()
+	_reset_tips_button.text = "TIPS RESET"
+	get_tree().create_timer(1.5, true).timeout.connect(func():
+		if is_instance_valid(_reset_tips_button):
+			_reset_tips_button.text = "RESET TIPS")
 
 
 func _column() -> VBoxContainer:

@@ -363,8 +363,6 @@ func start_lobby(new_seed: int, new_shift: int) -> void:
 	Warmup.run(self)
 	if dev_mode:
 		dev.on_enter()  # DEV HOOK: no clock-in; the room is always "on shift"
-	else:
-		say(loop.lobby_message(), 6.0)
 	if is_host() and Net.active:
 		_rpc_shift.rpc(seed_value, shift, phase, _net_seq)
 
@@ -386,7 +384,6 @@ func clock_in() -> void:
 	_set_phase(Phase.SHIFT)
 	loop.on_clock_in()
 	_sound("punch")
-	say(loop.clock_in_message(), 5.0)
 	if Net.active:
 		_rpc_shift.rpc(seed_value, shift, phase, _net_seq)
 
@@ -508,7 +505,6 @@ func _to_next_shift() -> void:
 	# walked out to the entrance hall first). Clock-in waits until they are ready.
 	clock_in_pending = false
 	wing_loader.regenerate(maxi(shift, int(wing_loader.generation) + 1))
-	say(loop.lobby_message(), 6.0)
 	if Net.active:
 		_rpc_shift.rpc(seed_value, shift, phase, _net_seq)
 
@@ -1612,12 +1608,12 @@ func finish_case(id: int, won: bool) -> void:
 		_sound("step_done", at)
 		Audio.sting("saved")
 		_broadcast("sting", {"cue": "saved"})
-		say("%s is stable.%s" % [pname, loop.after_case_hint()], 5.0)
+		say("%s is stable." % pname, 5.0)
 	else:
 		_sound("flatline", at)
 		Audio.sting("flatline")
 		_broadcast("sting", {"cue": "flatline"})
-		say("%s flatlined.%s" % [pname, loop.after_case_hint()], 5.0)
+		say("%s flatlined." % pname, 5.0)
 	if dev_mode:
 		_dev_case_clear[id] = world_time + 4.0  # DEV HOOK: the dev room clears the table again
 	loop.on_case_finished(c)

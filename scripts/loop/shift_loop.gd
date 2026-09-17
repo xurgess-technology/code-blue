@@ -589,12 +589,6 @@ func clock_out(force: bool) -> void:
 	game.finish_shift("Clocked out. %s" % pay_note, PAYCHECK_SECONDS)
 
 
-func after_case_hint() -> String:
-	if game.dev_mode or game.phase != game.Phase.SHIFT:
-		return ""
-	return " Clock out when you are ready." if _clock_out_blocker() == "" else ""
-
-
 # =========================================================================
 # tests, the dev panel, the old begin_shift
 # =========================================================================
@@ -719,16 +713,6 @@ static func call_lines(kind: String, cc: Dictionary, machine: bool, who: String)
 
 static func _line_seconds(line: String) -> float:
 	return clampf(1.6 + 0.045 * line.length(), 2.6, 6.0)
-
-
-func lobby_message() -> String:
-	if game.dev_mode:
-		return ""
-	return "Shift %d. Walk in and hold E at the time clock when everyone is ready." % int(game.shift)
-
-
-func clock_in_message() -> String:
-	return "Clocked in. The phone's already ringing."
 
 
 ## The one-line objective the HUD shows, or "".

@@ -1795,3 +1795,18 @@ Rebuilt around that:
   raises the printer and brings the page down into it (Resume / Reset / Main menu / Quit game), and
   leaving plays it backwards before `closed` unpauses. hud.gd no longer draws the PAUSED overlay;
   click-to-resume and Q-to-walk-out while paused are gone (the page's buttons replace them).
+
+## Tip fax: first-time tutorials (2026-09-16)
+
+- `scripts/tips/tip_fax.gd` (CanvasLayer 5, created by main.gd as `main.tips`): a small fax machine in
+  the bottom left corner (flush with the screen's edges) prints a memo line by line the first time the
+  local player stands in a room kind listed in `ROOM_TIPS` (today `break_room` -> the time clock,
+  `hub_crematorium` -> the furnace). Memos tear off 20 s after they start or on Esc; while one is up,
+  Esc tears it off instead of opening the pause menu (main.gd checks `tips.is_showing()` first). Queued
+  memos print one after another. Seen tips are saved per machine in `user://tips.cfg`; the settings
+  page's RESET TIPS clears them. Add a tip: an entry in `TIPS` plus a trigger (a room kind today).
+- The health hearts and stamina bar moved to the top left for it.
+- Removed: the grey controls line along the bottom, and the lobby / clock-in / "clock out when you
+  are ready" messages (shift_loop's lobby_message, clock_in_message, after_case_hint).
+- `tools/tipshot.tscn` (windowed) shows both memos and the Esc tear-off, and forgets the seen tips
+  before and after so a real game still shows them. Worktrees share user://, so running it resets them.

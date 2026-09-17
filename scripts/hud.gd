@@ -23,7 +23,6 @@ var host_info: String = ""
 var drawn: PackedStringArray = []
 
 var _t: float = 0.0
-var _hint_timer: float = 45.0
 var _font: Font
 var _stamina_show: float = 0.0
 ## SWEEP 4A HOOK (controls): the ability bar (Alt) and the scanner ring, both local-only.
@@ -54,8 +53,6 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_t += delta
-	if _hint_timer > 0.0:
-		_hint_timer -= delta
 	var me = game.local_player() if game != null else null
 	var tired: bool = me != null and me.stamina < 0.995
 	_stamina_show = clampf(_stamina_show + (delta * 4.0 if tired else -delta * 1.5), 0.0, 1.0)
@@ -99,8 +96,6 @@ func _draw() -> void:
 	_draw_holds(w, h)
 	_draw_host_info(w)
 	_draw_message(w, h, in_surgery)
-	if not in_surgery:
-		_draw_hint(w, h)
 	# Paused: the settings fax is the pause menu (settings_screen.gd), nothing drawn here.
 	if game.paused:
 		pass
@@ -123,11 +118,12 @@ func _draw_vignette(w: float, h: float) -> void:
 		draw_rect(Rect2(0, 0, w, h), Color(0.55, 0.0, 0.0, red * 0.45))
 
 
-## Your own hearts, bottom left, with a thin stamina bar under them while it is not full.
-func _draw_health(h: float, me) -> void:
+## Your own hearts, top left, with a thin stamina bar under them while it is not full. (The bottom
+## left corner is the tip fax's, scripts/tips/tip_fax.gd.)
+func _draw_health(_h: float, me) -> void:
 	drawn.append("health")
 	var x := 24.0
-	var y := h - 46.0
+	var y := 44.0
 	var n: int = me.max_hp
 	var step := 30.0
 	draw_rect(Rect2(x - 12, y - 20, 16 + n * step, 38), Color(0, 0, 0, 0.5))
@@ -541,15 +537,6 @@ func _draw_message(w: float, h: float, in_surgery: bool) -> void:
 	var tw := _font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
 	draw_rect(Rect2(w * 0.5 - tw * 0.5 - 14, y - 20, tw + 28, 30), Color(0, 0, 0, 0.65))
 	_text(Vector2(0, y), text, 16, Color("f0e6c8"), HORIZONTAL_ALIGNMENT_CENTER, w)
-
-
-func _draw_hint(w: float, h: float) -> void:
-	if _hint_timer <= 0.0:
-		return
-	drawn.append("hint")
-	_text(Vector2(0, h - 8),
-		"WASD move   SPACE jump   CTRL crouch   MOUSE look   SHIFT sprint   F light   E use   G set down   1-4 slots   ALT+1-4 abilities   R scan   Q shove   ESC pause",
-		12, Color(0.67, 0.67, 0.67, minf(1.0, _hint_timer / 2.0)), HORIZONTAL_ALIGNMENT_CENTER, w)
 
 
 func _overlay(w: float, h: float, title: String, sub: String, prompt: String, col: Color) -> void:
