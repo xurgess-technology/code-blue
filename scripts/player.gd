@@ -57,6 +57,12 @@ var _drop_holding: bool = false
 var _drop_hold_t: float = 0.0
 const DROP_TAP_MAX := 0.15
 const DROP_CHARGE_FULL := 1.1
+## THROW HOOK (scripts/hands/throw_pose.gd): the live wind-up the hands pose from, client-owned and
+## replicated (report_state index 15, report_full "tw"): 0..1 charge while the drop key is held past
+## the tap, -1 for THROW_FOLLOW_TIME after a charged throw fires (the follow-through), else 0.
+var throw_wind: float = 0.0
+var _throw_follow_t: float = 0.0
+const THROW_FOLLOW_TIME := 0.25
 var interact_count: int = 0
 var wants_interact: bool = false
 ## SWEEP 3 HOOK: left mouse with a usable item in hand (bone saw swing, anesthetic jab; see
@@ -860,6 +866,11 @@ func _local_step(delta: float) -> void:
 				var held: float = _drop_hold_t
 				drop_charge = 0.0 if held <= DROP_TAP_MAX else clampf((held - DROP_TAP_MAX) / (DROP_CHARGE_FULL - DROP_TAP_MAX), 0.0, 1.0)
 				drop_count += 1
+				# THROW HOOK: a charged throw snaps forward; a tap just drops.
+				throw_wind = -1.0 if drop_charge > 0.0 else 0.0
+				_throw_follow_t = THROW_FOLLOW_TIME if drop_charge > 0.0 else 0.0
+			else:
+				throw_wind = clampf((_drop_hold_t - DROP_TAP_MAX) / (DROP_CHARGE_FULL - DROP_TAP_MAX), 0.0, 1.0)
 		# SWEEP 4A HOOK (controls): Alt+1..4 fires an ability slot; plain 1..4 still picks an item
 		# slot. Holding Alt does not block movement or anything else.
 		# SPRINT-DIVE HOOK: no ability use mid-dive; switching the selected item slot is still fine.
@@ -876,6 +887,18 @@ func _local_step(delta: float) -> void:
 				select_step(1)
 			if Input.is_action_just_pressed("slot_prev"):
 				select_step(-1)
+
+	# THROW HOOK: a throw charge is cancelled (no drop) by a menu / freed mouse, a dive, a stun, going
+	# down, carrying, dragging, a wind-up or the hand emptying; the arms ease back (throw_pose.gd).
+	if _drop_holding and (not (can_move and not hive_view) or bot_active or diving or downed or carrying != 0 			or dragging_monster >= 0 or winding or selected_stack().kind == ""):
+		_drop_holding = false
+		throw_wind = 0.0
+	if _throw_follow_t > 0.0:
+		_throw_follow_t -= delta
+		if _throw_follow_t <= 0.0 and throw_wind < 0.0:
+			throw_wind = 0.0
+	elif not _drop_holding and throw_wind > 0.0:
+		throw_wind = 0.0
 
 	# HANDS HOOK: the mouse was freed (a menu, the terminal) mid-charge: the shove goes off.
 	if _charging_with != "" and not (can_move and not hive_view) and g != null and g.combat != null:
@@ -1735,7 +1758,8 @@ func report_state() -> Array:
 		| (16 if crouching else 0) | (32 if scan_holding else 0) | (64 if prone else 0)
 	return [global_position, rotation.y, head.rotation.x, bits, shove_count, drop_count, aim_id, interact_count, selected, use_count,
 		ability_slot_press[0], ability_slot_press[1], ability_slot_press[2], ability_slot_press[3],
-		snappedf(drop_charge, 0.02)]   # SWEEP 4A HOOK (pharmacy, chunk 3)
+		snappedf(drop_charge, 0.02),   # SWEEP 4A HOOK (pharmacy, chunk 3)
+		snappedf(throw_wind, 0.02)]   # THROW HOOK
 
 
 func apply_remote_state(s: Array) -> void:
@@ -1769,6 +1793,8 @@ func apply_remote_state(s: Array) -> void:
 			ability_slot_press[i] = int(s[10 + i])
 	if s.size() >= 15:   # SWEEP 4A HOOK (pharmacy, chunk 3): charged throw
 		drop_charge = float(s[14])
+	if s.size() >= 16:   # THROW HOOK: the live wind-up
+		throw_wind = float(s[15])
 	_consume_actions()
 
 
@@ -1789,6 +1815,7 @@ func report_full() -> Dictionary:
 		"cr": crouching,   # SWEEP 4A HOOK (controls)
 		"pr": prone,
 		"sh": scan_holding,   # terminal redesign, chunk 4: everyone sees everyone's laser
+		"tw": snappedf(throw_wind, 0.02),   # THROW HOOK: everyone sees the wind-up
 	}
 
 
@@ -1841,4 +1868,5 @@ func apply_remote_full(s: Dictionary) -> void:
 	crouching = bool(s.get("cr", false))   # SWEEP 4A HOOK (controls)
 	scan_holding = bool(s.get("sh", false))   # terminal redesign, chunk 4
 	prone = bool(s.get("pr", false))
+	throw_wind = float(s.get("tw", 0.0))   # THROW HOOK
 	moving = s.mv

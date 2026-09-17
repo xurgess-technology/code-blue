@@ -11,6 +11,7 @@ const Poser := preload("res://scripts/hands/body_poser.gd")
 const Grips := preload("res://scripts/hands/grips.gd")
 const WindupScript := preload("res://scripts/combat/windup.gd")
 const HumanModel := preload("res://scripts/human/human_model.gd")   # HUMAN HOOK
+const ThrowPoseScript := preload("res://scripts/hands/throw_pose.gd")   # THROW HOOK
 
 ## The fallback attach point on a body without a rig (body space).
 const FIXED_ATTACH := Vector3(-0.25, 1.05, -0.35)
@@ -35,6 +36,7 @@ var _socket_r := Transform3D.IDENTITY   # body space, updated after the skeleton
 var _socket_l := Transform3D.IDENTITY
 var _two := false
 var _shake_t := 0.0
+var _throw = ThrowPoseScript.new()   # THROW HOOK
 var _active := true
 var _syringe: Node3D = null
 # HUMAN HOOK: one-shot clips (Interact / PickUp) and the last interact seen.
@@ -219,6 +221,29 @@ func update(delta: float) -> void:
 			ar += Vector3(sin(_shake_t * 60.0), cos(_shake_t * 47.0), 0.0) * amp
 			al += Vector3(cos(_shake_t * 53.0), sin(_shake_t * 66.0), 0.0) * amp
 			tor.x -= 0.1 * float(act.charge)
+	# THROW HOOK: the drop key's charged throw (scripts/hands/throw_pose.gd), over the hold pose.
+	var busy_body: bool = player.carrying != 0 or player.dragging_monster >= 0 or player.downed or player.carried_by != 0 or player.on_table
+	_throw.update(delta, float(player.throw_wind) if act.is_empty() and not busy_body else 0.0, _two)
+	if _throw.active():
+		var prefix := "throw_both_" if _throw.two else "throw_"
+		for step in [[prefix + "windup", _throw.wind_w()], [prefix + "strike", _throw.strike_w()]]:
+			var tw: float = step[1]
+			if tw <= 0.001:
+				continue
+			var tp: Dictionary = RigMap.pose_of(rig, String(step[0]))
+			if tp.has("arm_r"):
+				ar = _toward(ar, arw, tp.arm_r, tw)
+				arw = maxf(arw, tw * float(tp.arm_r[1]))
+			if tp.has("arm_l"):
+				al = _toward(al, alw, tp.arm_l, tw * float(tp.arm_l[1]))
+				alw = maxf(alw, tw * float(tp.arm_l[1]))
+			if tp.has("torso"):
+				tor = tor.lerp(Vector2(tp.torso[0], tp.torso[1]), tw)
+				torw = maxf(torw, tw)
+		# Full charge on a two-handed thing: both arms (and the thing between the hands) tremble.
+		var jig: Vector3 = _throw.jig(0.0) * 0.045
+		ar += jig
+		al += jig
 	poser.arm_r = ar if ar.length() > 0.01 else Vector3.FORWARD
 	poser.arm_r_w = arw
 	poser.arm_l = al if al.length() > 0.01 else Vector3.FORWARD

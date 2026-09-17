@@ -105,4 +105,11 @@ const POSES := {
 	# Shove: charging leans back with both arms braced up in front, the strike throws both forward.
 	"shove_charge": {"arm_r": [Vector3(-0.45, 0.25, 0.86), 1.0], "arm_l": [Vector3(0.45, 0.25, 0.86), 1.0], "torso": [-0.32, 0.0, 1.0]},
 	"shove_strike": {"arm_r": [Vector3(-0.2, 0.05, 1.0), 1.0], "arm_l": [Vector3(0.2, 0.05, 1.0), 1.0], "torso": [0.38, 0.0, 1.0]},
+	# THROW HOOK (scripts/hands/throw_pose.gd): one-handed, the right arm (it holds the stack) drawn up
+	# and back behind the shoulder, chest turned away and the left arm out front; then flung forward.
+	"throw_windup": {"arm_r": [Vector3(-0.45, 0.55, -0.7), 1.0], "arm_l": [Vector3(0.3, 0.05, 0.95), 0.5], "torso": [-0.14, -0.45, 1.0]},
+	"throw_strike": {"arm_r": [Vector3(-0.1, 0.22, 1.0), 1.0], "arm_l": [Vector3(0.4, -0.5, 0.3), 0.5], "torso": [0.28, 0.3, 1.0]},
+	# Two-handed: both arms up over the head, leaning back; then heaved out in front.
+	"throw_both_windup": {"arm_r": [Vector3(-0.05, 0.95, -0.25), 1.0], "arm_l": [Vector3(0.05, 0.95, -0.25), 1.0], "torso": [-0.22, 0.0, 1.0]},
+	"throw_both_strike": {"arm_r": [Vector3(-0.15, 0.08, 1.0), 1.0], "arm_l": [Vector3(0.15, 0.08, 1.0), 1.0], "torso": [0.36, 0.0, 1.0]},
 }

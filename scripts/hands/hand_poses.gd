@@ -37,6 +37,21 @@ const SHOVE_LEFT := [
 	{"p": Vector3(-0.15, -0.13, -0.66), "f": Vector3(0.15, 1.0, -0.1), "n": Vector3(0.1, 0.0, -1.0), "c": 0.05},
 ]
 
+## THROW HOOK (scripts/hands/throw_pose.gd): [wind-up peak, release] for a one-handed throw (the left
+## hand, which holds the stack): drawn up and back past the shoulder, palm and stack turned forward
+## at the edge of the view, then flung out ahead.
+const THROW_LEFT := [
+	{"p": Vector3(-0.4, -0.05, -0.34), "f": Vector3(0.1, 1.0, 0.3), "n": Vector3(0.45, 0.2, -0.9), "c": 0.4},
+	{"p": Vector3(-0.07, -0.13, -0.64), "f": Vector3(0.2, 0.25, -1.0), "n": Vector3(0.25, 0.95, -0.15), "c": 0.08},
+]
+## Two-handed throw: the thing's centre raised over the head (top of the view) and slightly back,
+## then heaved out in front; the hands' own frames (left hand, mirrored for the right).
+const THROW_BOTH_CENTRE := [Vector3(0.0, 0.2, -0.3), Vector3(0.0, -0.17, -0.74)]
+const THROW_BOTH_LEFT := [
+	{"p": Vector3(-0.012, -0.03, 0.03), "f": Vector3(0.1, 0.45, 0.9), "n": Vector3(1.0, 0.2, 0.0), "c": 0.7},
+	{"p": Vector3(-0.012, -0.03, 0.03), "f": Vector3(0.12, -0.2, -1.0), "n": Vector3(1.0, 0.35, 0.0), "c": 0.35},
+]
+
 
 ## Mirror a left-hand pose to the right hand.
 static func mirror(pose: Dictionary) -> Dictionary:
