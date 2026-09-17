@@ -1,11 +1,12 @@
 extends CanvasLayer
-## The `Loading` autoload: one catch-all loading screen, a heart monitor whose trace sweeps and beeps
-## while anything is loading.
+## The `Loading` autoload: the in-game loading screen, a heart monitor whose trace sweeps and beeps
+## while anything is loading (a new hospital between runs). Session starts from the title menu use
+## the shift assignment fax instead (scripts/shift_fax.gd).
 ##
-##     Loading.begin("session", "SCRUBBING IN...")
+##     Loading.begin("new_run", "NEW HOSPITAL...")
 ##     await Loading.drawn()        # before blocking work, so the screen is actually up first
 ##     ...build...
-##     Loading.end("session")
+##     Loading.end("new_run")
 ##
 ## Reasons can overlap (a session start, then the warmup it kicks off): the screen stays up until
 ## every reason has ended and it has been visible for MIN_SECONDS, then fades. The trace and the

@@ -2,7 +2,7 @@ extends Node
 ## Headless checks for dev mode.
 ##
 ##   godot --headless --fixed-fps 60 --path . tools/devtest.tscn
-##       Solo, in a normal hospital: the OR supply closet's door is locked and F1 does nothing; the
+##       Solo, in a normal hospital: the OR supply closet has no dev door and F1 does nothing; the
 ##       pharmacy fax's secret order (3141592653 placebo pills, no money) prints a reply page, turns
 ##       dev mode on and builds the hidden room past the parking lot. Then the closet door, the room
 ##       (the gun on monsters, dummies and bots; dispensers, the pen doors, lights and gate), the
@@ -92,12 +92,7 @@ func _start_solo() -> void:
 func _run_solo() -> void:
 	await _start_solo()
 	_check(not game.dev_on() and not dev.room_ready(), "a new session starts without dev mode or the room")
-	var closet = game.find_interactable("dev_door_closet")
-	_check(closet != null, "the OR supply closet has the dev door")
-	if closet == null:
-		_finish()
-		return
-	_check(closet.interact_prompt(me) == "!Locked", "the closet door is locked (%s)" % closet.interact_prompt(me))
+	_check(game.find_interactable("dev_door_closet") == null, "no dev door in the OR supply closet before dev mode")
 	await _key(KEY_F1)
 	_check(not main.dev_panel.is_open(), "F1 does nothing without dev mode")
 
@@ -109,6 +104,11 @@ func _run_solo() -> void:
 	o = dev.room.global_position if dev.room_ready() else Vector3.ZERO
 	var lot: Rect2 = game.level_info.get("neutral_rect", Rect2())
 	_check(lot.size != Vector2.ZERO and o.z > lot.end.y + 10.0, "the room stands past the parking lot (room z %.0f, lot ends %.0f)" % [o.z, lot.end.y])
+	var closet = game.find_interactable("dev_door_closet")
+	_check(closet != null, "dev mode puts the dev door in the OR supply closet")
+	if closet == null:
+		_finish()
+		return
 	_check(closet.interact_prompt(me) == "Enter the dev room", "the closet door opens for dev mode")
 	var normal: int = game.money
 	game.add_money(100, "test")
@@ -268,7 +268,7 @@ func _run_solo() -> void:
 	await _frames(3)
 	_check(not game.dev_on() and not main.dev_panel.is_open(), "DEV MODE OFF turns dev mode off and closes the panel")
 	_check(dev.bots.is_empty() and not dev.is_god(me) and not dev.has_gun(me.peer_id), "and drops the bots, god mode and the gun")
-	_check(closet.interact_prompt(me) == "!Locked", "the closet door locks again")
+	_check(game.find_interactable("dev_door_closet") == null, "the closet's dev door is gone again")
 	await _key(KEY_F1)
 	_check(not main.dev_panel.is_open(), "F1 does nothing again")
 

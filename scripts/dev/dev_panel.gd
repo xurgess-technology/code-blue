@@ -295,6 +295,7 @@ func _build() -> void:
 	ailments.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var p2 := _row(col)
 	_button(p2, "Put on the table", func(): _req("patient", {"patient": pids[patients.selected], "ailment": aids[ailments.selected]}))
+	_button(p2, "Flatlined", func(): _req("patient", {"patient": pids[patients.selected], "ailment": aids[ailments.selected], "dead": true}))
 	_button(p2, "Clear tables", func(): _req("clear_patient"))
 	var p3 := _row(col)
 	_label(p3, "Vitals", 13, Color.WHITE).custom_minimum_size.x = 44

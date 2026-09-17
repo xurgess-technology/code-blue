@@ -64,6 +64,8 @@ var _next_fidget := 2.0
 var _next_twitch := 1.0
 var _rng := RandomNumberGenerator.new()
 var _bleed := {}
+## expose_site: {site, centre: Vector2, radii: Vector2}, or {} when covered
+var exposure := {}
 
 
 static func create(id: String) -> Node3D:
@@ -144,6 +146,17 @@ func make_severed_limb(parent: Node) -> Node3D:
 	if parent == null:
 		return null
 	return _builder.make_severed_limb(self, parent)
+
+
+## A surgery step works on bare skin here: the builder clears the patient's clothing (Bob's gown)
+## inside the ellipse at `centre` with `radii` (metres on the site plane: site X, Z) until cover_site.
+## Every machine showing the step calls it; bodies without clothing ignore it.
+func expose_site(site: String, centre: Vector2, radii: Vector2) -> void:
+	exposure = {"site": site, "centre": centre, "radii": radii}
+
+
+func cover_site() -> void:
+	exposure = {}
 
 
 func set_vitals(v: float) -> void:

@@ -16,11 +16,14 @@ extends Node
 ##                             terminal, px} (px (-1, -1) off the screen)
 ##   net_fields() / apply_net(g)
 ##
-## Signed out by SIGN OUT, by walking WALK_AWAY_M from the screen, by leaving the game, and after
-## IDLE_SECONDS with nobody's laser on the screen. Signing out goes back to HOME.
+## Signed out by SIGN OUT, by walking away (more than WALK_AWAY_M from the screen, or out of sight of
+## it: behind a wall, out of the room) for AWAY_GRACE seconds, by leaving the game, and after
+## IDLE_SECONDS with nobody using the screen (no clicks, no laser moving on it). Signing out goes back
+## to HOME behind the lock screen.
 
-const WALK_AWAY_M := 9.0
-const IDLE_SECONDS := 60.0
+const WALK_AWAY_M := 6.0
+const AWAY_GRACE := 2.0
+const IDLE_SECONDS := 25.0
 const HOLD_SECONDS := 1.5
 const LASER_RANGE := 14.0   # scan_fx.gd LASER_RANGE
 
@@ -28,6 +31,8 @@ var game: Node
 var user := 0
 var _db: Dictionary = {}
 var _idle := 0.0
+var _away_t := 0.0
+var _lasers: Dictionary = {}   # peer id -> the px their laser was on the screen last tick (host)
 
 
 func setup(g: Node) -> void:
@@ -135,7 +140,10 @@ func _host_sign_in(peer: int, db) -> void:
 		return
 	user = peer
 	_idle = 0.0
+	_away_t = 0.0
+	_lasers.clear()
 	_set_db(db)
+	_refresh()   # the lock screen comes down even when their database is empty
 
 
 func sign_out() -> void:
@@ -143,6 +151,8 @@ func sign_out() -> void:
 		return
 	user = 0
 	_db = {}
+	_away_t = 0.0
+	_lasers.clear()
 	var wt := _terminal()
 	if wt != null:
 		wt.ui.go_home()
@@ -169,20 +179,58 @@ func _away(p: Node3D, wt: Node3D) -> bool:
 	return Vector2(d.x, d.z).length() > WALK_AWAY_M
 
 
+## Player p can't see the screen: behind its wall, or something solid (a wall, a door) between their
+## eyes and the middle of the picture.
+func _out_of_sight(p: Node3D, wt: Node3D) -> bool:
+	var cam: Camera3D = p.get("camera")
+	var eye: Vector3 = cam.global_position if cam != null else p.global_position + Vector3.UP * 1.6
+	var centre: Vector3 = wt.glass.global_position if wt.get("glass") != null else wt.global_position + Vector3.UP * 1.6
+	# The picture faces -Z of the terminal's front pivot, i.e. the glass's +Z after its PI turn.
+	var facing: Vector3 = wt.glass.global_transform.basis.z if wt.get("glass") != null else -wt.global_transform.basis.z
+	if (eye - centre).dot(facing) < 0.0:
+		return true
+	var q := PhysicsRayQueryParameters3D.create(eye, centre)
+	q.collision_mask = C.L_WORLD
+	q.exclude = [p.get_rid()]
+	var hit: Dictionary = p.get_world_3d().direct_space_state.intersect_ray(q)
+	if hit.is_empty():
+		return false
+	if (hit.position as Vector3).distance_to(centre) < 0.5:
+		return false
+	var collider = hit.get("collider")
+	if collider is Node:
+		for c in (collider as Node).get_children():
+			if c == wt:
+				return false
+	return true
+
+
 func _physics_process(delta: float) -> void:
 	if game == null or not game.is_host() or user == 0:
 		return
 	var wt := _terminal()
 	var p = game.players.get(user)
-	if wt == null or p == null or not is_instance_valid(p) or _away(p, wt):
+	if wt == null or p == null or not is_instance_valid(p) or not p.is_inside_tree():
 		sign_out()
 		return
-	var anyone := false
-	for q in game.players.values():
-		if is_instance_valid(q) and bool(q.scan_holding) and laser_of(q).terminal == wt:
-			anyone = true
-			break
-	_idle = 0.0 if anyone else _idle + delta
+	_away_t = _away_t + delta if _away(p, wt) or _out_of_sight(p, wt) else 0.0
+	if _away_t >= AWAY_GRACE:
+		sign_out()
+		return
+	# Activity: a click (_host_click zeroes _idle) or someone's laser moving across the screen.
+	var seen := {}
+	for id in game.players.keys():
+		var q = game.players[id]
+		if not is_instance_valid(q) or not bool(q.scan_holding):
+			continue
+		var l := laser_of(q)
+		if l.terminal != wt:
+			continue
+		seen[id] = l.px
+		if not _lasers.has(id) or (_lasers[id] as Vector2).distance_to(l.px) > 6.0:
+			_idle = 0.0
+	_lasers = seen
+	_idle += delta
 	if _idle >= IDLE_SECONDS:
 		sign_out()
 

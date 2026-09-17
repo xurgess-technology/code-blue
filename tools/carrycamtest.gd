@@ -1,11 +1,13 @@
 extends Node
 ## Headless checks for the over-the-shoulder carry camera (docs/HANDS_AND_FEEDBACK.md "Done when"):
 ## with the camera behind the shoulder, the real aim ray (no bot_aim_id) still puts a carried player
-## on a free patient table in the hospital's OR and straps a dragged monster to a patient table; the camera sits back over
-## the left shoulder while carrying, hides the first-person hands and shows the body, keeps its
-## offset through a teleport, ignores an interactable between the camera and the head, pulls in
-## against a wall, and eases back to first person when the body is put down or the setting is off.
-##
+## on a free patient table in the hospital's OR and straps a dragged monster to a patient table; the camera sits close
+## behind the RIGHT shoulder while carrying (the load rides the LEFT: the carried player, a human
+## body's mirrored Carried model, a seal/monster body), swings a little around the upper-back pivot
+## as the player looks down and up, hides the first-person hands and shows the body, keeps its
+## offset through a teleport, ignores an interactable between the camera and the head, frames a
+## dragged monster over the right shoulder too, pulls in against a wall, and eases back to first
+## person when the body is put down or the setting is off.
 ##
 ## A normal hospital (seed 4242) with dev mode on for its dummies, No monsters, clocked in (carrying
 ## and the tables work on shift) with the phone hung up.
@@ -86,7 +88,35 @@ func _run() -> void:
 	_check(me.carrying == did, "set-up: carrying the downed dummy")
 	await _seconds(0.5)
 	_check(cc.active and cc.blend >= 1.0, "carrying: the camera moved over the shoulder (blend %.2f)" % cc.blend)
-	_check(cc.offset.x < -0.3 and cc.offset.z > 1.0 and cc.arm_length > 1.2, "behind and over the LEFT shoulder, the body rides the right (%s)" % str(cc.offset.snappedf(0.01)))
+	me.bot_pitch = 0.0
+	await _frames(3)
+	var level := _yaw_offset()
+	_check(level.x > 0.4 and level.x < 0.65 and level.z > 1.0 and level.z < 1.45 and level.y > 0.05 and level.y < 0.3,
+		"close behind and over the RIGHT shoulder: 0.4-0.65 m right, 1.0-1.45 m back, 0.05-0.3 m up (%s)" % str(level.snappedf(0.01)))
+	_check(level.distance_to(CarryCam.rest_offset(CarryCam.CARRY_ARM, 0.0)) < 0.05, "in the open it sits at the rest offset (%s)" % str(CarryCam.rest_offset(CarryCam.CARRY_ARM, 0.0).snappedf(0.01)))
+	var ride: Vector3 = Basis(Vector3.UP, me.global_rotation.y).inverse() * (dummy.global_position - me.global_position)
+	_check(ride.x < -0.4, "the carried player rides the LEFT shoulder (%s in the carrier's frame)" % str(ride.snappedf(0.01)))
+	var hc: Transform3D = Player.human_carried_pose(me)
+	var hc_local: Vector3 = Basis(Vector3.UP, me.global_rotation.y).inverse() * (hc.origin - me.global_position)
+	_check(hc_local.x < -0.1 and hc.basis.determinant() < 0.0, "a human's Carried clip goes on the left shoulder, mirrored (%s, det %.1f)" % [str(hc_local.snappedf(0.01)), hc.basis.determinant()])
+	var sp: Transform3D = game.corpses.shoulder_pose(me)
+	var sp_local: Vector3 = Basis(Vector3.UP, me.global_rotation.y).inverse() * (sp.origin - me.global_position)
+	_check(sp_local.x < -0.1, "a seal/monster body (and the furnace roll-off) starts over the left shoulder (%s)" % str(sp_local.snappedf(0.01)))
+	# Looking down lifts the camera a little over the shoulder, looking up lowers it: a swing around
+	# the upper back, not a full orbit and not rigid.
+	me.bot_pitch = -0.9
+	await _frames(3)
+	var down := _yaw_offset()
+	me.bot_pitch = 0.9
+	await _frames(3)
+	var up := _yaw_offset()
+	me.bot_pitch = 0.0
+	await _frames(3)
+	_check(down.y > level.y + 0.2 and down.y < level.y + 0.8 and up.y < level.y - 0.15 and up.y > level.y - 0.8,
+		"the pitch swings the camera around the upper back: up %.2f / level %.2f / down %.2f m" % [up.y, level.y, down.y])
+	_check(absf(down.x - level.x) < 0.02 and absf(up.x - level.x) < 0.02 and up.z < level.z, "it stays over the right shoulder and comes in a little looking up (z up %.2f, level %.2f)" % [up.z, level.z])
+	_check(down.distance_to(CarryCam.rest_offset(CarryCam.CARRY_ARM, -0.9)) < 0.05 and up.distance_to(CarryCam.rest_offset(CarryCam.CARRY_ARM, 0.9)) < 0.05,
+		"in the open the swung camera matches rest_offset (%s / %s)" % [str(down.snappedf(0.01)), str(up.snappedf(0.01))])
 	_check(me.camera.cull_mask & HandsFP.HANDS_LAYER == 0, "the first-person hands and held stack are hidden")
 	_check(me.body_visual.visible, "the carrier's own body shows")
 	var flash_off: float = me.flashlight.global_position.distance_to(me.head.global_transform * CarryCam.FLASH_OFFSET)
@@ -141,7 +171,11 @@ func _run() -> void:
 	await _frames(2)
 	game.combat.start_drag(me, m)
 	await _seconds(0.5)
-	_check(game.combat.dragging(me) == m.monster_id and cc.active and cc.offset.z > 0.5 and cc.offset.y > 0.5, "dragging: the camera is up above and behind (%s)" % str(cc.offset.snappedf(0.01)))
+	me.bot_pitch = 0.0
+	await _frames(3)
+	var drag_off := _yaw_offset()
+	_check(game.combat.dragging(me) == m.monster_id and cc.active and drag_off.z > 1.2 and drag_off.x > 0.4 and drag_off.y > 0.4,
+		"dragging: the camera is over the right shoulder, higher and further back (%s from the eye)" % str(drag_off.snappedf(0.01)))
 	_stand_facing(tpos + tside * 1.5, tpos + Vector3(0, 0.9, 0))
 	await _aim_camera(tpos + Vector3(0, 0.9, 0))
 	await _frames(4)
@@ -171,14 +205,14 @@ func _run() -> void:
 		me.bot_yaw = wall.yaw
 		me.bot_pitch = 0.0
 		await _frames(3)
-		_check(cc.arm_length < open_len - 0.4, "backed against a wall the camera pulls in toward the head (%.2f m, open %.2f m)" % [cc.arm_length, open_len])
+		_check(cc.arm_length < open_len - 0.3, "backed against a wall the camera pulls in toward the head (%.2f m, open %.2f m)" % [cc.arm_length, open_len])
 		var cam: Vector3 = me.camera.global_position
 		var space := me.get_world_3d().direct_space_state
 		var q := PhysicsRayQueryParameters3D.create(me.head.global_position, cam)
 		q.collision_mask = C.L_WORLD
 		_check(space.intersect_ray(q).is_empty(), "and it never ends up behind the wall")
 		await _seconds(1.5)
-		_check(cc.arm_length < open_len - 0.4, "it stays pulled in while the wall is there")
+		_check(cc.arm_length < open_len - 0.3, "it stays pulled in while the wall is there")
 	Settings.set_value("carry_camera", "first_person")
 	await _seconds(0.5)
 	_check(not cc.active and me.carrying == did2 and me.fx.position == Vector3.ZERO, "setting 'first_person': carrying stays in first person")
@@ -215,6 +249,11 @@ func _wall_spot() -> Dictionary:
 			# Face away from the wall: the camera goes back into it.
 			return {"pos": game._floor_at(Vector3(spot.x, base.y, spot.z)), "yaw": atan2(dir.x, dir.z)}
 	return {}
+
+
+## The camera's offset from the eye in the player's yaw frame (x right, y up, z back).
+func _yaw_offset() -> Vector3:
+	return Basis(Vector3.UP, me.global_rotation.y).inverse() * (me.camera.global_position - me.head.global_position)
 
 
 func _stand_facing(pos: Vector3, at: Vector3) -> void:

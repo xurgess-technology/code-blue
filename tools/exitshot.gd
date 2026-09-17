@@ -1,6 +1,7 @@
 extends Node
 ## Windowed screenshots of patient exits: carrying a body over the shoulder, a body on the floor, the
-## body sliding into the furnace, Bob thanking and walking out, the seal flopping out.
+## body sliding into the furnace, Bob thanking and walking out, the seal flopping out, the seal over
+## the left shoulder and rolling off it into the fire.
 ##
 ##   godot --path . tools/exitshot.tscn
 ##
@@ -96,6 +97,22 @@ func _ready() -> void:
 		_look((w3.p as Vector3) + Vector3(2.2, 0, 2.2), (w3.p as Vector3) + Vector3.UP * 0.3)
 	await _seconds(0.3)
 	await _shot("9_seal_flopping")
+
+	# A body without a Carried clip (the seal) over the left shoulder, then rolling off it into the fire.
+	var id4: int = game.add_case({"patient_id": "seal", "ailment_id": "gunshot", "table": t, "state": "on_table"})
+	await _seconds(0.2)
+	game.finish_case(id4, false)
+	await _seconds(0.5)
+	_look(game.table_position(t) + Vector3(0, 0, 2.4), game.table_position(t) + Vector3.UP * 0.9)
+	await _seconds(0.3)
+	game.corpses.lift(me, id4)
+	await _seconds(1.0)
+	await _shot("10_carrying_seal")
+	_look(stand, furn.global_position + Vector3.UP * 1.2)
+	await _seconds(0.8)
+	game.corpses.cremate(me)
+	await _seconds(0.3)
+	await _shot("11_seal_rolls_off")
 	main.tips.reset_seen()
 	get_tree().quit(0)
 

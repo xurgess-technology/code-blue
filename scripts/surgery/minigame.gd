@@ -30,6 +30,10 @@ signal finished(result: Dictionary)
 ##   seed: int, deterministic per case and step
 ##   body: Node3D, the PatientBody on the table (may be null in the lab)
 ##   operator: bool, true on the machine whose player is doing this step
+## Optional:
+##   helper_lights: Callable -> Array of SpotLight3D, the flashlights of teammates standing by (on,
+##     not the operator's). Every machine has them (their aim and on/off are replicated), so a step
+##     can use helper_light() to let a teammate's light help on everyone's screen.
 var ctx: Dictionary = {}
 ## 0..1, shown on the HUD and used by the surgery system to know how far along we are.
 var progress: float = 0.0
@@ -128,6 +132,67 @@ func finish(result: Dictionary = {}) -> void:
 	done = true
 	progress = 1.0
 	finished.emit(result)
+
+
+## How much teammates' flashlights (ctx.helper_lights) light this site: {"amount": 0..1, "spot":
+## Vector2 where the brightest beam meets the plane, plane metres}. A light counts when it is on,
+## above the plane, within HELPER_RANGE and aimed at the site (full inside half its cone, none past
+## the cone's edge), with nothing solid in between. Line of sight is re-checked every HELPER_RAY_EVERY s.
+const HELPER_RANGE := 4.0
+const HELPER_RAY_EVERY := 0.25
+var _helper_los := {}              # light instance id -> [clear: bool, checked_at: msec]
+
+func helper_light() -> Dictionary:
+	var out := {"amount": 0.0, "spot": Vector2.ZERO}
+	var src = ctx.get("helper_lights")
+	if not (src is Callable) or not (src as Callable).is_valid() or not is_inside_tree():
+		return out
+	var site := global_transform
+	var n := site.basis.y.normalized()
+	var inv := site.affine_inverse()
+	var now := Time.get_ticks_msec()
+	for l in (src as Callable).call():
+		var light := l as SpotLight3D
+		if light == null or not is_instance_valid(light) or not light.is_visible_in_tree():
+			continue
+		var from := light.global_position
+		var to_site := site.origin - from
+		var d := to_site.length()
+		if d < 0.05 or d > minf(HELPER_RANGE, light.spot_range) or n.dot(-to_site) <= 0.0:
+			continue
+		var aim := -light.global_basis.z.normalized()
+		var ang := rad_to_deg(acos(clampf(aim.dot(to_site / d), -1.0, 1.0)))
+		var cone := light.spot_angle
+		var k := 1.0 - smoothstep(cone * 0.5, cone, ang)
+		k *= 1.0 - smoothstep(HELPER_RANGE * 0.6, HELPER_RANGE, d)
+		k *= clampf(light.light_energy / 3.0, 0.0, 1.0)
+		if k <= 0.001 or k <= float(out.amount):
+			continue
+		if not _helper_clear(light, from, site.origin + n * 0.03, now):
+			continue
+		var la := inv.basis * aim
+		var lf := inv * from
+		var spot := Vector2.ZERO
+		if la.y < -0.05:
+			var t := -lf.y / la.y
+			spot = Vector2(lf.x + la.x * t, lf.z + la.z * t)
+		out = {"amount": k, "spot": spot.limit_length(0.25)}
+	return out
+
+
+func _helper_clear(light: Node, from: Vector3, to: Vector3, now: int) -> bool:
+	var id := light.get_instance_id()
+	var rec: Array = _helper_los.get(id, [])
+	if not rec.is_empty() and now - int(rec[1]) < int(HELPER_RAY_EVERY * 1000.0):
+		return bool(rec[0])
+	var clear := true
+	var space := get_world_3d().direct_space_state if get_world_3d() != null else null
+	if space != null:
+		var q := PhysicsRayQueryParameters3D.create(from, to)
+		q.collision_mask = C.L_WORLD
+		clear = space.intersect_ray(q).is_empty()
+	_helper_los[id] = [clear, now]
+	return clear
 
 
 ## Plane-local 2D point (metres) to a local 3D position on the plane, lifted by `lift`.

@@ -24,6 +24,7 @@ var stamina: float = 1.0
 var sprinting: bool = false
 var moving: bool = false
 var operating: bool = false
+var _op_anchor := Vector3.INF   # where the local player stood when the operation began
 var flashlight_on: bool = true
 var invuln: float = 0.0
 
@@ -57,6 +58,12 @@ var _drop_holding: bool = false
 var _drop_hold_t: float = 0.0
 const DROP_TAP_MAX := 0.15
 const DROP_CHARGE_FULL := 1.1
+## THROW HOOK (scripts/hands/throw_pose.gd): the live wind-up the hands pose from, client-owned and
+## replicated (report_state index 15, report_full "tw"): 0..1 charge while the drop key is held past
+## the tap, -1 for THROW_FOLLOW_TIME after a charged throw fires (the follow-through), else 0.
+var throw_wind: float = 0.0
+var _throw_follow_t: float = 0.0
+const THROW_FOLLOW_TIME := 0.25
 var interact_count: int = 0
 var wants_interact: bool = false
 ## SWEEP 3 HOOK: left mouse with a usable item in hand (bone saw swing, anesthetic jab; see
@@ -257,8 +264,17 @@ var camera: Camera3D
 var flashlight: SpotLight3D
 var body_visual: Node3D
 ## HUMAN HOOK: where a carried human's Carried clip origin (the belly) sits, in the carrier's frame: the
-## human carrier's right shoulder.
-const HUMAN_CARRIED_SHOULDER := Vector3(0.15, 1.535, 0.03)
+## human carrier's LEFT shoulder (the over-the-shoulder carry camera looks over the right one).
+const HUMAN_CARRIED_SHOULDER := Vector3(-0.15, 1.535, 0.03)
+
+
+## HUMAN HOOK: the global transform of a Carried-clip model on `carrier`'s left shoulder, facing where
+## the carrier faces. The clip is authored over a RIGHT shoulder (art/human/README.md), so the
+## model is mirrored across the carrier's left/right axis. Every machine computes this from the
+## replicated carrier, so it matches everywhere. Used for carried teammates and carried bodies.
+static func human_carried_pose(carrier: Node3D) -> Transform3D:
+	var cb := Basis(Vector3.UP, carrier.rotation.y)
+	return Transform3D(cb * Basis.from_scale(Vector3(-1.0, 1.0, 1.0)), carrier.global_position + cb * HUMAN_CARRIED_SHOULDER)
 var name_tag: Label3D
 var hands: Node3D
 var game: Node = null
@@ -805,6 +821,14 @@ func _local_step(delta: float) -> void:
 	var was_air := not is_on_floor()
 	var fall_speed := velocity.y
 	move_and_slide()
+	# Operating: rooted at the table. Something solid passing (the paramedics' gurney leaving the
+	# OR) used to shove the operator out of reach, and the host then ended the operation.
+	if operating and is_local:
+		if _op_anchor == Vector3.INF:
+			_op_anchor = global_position
+		global_position = Vector3(_op_anchor.x, global_position.y, _op_anchor.z)
+	else:
+		_op_anchor = Vector3.INF
 	if diving and _dive_airborne:
 		_dive_peak_y = maxf(_dive_peak_y, global_position.y)
 	if diving and _dive_airborne and was_air and is_on_floor():
@@ -860,6 +884,11 @@ func _local_step(delta: float) -> void:
 				var held: float = _drop_hold_t
 				drop_charge = 0.0 if held <= DROP_TAP_MAX else clampf((held - DROP_TAP_MAX) / (DROP_CHARGE_FULL - DROP_TAP_MAX), 0.0, 1.0)
 				drop_count += 1
+				# THROW HOOK: a charged throw snaps forward; a tap just drops.
+				throw_wind = -1.0 if drop_charge > 0.0 else 0.0
+				_throw_follow_t = THROW_FOLLOW_TIME if drop_charge > 0.0 else 0.0
+			else:
+				throw_wind = clampf((_drop_hold_t - DROP_TAP_MAX) / (DROP_CHARGE_FULL - DROP_TAP_MAX), 0.0, 1.0)
 		# SWEEP 4A HOOK (controls): Alt+1..4 fires an ability slot; plain 1..4 still picks an item
 		# slot. Holding Alt does not block movement or anything else.
 		# SPRINT-DIVE HOOK: no ability use mid-dive; switching the selected item slot is still fine.
@@ -876,6 +905,18 @@ func _local_step(delta: float) -> void:
 				select_step(1)
 			if Input.is_action_just_pressed("slot_prev"):
 				select_step(-1)
+
+	# THROW HOOK: a throw charge is cancelled (no drop) by a menu / freed mouse, a dive, a stun, going
+	# down, carrying, dragging, a wind-up or the hand emptying; the arms ease back (throw_pose.gd).
+	if _drop_holding and (not (can_move and not hive_view) or bot_active or diving or downed or carrying != 0 			or dragging_monster >= 0 or winding or selected_stack().kind == ""):
+		_drop_holding = false
+		throw_wind = 0.0
+	if _throw_follow_t > 0.0:
+		_throw_follow_t -= delta
+		if _throw_follow_t <= 0.0 and throw_wind < 0.0:
+			throw_wind = 0.0
+	elif not _drop_holding and throw_wind > 0.0:
+		throw_wind = 0.0
 
 	# HANDS HOOK: the mouse was freed (a menu, the terminal) mid-charge: the shove goes off.
 	if _charging_with != "" and not (can_move and not hive_view) and g != null and g.combat != null:
@@ -1184,7 +1225,7 @@ func _update_scan_progress(delta: float) -> void:
 		scan_progress = 0.0
 		scan_target_id = target_id
 		_scan_beep_accum = 0.0
-	if target_id >= 0:
+	if target_id != -1:   # scan props (the waiting Night Nurse) have negative ids
 		scan_progress = clampf(scan_progress + delta / C.SCAN_SECONDS, 0.0, 1.0)
 		# SWEEP 4A HOOK (scanner): a beep while scanning, faster as progress builds. This is a
 		# plain 2D sound (Audio.play), never game.emit_noise(): it is not a noise event, so
@@ -1694,17 +1735,15 @@ func _update_down_pose(delta: float) -> void:
 		return
 	if body_hands != null and body_hands.lies_by_clip():
 		# HUMAN HOOK: the human lies, crawls and hangs over the shoulder by its own clips; the Carried
-		# clip's origin (the belly on the shoulder) goes onto the carrier's right shoulder.
-		body_visual.rotation = Vector3(-0.2 if hive_view else 0.0, 0.0, 0.0)
-		body_visual.position = Vector3.ZERO
+		# clip's origin (the belly on the shoulder) goes onto the carrier's left shoulder, mirrored.
+		# The whole transform (not rotation/position) so the carry's mirror never outlives it.
+		body_visual.transform = Transform3D(Basis(Vector3.RIGHT, -0.2 if hive_view else 0.0), Vector3.ZERO)
 		var carrier = game.players.get(carried_by) if carried_by != 0 and game != null else null
 		if carrier != null and is_instance_valid(carrier):
-			# on the carrier's right shoulder, facing where the carrier faces, whatever this body's own yaw
-			var cb := Basis(Vector3.UP, carrier.rotation.y)
-			body_visual.global_transform = Transform3D(cb, carrier.global_position + cb * HUMAN_CARRIED_SHOULDER)
+			body_visual.global_transform = human_carried_pose(carrier)
 		return
 	if carried_by != 0:
-		# A fireman's carry over the right shoulder (game.pinned_pose puts the root there): legs
+		# A fireman's carry over the left shoulder (game.pinned_pose puts the root there): legs
 		# down the front, the rest of the body down the carrier's back.
 		body_visual.rotation = Vector3(PI * 0.5, 0.0, 0.0)
 		body_visual.position = Vector3(0.0, 0.0, -0.6)
@@ -1735,7 +1774,8 @@ func report_state() -> Array:
 		| (16 if crouching else 0) | (32 if scan_holding else 0) | (64 if prone else 0)
 	return [global_position, rotation.y, head.rotation.x, bits, shove_count, drop_count, aim_id, interact_count, selected, use_count,
 		ability_slot_press[0], ability_slot_press[1], ability_slot_press[2], ability_slot_press[3],
-		snappedf(drop_charge, 0.02)]   # SWEEP 4A HOOK (pharmacy, chunk 3)
+		snappedf(drop_charge, 0.02),   # SWEEP 4A HOOK (pharmacy, chunk 3)
+		snappedf(throw_wind, 0.02)]   # THROW HOOK
 
 
 func apply_remote_state(s: Array) -> void:
@@ -1769,6 +1809,8 @@ func apply_remote_state(s: Array) -> void:
 			ability_slot_press[i] = int(s[10 + i])
 	if s.size() >= 15:   # SWEEP 4A HOOK (pharmacy, chunk 3): charged throw
 		drop_charge = float(s[14])
+	if s.size() >= 16:   # THROW HOOK: the live wind-up
+		throw_wind = float(s[15])
 	_consume_actions()
 
 
@@ -1789,6 +1831,7 @@ func report_full() -> Dictionary:
 		"cr": crouching,   # SWEEP 4A HOOK (controls)
 		"pr": prone,
 		"sh": scan_holding,   # terminal redesign, chunk 4: everyone sees everyone's laser
+		"tw": snappedf(throw_wind, 0.02),   # THROW HOOK: everyone sees the wind-up
 	}
 
 
@@ -1841,4 +1884,5 @@ func apply_remote_full(s: Dictionary) -> void:
 	crouching = bool(s.get("cr", false))   # SWEEP 4A HOOK (controls)
 	scan_holding = bool(s.get("sh", false))   # terminal redesign, chunk 4
 	prone = bool(s.get("pr", false))
+	throw_wind = float(s.get("tw", 0.0))   # THROW HOOK
 	moving = s.mv

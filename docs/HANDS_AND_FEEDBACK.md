@@ -97,12 +97,22 @@ click**.
 ## 3. Over-the-shoulder carry camera
 - **When:** carrying a downed player (`carrying != 0`) or dragging a monster
   (`dragging_monster >= 0`). Not for bulky loot.
-- **Camera:** ease over about 0.35 s to a spot behind and to the right of the head. Start with
-  roughly 1.6 m back, 0.45 m right and 0.25 m up, then tune. Put the shoulder opposite the
-  carried body: the fireman's carry sits on the right shoulder (`pinned_pose` +0.55 x), so the
-  camera sits over the left shoulder. For a monster dragged behind, pick whichever side shows the
-  body best. Use a `SpringArm3D` or a ray so the camera never goes through walls; in tight
-  corridors it pulls in toward the head.
+- **Camera (2026-09-17, flagship framing):** over the RIGHT shoulder, like The Last of Us Part II,
+  the RE4 remake or God of War: the carrier on the left third of the screen, the crosshair at the
+  centre clear and aiming along the player's aim. Everything carried rides the LEFT shoulder: a
+  teammate (`pinned_pose` -0.55 x), a human body on the mirrored Carried clip
+  (`Player.human_carried_pose`), a seal/monster body across the shoulders shifted left
+  (`corpses.SHOULDER_AT`), and the carrier's left arm wraps the legs (right arm free). It eases in
+  and out over 0.4 s (smootherstep). The rig, in the player's yaw frame: a pivot at the upper back
+  (`PIVOT` (0, -0.2, 0.12) from the eye), then the arm (`CARRY_ARM` 0.5 right, 0.34 up, 1.15 back:
+  the camera sits 0.5 m right, 0.14 m up, 1.27 m back from the eye at level pitch). The up/back part
+  of the arm swings around the pivot by 45% of the look pitch -- looking down lifts the camera a
+  little so the floor ahead is in view, looking up lowers it and pulls it in a little (up to 25%)
+  -- neither a full orbit nor rigid. Dragging uses the same framing a little higher and further
+  back (`DRAG_ARM` 0.58, 0.72, 1.5) with a gentle 0.2 rad downward look; the dragged body lies
+  behind the carrier, so it is mostly out of frame. The furnace linger keeps the carry framing.
+  Sphere casts along head -> pivot -> shoulder -> camera keep it out of walls; in tight corridors
+  it pulls in toward the head (instantly), and eases back out.
 - **Show the local body:** the carrier's own `body_visual` (carry pose) and the carried body
   become visible to the local player. First-person hands and the held item are hidden.
 - **Aim and interact:** the interact and aim ray still has to work, for example putting a

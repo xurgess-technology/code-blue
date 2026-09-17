@@ -239,7 +239,9 @@ func _wall_sign_in_and_out() -> void:
 	_check(int(game.wall.user) == me.peer_id, "signed in again")
 	me.bot_scan = false
 	me.teleport(game._floor_at(glass.global_position + out * 4.0 + glass.global_basis.x.normalized() * 12.0))
-	await _frames(3)
+	await _frames(int(game.wall.AWAY_GRACE * 60.0) - 20)
+	_check(int(game.wall.user) == me.peer_id, "a moment away does not sign out yet")
+	await _frames(40)
 	_check(int(game.wall.user) == 0, "walking %.0f m away signs out" % game.wall.WALK_AWAY_M)
 	# Idle.
 	me.teleport(game._floor_at(Vector3(stand.x, 0.0, stand.z)))

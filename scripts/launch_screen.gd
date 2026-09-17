@@ -27,17 +27,18 @@ const RULE_PAUSE := 0.3
 ## Longest step of printer time per frame (seconds).
 const MAX_STEP := 1.0 / 30.0
 ## The stamped page stays still at least this long, and this long after the final draw finished.
-const STAMP_HOLD := 1.3
-const AFTER_DRAW_HOLD := 0.35
+const STAMP_HOLD := 0.9
+const AFTER_DRAW_HOLD := 0.25
 ## The stamp settles before the warmup is allowed to start its long draw frames.
 const STAMP_SETTLE := 0.35
-## Seconds for the finished page to accelerate up and off the screen.
-const FEED_OUT := 0.8
-const FEED_TICK := 0.11
+## Seconds for the finished page to accelerate up and off the screen (a long page: a little over the
+## shared Fax.EJECT_SECONDS), after which the menu's sign-in sheet feeds in (Fax.FEED_SECONDS).
+const FEED_OUT := 0.45
+const FEED_TICK := Fax.FEED_TICK
 ## Lines to a sheet; then it ejects and a new sheet peeks out.
 const PAGE_LINES := 12
-const EJECT_SECONDS := 0.55
-const PEEK_SECONDS := 0.35
+const EJECT_SECONDS := 0.4
+const PEEK_SECONDS := 0.3
 ## Blank paper above a sheet's first line (in lines): what peeks out of the slot before it prints.
 const PAGE_MARGIN := 1.3
 
@@ -143,7 +144,7 @@ func paper_scroll_px() -> float:
 
 ## The paper's speed (px/s) as the page leaves: the next page starts at this speed.
 func feed_speed() -> float:
-	return 2.0 * _feed_dist / FEED_OUT if _feed_dist > 0.0 else 0.0
+	return 1.7 * _feed_dist / FEED_OUT if _feed_dist > 0.0 else 0.0   # d/dt of Fax.ease_in at the end
 
 
 func _queue_chart() -> void:
@@ -225,7 +226,7 @@ func _process(_delta: float) -> void:
 		if _feed_t >= 0.0:
 			_feed_t += dt
 			var t := minf(_feed_t / FEED_OUT, 1.0)
-			_feed_px = _feed_dist * t * t   # accelerating: leaves at feed_speed()
+			_feed_px = _feed_dist * Fax.ease_in(t)   # accelerating: leaves at feed_speed()
 			_feed_tick -= dt
 			if _feed_tick <= 0.0:
 				_feed_tick = FEED_TICK
@@ -250,7 +251,7 @@ func _tick_page(dt: float) -> bool:
 	if _eject_t >= 0.0:
 		_eject_t += dt
 		var k := minf(_eject_t / EJECT_SECONDS, 1.0)
-		_eject_px = _eject_dist() * k * k
+		_eject_px = _eject_dist() * Fax.ease_in(k)
 		if k >= 1.0:
 			_eject_t = -1.0
 			_old_start = -1

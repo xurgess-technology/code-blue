@@ -140,16 +140,16 @@ func pocket_go(into: bool) -> void:
 		me.teleport(spots[0] if not spots.is_empty() else Vector3.ZERO)
 
 
-## A new level exists (game._build_level): the supply closet's locked door, and the hidden room
-## again if dev mode is already on (the old one went with the old level).
+## A new level exists (game._build_level): if dev mode is already on, the supply closet's door and
+## the hidden room again (the old ones went with the old level).
 func on_level_built() -> void:
 	room = null
 	room_info = {}
 	closet_door = null
 	_applied_gate = false
 	_applied_lights = true
-	_add_closet_door()
 	if game.dev_on():
+		_add_closet_door()
 		build_room()
 
 
@@ -212,8 +212,13 @@ func _room_origin() -> Vector3:
 	return Vector3(snappedf(at.x, C.TILE), 0.0, snappedf(at.z, C.TILE))
 
 
-## The locked door on the supply closet's west wall (every level with a supply closet).
+## The door on the supply closet's west wall (every level with a supply closet). It only exists while
+## dev mode is on (Zach, 2026-09-17): no locked door hinting at anything before.
 func _add_closet_door() -> void:
+	if closet_door != null and is_instance_valid(closet_door):
+		return
+	if game.level == null or not is_instance_valid(game.level):
+		return
 	for r in game.level_info.get("rooms", []):
 		if String(r.get("kind", "")) != "or_storage":
 			continue
@@ -591,7 +596,11 @@ const DOOR_ACTIONS := ["doors_all", "regen_wings"]
 ## On builds the hidden room here (the pharmacy fax's loading page covers the hitch).
 func on_dev_tools(on: bool) -> void:
 	if on:
+		_add_closet_door()
 		build_room()
+	elif closet_door != null and is_instance_valid(closet_door):
+		closet_door.queue_free()
+		closet_door = null
 	dev_tools_changed.emit(on)
 	state_changed.emit()
 
@@ -670,7 +679,7 @@ func _apply_request(sender: int, action: String, a: Dictionary) -> void:
 			for m in game.monsters.values().duplicate():
 				game.kill_monster(m)
 		"patient":
-			set_patient(String(a.get("patient", "bob")), String(a.get("ailment", "gunshot")))
+			set_patient(String(a.get("patient", "bob")), String(a.get("ailment", "gunshot")), bool(a.get("dead", false)))
 		"clear_patient":
 			# loop: every patient, on the tables and on the way.
 			for c in game.cases.duplicate():
@@ -862,7 +871,8 @@ func set_nurse_walk(mode: String, who: Node) -> void:
 		nurse_loop.append(NavigationServer3D.map_get_closest_point(map, p) if has_nav else p)
 
 
-func set_patient(patient_id: String, ailment_id: String) -> void:
+## `dead`: they flatline at once and stay on the table as a body (for the furnace).
+func set_patient(patient_id: String, ailment_id: String, dead := false) -> void:
 	if not is_host() or Procedures.patient(patient_id).is_empty() or Procedures.ailment(ailment_id).is_empty() \
 			or Procedures.is_player_only(ailment_id):
 		return
@@ -875,7 +885,10 @@ func set_patient(patient_id: String, ailment_id: String) -> void:
 			game.remove_case(int(there.id))
 	if game.phase == game.Phase.LOBBY:
 		game.clock_in()   # a patient before clocking in: clock in first
-	game.add_case({"patient_id": patient_id, "ailment_id": ailment_id, "table": table, "state": "on_table"})
+	var id: int = game.add_case({"patient_id": patient_id, "ailment_id": ailment_id, "table": table, "state": "on_table"})
+	if dead:
+		game.finish_case(id, false)
+		return
 	game.say("%s is on the table: %s." % [Procedures.patient(patient_id).name, Procedures.ailment(ailment_id).name], 3.0)
 
 

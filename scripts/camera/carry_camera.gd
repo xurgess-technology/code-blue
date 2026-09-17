@@ -1,26 +1,47 @@
 extends RefCounted
-## The over-the-shoulder camera while the local player carries a downed teammate or drags a monster
-## (docs/HANDS_AND_FEEDBACK.md "Over-the-shoulder carry camera"). Local only: nothing new on the wire.
+## The over-the-shoulder carry camera while the local player carries a downed teammate or a body, or
+## drags a monster (docs/HANDS_AND_FEEDBACK.md "Over-the-shoulder carry camera"). Local only: nothing
+## new on the wire.
 ##
 ## Ordinary play is always first person, locked -- this camera only ever engages for the
-## carry/drag states below. It moves the camera-feel node (Head/FX) back from the head, over the
-## LEFT shoulder while carrying (the body rides the right shoulder, game.pinned_pose +0.55 x) and
-## higher over the right shoulder while dragging (the body lies behind and below). The offset is in
-## the head's frame, so mouse pitch orbits it around the head, and a teleport moves it with the
-## player (no easing across the world; the wall pull-in snaps to the new place). A sphere cast from
-## the shoulder keeps it out of walls: in a corridor it pulls in toward the head, and the
-## first-person hands take back over if it pulls in far enough to put the camera inside the local
-## body. The local body (and the carried body, while carrying) become visible whenever the shoulder
-## offset is far enough out to show them; the first-person hands and held item show whenever it is
+## carry/drag states below. Framed the way the big third-person games do it (The Last of Us Part II,
+## the RE4 remake, God of War): the camera sits close behind and over the RIGHT shoulder, so the
+## carrier fills the left third of the screen and the crosshair at the centre is clear; the load
+## rides the LEFT shoulder (game.pinned_pose -0.55 x, Player.HUMAN_CARRIED_SHOULDER mirrored,
+## corpses.shoulder_pose), where it shows at the left edge without filling the frame.
+##
+## The rig: a PIVOT at the upper back (just below and behind the eye, in the player's yaw frame),
+## then the shoulder offset sideways, then an arm up and back that swings with the look pitch --
+## scaled down (ORBIT_K) so looking down lifts the camera a little over the shoulder and looking up
+## lowers it a little behind the back, and a little shorter looking up (LOOK_UP_PULL) so it never
+## digs into the floor. The camera itself always looks where the head looks, so the crosshair aims
+## along the player's aim (aim_segment). A teleport moves it with the player (no easing across the
+## world; the wall pull-in snaps to the new place). Sphere casts along the same three legs (head ->
+## pivot -> shoulder -> camera) keep it out of walls: in a corridor it pulls in toward the head, and
+## the first-person hands take back over if it pulls in far enough to put the camera inside the
+## local body. The local body (and the carried body, while carrying) become visible whenever the
+## camera is far enough out to show them; the first-person hands and held item show whenever it is
 ## not. The flashlight stays at the head, pointed where the camera looks.
+## After a body goes into the furnace the camera lingers over the shoulder for LINGER_SECONDS so the
+## carrier sees it roll off into the fire (linger(), corpses.gd).
 ## Setting `carry_camera`: "shoulder" (default) or "first_person".
 
-const EASE_TIME := 0.35
-## Head-space offsets (x right, y up, z back).
-const CARRY_OFFSET := Vector3(-1.0, 0.45, 2.0)
-const DRAG_OFFSET := Vector3(0.45, 1.0, 3.6)
+const EASE_TIME := 0.4
+## Yaw-frame offsets (x right, y up, z back). PIVOT is from the eye; the arms are from the pivot.
+const PIVOT := Vector3(0.0, -0.2, 0.12)
+## Carrying: close over the right shoulder. At level pitch the camera sits (0.5, 0.14, 1.27) from the eye.
+const CARRY_ARM := Vector3(0.5, 0.34, 1.15)
+## Dragging: the body lies behind, so a little higher and further back, looking gently down.
+const DRAG_ARM := Vector3(0.58, 0.72, 1.5)
 ## Extra downward look while dragging, radians, so the body behind is in frame.
-const DRAG_TILT := 0.45
+const DRAG_TILT := 0.2
+## How much of the look pitch swings the arm around the pivot (0 rigid, 1 a full orbit).
+const ORBIT_K := 0.45
+## The arm's back reach is this much shorter looking fully up (none looking level or down).
+const LOOK_UP_PULL := 0.25
+## How fast the arm follows a change of target (carrying -> dragging), 1/s.
+const ARM_FOLLOW := 6.0
+const LINGER_SECONDS := 2.5
 const CAST_RADIUS := 0.16
 ## Below this distance from the head the local body hides (the camera would be inside it).
 const HIDE_BODY_BELOW := 0.55
@@ -36,12 +57,14 @@ var offset := Vector3.ZERO
 var arm_length := 0.0
 var active := false
 
-var _side_offset := CARRY_OFFSET
+var _target_arm := CARRY_ARM
+var _arm := CARRY_ARM
 var _tilt := 0.0
 var _last_pos := Vector3.INF
 var _len_k := 1.0
 var _side_k := 1.0
 var _body_shown := false
+var _linger := 0.0
 
 
 func _init(p: Node) -> void:
@@ -60,17 +83,42 @@ func wants() -> bool:
 		return false
 	if not setting_on():
 		return false
-	return p.carrying != 0 or p.dragging_monster >= 0
+	return p.carrying != 0 or p.dragging_monster >= 0 or _linger > 0.0
+
+
+## Stay over the shoulder a moment after the carry ends (a body just went into the furnace).
+func linger(seconds: float = LINGER_SECONDS) -> void:
+	_target_arm = CARRY_ARM
+	_linger = seconds
+
+
+## The camera's yaw-frame offset from the eye for an arm and a look pitch, walls ignored (tests).
+static func rest_offset(arm: Vector3, pitch: float) -> Vector3:
+	return PIVOT + Vector3(arm.x, 0.0, 0.0) + swing(arm, pitch)
+
+
+## The up-and-back part of an arm, swung around the pivot by the look pitch (+ looks up).
+static func swing(arm: Vector3, pitch: float) -> Vector3:
+	var pull := 1.0 - LOOK_UP_PULL * clampf(pitch / 1.3, 0.0, 1.0)
+	return Basis(Vector3.RIGHT, pitch * ORBIT_K) * Vector3(0.0, arm.y, arm.z * pull)
 
 
 func update(delta: float) -> void:
 	var p = player
+	_linger = maxf(0.0, _linger - delta)
+	if p != null and (p.downed or not p.alive):
+		_linger = 0.0
 	var want := wants()
-	if want:
-		_side_offset = CARRY_OFFSET if p.carrying != 0 else DRAG_OFFSET
+	if want and (p.carrying != 0 or p.dragging_monster >= 0):
+		_target_arm = CARRY_ARM if p.carrying != 0 else DRAG_ARM
+	if blend <= 0.0:
+		_arm = _target_arm
+	else:
+		_arm = _arm.lerp(_target_arm, clampf(1.0 - exp(-ARM_FOLLOW * delta), 0.0, 1.0))
 	blend = move_toward(blend, 1.0 if want else 0.0, delta / EASE_TIME)
 	active = blend > 0.0
-	var e := blend * blend * (3.0 - 2.0 * blend)
+	# smootherstep: no jolt as it leaves the head or as it settles over the shoulder
+	var e := blend * blend * blend * (blend * (blend * 6.0 - 15.0) + 10.0)
 	var fx: Node3D = p.fx
 	var head: Node3D = p.head
 	if fx == null or head == null:
@@ -85,29 +133,30 @@ func update(delta: float) -> void:
 		_show_body(false)
 		_last_pos = Vector3.INF
 		return
-	var want_off: Vector3 = _side_offset * e
 	_tilt = (DRAG_TILT if p.dragging_monster >= 0 else 0.0) * e
-	# Keep the camera out of walls, in three legs from the head: up, out to the shoulder, back. A wall
-	# beside the player moves the camera in over the head (it stays behind them); a wall behind pulls
-	# it in toward the head. Shortening is instant, growing back eases.
+	# Keep the camera out of walls, in three legs from the head: to the pivot at the upper back, out
+	# to the right shoulder, then up and back along the swung arm. A wall beside the player moves the
+	# camera in over the head (it stays behind them); a wall behind pulls it in toward the head.
+	# Shortening is instant, growing back eases.
 	var hx: Transform3D = head.global_transform
-	var hb := hx.basis.orthonormalized()
+	var hb := Basis(Vector3.UP, (p as Node3D).global_rotation.y)   # yaw only; the pitch swings the arm
+	var sw: Vector3 = swing(_arm, head.rotation.x) * e
 	var space: PhysicsDirectSpaceState3D = head.get_world_3d().direct_space_state if head.is_inside_tree() else null
-	var top: Vector3 = _cast(space, hx.origin, hx.origin + hb * Vector3(0.0, want_off.y, 0.0))
-	var side_goal: Vector3 = top + hb * Vector3(want_off.x, 0.0, 0.0)
-	var side_k := _fraction(space, top, side_goal)
-	var back_from_full: Vector3 = top + (side_goal - top) * side_k
-	var back_k := _fraction(space, back_from_full, back_from_full + hb * Vector3(0.0, 0.0, want_off.z))
+	var pivot: Vector3 = _cast(space, hx.origin, hx.origin + hb * (PIVOT * e))
+	var side_goal: Vector3 = pivot + hb * Vector3(_arm.x * e, 0.0, 0.0)
+	var side_k := _fraction(space, pivot, side_goal)
+	var from_side: Vector3 = pivot + (side_goal - pivot) * side_k
+	var back_k := _fraction(space, from_side, from_side + hb * sw)
 	var teleported: bool = _last_pos != Vector3.INF and _last_pos.distance_to(p.global_position) > 2.5
 	_last_pos = p.global_position
 	if teleported:
 		_side_k = side_k
 		_len_k = back_k
 	else:
-		_side_k = side_k if side_k < _side_k else minf(side_k, _side_k + EXTEND_SPEED * delta / maxf(0.05, absf(want_off.x)))
-		_len_k = back_k if back_k < _len_k else minf(back_k, _len_k + EXTEND_SPEED * delta / maxf(0.05, want_off.z))
-	var shoulder: Vector3 = top + (side_goal - top) * minf(_side_k, side_k)
-	var world_cam: Vector3 = shoulder + hb * Vector3(0.0, 0.0, want_off.z * minf(_len_k, back_k))
+		_side_k = side_k if side_k < _side_k else minf(side_k, _side_k + EXTEND_SPEED * delta / maxf(0.05, absf(_arm.x * e)))
+		_len_k = back_k if back_k < _len_k else minf(back_k, _len_k + EXTEND_SPEED * delta / maxf(0.05, sw.length()))
+	var shoulder: Vector3 = pivot + (side_goal - pivot) * minf(_side_k, side_k)
+	var world_cam: Vector3 = shoulder + hb * (sw * minf(_len_k, back_k))
 	offset = hx.affine_inverse() * world_cam
 	arm_length = offset.length()
 	fx.position = offset

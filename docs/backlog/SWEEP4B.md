@@ -155,5 +155,3 @@ work on the Blender-made rigs; check before scheduling.
   rattle the Discharged can hear.
 - **Open bugs** stay in `docs/KNOWN_ISSUES.md`. The Steam backend has never been tested against a
   real Steam client.
-- **Unmerged art test:** branch `worktree-agent-a441225dea8b42852` (an AI-generated Night Nurse,
-  made with FLUX, TripoSR and a Blender cleanup). Keep or delete it.

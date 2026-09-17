@@ -10,21 +10,15 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 
 ## Surgery and patients
 
-- **Bob's gown pokes through the gunshot wound view.** Gown folds rise up to about 2 cm above the
-  `gunshot` site plane and move with breathing; the forceps channel is lifted 2 to 2.9 cm to
-  compensate, but a flap still shows through (`tools/lab_shots/forceps_finished.png`). Fix options:
-  put the site on top of the local geometry, or let the forceps step hide the body's own wound
-  visuals and gown locally.
-- **A teammate's flashlight does not light the wound.** The forceps channel darkens every light by
-  depth (down to 6% at the bullet), including other players' flashlights. The design wants a
-  teammate's light to help. Needs an "extra light" input to the minigame or a different darkness
-  approach. Best done once multiplayer can be tested for real.
-- **The infection still shows in two styles at the edges.** The tourniquet step now puts its
-  infection front exactly where the body paints its own, and its decal is wider and deeper, so the
-  seal's paddle and Bob's forearm are covered from above. At a glancing angle a little of the
-  body's green still shows low on the sides of the limb (`tools/lab_shots/fix_tq_bob_wide.png`).
-  A real fix is one infection look: the body's shader drawing the minigame's margin, or the body
-  hiding its own infection while the decal is up.
+- **The anesthetic view on Bob is half behind his gown.** The step's camera sits over his chest
+  side of the left forearm, so the gown's bulk hides the inner elbow's lower half; the vein bar is
+  drawn without depth test so the step still plays (`tools/lab_shots/gown_anes_bob_bot.png`).
+  Clearing the gown there does not work (it is a shell with no torso under it); a camera from the
+  arm's outer side would.
+- **The Kenney fallback Bob (`bob_skin.gdshader`) still paints the old grey-green infection.** Only
+  used when the Blender model is missing.
+- **The cloth shader now has a `discard`** (the gown cut-out), which every human's cloth shares; a
+  small depth-prepass cost on characters, not measured.
 - **The work lamp is tuned for the game, still bright in the lab (sweep 2, orscreen).** Energy 2.2
   -> 0.5 with a steeper falloff (attenuation 1.0, 40 degree cone). In the real OR
   (`tools/game_shots/10_operating_hud.png`) skin keeps its colour and the cues read. The minigame
@@ -336,7 +330,7 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 - **Solo means game over on the first down.** Nobody can carry you, so `all_players_out()` fails
   the shift at once (the mortal playtest now reports "went down" instead of "died"). The dev room
   never ends the shift for it.
-- **The carry pose is a stiff plank.** The carried body lies straight over the right shoulder (no
+- **The carry pose is a stiff plank.** The carried body lies straight over the left shoulder (no
   bend, no animation), sticking out behind the carrier; with the big-headed surgeon model it is
   mostly hidden from straight in front. The carried player's camera sits a metre behind the
   shoulder point along their own look direction, so looking around orbits a little.
@@ -506,7 +500,7 @@ Players, Bob, the paramedics and the downed player on the table use the Blender 
   Mesh LODs for the skinned bodies or a cheaper distant body are the next step if it matters.
 - **The first-person arms stay the hands worker's `fp_arms`** (a different look from the third-person
   surgeon: tinted sleeve and mitten hand).
-- **The carry reads, but loosely**: the carried body hangs on the carrier's right shoulder from a
+- **The carry reads, but loosely**: the carried body hangs on the carrier's left shoulder (mirrored) from a
   fixed offset (`Player.HUMAN_CARRIED_SHOULDER`, sized for a 1.78 m carrier), so on the 1.68 m
   surgeon B it sits a few centimetres high; the carrier's arm across the legs does not grip them.
 - **Arms are posed by direction, not IK**: held items sit in the hand bone's palm socket, but the
@@ -745,6 +739,34 @@ Players, Bob, the paramedics and the downed player on the table use the Blender 
 - New content must be added to `scripts/warmup.gd` (new item, patient state, monster, minigame),
   and minigames should build shaders through `Minigame.cached_shader()`, or first-use hitches come back.
 - Run-to-run noise is about +/-10%; compare with `tools/perfprobe.tscn -- --tune` (includes a repeat row).
+
+## Resolved 2026-09-17 (surgery look pass)
+
+- **Bob's gown poked through the gunshot wound view.** The forceps step now calls
+  `PatientBody.expose_site`: Bob's gown panel comes back and the cloth shader cuts the gown away
+  inside the skin patch's ellipse with a shaded fold round it, so no fold rises through the patch
+  and the rectangular panel hole is gone while the step is up (`tools/lab_shots/gown_forceps_bob.png`,
+  `gown_forceps_bob_wide.png`). The seal has no clothing; its patch was already clean
+  (`gown_forceps_seal*.png`). The gunshot gauze step covers the site with its drape.
+- **A teammate's flashlight did not light the wound.** `ctx.helper_lights` / `Minigame.helper_light()`
+  (see CONTRACTS): a teammate's flashlight that is on, within 4 m, aimed at the site and unblocked
+  lifts the forceps channel's darkness (a warm pool where the beam lands, less gloom down the whole
+  tract, a brighter bullet) on every machine. Checked in the lab
+  (`--teammate-light`, `=nohelp`, `=away`: `tools/lab_shots/flash_*.png`) and in the real game with a
+  teammate bot (`tools/teammatelightshot.tscn`: `tools/game_shots/teammate_light_{off,on}.png`,
+  helper 0.00 -> 1.00).
+- **The infection showed in two styles.** Bob's skin shader never drew his infection at all (the
+  glTF import flips UV2.y, so its right-arm test never matched), and the tourniquet step painted its
+  own decal. Now the body owns one look everywhere (table, carried, floor, every step): Bob's shader
+  draws a flushed band, a ragged dark margin, raw red and necrotic purple-black with slough and pus,
+  matching the seal's baked `Seal_Infect`, and the tourniquet step no longer draws its decal on a
+  real body. Its front now follows any body's (Bob's starts 17 cm past `limb`, beyond `PLACE_REACH`,
+  so the step used to roll its own front elsewhere) (`tools/lab_shots/inf_*.png`).
+- **The bone saw's guide was a big glowing line.** Replaced with a pre-op skin marking in surgical
+  violet: a dashed line with hash ticks across it and a dotted margin either side, a faint sheen for
+  the dark OR that takes a soft green/amber/red tint after each pass, and no tooth glow. It sorts
+  under the kerf and the pooled blood; the skull variant uses a narrower spread
+  (`tools/lab_shots/saw_mark_*.png`; before: `before_saw_*.png`).
 
 ## Resolved 2026-09-13
 
@@ -1859,3 +1881,42 @@ Rebuilt around that:
   "the bot threw the loot into the furnace and sold it for $52" (every run), braintest "nobody is
   left looking through a Walk-In" after a game over (flaky, about 1 in 2), mapcheck seed 1's morgue
   tray (known).
+
+## Right-shoulder carry camera, load on the left shoulder (2026-09-17)
+
+- The carry camera now looks over the RIGHT shoulder and everything carried rides the LEFT
+  (docs/HANDS_AND_FEEDBACK.md section 3). A human's Carried clip is mirrored with an x scale of -1
+  on its root; lighting and culling look right in `tools/game_shots/exit_2_carrying.png`,
+  `29_hands_carry_cam_player.png` and `31_human_teammate_carrying.png`.
+- **The dragged monster is out of frame while dragging.** It lies 1.15 m behind the carrier
+  (`combat.DRAG_BEHIND`), under the camera, so `29_hands_carry_cam_monster.png` shows only the
+  carrier. Seeing it would need a much higher, steeper camera.
+- **The carrier's left arm crosses the chest** below the carried legs rather than gripping them
+  (direction posing, no IK); the fingertips show past the right side of the chest from the camera.
+- **A seal or monster body lies across the shoulders**, its middle out over the left shoulder
+  (`corpses.SHOULDER_AT` -0.38 x): the far end still crosses behind the carrier's head, just left of
+  the crosshair (`exit_10_carrying_seal.png`).
+
+## Fax polish: one motion vocabulary, snappier transitions (2026-09-17)
+
+- **Every fax screen moves the same way** (docs/FAX.md has the full table): pages feed up out of the
+  slot (0.5 s, ease out) and eject up off the top (0.35 s, ease in), the printer rises / sinks
+  (0.38 s) only when the machine itself comes or goes. Shared constants, easing and a reversible
+  `Fax.Motion` live in `scripts/fax_printer.gd`.
+- **Faster:** launch -> title 2.1 -> 0.95 s, title <-> settings 1.5 / 1.8 -> 0.85 s, the shift
+  assignment's tail after the world is ready ~5 -> ~1.5 s (GOOD LUCK types quickly, short beat, and
+  the mouse returns as the page starts leaving), pause close 0.55 -> 0.38 s.
+- **Control returns at once:** closing the pause page unpauses the same frame (`settings_ui.closed`
+  now fires on dismissal; `gone` fires once it has left); Esc again turns it around. The pharmacy
+  form likewise (`is_open()` false at once) and can be called back while leaving.
+- **New motion where things popped:** the pharmacy form rises/feeds in, ejects on cancel, sinks
+  after SEND; Main menu from the pause page ejects the pause page over the title's printer and feeds
+  the sign-in sheet (`settings_ui.leave_to_menu`, `menu.hold_in_printer`); the tip memo's paper slides
+  up as lines print; the secret order's reply page rises out of the slot line by line.
+- **No teleports / double actions:** a sheet sent away half fed in leaves from where it is (menu,
+  shift assignment cancel); Enter / double clicks / Settings while the sign-in sheet is ejecting are
+  ignored (`Menu._accepting`); Esc during the shift assignment's last 0.4 s doesn't open the pause fax
+  over its sinking printer.
+- `tools/settingstest.gd`'s pause check now expects the shift resumed straight after Esc.
+- `tools/faxshot.tscn` (windowed) drives every transition, logs durations, saves contact sheets.
+  Not run: the test suites (settingstest, devtest, faxcheck, inventorytest touch these screens).

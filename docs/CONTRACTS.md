@@ -200,6 +200,8 @@ func flatline() -> void
 func site_section(site: String) -> Dictionary           # limb sites: {half_up, half_side, axis_depth, shape}; {} elsewhere
 func infection_start(site: String) -> float             # metres along the site's +X to where the body's infection begins; INF if none
 func make_severed_limb(parent: Node) -> Node3D          # adds a static copy of the limb an amputation removes, posed where it is; may be null
+func expose_site(site: String, centre: Vector2, radii: Vector2) -> void  # clear clothing inside an ellipse on the site plane (site X, Z) while a step is up
+func cover_site() -> void                               # undo expose_site
 ```
 
 Sites every patient provides: `injection`, `gunshot`, `limb` (above the infection, where the
@@ -251,10 +253,15 @@ frame and API; underneath:
   Sections: `limb` half_up 0.0489 / half_side 0.049, `limb_cut` 0.0411 / 0.0384, `shape` 2.2;
   `infection_start` 0.172 and 0.0295.
 - The gunshot ailment hides `Human_GownPanel` (a real opening in the gown, not a patch over it).
+  While a step has called `expose_site` (the forceps step, round its skin patch) the panel is back
+  and the cloth shader (`human_cloth.gdshader`, `expose*` uniforms) discards the gown inside the
+  ellipse instead, so gown folds never rise through the patch. Only the panel has skin under it:
+  elsewhere the gown is a shell over nothing, so do not expose sites away from the gunshot panel.
   Amputation hides `Human_Forearm_R`; the upper arm's own stump cap shows. `make_severed_limb` bakes
   `Human_Forearm_R` from the current pose (`bake_mesh_from_current_skeleton_pose`), cut cap included.
 - `skin_mats` is the model's skin ShaderMaterial (`human_skin.gdshader`): `pallor`, `grey`, `infect`
-  (graded by UV2.x, metres along the right arm, from 0.384 to 0.434), plus `gash`, `wound`,
+  (graded by UV2.x, metres along the right arm, from 0.384 to 0.434; the import flips UV2.y, so the
+  right arm reads 0 in the shader), plus `gash`, `wound`,
   `vein_glow`. Overlays (tourniquet, stump dressing from `SealModelBuilder.make_stump_dressing`,
   wound, pad and belly band, drips) are fitted to the model.
 
@@ -312,6 +319,10 @@ are easy to miss:
 - `on_jolt(offset, strength, duration)` is called on the operator's machine when an underdosed
   patient stirs; for `duration` seconds the cursor passed to `handle_cursor` carries a decaying
   shake of up to `offset`. React there rather than inferring jolts from cursor jumps.
+- `ctx.helper_lights` (optional Callable -> Array of SpotLight3D): the surgery system passes the
+  flashlights of living players other than the operator. `helper_light()` turns them into
+  `{amount, spot}` for this site (on, in range, aimed, clear line of sight). The forceps step lifts
+  its channel's darkness with it on every machine.
 - `Minigame.OWN_LAYER` (render layer 20) is reserved for a minigame's own props. Decals project
   only onto layer 1, so nothing on layer 20 gets painted. Cameras keep the default cull mask.
 - `hud_state()` may add `cross_section: {layers: [{name, from, to, color}], depth, layer}`; the
@@ -1298,7 +1309,7 @@ game.downed_view           # scripts/downed/downed_view.gd: blood trails, the lo
 - Carrying: aim at a downed teammate (`pl_<id>`) with empty hands and hold E for `CARRY_HOLD`
   (simulated by the host from `wants_interact` + `aim_id`). E again puts them down in front (a
   reliable `placed` event tells the downed machine where, since it owns its position); E aimed at
-  the `player_table` proxy lays them on it. The carried body rides the right shoulder; the carried
+  the `player_table` proxy lays them on it. The carried body rides the LEFT shoulder (`pinned_pose` -0.55 x); the carried
   player's camera hangs a metre behind that point.
 - Player table: `level_info.tables` entry with `kind == "player"` (the hospital's), else a clear spot
   2.7-3.4 m from the OR table; a table model (`scripts/downed/player_table.gd`) is built only when
@@ -1496,14 +1507,21 @@ Settings "carry_camera": "shoulder" (default) | "first_person"     # carrying/dr
   `Walk` at 1.45x (carrying, dragging, winding up), `Crawl` (downed; frozen when not moving), `Carried`,
   `Lying` (on the table), and the one-shots `PickUp` (an interact aimed at `it_*`) / `Interact` when an
   interact comes in standing still. `body_hands.lies_by_clip()` tells `Player._update_down_pose` not to
-  tip the body; carried, the body is placed each frame at `Player.HUMAN_CARRIED_SHOULDER` (0.15, 1.535, 0.03)
-  in the carrier's frame and yaw, so the Carried clip's belly lands on the carrier's right shoulder. The first-person arms stay `fp_arms`.
-- **Carry camera**: while the local player carries a downed player or drags a monster (setting
-  "shoulder"), `Head/FX` eases (0.35 s) to `CARRY_OFFSET` (-1.0, 0.45, 2.0) in the head's frame (over
-  the left shoulder; the body rides the right) or `DRAG_OFFSET` (0.45, 1.0, 3.6) with a 0.45 rad
-  downward look (the body lies behind). Sphere casts (r 0.16) from the head go up, out to the
-  shoulder, then back: a wall beside moves it in over the head, a wall behind pulls it toward the
-  head; shortening is instant, growing back 2.5 m/s, a teleport snaps. The first-person hands and held
+  tip the body; carried, the body is placed each frame by `Player.human_carried_pose(carrier)`: `HUMAN_CARRIED_SHOULDER` (-0.15, 1.535, 0.03)
+  in the carrier's frame and yaw, mirrored (x scale -1: the clip is authored over a right shoulder), so the Carried clip's belly lands on the carrier's LEFT shoulder; corpses.gd places a carried human body the same way and a seal/monster body across the shoulders at `SHOULDER_AT` (-0.38, 1.62, 0.18), where the furnace roll-off starts. The carrier's `carry` pose wraps the LEFT arm across the legs; the right arm stays free. The first-person arms stay `fp_arms`.
+- **Carry camera** (`scripts/camera/carry_camera.gd`): while the local player carries a downed player
+  or a body, or drags a monster (setting "shoulder"), `Head/FX` eases (0.4 s, smootherstep) over the
+  RIGHT shoulder (the load rides the left), framed like a flagship third-person game: the carrier on
+  the left third, the crosshair clear. In the player's yaw frame: a `PIVOT` (0, -0.2, 0.12) from the
+  eye (the upper back), then `CARRY_ARM` (0.5 right, 0.34 up, 1.15 back) -- at level pitch the camera
+  sits (0.5, 0.14, 1.27) from the eye -- or `DRAG_ARM` (0.58, 0.72, 1.5) with a 0.2 rad downward look.
+  The up/back part of the arm swings around the pivot by `ORBIT_K` (0.45) of the look pitch (looking
+  down lifts it, looking up lowers it) and its back reach shortens up to 25% looking up
+  (`rest_offset(arm, pitch)` gives the wall-free offset); the camera always looks where the head
+  looks. Switching carry/drag eases the arm (6/s). Sphere casts (r 0.16) run head -> pivot ->
+  shoulder -> camera: a wall beside moves it in over the head, a wall behind pulls it toward the
+  head; shortening is instant, growing back 2.5 m/s, a teleport snaps. After a body goes into the
+  furnace it lingers 2.5 s (`linger()`). The first-person hands and held
   stack hide (the camera's cull mask drops `HANDS_LAYER`), the local body shows (no shadows) unless the
   camera is within 0.55 m of the head, the flashlight stays at the head pointed along the camera. The
   aim ray (`aim_segment`) runs along the camera's line from where it passes the head, reaching

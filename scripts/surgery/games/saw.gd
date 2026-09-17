@@ -15,13 +15,15 @@ extends "res://scripts/surgery/minigame.gd"
 ##   - Each pass advances the depth by k / layer_resistance * (FLOOR + (1 - FLOOR) * length) *
 ##     (1 - 0.5 * rushed) * (1 - 0.6 * off_line). Short passes still cut a little.
 ##   - RUSHED: faster than the layer allows (bone allows less) and the saw jumps in the kerf:
-##     blood and chips spray, the kerf goes ragged and the guide flashes red; enough of it
+##     blood and chips spray, the kerf goes ragged and the marking's sheen pulses red; enough of it
 ##     botches ("The saw jumped and tore the muscle").
 ##   - OFF LINE: the blade follows the cursor across the line, but once the kerf is started it
 ##     holds the blade (KERF_GRIP). Beyond the tolerance it scores the skin beside the cut, the
-##     guide turns red, and it botches at a rate.
-##   - The GUIDE: a glowing line on the limb along the cut, and a glow along the saw's teeth.
-##     It flashes green on a good biting pass, amber on a short one, red when rushed or off line.
+##     marking's sheen warms to red, and it botches at a rate.
+##   - The MARKING: a pre-op skin-marker line in surgical violet round the limb along the cut,
+##     dashed, with short hash ticks across it, the way a surgeon marks a patient. It carries a
+##     faint sheen so it reads in the dark OR; after each pass the sheen takes a soft tint (green
+##     biting, amber short, red rushed or off line) and settles back. The hint text says the rest.
 ##   - LAYERS: skin (fast) -> muscle -> bone (slow, grinding, bone dust) -> far soft tissue. The
 ##     kerf shows the colour of the layer, and the sound changes from a rasp to a grind.
 ##   - TOURNIQUET (ctx.flags.tourniquet, missing = 0.5): a weak one makes every pass spurt,
@@ -75,13 +77,28 @@ const SKULL_BLEED := 0.35
 const K_SKULL := 0.05
 const MAX_SPLATS := 28
 const MAX_SCORES := 10
+## Surgical skin-marker violet (gentian violet), for the ink and its resting sheen.
+const INK := Color(0.2, 0.03, 0.38)
+const INK_SHEEN := Color(0.55, 0.3, 1.0)
+## The sheen's tint after a pass. Soft: the ink stays violet, only its faint glow shifts.
 const GUIDE_COLORS := {
-	Verdict.NONE: Color(0.75, 0.9, 1.0),
-	Verdict.GOOD: Color(0.15, 1.0, 0.35),
-	Verdict.SHORT: Color(1.0, 0.72, 0.1),
-	Verdict.RUSHED: Color(1.0, 0.12, 0.08),
-	Verdict.OFF: Color(1.0, 0.12, 0.08),
+	Verdict.NONE: INK_SHEEN,
+	Verdict.GOOD: Color(0.35, 1.0, 0.55),
+	Verdict.SHORT: Color(1.0, 0.72, 0.25),
+	Verdict.RUSHED: Color(1.0, 0.25, 0.2),
+	Verdict.OFF: Color(1.0, 0.25, 0.2),
 }
+const SHEEN_ENERGY := 0.4       # the marking's resting glow: just enough to find it in the dark
+const SHEEN_PULSE := 0.15        # extra glow right after a pass, fading with the flash
+const MARK_W := 0.058            # metres across the marking's texture (line, hash ticks, margin dots)
+const MARK_LINE_HW := 0.0012     # half width of the drawn line (a broad marker: it must read from the camera)
+const MARK_DASH := 0.0065        # one dash and its gap along the line
+const MARK_TICK_HL := 0.0155     # half length of a hash tick across the line (they show past the blade)
+const MARK_TICK_HW := 0.0009     # half width of a tick
+const MARK_DOTS_AT := 0.0235     # the dotted margin lines either side of the cut
+const MARK_DOT_R := 0.0014
+const MARK_DOT_EVERY := 0.0042
+const SKULL_MARK_SCALE := 0.62   # the skull's marking spread, of the limb's
 
 # -- tuning from ctx -----------------------------------------------------------------------------
 var diff := 1.0
@@ -138,11 +155,11 @@ var _rng := RandomNumberGenerator.new()
 var _built := false
 var _saw: Node3D
 var _saw_model: Node3D
-var _teeth_mat: StandardMaterial3D
 var _drips: Array[MeshInstance3D] = []
 var _smear: MeshInstance3D
 var _smear_mat: StandardMaterial3D
 var _marker: Decal
+var _mark_key := ""                # "<length mm>|<width mm>" of the marking's textures
 var _guide: Decal
 var _bruise: Decal
 var _opening: Decal
@@ -533,7 +550,7 @@ func _mat(col: Color, rough := 0.6, metal := 0.0) -> StandardMaterial3D:
 	return m
 
 
-func _decal(tex: Texture2D, size: Vector3, pos: Vector3, sort := 0) -> Decal:
+func _decal(tex: Texture2D, size: Vector3, pos: Vector3, sort := 0.0) -> Decal:
 	var d := Decal.new()
 	d.texture_albedo = tex
 	d.size = size
@@ -552,12 +569,20 @@ func _build() -> void:
 	var body = ctx.get("body")
 	var proj_h := hu * 2.0 + 0.06
 	var proj_y := -hu + 0.03
-	_marker = _decal(_texture("marker"), Vector3(0.006, proj_h, hs * 3.0 + 0.04), Vector3(0, proj_y, 0), 1)
-	# The glowing guide along the cut: it flashes green, amber or red with each pass.
-	_guide = _decal(_texture("glow_line"), Vector3(0.04 if skull else 0.09, proj_h, hs * (2.2 if skull else 3.2) + 0.05), Vector3(0, proj_y, 0), 10)
+	# The pre-op marking: violet ink on the skin (dashed line, hash ticks, dotted margins). Drawn on
+	# the skin, so it sorts over the bruise and under the kerf, the dust and the blood.
+	# Just round the limb: a longer box would ink the gown or the table beside it too.
+	# The skull's line runs across a forehead: a narrower spread keeps the margins off the brows.
+	var mark_size := Vector3(MARK_W * (SKULL_MARK_SCALE if skull else 1.0), proj_h, hs * 2.05 + 0.004)
+	_mark_key = "%d|%d" % [int(round(mark_size.z * 1000.0)), int(round(mark_size.x * 1000.0))]
+	_marker = _decal(_texture("marker0|" + _mark_key), mark_size, Vector3(0, proj_y, 0), 2.5)
+	_marker.modulate = INK
+	# ... and its faint sheen: the same strokes as emission only, so it can take a soft tint. Once
+	# the kerf is open the sheen drops the strokes over it (emission would show through the cut).
+	_guide = _decal(_texture("marker1|" + _mark_key), mark_size, Vector3(0, proj_y, 0), 2.6)
 	_guide.texture_emission = _guide.texture_albedo
-	# Bright enough to read under the work lamp, not so bright it blooms the limb away.
-	_guide.emission_energy = 0.9 if skull else 1.3
+	_guide.albedo_mix = 0.0
+	_guide.emission_energy = SHEEN_ENERGY
 	_guide.modulate = GUIDE_COLORS[Verdict.NONE]
 	_bruise = _decal(_texture("bruise"), Vector3(0.05, proj_h, 0.05), Vector3(0, proj_y, 0), 2)
 	_dust_decal = _decal(_texture("dust"), Vector3(0.08, proj_h, 0.1), Vector3(0, proj_y, 0), 3)
@@ -587,19 +612,6 @@ func _build() -> void:
 	var basis := tilt * Basis(Vector3.UP, PI * 0.5) * Basis(Vector3.RIGHT, PI * 0.5)
 	_saw_model.transform = Transform3D(basis, -(basis * Vector3(0.07, 0.012, 0.044)))
 	_saw.add_child(_saw_model)
-	# A glow along the teeth, the same colour as the guide on the limb.
-	var teeth := MeshInstance3D.new()
-	var tb := BoxMesh.new()
-	tb.size = Vector3(0.02, 0.002, 0.27)
-	teeth.mesh = tb
-	_teeth_mat = StandardMaterial3D.new()
-	_teeth_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	_teeth_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_teeth_mat.albedo_color = Color(GUIDE_COLORS[Verdict.NONE], 0.0)
-	teeth.material_override = _teeth_mat
-	teeth.position = Vector3(0.0, 0.003, -0.02)
-	teeth.name = "TeethGlow"
-	_saw.add_child(teeth)
 	# Blood on the blade: a smear along the teeth and drops hanging off it.
 	_smear_mat = _mat(Color(0.32, 0.0, 0.01, 0.0), 0.15)
 	_smear_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -732,22 +744,28 @@ func _update_visuals(delta: float) -> void:
 	_pool.size = Vector3(ps * 1.3, _pool.size.y, ps)
 	_pool.position.x = kx + 0.01 * distal
 	_pool.modulate = Color(1, 1, 1, clampf(blood * 2.5, 0.0, 0.95))
-	_marker.modulate = Color(1, 1, 1, clampf(1.0 - blood * 1.1, 0.15, 1.0))
-	# The guide: a calm glow until the saw is working, then the colour of the last pass, brightest
-	# right after it; red at once while the blade is off the line.
-	_flash = maxf(0.0, _flash - delta * 1.6)
-	var gcol: Color = GUIDE_COLORS[Verdict.NONE]
-	var glow := 0.25
+	# The ink stays where it was drawn; blood pooling over the cut hides it.
+	var ink_a := clampf(1.0 - blood * 1.1, 0.15, 1.0)
+	_marker.modulate = Color(INK.r, INK.g, INK.b, 0.92 * ink_a)
+	# Its sheen: violet at rest; after a pass a soft tint of the verdict that fades back, and a
+	# gentle red while the blade is off the line. Blood smothers it faster than the ink.
+	_flash = maxf(0.0, _flash - delta * 1.4)
+	var tint := 0.0
+	var gcol: Color = _flash_col
 	if held and off_now > 0.35:
 		gcol = GUIDE_COLORS[Verdict.OFF]
-		glow = 0.9
+		tint = 0.45 + 0.08 * sin(_vt * 6.0)
 	elif held and verdict != Verdict.NONE:
-		gcol = _flash_col
-		glow = 0.55 + 0.45 * _flash
+		tint = 0.5 * _flash
+	var sheen: Color = INK_SHEEN.lerp(gcol, tint)
 	_guide.visible = not _finale
-	_guide.position.x = kx if depth > KERF_FROM else 0.0
-	_guide.modulate = Color(gcol.r, gcol.g, gcol.b, glow)
-	_teeth_mat.albedo_color = Color(gcol.r, gcol.g, gcol.b, (0.25 + 0.6 * _flash) if held else 0.0)
+	_guide.modulate = Color(sheen.r, sheen.g, sheen.b, clampf(1.0 - blood * 1.8, 0.0, 1.0))
+	var glow_key := "marker%d|%s" % [2 if depth > 0.01 else 1, _mark_key]
+	if String(_guide.get_meta("key", "")) != glow_key:
+		_guide.set_meta("key", glow_key)
+		_guide.texture_albedo = _texture(glow_key)
+		_guide.texture_emission = _guide.texture_albedo
+	_guide.emission_energy = SHEEN_ENERGY + SHEEN_PULSE * maxf(_flash if held else 0.0, tint * 0.5)
 
 	# Splatter from each spurt, placed from the seed so every machine agrees.
 	if splats != _seen_splats:
@@ -903,9 +921,14 @@ static func _texture(key: String) -> Texture2D:
 	if _tex.has(key):
 		return _tex[key]
 	var img: Image
+	if key.begins_with("marker"):
+		# "marker<mode>|<length mm>|<width mm>"
+		var parts := key.trim_prefix("marker").split("|")
+		img = _img_marker(int(parts[0]), float(parts[1]) * 0.001, float(parts[2]) * 0.001)
+		var mt := ImageTexture.create_from_image(img)
+		_tex[key] = mt
+		return mt
 	match key:
-		"marker": img = _img_marker()
-		"glow_line": img = _img_glow_line()
 		"bruise": img = _img_soft(Color(0.45, 0.08, 0.12), 0.7, 1.4)
 		"dust": img = _img_dust()
 		"slit": img = _img_slit(false)
@@ -919,36 +942,54 @@ static func _texture(key: String) -> Texture2D:
 	return t
 
 
-## Purple surgical-marker dashes along the image's long axis (decal Z).
-static func _img_marker() -> Image:
-	var w := 8
-	var h := 256
+## A pre-op skin-marker line along the image's long axis (decal Z), `length` metres long: hand-drawn
+## dashes with a slight wobble and uneven ink, a short hash tick across every other dash, and a
+## dotted margin line either side, fading out at both ends. Drawn in metres so the strokes keep
+## their shape whatever the limb's size. White strokes: the decal's modulate gives the colour.
+## `width` spreads the ticks and margins (the strokes themselves keep their size).
+## `mode` 0: the ink. 1: the same strokes premultiplied (rgb = coverage) for the emission-only
+## sheen decal, whose emission ignores the texture's alpha. 2: the sheen without the strokes over
+## the kerf (only the tick ends and the dotted margins), once the cut is open.
+static func _img_marker(mode: int, length: float, width: float = MARK_W) -> Image:
+	var w := 96
+	var h := clampi(int(length / 0.0005), 64, 640)
 	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
+	var sx := width / float(w)
+	var spread := width / MARK_W
+	var tick_hl := MARK_TICK_HL * spread
+	var dots_at := MARK_DOTS_AT * spread
+	var sz := length / float(h)
+	var aa := 0.0004
 	for y in h:
-		var v := float(y) / h
-		var on := fmod(v * 14.0, 1.0) < 0.62
-		var wob := _noise1(v * 40.0, 3.0) * 0.15
+		var zm := (y + 0.5) * sz
+		var ends := 1.0 - smoothstep(0.8, 0.97, absf(zm / length * 2.0 - 1.0))
+		# The pen drifts a little off straight along the line.
+		var cxm := _noise1(zm * 90.0, 3.0) * 0.0006 + _noise1(zm * 400.0, 4.0) * 0.00015
+		var ph := fmod(zm, MARK_DASH) / MARK_DASH
+		var dash_i := int(floor(zm / MARK_DASH))
+		# a dash over 0.15..0.75 of each period, softened pen ends
+		var dash := smoothstep(0.12, 0.18, ph) * (1.0 - smoothstep(0.72, 0.78, ph))
+		# a hash tick straight across the middle of every other dash, drawn by hand (not quite square)
+		var tick_on := dash_i % 2 == 0
+		var tick_dz := (ph - 0.45) * MARK_DASH
+		var tick_tilt := _noise1(float(dash_i) * 1.7, 8.0) * 0.12
+		# the dotted margins: a dot every MARK_DOT_EVERY metres
+		var dot_dz := fmod(zm + MARK_DOT_EVERY * 0.5, MARK_DOT_EVERY) - MARK_DOT_EVERY * 0.5
 		for x in w:
-			var u := absf((x + 0.5) / w * 2.0 - 1.0 + wob)
-			var a := clampf((1.0 - u) * 2.2, 0.0, 1.0) if on else 0.0
-			img.set_pixel(x, y, Color(0.22, 0.06, 0.4, a * 0.95))
-	return img
-
-
-## A soft glowing band along the image's long axis (decal Z): a bright core, a wide halo, and
-## faded ends. Tinted by the decal's modulate.
-static func _img_glow_line() -> Image:
-	var w := 32
-	var h := 128
-	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
-	for y in h:
-		var v := absf((y + 0.5) / h * 2.0 - 1.0)
-		var ends := 1.0 - smoothstep(0.8, 1.0, v)
-		for x in w:
-			var u := absf((x + 0.5) / w * 2.0 - 1.0)
-			var core := 1.0 - smoothstep(0.06, 0.16, u)
-			var halo := pow(clampf(1.0 - u, 0.0, 1.0), 3.0) * 0.45
-			img.set_pixel(x, y, Color(1, 1, 1, clampf(core + halo, 0.0, 1.0) * ends))
+			var xo := (x + 0.5) * sx - width * 0.5 - cxm
+			var dx := absf(xo)
+			var a := dash * (1.0 - smoothstep(MARK_LINE_HW - aa, MARK_LINE_HW + aa, dx))
+			if tick_on:
+				var along := 1.0 - smoothstep(MARK_TICK_HW - aa, MARK_TICK_HW + aa, absf(tick_dz - xo * tick_tilt))
+				var across := 1.0 - smoothstep(tick_hl - 0.0012, tick_hl, dx)
+				a = maxf(a, along * across)
+			var ddx := dx - dots_at
+			a = maxf(a, 0.85 * (1.0 - smoothstep(MARK_DOT_R - aa, MARK_DOT_R + aa, sqrt(ddx * ddx + dot_dz * dot_dz))))
+			# Ink is uneven: a little thinner here and there, never gone.
+			a = clampf(a * (0.86 + 0.14 * _hash2(float(x) * 0.37, float(y) * 0.11)), 0.0, 1.0) * ends
+			if mode == 2:
+				a *= smoothstep(tick_hl - 0.0025, tick_hl - 0.0015, dx)
+			img.set_pixel(x, y, Color(1, 1, 1, a) if mode == 0 else Color(a, a, a, a))
 	return img
 
 

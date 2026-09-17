@@ -52,8 +52,9 @@ const HUMAN := {
 	"scale": 1.0,
 	# Poses that read differently on a two-bone arm (merged over POSES by pose_of()).
 	"poses": {
-		# The right arm wraps the carried legs across the front of the shoulder instead of pointing up.
-		"carry": {"arm_r": [Vector3(0.8, 0.0, 0.45), 1.0], "torso": [0.12, -0.05, 1.0]},
+		# The left arm wraps the carried legs across the front of the left shoulder instead of pointing
+		# up; the right arm stays free.
+		"carry": {"arm_l": [Vector3(-0.85, -0.25, -0.2), 1.0], "torso": [0.12, 0.05, 1.0]},
 		"hold": {"arm_r": [Vector3(-0.15, -0.35, 0.92), 1.0]},
 		"hold_both": {"arm_r": [Vector3(0.2, -0.05, 1.0), 1.0], "arm_l": [Vector3(-0.2, -0.05, 1.0), 1.0]},
 	},
@@ -92,8 +93,8 @@ const POSES := {
 	"hold": {"arm_r": [Vector3(-0.28, -0.3, 0.91), 1.0]},
 	# Bulky loot: both arms forward, hands on its sides.
 	"hold_both": {"arm_r": [Vector3(-0.12, -0.42, 0.9), 1.0], "arm_l": [Vector3(0.12, -0.42, 0.9), 1.0]},
-	# A fireman's carry on the right shoulder: the right arm up over the legs in front.
-	"carry": {"arm_r": [Vector3(-0.35, 0.72, 0.6), 1.0], "torso": [0.08, 0.0, 1.0]},
+	# A fireman's carry on the left shoulder: the left arm up over the legs in front, the right free.
+	"carry": {"arm_l": [Vector3(0.35, 0.72, 0.6), 1.0], "torso": [0.08, 0.0, 1.0]},
 	# Dragging a monster by the ankles behind: the right arm reaches back and down.
 	"drag": {"arm_r": [Vector3(-0.3, -0.75, -0.58), 1.0], "torso": [0.18, 0.0, 1.0]},
 	# Saw: raised high on the right, then chopped down across the front.
@@ -105,4 +106,11 @@ const POSES := {
 	# Shove: charging leans back with both arms braced up in front, the strike throws both forward.
 	"shove_charge": {"arm_r": [Vector3(-0.45, 0.25, 0.86), 1.0], "arm_l": [Vector3(0.45, 0.25, 0.86), 1.0], "torso": [-0.32, 0.0, 1.0]},
 	"shove_strike": {"arm_r": [Vector3(-0.2, 0.05, 1.0), 1.0], "arm_l": [Vector3(0.2, 0.05, 1.0), 1.0], "torso": [0.38, 0.0, 1.0]},
+	# THROW HOOK (scripts/hands/throw_pose.gd): one-handed, the right arm (it holds the stack) drawn up
+	# and back behind the shoulder, chest turned away and the left arm out front; then flung forward.
+	"throw_windup": {"arm_r": [Vector3(-0.45, 0.55, -0.7), 1.0], "arm_l": [Vector3(0.3, 0.05, 0.95), 0.5], "torso": [-0.14, -0.45, 1.0]},
+	"throw_strike": {"arm_r": [Vector3(-0.1, 0.22, 1.0), 1.0], "arm_l": [Vector3(0.4, -0.5, 0.3), 0.5], "torso": [0.28, 0.3, 1.0]},
+	# Two-handed: both arms up over the head, leaning back; then heaved out in front.
+	"throw_both_windup": {"arm_r": [Vector3(-0.05, 0.95, -0.25), 1.0], "arm_l": [Vector3(0.05, 0.95, -0.25), 1.0], "torso": [-0.22, 0.0, 1.0]},
+	"throw_both_strike": {"arm_r": [Vector3(-0.15, 0.08, 1.0), 1.0], "arm_l": [Vector3(0.15, 0.08, 1.0), 1.0], "torso": [0.36, 0.0, 1.0]},
 }
