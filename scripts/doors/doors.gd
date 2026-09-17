@@ -181,7 +181,7 @@ func _drive(d: Node, target: float, speed: float, opener: Node = null) -> void:
 
 
 func _host_tick(delta: float) -> void:
-	var want_locked: bool = not game.dev_mode and (game.phase != game.Phase.SHIFT or not _wings_ready())
+	var want_locked: bool = (game.phase != game.Phase.SHIFT or not _wings_ready())
 	if want_locked != gates_locked:
 		set_gates_locked(want_locked, true)
 	unlocking = want_locked and game.phase == game.Phase.LOBBY and bool(game.get("clock_in_pending"))

@@ -84,7 +84,7 @@ func build_wings(info: Dictionary, _wing_seed: int, generation: int) -> void:
 	info["pockets"] = {}
 	var plan: Dictionary = info.get("pocket_plan", {})
 	var parent = info.get("wings_root")
-	if plan.is_empty() or parent == null or not is_instance_valid(parent) or (game != null and bool(game.get("dev_mode"))):
+	if plan.is_empty() or parent == null or not is_instance_valid(parent):
 		return
 	busy = true
 	stats = {"kind": String(plan.kind), "generation": generation, "frames": 0, "steps": 0, "max_frame_ms": 0.0,

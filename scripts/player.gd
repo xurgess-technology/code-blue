@@ -823,7 +823,7 @@ func _local_step(delta: float) -> void:
 			set_flashlight(not flashlight_on)
 			Audio.play("click")
 		# DEV HOOK: with the dev gun out, the left mouse button fires instead of shoving.
-		var gun_out: bool = g != null and g.dev_mode and g.dev.has_gun(peer_id) and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+		var gun_out: bool = g != null and g.dev_on() and g.dev.has_gun(peer_id) and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 		# HANDS HOOK: the shove charges while Q (or left mouse with nothing usable) is held and fires on
 		# release; left mouse with the saw or the needle winds that up (scripts/combat/windup.gd). The
 		# combat system refuses while downed, carrying, dragging, busy or cooling down.
@@ -1652,7 +1652,7 @@ func refresh_downed_visuals() -> void:
 		body_visual.visible = false   # the lying PlayerBody on the table stands in
 		name_tag.visible = false
 	if is_local:
-		hands.visible = alive and not downed and (game == null or not game.dev_mode or not game.dev.has_gun(peer_id))
+		hands.visible = alive and not downed and (game == null or not game.dev_on() or not game.dev.has_gun(peer_id))
 
 
 ## Knocked down (dev stun) or downed you see the floor; everyone else sees you lying on it. Carried,

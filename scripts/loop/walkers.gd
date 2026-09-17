@@ -49,7 +49,7 @@ func setup(l: Node) -> void:
 
 ## Host (game.finish_case): a patient pulled through. `thank`: the peer who operated last, 0 if nobody.
 func schedule(c: Dictionary, thank: int) -> void:
-	if not game.is_host() or game.dev_mode:
+	if not game.is_host():
 		return
 	if Procedures.is_monster(String(c.get("patient_id", ""))) or String(c.get("patient_id", "")) == "player":
 		return

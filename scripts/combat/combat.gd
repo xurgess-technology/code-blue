@@ -218,7 +218,7 @@ func _swing(p: Node) -> void:
 		var q: Node = t.node
 		last_result = {"what": "player", "id": q.peer_id}
 		game._sound("combat_hit", at)
-		var god: bool = game.dev_mode and game.dev.is_god(q)
+		var god: bool = game.dev_on() and game.dev.is_god(q)
 		if q.invuln <= 0.0 and not god:
 			game.damage_player(q, 1, "saw:%s" % p.player_name, dir * 6.0 + Vector3.UP * 1.5)
 			game.say("%s took a bone saw to %s." % [p.player_name, q.player_name], 3.0)

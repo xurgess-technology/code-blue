@@ -1,17 +1,19 @@
 extends RefCounted
-## The dev room: one bright, hand-built room instead of a generated hospital.
+## The hidden dev room: one bright, hand-built room, built out past the parking lot's fog the first
+## time dev mode comes on in a session (dev_room.gd), and reached only through the locked door in
+## the OR supply closet. It holds what the dev panel can't give: the monster pen, one of every
+## container, a dispenser for every item and loot kind, the dev gun rack and a floor for dummies.
 ##
-## Fills the same `level_info` keys the game reads from HospitalBuilder (spawns, table, shelf,
-## lectern, lights, containers, nav_region) so the rest of the game runs unchanged. Built the
-## same way on every machine, so every interact_id matches.
+## build() fills `info` in the room's own frame (dev_room.gd moves the room and its markers into
+## place). Built the same way on every machine, so every interact_id matches.
 ##
-## Layout, world metres (X east, Z south, you spawn at the south wall looking north):
+## Layout, room metres (X east, Z south, you arrive at the south wall looking north):
 ##
 ##   z 0 .. 6.8    the specimen pen: monsters spawn here
 ##   z 6.8 .. 8    a waist-high barrier you shoot over, with a gate in the middle
-##   z 8 .. 18     the lab: OR table and shelf (west half), open floor for bots and dummies
-##                 (east half), one of every container on the west wall, a dispenser for
-##                 every item and the dev gun rack on the east wall
+##   z 8 .. 18     the lab: open floor for bots and dummies, one of every container on the west
+##                 wall, a dispenser for every item and the dev gun rack on the east wall, the loot
+##                 rack and the door back to the closet on the south wall
 
 const DispenserScript := preload("res://scripts/dev/dev_dispenser.gd")
 const FridgeScript := preload("res://scripts/containers/med_fridge.gd")
@@ -30,17 +32,13 @@ const GATE_X := Vector2(10.8, 13.2)
 const LIGHT_RANGE := 6.0
 const LIGHT_ENERGY := 1.05
 
-const TABLE := Vector3(8.5, 0.0, 11.5)
-const PLAYER_TABLE := Vector3(8.5, 0.0, 14.3)
-const SHELF := Vector3(5.2, 0.0, 11.5)
-const LECTERN := Vector3(13.0, 0.0, 17.3)
-## inventory (sweep 2): the loot rack's first cubby x, and the economy spots.
+## inventory (sweep 2): the loot rack's first cubby x.
 const RACK_X0 := 1.4
-const SHOP := Vector3(17.6, 0.0, 17.25)
-## Hub rebuild: the compact furnace block is 1.8 m deep behind its face, so the face stands that far
-## off the south wall.
-const FURNACE := Vector3(21.2, 0.0, 16.15)
+## The door back to the supply closet (south wall) and where you arrive through it.
+const EXIT_X := 9.0
+const ARRIVE := Vector3(EXIT_X, 0.0, 16.4)
 const LootTableScript := preload("res://scripts/economy/loot_table.gd")
+const DevDoorScript := preload("res://scripts/dev/dev_door.gd")
 
 ## Every nav obstacle as [centre, size] on the floor; filled while building.
 static var _obstacles: Array = []
@@ -150,28 +148,12 @@ static func build(info: Dictionary) -> Node3D:
 		door_nodes.append(node)
 	info["door_nodes"] = door_nodes
 
-	# ---- OR table, shelf, lectern -------------------------------------------------
-	root.add_child(_operating_table(TABLE))
-	_obstacles.append([TABLE, Vector3(2.3, 0, 1.0)])
-	info["table"] = TABLE
-	info["table_yaw"] = 0.0
-	# downed (sweep 2 wave 3): the player table south of the OR table; game.gd builds its model.
-	info["tables"] = [{"position": TABLE, "yaw": 0.0, "kind": "patient"}, {"position": PLAYER_TABLE, "yaw": 0.0, "kind": "player"}]
-	_obstacles.append([PLAYER_TABLE, Vector3(2.1, 0, 0.9)])
-	# Faces the table (+X), so the label reads from where the surgeon stands.
-	info["shelf"] = {"position": SHELF, "yaw": PI / 2.0}
-	_obstacles.append([SHELF, Vector3(0.5, 0, 1.35)])
-	var lectern := StaticBody3D.new()
-	lectern.name = "Lectern"
-	lectern.collision_layer = C.L_WORLD
-	lectern.collision_mask = 0
-	lectern.position = LECTERN
-	lectern.add_child(_box_mesh(Vector3(0.9, 0.05, 0.6), Vector3(0, 0.9, 0), _mat(Color(0.3, 0.21, 0.14), 0.7)))
-	lectern.add_child(_box_mesh(Vector3(0.1, 0.88, 0.1), Vector3(0, 0.44, 0), steel))
-	_shape(lectern, Vector3(0.9, 0.925, 0.6), Vector3(0, 0.4625, 0))
-	root.add_child(lectern)
-	info["lectern"] = {"position": LECTERN, "yaw": PI}
-	_obstacles.append([LECTERN, Vector3(0.9, 0, 0.6)])
+	# ---- the door back to the supply closet ----------------------------------------
+	var exit_door: StaticBody3D = DevDoorScript.create("exit")
+	exit_door.position = Vector3(EXIT_X, 0.0, D)
+	exit_door.rotation.y = PI   # its front (+Z) faces north, into the room
+	root.add_child(exit_door)
+	_obstacles.append([Vector3(EXIT_X, 0, D - 0.1), Vector3(1.3, 0, 0.3)])
 
 	# ---- one of every container on the west wall ------------------------------
 	var holder := Node3D.new()
@@ -261,12 +243,6 @@ static func build(info: Dictionary) -> Node3D:
 	rack_lamp.shadow_enabled = false
 	rack_lamp.position = Vector3(RACK_X0 + (cols - 1) * 0.4, 2.6, D - 1.6)
 	rack.add_child(rack_lamp)
-	info["economy"] = {
-		"shop": {"position": SHOP, "yaw": PI},
-		"furnace": {"position": FURNACE, "yaw": PI},
-	}
-	_obstacles.append([SHOP, Vector3(1.6, 0, 0.8)])
-	_obstacles.append([FURNACE + Vector3(0, 0, 0.9), Vector3(3.3, 0, 1.9)])
 
 	# ---- lights ------------------------------------------------------------------
 	var lights_root := Node3D.new()
@@ -284,22 +260,11 @@ static func build(info: Dictionary) -> Node3D:
 	info["lights"] = lights
 
 	# ---- markers -----------------------------------------------------------------
-	var player_spawns: Array = []
-	for i in 6:
-		player_spawns.append(Vector3(9.0 + i * 1.3, 0.0, 16.3))
-	var tool_spawns: Array = []
-	for i in 8:
-		tool_spawns.append(Vector3(13.5 + (i % 4) * 1.6, 0.0, 13.5 + (i / 4) * 1.4))
-	info["player_spawns"] = player_spawns
-	info["tool_spawns"] = tool_spawns
+	info["arrive"] = ARRIVE
 	# DOORS HOOK: all in the pen's middle bay (between the partitions at x 7.5-9 and 15-16.5), in
 	# plain view of the lab; the side bays are through the doors.
 	info["monster_spawns"] = [Vector3(10.2, 0, 3.2), Vector3(12.0, 0, 2.6), Vector3(13.8, 0, 3.4), Vector3(10.6, 0, 5.0), Vector3(13.4, 0, 5.0)]
 	info["dummy_spots"] = [Vector3(15.5, 0, 10.2), Vector3(17.0, 0, 10.2), Vector3(18.5, 0, 10.2), Vector3(20.0, 0, 10.2), Vector3(15.5, 0, 11.8), Vector3(17.0, 0, 11.8), Vector3(18.5, 0, 11.8), Vector3(20.0, 0, 11.8)]
-	# No time clock here: park its aim spot under the floor where nobody can aim.
-	info["clock"] = Vector3(1.0, -40.0, 1.0)
-	info["loose_anchors"] = []
-	info["size"] = Vector2i(int(W / C.TILE), int(D / C.TILE))
 	info["dev_room"] = true
 
 	# ---- navigation ----------------------------------------------------------------
@@ -360,39 +325,6 @@ static func set_gate_open(info: Dictionary, open: bool) -> void:
 
 # ---------------------------------------------------------------------------
 # pieces
-
-static func _operating_table(pos: Vector3) -> Node3D:
-	var sb := StaticBody3D.new()
-	sb.name = "OperatingTable"
-	sb.collision_layer = C.L_WORLD
-	sb.collision_mask = 0
-	sb.position = pos
-	var model := _asset("prop/table_op")
-	var top := 0.95
-	if model != null:
-		sb.add_child(model)
-		var box := _mesh_aabb(model)
-		if box.size.y > 0.3 and box.size.y < 1.6:
-			top = box.position.y + box.size.y
-		_shape(sb, Vector3(clampf(box.size.x, 1.6, 2.6), top, clampf(box.size.z, 0.6, 1.2)), Vector3(0, top * 0.5, 0))
-	else:
-		sb.add_child(_box_mesh(Vector3(2.2, 0.14, 0.95), Vector3(0, 0.88, 0), _mat(Color(0.78, 0.82, 0.84), 0.35)))
-		sb.add_child(_box_mesh(Vector3(0.5, 0.8, 0.5), Vector3(0, 0.4, 0), _mat(Color(0.45, 0.47, 0.5), 0.4)))
-		_shape(sb, Vector3(2.2, top, 0.95), Vector3(0, top * 0.5, 0))
-	# A surgical lamp overhead so the patient always reads.
-	var lamp := SpotLight3D.new()
-	lamp.name = "SurgicalLamp"
-	lamp.position = Vector3(0, H - 0.2, 0)
-	lamp.rotation_degrees = Vector3(-90, 0, 0)
-	lamp.spot_range = 4.0
-	lamp.spot_angle = 30.0
-	lamp.light_energy = 2.2
-	lamp.light_color = Color(1.0, 0.98, 0.92)
-	lamp.shadow_enabled = false
-	sb.add_child(lamp)
-	sb.add_child(_box_mesh(Vector3(0.6, 0.06, 0.6), Vector3(0, H - 0.12, 0), _mat(Color(0.9, 0.9, 0.85), 0.3, Color(1, 1, 0.9), 1.5)))
-	return sb
-
 
 static func _fixture(pen: bool) -> Node3D:
 	var n := Node3D.new()

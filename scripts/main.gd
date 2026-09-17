@@ -26,7 +26,6 @@ var tips: CanvasLayer = null
 ## DEV HOOK: the dev room panel (a CanvasLayer, hidden outside the dev room).
 var dev_panel: CanvasLayer = null
 const DevPanelScript := preload("res://scripts/dev/dev_panel.gd")
-const DevRoomScript := preload("res://scripts/dev/dev_room.gd")
 
 
 func _ready() -> void:
@@ -88,7 +87,6 @@ func _ready() -> void:
 	menu.chose_host.connect(_start_host)
 	menu.chose_join.connect(_start_join)
 	# DEV HOOK (scripts/dev): the secret dev room and its panel.
-	menu.chose_dev.connect(start_dev)
 	dev_panel = DevPanelScript.new()
 	dev_panel.name = "DevPanel"
 	add_child(dev_panel)
@@ -299,28 +297,6 @@ func _start_join(player_name: String, address: String) -> void:
 	if not err.is_empty():
 		Loading.end("join")
 		menu.show_menu(err)
-
-
-## DEV HOOK: into the dev room, alone or hosting (friends then join it like any hosted game).
-func start_dev(player_name: String, host: bool) -> void:
-	await _after_launch()
-	if Loading.is_active():
-		return
-	if host:
-		var err := Net.host(player_name)
-		if not err.is_empty():
-			menu.show_menu(err)
-			return
-		var addresses := Net.local_addresses()
-		hud.host_info = "Friends join at: %s" % ", ".join(addresses.map(func(a): return "%s:%d" % [a, C.DEFAULT_PORT])) \
-			if not addresses.is_empty() else "Hosting on port %d" % C.DEFAULT_PORT
-	else:
-		Net.start_solo(player_name)
-		hud.host_info = ""
-	await _loading_screen_up()
-	game.start_session(DevRoomScript.SEED)
-	_enter_game()
-	Loading.end("session")
 
 
 

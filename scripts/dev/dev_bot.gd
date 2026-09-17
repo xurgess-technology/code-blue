@@ -192,7 +192,7 @@ func _fetch(delta: float, kind: String) -> void:
 			best_id = id
 			best_pos = pos
 	var disp = game.find_interactable("dev_disp_%s" % kind)
-	if disp != null:
+	if disp != null and dev.in_room(p.global_position):   # the room's floor doesn't reach the hospital
 		var dd: float = disp.global_position.distance_to(p.global_position)
 		# Prefer a dispenser unless the loose stack is clearly closer.
 		if best_id == "" or dd < best_d + 3.0:

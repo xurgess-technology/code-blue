@@ -123,8 +123,10 @@ var message_timer: float = 0.0
 var danger: float = 0.0
 var spectating: int = 0
 var paused: bool = false
-## DEV HOOK (scripts/dev): true while the session is in the secret dev room (seed DevRoom.SEED).
-var dev_mode: bool = false
+## DEV HOOK: dev mode for this session, on every machine (the pharmacy fax's secret order,
+## DEV_CODE placebo pills). The F1 panel works anywhere and the hidden dev room is built. Replicated.
+var dev_tools: bool = false
+const DEV_CODE := 3141592653
 var _new_run_pending := false
 ## DEV HOOK: the dev room controller (scripts/dev/dev_room.gd), idle outside the dev room.
 var dev: Node = null
@@ -142,7 +144,6 @@ var _complication_timer: float = 0.0
 var _next_case_id: int = 1
 var _bodies: Dictionary = {}          # table index -> {key, fk, dead, node}
 var _cases_sig: String = ""
-var _dev_case_clear: Dictionary = {}  # host, dev room: case id -> world_time to clear it
 var _shift_item_ids: Dictionary = {}  # host: items the spawners put in the hospital this run
 
 const PlayerScene := preload("res://scripts/player.gd")
@@ -341,7 +342,7 @@ func end_session(reason: String) -> void:
 		p.queue_free()
 	players.clear()
 	dev.reset_state()  # DEV HOOK: bots are gone with the players; time scale back to 1
-	dev_mode = false
+	dev_tools = false   # DEV HOOK: dev mode is for this session only
 	phase = Phase.MENU
 	phase_changed.emit(phase)
 	if not reason.is_empty():
@@ -355,12 +356,6 @@ func start_lobby(new_seed: int, new_shift: int) -> void:
 	seed_value = new_seed
 	shift = new_shift
 	_rng.seed = hash(str(new_seed) + "|" + str(new_shift))
-	# DEV HOOK: the dev room is the session seed DevRoomScript.SEED, so a joining client builds
-	# the same room from the snapshot without any extra protocol.
-	var was_dev := dev_mode
-	dev_mode = new_seed == DevRoomScript.SEED
-	if was_dev and not dev_mode:
-		dev.reset_state()
 	_clear_case()
 	loop.reset()
 	_clear_items()
@@ -384,8 +379,6 @@ func start_lobby(new_seed: int, new_shift: int) -> void:
 	# First lobby of the session: build and draw one of everything behind a short cover so
 	# nothing hitches the first time it appears later.
 	Warmup.run(self)
-	if dev_mode:
-		dev.on_enter()  # DEV HOOK: no clock-in; the room is always "on shift"
 	if is_host() and Net.active:
 		_rpc_shift.rpc(seed_value, shift, phase, _net_seq)
 
@@ -556,6 +549,24 @@ func _client_rebuild_cover() -> void:
 	Loading.end.call_deferred("rebuild")
 
 
+## DEV HOOK: dev mode is on in this session (the pharmacy's secret order).
+func dev_on() -> bool:
+	return dev_tools
+
+
+## Host: turn the session's dev tools on or off for everyone. Off also drops every toggle, bot and
+## dummy (dev.reset_state); the dev room's geometry stays until the session ends.
+func set_dev_tools(on: bool, p: Node = null) -> void:
+	if not is_host() or on == dev_tools:
+		return
+	dev_tools = on
+	if not on:
+		dev.reset_state()
+	var who: String = p.player_name if p != null else "Someone"
+	say(("%s turned on DEV MODE. F1 opens the dev panel." % who) if on else ("%s turned off DEV MODE." % who), 4.0)
+	dev.on_dev_tools(on)
+
+
 ## Host: after game over, a new run: broke, shift 1, a new hospital. The loading screen goes up and
 ## draws first; the game-over tick keeps calling this while it waits, hence the guard.
 func _new_run() -> void:
@@ -619,10 +630,10 @@ var _prebuilt := {}
 ## Build the hospital for (seed, shift) without blocking frames, so the loading screen keeps
 ## animating: map generation, mesh data and the navigation bake on a worker thread, then the nodes
 ## a few milliseconds per frame. The next start_lobby for the same seed and shift uses the result
-## instead of building it again. Does nothing for the dev room (it builds its own small room).
+## instead of building it again.
 func prebuild_level(for_seed: int, for_shift: int) -> void:
 	_discard_prebuilt()
-	if for_seed == DevRoomScript.SEED or not ResourceLoader.exists(MAPGEN_PATH) or not ResourceLoader.exists(BUILDER_PATH):
+	if not ResourceLoader.exists(MAPGEN_PATH) or not ResourceLoader.exists(BUILDER_PATH):
 		return
 	var MapGenScript: GDScript = load(MAPGEN_PATH)
 	var BuilderScript: GDScript = load(BUILDER_PATH)
@@ -667,10 +678,7 @@ func _build_level(for_seed: int) -> void:
 	var gen: Dictionary = {}
 	var mapgen_path := MAPGEN_PATH
 	var builder_path := BUILDER_PATH
-	if dev_mode:
-		_discard_prebuilt()
-		level = dev.build_level(level_info)  # DEV HOOK: the dev room instead of a hospital
-	elif ResourceLoader.exists(mapgen_path) and ResourceLoader.exists(builder_path):
+	if ResourceLoader.exists(mapgen_path) and ResourceLoader.exists(builder_path):
 		var MapGenScript: GDScript = load(mapgen_path)
 		var BuilderScript: GDScript = load(builder_path)
 		# DOORS HOOK: the run's entrance building with this shift's wings (a joining client: the host's).
@@ -686,7 +694,7 @@ func _build_level(for_seed: int) -> void:
 			level = BuilderScript.build(gen, level_info)
 		level_info["wing_gen"] = wing_gen
 	# A level missing its landmarks is worse than no level; fall back rather than ship a broken shift.
-	if not dev_mode and (level == null or not _level_info_usable()):
+	if level == null or not _level_info_usable():
 		if level != null:
 			push_warning("Generated level for seed %d was incomplete; using the fallback ward." % for_seed)
 			level.queue_free()
@@ -698,11 +706,12 @@ func _build_level(for_seed: int) -> void:
 	_attach_light_flicker(level)
 	_add_occluders()
 	_add_landmarks()
-	# DOORS HOOK: the level's doors (the hospital's, the dev room's) and the wings' generation.
+	# DOORS HOOK: the level's doors and the wings' generation.
 	doors.clear()
 	doors.register(level_info.get("door_nodes", []))
 	wing_loader.on_level_built(level_info)
 	pockets.finish_now()   # POCKETS HOOK: a whole level (a loading screen) does not wait frames for its pocket
+	dev.on_level_built()   # DEV HOOK: the supply closet's locked door; the hidden room again if dev mode is on
 
 
 func _level_info_usable() -> bool:
@@ -930,8 +939,7 @@ func _add_landmarks() -> void:
 	# loop: the patient tables (a second one beside the first on levels with only one) and the
 	# break-room phone, before the economy looks for free floor.
 	_setup_tables()
-	if not dev_mode:
-		loop.on_level_built(level, level_info)
+	loop.on_level_built(level, level_info)
 
 	# pharmacy (chunk 3): the pharmacy window and the furnace (placed once physics has the level).
 	economy.on_level_built(level, level_info)
@@ -993,7 +1001,7 @@ func _table_prompt(p, table_index: int) -> String:
 	if c.is_empty() or String(c.get("patient_id", "")) == "player":
 		return ""
 	# Patient exits: a body waiting for the furnace (a patient or a dissected monster).
-	if p != null and not dev_mode and corpses.is_corpse(c):
+	if p != null and corpses.is_corpse(c):
 		return corpses.lift_prompt(p, c)
 	if dissection.owns_case(c):
 		return dissection.table_prompt(p, table_index)   # SWEEP 3 HOOK (dissection): re-dose / sedation
@@ -1087,7 +1095,7 @@ func _proxy_used(id: String, p: Node) -> void:
 		if downed_any_table and int(player_table.get("index", -1)) == int(t.index):
 			player_surgery.begin(p)   # the downed teammate lying on this table
 			return
-		if not dev_mode and corpses.is_corpse(case_on_table(int(t.index))):
+		if corpses.is_corpse(case_on_table(int(t.index))):
 			return   # patient exits: a body is lifted with a hold (_tick_carry_holds), a tap does nothing
 		if dissection.table_used(p, int(t.index)):
 			return   # SWEEP 3 HOOK (dissection): anesthetic in hand re-doses a strapped monster
@@ -1546,7 +1554,7 @@ func buy_pills(p: Node) -> bool:
 ## the Night Nurse fetches the order and the pickup drawer slides out with it (economy_props.gd runs
 ## that timeline on every machine; only the host spawns the items, one stack per line).
 func order_pharmacy(p: Node, order: Variant) -> bool:
-	if not is_host() or economy == null or economy.pharmacy == null or not is_instance_valid(economy.pharmacy):
+	if not is_host():
 		return false
 	var sets := {}
 	if order is Array:
@@ -1554,6 +1562,12 @@ func order_pharmacy(p: Node, order: Variant) -> bool:
 			sets[String(k)] = 1
 	elif order is Dictionary:
 		sets = order
+	# DEV HOOK: the secret order. No money, no delivery: dev mode for everyone in the session.
+	if int(sets.get("placebo_pills", 0)) == DEV_CODE:
+		set_dev_tools(true, p)
+		return true
+	if economy == null or economy.pharmacy == null or not is_instance_valid(economy.pharmacy):
+		return false
 	var items: Array = []
 	var total := 0
 	for e in PHARMACY_CATALOG:
@@ -1707,9 +1721,7 @@ func finish_case(id: int, won: bool) -> void:
 		Audio.sting("flatline")
 		_broadcast("sting", {"cue": "flatline"})
 		say("%s flatlined." % pname, 5.0)
-	if dev_mode:
-		_dev_case_clear[id] = world_time + 4.0  # DEV HOOK: the dev room clears the table again
-	elif won and String(c.patient_id) != "player":
+	if won and String(c.patient_id) != "player":
 		loop.walkers.schedule(c, operated_by)   # patient exits: up off the table, thanks, out the doors
 	loop.on_case_finished(c)
 
@@ -1873,7 +1885,6 @@ func _table_yaw() -> float:
 
 func _clear_case() -> void:
 	cases.clear()
-	_dev_case_clear.clear()
 	shelf = {}
 	_apply_cases_locally()
 	if player_surgery != null:
@@ -2037,7 +2048,9 @@ func point_is_lit(p: Vector3) -> bool:
 # =========================================================================
 
 func _spawn_monsters() -> void:
-	_clear_monsters()
+	_clear_monsters(true)
+	if dev_on() and dev.monsters_off:
+		return   # DEV HOOK: the panel's "No monsters"
 	var roster: Array = MonsterScript.roster(shift, players.size())
 	var spots: Array = level_info.get("monster_spawns", []).duplicate()
 	_shuffle(spots, _rng)
@@ -2068,13 +2081,22 @@ func _add_monster(kind: String, pos: Vector3) -> Node:
 	return m
 
 
-func _clear_monsters() -> void:
+## `keep_dev_room`: the monsters in the hidden dev room's pen stay (a new shift's monsters coming in).
+func _clear_monsters(keep_dev_room := false) -> void:
 	if combat != null:
 		combat.on_monsters_cleared()   # SWEEP 3 HOOK: nobody is dragging a monster any more
-	for m in monsters.values():
-		m.queue_free()
+	var kept := {}
+	for id in monsters.keys():
+		var m = monsters[id]
+		if keep_dev_room and is_instance_valid(m) and dev.in_room(m.global_position):
+			kept[id] = m
+			continue
+		if is_instance_valid(m):
+			m.queue_free()
 	monsters.clear()
-	_next_monster_id = 0
+	monsters.merge(kept)
+	if kept.is_empty():
+		_next_monster_id = 0
 
 
 # =========================================================================
@@ -2288,11 +2310,6 @@ func _sim_shift(delta: float) -> void:
 		if float(c.vitals) <= 0.0:
 			c.vitals = 0.0
 			finish_case(int(c.id), false)
-	if dev_mode:
-		for id in _dev_case_clear.keys():
-			if world_time >= float(_dev_case_clear[id]):
-				_dev_case_clear.erase(id)
-				remove_case(int(id))
 
 	_supply_timer -= delta
 	if _supply_timer <= 0.0:
@@ -2300,18 +2317,17 @@ func _sim_shift(delta: float) -> void:
 		_check_supply()
 
 	# loop: the time clock ends the shift once every accepted patient is stable or dead.
-	if not dev_mode:
-		if loop.can_clock_out() and _holding_aim("clock"):
-			punch = minf(1.0, punch + delta / C.PUNCH_SECONDS)
-			if punch >= 1.0:
-				punch = 0.0
-				loop.clock_out(false)
-				return
-		else:
-			punch = maxf(0.0, punch - delta * 1.5)
+	if loop.can_clock_out() and _holding_aim("clock"):
+		punch = minf(1.0, punch + delta / C.PUNCH_SECONDS)
+		if punch >= 1.0:
+			punch = 0.0
+			loop.clock_out(false)
+			return
+	else:
+		punch = maxf(0.0, punch - delta * 1.5)
 
 	# downed + loop: nobody left standing (every player downed or dead) is game over.
-	if not dev_mode and all_players_out():
+	if not (dev_tools and dev.no_game_over) and all_players_out():
 		game_over("Everyone is down. The night shift is over.")
 
 
@@ -2372,7 +2388,7 @@ func _update_danger() -> void:
 func monster_hit_player(m: Node, p: Node) -> void:
 	if not is_host() or not p.alive or p.downed or p.invuln > 0.0:
 		return
-	if dev_mode and dev.is_god(p):
+	if dev_on() and dev.is_god(p):
 		return  # DEV HOOK: god mode
 	var knock: Vector3 = (p.global_position - m.global_position).normalized() * m.knockback
 	damage_player(p, m.damage, "monster:%s" % m.kind, knock)
@@ -2558,7 +2574,7 @@ func _tick_downed(_delta: float) -> void:
 	for p in players.values():
 		if not p.alive or not p.downed or p.bleed > 0.0:
 			continue
-		if dev_mode and dev.is_god(p):
+		if dev_on() and dev.is_god(p):
 			p.bleed = BLEED_SECONDS   # DEV HOOK: god mode never bleeds out
 			continue
 		kill_player(p, "bleed")
@@ -2584,7 +2600,7 @@ func _tick_carry_holds(delta: float) -> void:
 		if q.wants_interact and q.aim_id.begins_with("pl_"):
 			target = players.get(int(q.aim_id.substr(3)))
 		# Patient exits: holding E on a body (on a table or on the floor) lifts it the same way.
-		if target == null and q.wants_interact and not dev_mode:
+		if target == null and q.wants_interact:
 			var body: Dictionary = corpses.aimed_body(q.aim_id)
 			var aim_node: Node = find_interactable(q.aim_id) if not body.is_empty() else null
 			if not body.is_empty() and corpses.can_lift(q, body) and (aim_node == null or _within_reach(q, aim_node)):
@@ -3535,7 +3551,8 @@ func _global_fields() -> Dictionary:
 		"pt": player_surgery.net_state(),  # downed: the player table's case and its surgery
 		"et": snappedf(end_timer, 0.1), "sf": shelf.duplicate(),
 		"wp": waiting_peers.keys(),
-		"dv": dev.net_state() if dev_mode else {},  # DEV HOOK
+		"dv": dev.net_state() if dev_on() else {},  # DEV HOOK
+		"dt": dev_tools,  # DEV HOOK: the pharmacy's secret order
 		"mn": money,  # inventory: team money
 		"fh": economy.furnace.hatch_open if economy.furnace != null and is_instance_valid(economy.furnace) else false,  # hub: the furnace hatch
 		"pj": projector_on,  # terminal redesign: the break room projector
@@ -3784,10 +3801,16 @@ func _apply_state(state: Dictionary, msg: Dictionary, keyframe: bool) -> void:
 	combat.apply_net_state(g.get("cb", {}))
 	dissection.apply_net_state(g.get("dx", {}))
 	brains.apply_net_state(g.get("br", {}))
-	if dev_mode and not (g.get("dv", {}) as Dictionary).is_empty():
+	var new_tools := bool(g.get("dt", dev_tools))   # DEV HOOK
+	if new_tools != dev_tools:
+		dev_tools = new_tools
+		if not new_tools:
+			dev.reset_state()
+		dev.on_dev_tools(new_tools)
+	if dev_on() and not (g.get("dv", {}) as Dictionary).is_empty():
 		dev.apply_net_state(g.dv)  # DEV HOOK: creates bot players before their entries apply
 	# DOORS HOOK: the host rebuilt the wings (a new shift): follow; then the doors' amounts.
-	if g.has("wg") and int(g.wg) != wing_loader.generation and not dev_mode:
+	if g.has("wg") and int(g.wg) != wing_loader.generation:
 		wing_loader.regenerate(int(g.wg))
 	doors.apply_net(g)
 

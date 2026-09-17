@@ -167,7 +167,7 @@ func _check_rooms() -> void:
 
 ## Things that happen rather than places: the first body waiting for the furnace.
 func _check_events() -> void:
-	if _seen.has("bodies") or game.corpses == null or game.dev_mode:
+	if _seen.has("bodies") or game.corpses == null:
 		return
 	if not game.corpses.any_left().is_empty():
 		_seen["bodies"] = true

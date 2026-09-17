@@ -106,7 +106,7 @@ func _exit_tree() -> void:
 
 func has_wings() -> bool:
 	return game != null and game.level != null and is_instance_valid(game.level) \
-			and game.level_info.has("wings_root") and not game.dev_mode
+			and game.level_info.has("wings_root")
 
 
 # =========================================================================

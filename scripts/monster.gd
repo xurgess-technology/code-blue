@@ -812,7 +812,7 @@ func _nurse_visual(delta: float) -> void:
 ## Dev room settings for the Night Nurse (dev_room.gd `nurse_settings()`): {ignore_watch, walk
 ## ("" | "follow" | "loop"), who, loop: Array of Vector3, speed}. Empty outside the dev room.
 func dev_nurse() -> Dictionary:
-	if game == null or not ("dev_mode" in game) or not game.dev_mode:
+	if game == null or not game.has_method("dev_on") or not game.dev_on():
 		return {}
 	var dv = game.get("dev")
 	if dv == null or not dv.has_method("nurse_settings"):

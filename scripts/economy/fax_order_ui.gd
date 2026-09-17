@@ -7,6 +7,10 @@ extends CanvasLayer
 ## and the team's money. SEND FAX feeds the page down into the machine, then sends the ticked items and
 ## their quantities to the host (economy.request_order), which takes the money and starts the order.
 ##
+## DEV HOOK: a quantity of exactly game.DEV_CODE placebo pills is the secret order. It sends whatever
+## the team has; instead of closing, the machine prints a reply page while the host turns dev mode on
+## and every machine builds the hidden dev room (dev_room.gd), then closes.
+##
 ##   open(game)   show it; the player stops (main.gd frees the mouse while is_open())
 ##   close()      hide it
 ##   is_open()
@@ -33,6 +37,18 @@ var _note: Label
 var _send: Button
 var _sending := -1.0
 var _sent_sets := {}
+# DEV HOOK: the reply page after the secret order.
+const REPLY_LINE_SECONDS := 0.42
+const REPLY_SEND_AT_LINE := 3     # the order goes out once this many lines are on the page
+const REPLY_HOLD_SECONDS := 1.8
+const REPLY_TIMEOUT := 15.0
+const SECRET_KIND := "placebo_pills"
+var _reply := -1.0                # seconds since the reply page started, < 0 while not printing
+var _reply_lines: Array = []      # the lines still to print ("@build" waits for the room)
+var _reply_next := 0.0
+var _reply_sent := false
+var _reply_wait: Label = null
+var _reply_done := -1.0
 
 
 func _ready() -> void:
@@ -76,6 +92,7 @@ func open(g: Node) -> void:
 	game = g
 	_open = true
 	_sending = -1.0
+	_reply = -1.0
 	_build_sheet()
 	visible = true
 	_layout.call_deferred()
@@ -87,6 +104,8 @@ func close() -> void:
 		return
 	_open = false
 	_sending = -1.0
+	_reply = -1.0
+	_reply_wait = null
 	visible = false
 
 
@@ -98,7 +117,7 @@ func _click() -> void:
 func _input(event: InputEvent) -> void:
 	if not _open:
 		return
-	if event.is_action_pressed("pause") and _sending < 0.0:
+	if event.is_action_pressed("pause") and _sending < 0.0 and _reply < 0.0:
 		close()
 		get_viewport().set_input_as_handled()
 
@@ -110,10 +129,16 @@ func _process(delta: float) -> void:
 	if me == null or not me.alive or me.downed or game.phase == Game.Phase.MENU:
 		close()
 		return
+	if _reply >= 0.0:
+		_tick_reply(delta)
+		return
 	if _sending >= 0.0:
 		_sending += delta
 		_layout()
 		if _sending >= SEND_SECONDS:
+			if _is_secret(_sent_sets):
+				_start_reply()
+				return
 			if game != null and game.economy != null:
 				game.economy.request_order(_sent_sets)
 			close()
@@ -200,7 +225,7 @@ func _stepper(r: Dictionary) -> HBoxContainer:
 	h.add_child(_ink("QTY", 15, Fax.INK_FAINT))
 	var edit := LineEdit.new()
 	edit.text = "1"
-	edit.max_length = 2
+	edit.max_length = 10   # DEV HOOK: room for the secret order
 	edit.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	edit.custom_minimum_size = Vector2(52, 30)
 	edit.add_theme_font_override("font", _font)
@@ -255,7 +280,22 @@ func _stepper(r: Dictionary) -> HBoxContainer:
 
 ## How many sets a row is set to: 0 while its box is blank or unticked.
 func _qty(r: Dictionary) -> int:
+	if _is_code(r):
+		return _code()
 	return clampi(int(String(r.edit.text)), 0, _max_qty())
+
+
+## DEV HOOK: this row holds the secret order.
+func _is_code(r: Dictionary) -> bool:
+	return String(r.kind) == SECRET_KIND and String(r.edit.text) == str(_code())
+
+
+func _code() -> int:
+	return int(game.DEV_CODE) if game != null else 3141592653
+
+
+func _is_secret(sets: Dictionary) -> bool:
+	return int(sets.get(SECRET_KIND, 0)) == _code()
 
 
 func _max_qty() -> int:
@@ -263,6 +303,10 @@ func _max_qty() -> int:
 
 
 func _set_qty(r: Dictionary, n: int) -> void:
+	if String(r.kind) == SECRET_KIND and n == _code():
+		r.edit.text = str(n)
+		_refresh()
+		return
 	r.edit.text = str(clampi(n, 1, _max_qty()))
 	_refresh()
 
@@ -354,8 +398,13 @@ func _draw_room() -> void:
 	var page_top := (_sheet.position.y - 30.0) if _sheet != null and is_instance_valid(_sheet) else float(l.slot_y)
 	Fax.draw_paper(_canvas, sz, l, -feed_px, 1.0, INF, false, page_top)
 	var sending := _sending >= 0.0
-	Fax.draw_printer(_canvas, sz, l, _font, float(l.tx) + (fmod(_sending * 900.0, float(l.text_w)) if sending else 0.0),
-			"SENDING..." if sending else "READY TO SEND", Fax.LCD_WAIT if sending else Fax.LCD_TEXT, 1.0, 0.0, MACHINE_LABEL)
+	var lcd := "SENDING..." if sending else "READY TO SEND"
+	var head := float(l.tx) + (fmod(_sending * 900.0, float(l.text_w)) if sending else 0.0)
+	if _reply >= 0.0:
+		sending = true
+		lcd = "RECEIVING..." if _reply_done < 0.0 else "RECEIVED"
+		head = float(l.tx) + fmod(_reply * 700.0, float(l.text_w))
+	Fax.draw_printer(_canvas, sz, l, _font, head, lcd, Fax.LCD_WAIT if sending else Fax.LCD_TEXT, 1.0, 0.0, MACHINE_LABEL)
 
 
 ## Nothing over the page: it ends at its own top edge.
@@ -373,9 +422,12 @@ func _refresh() -> void:
 	if _total == null or not is_instance_valid(_total):
 		return
 	var total := 0
+	var secret := false
 	for r in _rows:
 		if not is_instance_valid(r.box):
 			continue
+		if r.box.checked and _is_code(r):
+			secret = true
 		var qty := _qty(r) if r.box.checked else 1
 		r.cost.text = "$%d" % (int(r.price) * maxi(qty, 1))
 		if r.box.checked:
@@ -383,8 +435,8 @@ func _refresh() -> void:
 	var money := int(game.money) if game != null else 0
 	_total.text = "TOTAL ........ $%d" % total
 	_funds.text = "TEAM FUNDS ... $%d" % money
-	_note.text = "NOTE: not enough money for this order." if total > money else ""
-	_send.disabled = total == 0 or total > money
+	_note.text = "NOTE: not enough money for this order." if total > money and not secret else ""
+	_send.disabled = total == 0 or (total > money and not secret)
 
 
 func _send_order() -> void:
@@ -398,6 +450,81 @@ func _send_order() -> void:
 	if DisplayServer.get_name() != "headless":
 		Audio.play("fax_connect", null, -10.0, 0.0, Audio.BUS_UI)
 		Audio.play("print_feed", null, -6.0, 0.05, Audio.BUS_UI)
+
+
+# ---------------------------------------------------------------------------
+# DEV HOOK: the pharmacy's reply to the secret order
+
+func _start_reply() -> void:
+	_sending = -1.0
+	_reply = 0.0
+	_reply_next = 0.0
+	_reply_sent = false
+	_reply_wait = null
+	_reply_done = -1.0
+	if _sheet != null:
+		_sheet.queue_free()
+	_rows = []
+	_sheet = VBoxContainer.new()
+	_sheet.add_theme_constant_override("separation", 6)
+	_sheet.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_clip.add_child(_sheet)
+	var dt := Time.get_datetime_dict_from_system()
+	_reply_lines = [
+		[">> FAX  %04d-%02d-%02d  %02d:%02d  PAGE 1 OF 1" % [dt.year, dt.month, dt.day, dt.hour, dt.minute], 16, Fax.INK_FAINT],
+		["TO:    NIGHT SHIFT, OPERATING ROOM", Fax.FONT_SIZE, Fax.INK],
+		["FROM:  COUNTY GENERAL PHARMACY", Fax.FONT_SIZE, Fax.INK],
+		["RE:    3,141,592,653 PLACEBO PILLS", Fax.FONT_SIZE, Fax.INK],
+		["@rule"],
+		["ORDER VOIDED. NO CHARGE.", Fax.FONT_SIZE, Fax.INK],
+		["AUTHORIZATION ........ 3.14159265", Fax.FONT_SIZE, Fax.INK],
+		["UNLOCKING SUPPLY CLOSET ........ OK", Fax.FONT_SIZE, Fax.INK],
+		["@build"],
+		["@rule"],
+		["DEV MODE ON.  F1: DEV PANEL.", Fax.FONT_SIZE, Fax.DEV_INK],
+	]
+	if DisplayServer.get_name() != "headless":
+		Audio.play("fax_connect", null, -10.0, 0.0, Audio.BUS_UI)
+	_layout()
+
+
+func _tick_reply(delta: float) -> void:
+	_reply += delta
+	if _reply_sent and _reply_wait != null:
+		var ready: bool = game != null and game.dev_on() and game.dev.room_ready()
+		if ready or _reply >= REPLY_TIMEOUT:
+			_reply_wait.text = "BUILDING DEV ROOM ................ " + ("DONE" if ready else "LATE")
+			_reply_wait = null
+			_reply_next = _reply + REPLY_LINE_SECONDS
+		else:
+			_reply_wait.text = "BUILDING DEV ROOM " + ".".repeat(1 + int(_reply * 6.0) % 16)
+	elif _reply >= _reply_next and not _reply_lines.is_empty():
+		_print_reply_line(_reply_lines.pop_front())
+		_reply_next = _reply + REPLY_LINE_SECONDS
+		if _reply_lines.is_empty():
+			_reply_done = _reply
+	if not _reply_sent and _sheet.get_child_count() >= REPLY_SEND_AT_LINE:
+		# The page is up and drawing: now the order goes out and the room gets built behind it.
+		_reply_sent = true
+		if game != null and game.economy != null:
+			game.economy.request_order(_sent_sets)
+	if _reply_done >= 0.0 and _reply - _reply_done >= REPLY_HOLD_SECONDS:
+		close()
+		return
+	_layout()
+
+
+func _print_reply_line(line: Array) -> void:
+	match String(line[0]):
+		"@rule":
+			_sheet.add_child(_rule())
+		"@build":
+			_reply_wait = _ink("BUILDING DEV ROOM .", Fax.FONT_SIZE)
+			_sheet.add_child(_reply_wait)
+		_:
+			_sheet.add_child(_ink(String(line[0]), int(line[1]), line[2]))
+	if DisplayServer.get_name() != "headless":
+		Audio.play("print_feed", null, -12.0, 0.05, Audio.BUS_UI)
 
 
 ## A tick box drawn in ink: [ ] LABEL, click to tick or untick.

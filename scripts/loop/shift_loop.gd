@@ -154,7 +154,7 @@ func on_clock_in() -> void:
 	pay_note = ""
 	grace_left = GRACE_SECONDS
 	_rng.seed = hash("%d|loop|%d" % [int(game.seed_value), int(game.shift)])
-	if game.is_host() and not game.dev_mode:
+	if game.is_host():
 		start_call("first")
 
 
@@ -182,7 +182,7 @@ func physics_tick(delta: float) -> void:
 
 
 func _host_tick(delta: float) -> void:
-	if game.phase == game.Phase.SHIFT and not game.dev_mode:
+	if game.phase == game.Phase.SHIFT:
 		# The first call now fires immediately from on_clock_in(); grace_left stays 0 (GRACE_SECONDS)
 		# and is kept only for tests/tools that still reference it.
 		if extra_at >= 0.0 and not extra_done and call_state == "" and game.world_time >= extra_at:
@@ -494,7 +494,7 @@ func table_reserved(table_index: int) -> bool:
 
 ## Every accepted patient is stable or dead and nobody is on the way. Every machine.
 func can_clock_out() -> bool:
-	if game.phase != game.Phase.SHIFT or game.dev_mode:
+	if game.phase != game.Phase.SHIFT:
 		return false
 	return _clock_out_blocker() == ""
 
@@ -527,8 +527,6 @@ func clock_prompt(_p) -> String:
 		game.Phase.LOBBY:
 			return "Hold E: clock in"
 		game.Phase.SHIFT:
-			if game.dev_mode:
-				return ""
 			var why := _clock_out_blocker()
 			return "Hold E: clock out" if why == "" else "!" + why
 	return ""
@@ -631,12 +629,39 @@ func dev_phone_call() -> void:
 		game.say("Dispatch: %s, %s, coming in now." % [Procedures.patient(cc.patient_id).name, Procedures.ailment(cc.ailment_id).name.to_lower()], 3.0)
 
 
+## Host (dev panel "Skip to table"): every patient on the way is on a free table now; the
+## paramedics hand over where they stand and walk back out.
+func dev_skip_to_table() -> void:
+	if not game.is_host():
+		return
+	var moved := 0
+	for c in game.cases.duplicate():
+		if String(c.get("state", "")) != "incoming":
+			continue
+		var id := int(c.id)
+		for d in _dispatch.duplicate():
+			if int(d.id) == id:
+				_dispatch.erase(d)
+		if not crews.has(id):
+			var table: int = game.free_patient_table()
+			if table < 0:
+				break
+			var from := arrival_point()
+			crews[id] = {"p": from, "y": 0.0, "ph": "hand", "pt": String(c.patient_id), "ai": String(c.ailment_id), "tb": table}
+			_paths[id] = {"pts": PackedVector3Array([from]), "i": 1, "t": 0.0, "age": 0.0}
+		_hand_over(id, crews[id], c)
+		if String(c.state) == "on_table":
+			moved += 1
+	if moved == 0:
+		game.say("Nobody on the way (or no free table).", 2.5)
+
+
 ## Host (dev panel "Extra patient"): outside the dev room the extra call rings now; in the dev room
 ## (which has no phone) the extra patient is simply accepted and wheeled in.
 func dev_extra_patient() -> void:
 	if not game.is_host() or game.phase != game.Phase.SHIFT:
 		return
-	if game.dev_mode or phone == null:
+	if phone == null:
 		_make_room_for_a_patient()
 		var cc := _roll("extra")
 		first_called = true
@@ -652,7 +677,7 @@ func dev_extra_patient() -> void:
 
 ## The dev room keeps taking patients: with every table taken, the oldest finished one goes.
 func _make_room_for_a_patient() -> void:
-	if game.free_patient_table() >= 0 or not game.dev_mode:
+	if game.free_patient_table() >= 0 or phone != null:
 		return
 	for c in game.cases:
 		if String(c.state) == "stable" or String(c.state) == "dead":

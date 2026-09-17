@@ -18,10 +18,8 @@ signal chose_settings
 signal chose_host_steam(player_name: String)
 
 ## DEV HOOK (scripts/dev): Solo or Host while the secret code is armed. host = true to host.
-signal chose_dev(player_name: String, host: bool)
 
 const Fax := preload("res://scripts/fax_printer.gd")
-const DevCodeScript := preload("res://scripts/dev/dev_code.gd")
 
 ## Seconds the sheet takes to feed up out of the printer and settle.
 const FEED_IN := 1.3
@@ -34,7 +32,6 @@ const EJECT_SECONDS := 0.5
 const PAGE_MARGIN := 30.0
 const BOTTOM_PAD := 22.0
 
-var dev_code: Node = null
 var _name_edit: LineEdit
 var _addr_edit: LineEdit
 var _status: Label
@@ -119,14 +116,6 @@ func _build() -> void:
 	_title.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_title.draw.connect(_draw_title)
 	_sheet.add_child(_title)
-	# DEV HOOK: the dev room's secret code listens here; armed, the title stamp turns blue.
-	dev_code = DevCodeScript.new()
-	dev_code.name = "DevCode"
-	add_child(dev_code)
-	dev_code.armed_changed.connect(func(on):
-		_title_ink = Fax.DEV_INK if on else Fax.STAMP_INK
-		_title.queue_redraw())
-
 	_sheet.add_child(_rule())
 
 	var name_row := _row()
@@ -483,26 +472,13 @@ func set_enabled(on: bool) -> void:
 func _on_solo() -> void:
 	_save_prefs()
 	set_enabled(false)
-	if _dev_start(false):  # DEV HOOK
-		return
 	chose_solo.emit(player_name())
 
 
 func _on_host() -> void:
 	_save_prefs()
 	set_enabled(false)
-	if _dev_start(true):  # DEV HOOK
-		return
 	chose_host.emit(player_name())
-
-
-## DEV HOOK: armed by the secret code, Solo and Host open the dev room (once; it disarms).
-func _dev_start(host: bool) -> bool:
-	if dev_code == null or not dev_code.armed:
-		return false
-	dev_code.set_armed(false, false)
-	chose_dev.emit(player_name(), host)
-	return true
 
 
 ## Clicking the empty paper or the room lets go of a text field (so typing reaches the menu again).

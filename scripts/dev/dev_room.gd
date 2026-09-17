@@ -1,20 +1,25 @@
 extends Node
-## The dev room: a secret level mode for showing off and testing. One per game, a child of
-## Game named "Dev" (so its RPCs have the same path on every machine). Idle unless
-## `game.dev_mode`.
+## Dev mode: the tools behind the pharmacy fax's secret order (DEV_CODE placebo pills, game.gd
+## set_dev_tools). One per game, a child of Game named "Dev" (so its RPCs have the same path on every
+## machine). Idle unless `game.dev_on()`. Dev mode is for one session and for everyone in it.
 ##
-## The room is a real session: solo or hosted, friends join into it, the host owns the truth.
-## Everything here that changes the world runs on the host; clients ask through request()
-## and fire() and see the result through the "dv" block of the game snapshot
-## (net_state / apply_net_state) and one-off events (tracers, fallen monsters).
+## The host owns the truth: everything here that changes the world runs on the host; clients ask
+## through request() and fire() and see the result through the "dv" block of the game snapshot
+## (net_state / apply_net_state) and one-off events (tracers, fallen monsters, a walk through a dev
+## door).
 ##
-## Contracts other code relies on are in docs/CONTRACTS.md ("Dev room").
+## The hidden dev room (dev_level.gd) is built on every machine the first time dev mode is on in a
+## level, out past the parking lot's fog, and entered through the locked door in the OR supply
+## closet (dev_door.gd), which every level has.
+##
+## Contracts other code relies on are in docs/CONTRACTS.md ("Dev mode").
 
 signal state_changed
 ## The panel's "phone call" button when the game has no dev_phone_call() yet (wave 2 builds it).
 signal phone_call_requested
+## Dev tools were turned on or off in this session (every machine).
+signal dev_tools_changed(on: bool)
 
-const SEED := -4077
 const KILL := "kill"
 const KNOCK := "knock"
 const GUN_RANGE := 80.0
@@ -42,6 +47,9 @@ const PlayerScript := preload("res://scripts/player.gd")
 const WorldItemScript := preload("res://scripts/world_item.gd")
 const LootTable := preload("res://scripts/economy/loot_table.gd")
 const MonsterScript3 := preload("res://scripts/monster.gd")  # SWEEP 3 HOOK (monsters): display names
+const DevDoorScript := preload("res://scripts/dev/dev_door.gd")
+## How far south of the parking lot's far edge the hidden room stands, metres (well past the fog).
+const ROOM_GAP := 30.0
 
 var game: Node = null
 
@@ -49,8 +57,11 @@ var game: Node = null
 var time_scale := 1.0
 var lights_on := true
 var pen_open := false
-var freeze_vitals := true
-var auto_revive := true
+var freeze_vitals := false
+var auto_revive := false
+## Dev tools toggles: no monsters spawn (and the live ones go); nobody loses the run to everyone downed.
+var monsters_off := false
+var no_game_over := false
 var god := {}      # peer id -> true
 var noclip := {}   # peer id -> true
 var gun := {}      # peer id -> true
@@ -75,13 +86,20 @@ var _applied_lights := true
 # ---- local ----
 var _recoil := {}   # peer id -> 0..1
 
+# ---- every machine: the hidden room and the closet door in this level ----
+var room: Node3D = null
+## The room's markers in world space: arrive, monster_spawns, dummy_spots, containers, lights,
+## dev_gate, nav_region, door_nodes.
+var room_info := {}
+var closet_door: Node3D = null
+
 
 func setup(g: Node) -> void:
 	game = g
 
 
 func active() -> bool:
-	return game != null and game.dev_mode and game.phase != game.Phase.MENU
+	return game != null and game.dev_on() and game.phase != game.Phase.MENU
 
 
 func is_host() -> bool:
@@ -110,7 +128,7 @@ func _set_pocket(kind: String) -> void:
 		game.say("The %s is through the wall. Dev panel: Go there." % kind, 3.0)
 
 
-## The local player (who owns their own position) steps into the pocket or back to the room.
+## The local player (who owns their own position) steps into the pocket or back to the start.
 func pocket_go(into: bool) -> void:
 	var me: Node = game.local_player()
 	if me == null:
@@ -118,29 +136,125 @@ func pocket_go(into: bool) -> void:
 	if into and game.pockets.active():
 		me.teleport(game.pockets.pocket.spawn)
 	elif not into:
-		var spots: Array = game.level_info.get("player_spawns", [])
+		var spots: Array = game.spawn_points()
 		me.teleport(spots[0] if not spots.is_empty() else Vector3.ZERO)
 
 
-## Builds the room into `info` (game._build_level's dev branch).
-func build_level(info: Dictionary) -> Node3D:
-	return LevelScript.build(info)
+## A new level exists (game._build_level): the supply closet's locked door, and the hidden room
+## again if dev mode is already on (the old one went with the old level).
+func on_level_built() -> void:
+	room = null
+	room_info = {}
+	closet_door = null
+	_applied_gate = false
+	_applied_lights = true
+	_add_closet_door()
+	if game.dev_on():
+		build_room()
 
 
-## The level exists and everyone is in it (game.start_lobby's dev branch).
-func on_enter() -> void:
-	reset_state()
-	tools_unlocked = true   # DOORS HOOK: the panel's door tools now also open in a hospital run
-	game._set_phase(game.Phase.SHIFT)
-	game.vitals = 100.0
+## Whether a point is inside the hidden room (bots only use its dispensers from in there).
+func in_room(pos: Vector3) -> bool:
+	if not room_ready():
+		return false
+	var o := room.global_position
+	return pos.x >= o.x and pos.x <= o.x + LevelScript.W and pos.z >= o.z and pos.z <= o.z + LevelScript.D and absf(pos.y - o.y) < 4.0
+
+
+## Every machine: the hidden room is standing in this level.
+func room_ready() -> bool:
+	return room != null and is_instance_valid(room)
+
+
+## Every machine: build the hidden room past the parking lot (once per level). Built the same way
+## everywhere; the host stocks its containers.
+func build_room() -> void:
+	if room_ready() or game.level == null or not is_instance_valid(game.level):
+		return
+	var info := {}
+	room = LevelScript.build(info)
+	room.name = "DevRoom"
+	var origin := _room_origin()
+	room.position = origin
+	game.level.add_child(room)
+	for key in ["monster_spawns", "dummy_spots"]:
+		var moved: Array = []
+		for v in info.get(key, []):
+			moved.append((v as Vector3) + origin)
+		info[key] = moved
+	info["arrive"] = (info.get("arrive", Vector3.ZERO) as Vector3) + origin
+	for e in info.get("containers", []):
+		var ct = e.get("node")
+		if ct != null and is_instance_valid(ct):
+			e["position"] = (ct as Node3D).global_position
+	# DOORS HOOK: the pen's doors were placed in the room's frame; their tiles and centres move with it.
+	var tile_off := Vector2i(int(round(origin.x / C.TILE)), int(round(origin.z / C.TILE)))
+	for d in info.get("door_nodes", []):
+		var tiles: Array = []
+		for t in d.data.get("tiles", []):
+			tiles.append((t as Vector2i) + tile_off)
+		d.data["tiles"] = tiles
+		d.centre = (d as Node3D).global_position + Vector3.UP * 1.1
+	game.doors.register(info.get("door_nodes", []))
+	room_info = info
+	_applied_gate = false
+	LevelScript.set_gate_open(room_info, pen_open)
+	_applied_gate = pen_open
 	if is_host():
-		_stock_containers()
-	game.say("Dev room. F1 opens the dev panel.", 5.0)
+		_stock_containers(info.get("containers", []))
+
+
+## South of the lot's far edge (past the fog), snapped to whole tiles. A level with no lot (the
+## fallback ward): somewhere nobody walks.
+func _room_origin() -> Vector3:
+	var lot: Rect2 = game.level_info.get("neutral_rect", Rect2())
+	var at := Vector3(-120.0, 0.0, -120.0) if lot.size == Vector2.ZERO else Vector3(lot.position.x, 0.0, lot.end.y + ROOM_GAP)
+	return Vector3(snappedf(at.x, C.TILE), 0.0, snappedf(at.z, C.TILE))
+
+
+## The locked door on the supply closet's west wall (every level with a supply closet).
+func _add_closet_door() -> void:
+	for r in game.level_info.get("rooms", []):
+		if String(r.get("kind", "")) != "or_storage":
+			continue
+		var rect: Rect2 = r.rect
+		closet_door = DevDoorScript.create("closet")
+		closet_door.position = game._floor_at(Vector3(rect.position.x, 0.0, rect.get_center().y))
+		closet_door.rotation.y = PI / 2.0   # its front (+Z) faces +X, into the closet
+		game.level.add_child(closet_door)
+		return
+
+
+## Host: a dev door was used. "closet" walks into the hidden room (building it first if it somehow
+## isn't), "exit" back into the supply closet.
+func walk_through(p: Node, which: String) -> void:
+	if not is_host() or p == null or not game.dev_on():
+		return
+	var to: Vector3
+	if which == "closet":
+		build_room()
+		if not room_ready():
+			return
+		to = room_info.arrive
+	else:
+		if closet_door == null or not is_instance_valid(closet_door):
+			return
+		to = closet_door.global_position + closet_door.global_basis.z * 0.9
+	game._sound("doors_heavy", p.global_position)
+	send_player(p, to)
+
+
+## Host: move a player; their own machine owns their position, so a guest is told to go.
+func send_player(p: Node, to: Vector3) -> void:
+	if p.is_local or bool(p.get("is_bot")):
+		p.teleport(to)
+	elif Net.active and multiplayer.get_peers().has(int(p.peer_id)):
+		game._event.rpc_id(int(p.peer_id), "dev_tp", {"pos": to})
 
 
 ## Fill every container with what that kind of container normally holds.
-func _stock_containers() -> void:
-	for e in game.level_info.get("containers", []):
+func _stock_containers(entries: Array) -> void:
+	for e in entries:
 		var ct = e.get("node")
 		if ct == null or not is_instance_valid(ct) or not ct.is_inside_tree():
 			continue
@@ -156,19 +270,7 @@ func _stock_containers() -> void:
 			game._spawn_item(kind, int(batch[batch.size() - 1]), ct.slot_transform(i), WorldItemScript.State.IN_CONTAINER, String(e.id), i)
 
 
-## A patient was saved or lost in the dev room: clear the table, stay in the room. (loop: the game
-## now clears a finished case's table itself a few seconds later; this stays for old callers.)
-func on_case_over(_won: bool) -> void:
-	game.case = {}
-	game._apply_case_locally()
-	game.end_timer = 0.0
-	game._set_phase(game.Phase.SHIFT)
-	for p in game.players.values():
-		if not p.alive:
-			_revive(p)
-
-
-## Leaving the dev room (a normal lobby or the menu): undo anything global.
+## Dev mode off or the session over: undo anything global (the room's geometry stays with its level).
 func reset_state() -> void:
 	for id in bots.keys():
 		_free_bot(id)
@@ -183,8 +285,10 @@ func reset_state() -> void:
 	Engine.time_scale = 1.0
 	lights_on = true
 	pen_open = false
-	freeze_vitals = true
-	auto_revive = true
+	freeze_vitals = false
+	auto_revive = false
+	monsters_off = false
+	no_game_over = false
 	nurse_ignore_watch = false
 	nurse_walk = ""
 	nurse_pace = 0
@@ -245,11 +349,13 @@ func _process(delta: float) -> void:
 		return
 	for p in game.players.values():
 		_update_gun_visual(p, delta)
-	if not game.dev_mode:
+	if not game.dev_on():
 		return
-	if _applied_gate != pen_open:
+	if not room_ready():
+		build_room()   # a client whose snapshot turned dev mode on before its level existed
+	if _applied_gate != pen_open and room_ready():
 		_applied_gate = pen_open
-		LevelScript.set_gate_open(game.level_info, pen_open)
+		LevelScript.set_gate_open(room_info, pen_open)
 	if _applied_lights != lights_on:
 		_applied_lights = lights_on
 		_apply_lights()
@@ -257,8 +363,9 @@ func _process(delta: float) -> void:
 		Engine.time_scale = time_scale
 
 
+## The hidden room's lights.
 func _apply_lights() -> void:
-	for l in game.level_info.get("lights", []):
+	for l in room_info.get("lights", []):
 		var node = l.get("node")
 		if node == null or not is_instance_valid(node):
 			continue
@@ -414,7 +521,7 @@ func _shot_fx(shooter_id: int, from: Vector3, to: Vector3, mode: String, hit: bo
 
 ## First-person gun on your camera (hands hidden), third-person gun on everyone else's body.
 func _update_gun_visual(p: Node, delta: float) -> void:
-	var want: bool = game.dev_mode and gun.has(p.peer_id) and p.alive and not p.downed
+	var want: bool = game.dev_on() and gun.has(p.peer_id) and p.alive and not p.downed
 	var fp: Node3D = p.camera.get_node_or_null("DevGunFP")
 	var tp: Node3D = p.body_visual.get_node_or_null("DevGunTP")
 	if not want:
@@ -462,7 +569,7 @@ func _update_gun_visual(p: Node, delta: float) -> void:
 
 ## Ask for a change. The host applies it at once; a client sends it to the host.
 func request(action: String, args: Dictionary = {}) -> void:
-	if game == null or not (game.dev_mode or (tools_unlocked and DOOR_ACTIONS.has(action))):
+	if game == null or not game.dev_on():
 		return
 	if is_host():
 		_apply_request(Net.my_id(), action, args)
@@ -472,14 +579,21 @@ func request(action: String, args: Dictionary = {}) -> void:
 
 @rpc("any_peer", "reliable", "call_remote")
 func _rpc_request(action: String, args: Dictionary) -> void:
-	if is_host() and (game.dev_mode or (tools_unlocked and DOOR_ACTIONS.has(action))):
+	if is_host() and game.dev_on():
 		_apply_request(multiplayer.get_remote_sender_id(), action, args)
 
 
-## DOORS HOOK: once this machine has been in the dev room, its panel (F1) also opens in a hospital
-## run with only the door tools; these are the requests it may send there.
-static var tools_unlocked := false
+## DOORS HOOK: the panel's door tools.
 const DOOR_ACTIONS := ["doors_all", "regen_wings"]
+
+
+## Every machine: dev mode went on or off in this session (game.set_dev_tools, or the snapshot).
+## On builds the hidden room here (the pharmacy fax's loading page covers the hitch).
+func on_dev_tools(on: bool) -> void:
+	if on:
+		build_room()
+	dev_tools_changed.emit(on)
+	state_changed.emit()
 
 
 func _door_request(action: String, a: Dictionary) -> void:
@@ -489,7 +603,7 @@ func _door_request(action: String, a: Dictionary) -> void:
 			game.say("Every door %s." % ("open" if bool(a.get("open", true)) else "shut"), 2.0)
 		"regen_wings":
 			if not game.wing_loader.has_wings():
-				game.say("No wings in here. After a visit to the dev room, F1 in a hospital run regenerates the real ones.", 5.0)
+				game.say("No wings in this level.", 3.0)
 				return
 			game.wing_loader.regenerate(int(game.wing_loader.generation) + 1)
 			game.say("Regenerating the wings behind the gates...", 3.0)
@@ -518,6 +632,33 @@ func _apply_request(sender: int, action: String, a: Dictionary) -> void:
 			freeze_vitals = bool(a.get("on", not freeze_vitals))
 		"auto_revive":
 			auto_revive = bool(a.get("on", not auto_revive))
+		"dev_off":
+			game.set_dev_tools(false, who)
+			return
+		"monsters_off":
+			monsters_off = bool(a.get("on", not monsters_off))
+			if monsters_off:
+				_clear_monsters_quietly()
+			game.say("Monsters %s." % ("off" if monsters_off else "back on from the next shift"), 2.5)
+		"no_game_over":
+			no_game_over = bool(a.get("on", not no_game_over))
+		"clock_in":
+			if game.phase == game.Phase.LOBBY:
+				game.clock_in()
+			else:
+				game.say("Clock in from the lobby (before a shift).", 2.5)
+		"clock_out":
+			if game.phase == game.Phase.SHIFT:
+				game.loop.clock_out(true)
+			else:
+				game.say("Not on a shift.", 2.0)
+		"skip_to_table":
+			game.loop.dev_skip_to_table()
+		"abilities":
+			if game.brains != null:
+				for id in game.brains.ABILITY_ID_TO_PATH.keys():
+					game.brains.set_level(sender, String(id), int(game.brains.MAX_LEVEL))
+				game.tell(who, "Every ability, max level. Alt+1..4 uses them.", 3.0)
 		"difficulty":
 			game.shift = clampi(int(a.get("shift", 1)), 1, 99)
 			game.say("Difficulty: shift %d." % game.shift, 2.5)
@@ -590,6 +731,17 @@ func _apply_request(sender: int, action: String, a: Dictionary) -> void:
 			if action.begins_with("br_") and game.brains != null and game.brains.has_method("dev_request"):
 				game.brains.dev_request(sender, action, a)
 	state_changed.emit()
+
+
+## Host: every monster gone, no death effects (the panel's "No monsters").
+func _clear_monsters_quietly() -> void:
+	for id in game.monsters.keys():
+		var m = game.monsters[id]
+		game.monsters.erase(id)
+		if game.combat != null:
+			game.combat.on_monster_removed(m)
+		if m != null and is_instance_valid(m):
+			m.queue_free()
 
 
 func _set_flag(d: Dictionary, id: int, on: bool) -> void:
@@ -671,8 +823,11 @@ func spawn_monster(kind: String, where: String, who: Node = null) -> Node:
 	if where == "front" and who != null:
 		pos = _in_front_of(who, 4.0)
 	else:
-		var spots: Array = game.level_info.get("monster_spawns", [Vector3(12, 0, 3)])
-		pos = spots[game.monsters.size() % spots.size()]
+		var spots: Array = room_info.get("monster_spawns", [])
+		if spots.is_empty():
+			pos = _in_front_of(who, 4.0)
+		else:
+			pos = spots[game.monsters.size() % spots.size()]
 	var m = game._add_monster(kind, pos)
 	game.say("A %s crawls out." % MonsterScript3.display_name(kind), 2.0)  # SWEEP 3 HOOK (monsters)
 	return m
@@ -718,8 +873,9 @@ func set_patient(patient_id: String, ailment_id: String) -> void:
 		var there: Dictionary = game.case_on_table(table)
 		if not there.is_empty():
 			game.remove_case(int(there.id))
+	if game.phase == game.Phase.LOBBY:
+		game.clock_in()   # a patient before clocking in: clock in first
 	game.add_case({"patient_id": patient_id, "ailment_id": ailment_id, "table": table, "state": "on_table"})
-	game._set_phase(game.Phase.SHIFT)
 	game.say("%s is on the table: %s." % [Procedures.patient(patient_id).name, Procedures.ailment(ailment_id).name], 3.0)
 
 
@@ -758,8 +914,8 @@ func spawn_bot(kind: String, who: Node = null) -> int:
 	var p := _make_bot_node(id, bot_name, kind)
 	var pos: Vector3
 	if kind == "dummy":
-		var spots: Array = game.level_info.get("dummy_spots", [Vector3(16, 0, 11)])
-		pos = spots[n_dummies % spots.size()]
+		var spots: Array = room_info.get("dummy_spots", [])
+		pos = spots[n_dummies % spots.size()] if not spots.is_empty() else _in_front_of(who, 3.0)
 		p.bot_yaw = PI   # face the spawn so the target rings show
 	else:
 		pos = _in_front_of(who, 2.0) if who != null else game.spawn_points()[0]
@@ -876,6 +1032,7 @@ func net_state() -> Dictionary:
 			stun[p.peer_id] = snappedf(p.stun, 0.1)
 	return {
 		"ts": time_scale, "lo": lights_on, "po": pen_open, "fv": freeze_vitals, "ar": auto_revive,
+		"mo": monsters_off, "ng": no_game_over,
 		"gd": god.keys(), "nc": noclip.keys(), "gn": gun.keys(), "bt": bots, "st": stun,
 		"nn": [nurse_ignore_watch, nurse_walk, nurse_pace],   # NURSE HOOK
 		"pk": dev_pocket,   # POCKETS HOOK
@@ -890,8 +1047,10 @@ func apply_net_state(s: Dictionary) -> void:
 	time_scale = float(s.get("ts", 1.0))
 	lights_on = bool(s.get("lo", true))
 	pen_open = bool(s.get("po", false))
-	freeze_vitals = bool(s.get("fv", true))
-	auto_revive = bool(s.get("ar", true))
+	freeze_vitals = bool(s.get("fv", false))
+	auto_revive = bool(s.get("ar", false))
+	monsters_off = bool(s.get("mo", false))
+	no_game_over = bool(s.get("ng", false))
 	god = _as_set(s.get("gd", []))
 	noclip = _as_set(s.get("nc", []))
 	gun = _as_set(s.get("gn", []))
@@ -937,6 +1096,10 @@ func on_event(kind: String, data: Dictionary) -> void:
 	match kind:
 		"monster_killed":
 			monster_died_fx(data)
+		"dev_tp":
+			var me = game.local_player()
+			if me != null:
+				me.teleport(data.pos)
 
 
 func monster_died_fx(data: Dictionary) -> void:

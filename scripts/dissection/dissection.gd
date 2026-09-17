@@ -120,13 +120,6 @@ func _host_tick(delta: float) -> void:
 		var state := String(c.get("state", ""))
 		if state == "stable" or state == "dead":
 			# Patient exits: the dead monster is a body now (corpses.gd); it goes when it is burned.
-			if not game.dev_mode:
-				continue
-			if not _remove_at.has(id):
-				_remove_at[id] = float(game.world_time) + REMOVE_AFTER
-			elif float(game.world_time) >= float(_remove_at[id]):
-				_forget(id)
-				game.remove_case(id)
 			continue
 		if state != "on_table" or not in_shift:
 			continue

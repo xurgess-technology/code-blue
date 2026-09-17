@@ -1,19 +1,21 @@
 extends CanvasLayer
-## The dev panel. F1 (or the key left of 1) toggles it while in the dev room; the mouse is free
-## while it is open. Every world change goes through game.dev.request(), so on a client it is
-## sent to the host; only graphics quality is local.
+## The dev panel. F1 (or the key left of 1) toggles it anywhere in a session with dev mode on (the
+## pharmacy fax's secret order); the mouse is free while it is open. Every world change goes through
+## game.dev.request(), so on a client it is sent to the host. Local only: graphics quality, going
+## somewhere (you own your position), this machine's database and tips.
 
 const ACCENT := Color(0.3, 0.95, 0.8)
 const DIM := Color(0.6, 0.68, 0.7)
 const PANEL_W := 400.0
 const LootTableScript := preload("res://scripts/economy/loot_table.gd")
 const DevRoomScript := preload("res://scripts/dev/dev_room.gd")   # NURSE HOOK: pace names
+const MonsterPages := preload("res://scripts/database/monster_pages.gd")
+const OFF := Color(1.0, 0.4, 0.35)
 
 var game: Node = null
 var main: Node = null
 
 var _root: PanelContainer
-var _doors_root: PanelContainer = null   # DOORS HOOK: the door tools alone, in a hospital run
 var _open := false
 var _refresh_t := 0.0
 var _c := {}              # control name -> Control
@@ -21,6 +23,8 @@ var _bots_box: VBoxContainer
 var _bots_sig := ""
 var _bot_rows := {}       # bot id -> {status: Label, order: OptionButton, item: OptionButton, to: OptionButton}
 var _dragging := {}
+var _places: Array = []      # [{name, pos}] for "Go to"
+var _places_level: Node = null
 
 
 func setup(g: Node, m: Node) -> void:
@@ -37,11 +41,7 @@ func is_open() -> bool:
 
 func toggle(on = null) -> void:
 	_open = (not _open) if on == null else bool(on)
-	# DOORS HOOK: in a hospital run (after a dev room visit) only the door tools show.
-	var room: bool = game != null and game.dev_mode
-	_root.visible = _open and room
-	if _doors_root != null:
-		_doors_root.visible = _open and not room
+	_root.visible = _open
 	if _open:
 		_bots_sig = ""
 		_refresh()
@@ -50,7 +50,7 @@ func toggle(on = null) -> void:
 
 
 func _in_room() -> bool:
-	return game != null and (game.dev_mode or DevRoomScript.tools_unlocked) and game.phase != game.Phase.MENU
+	return game != null and game.dev_on() and game.phase != game.Phase.MENU
 
 
 func _input(event: InputEvent) -> void:
@@ -111,10 +111,15 @@ func _build() -> void:
 	scroll.add_child(col)
 
 	var title := Label.new()
-	title.text = "DEV ROOM"
+	title.text = "DEV MODE"
 	title.add_theme_font_size_override("font_size", 26)
 	title.add_theme_color_override("font_color", ACCENT)
-	col.add_child(title)
+	var top := _row(col)
+	top.add_child(title)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var off := _button(top, "DEV MODE OFF", func(): _req("dev_off"); toggle(false))
+	off.add_theme_color_override("font_color", OFF)
+	off.add_theme_color_override("font_hover_color", OFF.lightened(0.3))
 	_c["role"] = _label(col, "", 12, DIM)
 
 	# ---- you
@@ -125,6 +130,8 @@ func _build() -> void:
 	_c["gun"] = _check(you, "Dev gun", func(on): _req("gun", {"on": on}))
 	var you2 := _row(col)
 	_button(you2, "Down me", func(): _req("down_me"))   # downed hook
+	_button(you2, "All abilities", func(): _req("abilities"))
+	_button(you2, "Revive all", func(): _req("revive_all"))
 	_label(col, "Gun: left click kills, right click downs. Noclip: Space up, Ctrl down.", 11, DIM)
 
 	# ---- world
@@ -148,12 +155,12 @@ func _build() -> void:
 	var ts2 := _row(col)
 	for v in [0.1, 0.25, 0.5, 1.0, 2.0]:
 		_button(ts2, "%sx" % str(v), func(): _req("time_scale", {"v": v}))
-	var w1 := _row(col)
-	_c["lights"] = _check(w1, "Lights", func(on): _req("lights", {"on": on}))
-	_c["pen"] = _check(w1, "Pen gate open", func(on): _req("pen", {"open": on}))
 	var w2 := _row(col)
-	_c["freeze"] = _check(w2, "Freeze vitals", func(on): _req("freeze", {"on": on}))
+	_c["freeze"] = _check(w2, "Infinite vitals", func(on): _req("freeze", {"on": on}))
 	_c["auto_revive"] = _check(w2, "Auto-revive", func(on): _req("auto_revive", {"on": on}))
+	var w2b := _row(col)
+	_c["monsters_off"] = _check(w2b, "No monsters", func(on): _req("monsters_off", {"on": on}))
+	_c["no_game_over"] = _check(w2b, "No game over", func(on): _req("no_game_over", {"on": on}))
 	var w3 := _row(col)
 	_label(w3, "Difficulty (shift)", 13, Color.WHITE)
 	var shift := SpinBox.new()
@@ -169,6 +176,45 @@ func _build() -> void:
 	var gfx := _option(w4, ["Low", "Medium", "High"])
 	gfx.item_selected.connect(_set_quality)
 	_c["gfx"] = gfx
+
+	# ---- going places (local: you own your position)
+	_section(col, "Go to")
+	var g1 := _row(col)
+	var places := _option(g1, [])
+	places.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_c["places"] = places
+	_button(g1, "Go", func(): _go_place(places.selected))
+	var g2 := _row(col)
+	_button(g2, "Dev room", func(): _go_dev_room())
+	_button(g2, "Start", func(): game.dev.pocket_go(false))
+	var g3 := _row(col)
+	_c["lights"] = _check(g3, "Dev room lights", func(on): _req("lights", {"on": on}))
+	_c["pen"] = _check(g3, "Pen gate open", func(on): _req("pen", {"open": on}))
+	_label(col, "The dev room is behind the locked door in the OR supply closet.", 11, DIM)
+
+	# ---- the shift loop
+	_section(col, "Shift")
+	var sh1 := _row(col)
+	_button(sh1, "Clock in", func(): _req("clock_in"))
+	_button(sh1, "Clock out (force)", func(): _req("clock_out"))
+	var sh2 := _row(col)
+	_button(sh2, "Phone call", func(): _req("phone"))
+	_button(sh2, "Extra patient", func(): _req("extra_patient"))
+	_button(sh2, "Skip grace", func(): _req("skip_grace"))
+	var sh3 := _row(col)
+	_button(sh3, "Skip to table", func(): _req("skip_to_table"))
+	_c["shift_label"] = _label(col, "", 12, DIM)
+
+	# ---- this machine's own database and tips
+	_section(col, "Database and tips (this machine)")
+	var db1 := _row(col)
+	_button(db1, "Unlock every entry", func(): _database(true))
+	_button(db1, "Reset database", func(): _database(false))
+	var db2 := _row(col)
+	_button(db2, "Reset tips", func():
+		if main != null and main.get("tips") != null:
+			main.tips.reset_seen()
+			game.say("Every tip shows again.", 2.0))
 
 	# ---- spawning
 	_section(col, "Spawn")
@@ -187,7 +233,7 @@ func _build() -> void:
 	var monsters := _option(s2, ["The Walk-In", "The Discharged", "The Night Nurse"])  # SWEEP 3 HOOK (monsters): the Walk-In
 	monsters.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var kinds := ["walk_in", "discharged", "night_nurse"]
-	_button(s2, "In the pen", func(): _req("spawn_monster", {"kind": kinds[monsters.selected], "where": "pen"}))
+	_button(s2, "In the dev room pen", func(): _req("spawn_monster", {"kind": kinds[monsters.selected], "where": "pen"}))
 	_button(s2, "In front", func(): _req("spawn_monster", {"kind": kinds[monsters.selected], "where": "front"}))
 	var s3 := _row(col)
 	_button(s3, "Kill all monsters", func(): _req("kill_monsters"))
@@ -216,8 +262,8 @@ func _build() -> void:
 	_button(pk1, "Remove", func(): _req("pocket", {"kind": ""}))
 	var pk2 := _row(col)
 	_button(pk2, "Go there", func(): game.dev.pocket_go(true))
-	_button(pk2, "Back to the room", func(): game.dev.pocket_go(false))
-	_label(col, "Builds the space for this session (no hospital entrances here). In a hospital: PocketPlan.force_kind.", 11, DIM)
+	_button(pk2, "Back to the start", func(): game.dev.pocket_go(false))
+	_label(col, "Builds the space beside the hospital for this session (no entrances to it).", 11, DIM)
 
 	# ---- brains (SWEEP 3 HOOK, scripts/brains/brains.gd dev_request)
 	_section(col, "Brains")
@@ -250,11 +296,6 @@ func _build() -> void:
 	var p2 := _row(col)
 	_button(p2, "Put on the table", func(): _req("patient", {"patient": pids[patients.selected], "ailment": aids[ailments.selected]}))
 	_button(p2, "Clear tables", func(): _req("clear_patient"))
-	# loop: the shift loop's phone call (game.dev_phone_call), the extra patient and the grace skip.
-	var p2b := _row(col)
-	_button(p2b, "Phone call", func(): _req("phone"))
-	_button(p2b, "Extra patient", func(): _req("extra_patient"))
-	_button(p2b, "Skip grace", func(): _req("skip_grace"))
 	var p3 := _row(col)
 	_label(p3, "Vitals", 13, Color.WHITE).custom_minimum_size.x = 44
 	var vit := HSlider.new()
@@ -287,7 +328,6 @@ func _build() -> void:
 	_button(b1, "+ Bot", func(): _req("spawn_bot", {"kind": "bot"}))
 	_button(b1, "+ Dummy", func(): _req("spawn_bot", {"kind": "dummy"}))
 	_button(b1, "Remove all", func(): _req("remove_bots"))
-	_button(b1, "Revive all", func(): _req("revive_all"))
 	_bots_box = VBoxContainer.new()
 	_bots_box.add_theme_constant_override("separation", 4)
 	col.add_child(_bots_box)
@@ -298,27 +338,6 @@ func _build() -> void:
 
 	_label(col, "F1 or Esc closes this panel.", 11, DIM)
 
-	# The door tools on their own, for a hospital run after a visit to the dev room.
-	_doors_root = PanelContainer.new()
-	_doors_root.name = "DevDoorsPanel"
-	_doors_root.offset_left = 10
-	_doors_root.offset_top = 10
-	_doors_root.offset_right = 10 + PANEL_W
-	_doors_root.offset_bottom = 170
-	_doors_root.add_theme_stylebox_override("panel", sb)
-	add_child(_doors_root)
-	var dcol := VBoxContainer.new()
-	dcol.add_theme_constant_override("separation", 6)
-	_doors_root.add_child(dcol)
-	var dt := Label.new()
-	dt.text = "DEV: DOORS"
-	dt.add_theme_font_size_override("font_size", 20)
-	dt.add_theme_color_override("font_color", ACCENT)
-	dcol.add_child(dt)
-	_door_buttons(dcol)
-	_label(dcol, "F1 or Esc closes this panel.", 11, DIM)
-	_doors_root.visible = false
-
 
 func _door_buttons(parent: Control) -> void:
 	var d1 := _row(parent)
@@ -326,7 +345,7 @@ func _door_buttons(parent: Control) -> void:
 	_button(d1, "Close all doors", func(): _req("doors_all", {"open": false}))
 	var d2 := _row(parent)
 	_button(d2, "Regenerate wings now", func(): _req("regen_wings"))
-	_c["doors_label%d" % _c.size()] = _label(parent, "Hinged doors swing away from you on E. The wings only exist in a hospital run.", 11, DIM)
+	_label(parent, "Hinged doors swing away from you on E.", 11, DIM)
 
 
 func _section(parent: Control, text: String) -> void:
@@ -397,6 +416,65 @@ func _req(action: String, args: Dictionary = {}) -> void:
 		game.dev.request(action, args)
 
 
+## Local: this machine's player's own database, every entry unlocked or wiped.
+func _database(unlock: bool) -> void:
+	if unlock:
+		for kind in MonsterPages.ORDER:
+			for field in ["sighted", "scanned", "harvested"]:
+				game.mark_own_db(String(kind), field)
+		game.say("Every database entry unlocked.", 2.0)
+	else:
+		game.database.clear()
+		game.DatabaseStoreScript.save(game.database)
+		game.say("Database wiped.", 2.0)
+
+
+## Every room in this level worth going to: the entrance building's rooms by kind, the lot, one per wing.
+func _rebuild_places() -> void:
+	_places_level = game.level
+	_places = []
+	var seen := {}
+	var info: Dictionary = game.level_info
+	for r in info.get("rooms", []):
+		var wing := String(r.get("wing", ""))
+		var key := String(r.kind) if wing == "entrance" else "wing:" + wing
+		if seen.has(key):
+			continue
+		seen[key] = true
+		var rect: Rect2 = r.rect
+		var label := String(r.kind).replace("hub_", "").capitalize() if wing == "entrance" else "Wing %s (%s)" % [wing, String(r.kind).capitalize()]
+		_places.append({"name": label, "pos": Vector3(rect.get_center().x, 0.0, rect.get_center().y)})
+	var lot: Rect2 = info.get("neutral_rect", Rect2())
+	if lot.size != Vector2.ZERO:
+		_places.append({"name": "Parking lot", "pos": Vector3(lot.get_center().x, 0.0, lot.position.y + 6.0)})
+	var o := _c["places"] as OptionButton
+	o.clear()
+	for pl in _places:
+		o.add_item(String(pl.name))
+
+
+func _go_place(i: int) -> void:
+	if i < 0 or i >= _places.size():
+		return
+	var me = game.local_player()
+	if me == null:
+		return
+	var at: Vector3 = _places[i].pos
+	var map: RID = me.get_world_3d().navigation_map
+	if NavigationServer3D.map_get_iteration_id(map) > 0:
+		at = NavigationServer3D.map_get_closest_point(map, at)
+	me.teleport(game._floor_at(at))
+
+
+func _go_dev_room() -> void:
+	var me = game.local_player()
+	if me == null:
+		return
+	game.dev.build_room()
+	if game.dev.room_ready():
+		me.teleport(game.dev.room_info.arrive)
+
+
 func _set_quality(q: int) -> void:
 	var settings := get_node_or_null("/root/Settings")
 	if settings != null and settings.has_method("set_value"):
@@ -415,6 +493,12 @@ func _refresh() -> void:
 	(_c["god"] as CheckBox).set_pressed_no_signal(dev.god.has(me))
 	(_c["noclip"] as CheckBox).set_pressed_no_signal(dev.noclip.has(me))
 	(_c["gun"] as CheckBox).set_pressed_no_signal(dev.gun.has(me))
+	if _places_level != game.level:
+		_rebuild_places()
+	(_c["monsters_off"] as CheckBox).set_pressed_no_signal(dev.monsters_off)
+	(_c["no_game_over"] as CheckBox).set_pressed_no_signal(dev.no_game_over)
+	(_c["shift_label"] as Label).text = "Phase: %s, shift %d. %s" % [String(Game.Phase.keys()[int(game.phase)]).capitalize(),
+		int(game.shift), game.loop.objective_text() if game.loop != null else ""]
 	(_c["lights"] as CheckBox).set_pressed_no_signal(dev.lights_on)
 	(_c["pen"] as CheckBox).set_pressed_no_signal(dev.pen_open)
 	(_c["freeze"] as CheckBox).set_pressed_no_signal(dev.freeze_vitals)

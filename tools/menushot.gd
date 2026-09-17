@@ -32,10 +32,6 @@ func _ready() -> void:
 	join.pressed.emit()
 	await _shot("join_no_address")
 
-	menu.dev_code.set_armed(true, false)
-	await _shot("dev_armed")
-	menu.dev_code.set_armed(false, false)
-
 	# What a pending join looks like (without starting one): the choice X'd, the rest greyed.
 	menu.set_enabled(false)
 	menu._buttons[2].set_marked(true)
