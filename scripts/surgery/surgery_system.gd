@@ -472,9 +472,29 @@ func _spawn_mg() -> void:
 		"seed": hash("%s|%d" % [mg_key, int(game.get("seed_value") if game.get("seed_value") != null else 0)]),
 		"body": body,
 		"operator": false,
+		"helper_lights": _helper_lights,
 	})
 	if _mg_state_key == mg_key and not _mg_state.is_empty():
 		mg.apply_net_state(_mg_state)
+
+
+## Teammates' flashlights for the minigame (ctx.helper_lights): every living player's light that is
+## on, except whoever is operating. Remote players' aim and flashlight are replicated, so every
+## machine sees the same lights.
+func _helper_lights() -> Array:
+	var out: Array = []
+	var players = game.get("players") if game != null else null
+	if not (players is Dictionary):
+		return out
+	for p in (players as Dictionary).values():
+		if p == null or not is_instance_valid(p) or not bool(p.get("alive")):
+			continue
+		if int(p.get("peer_id")) == operator_id or bool(p.get("operating")):
+			continue
+		var fl = p.get("flashlight")
+		if fl is SpotLight3D and bool(p.get("flashlight_on")) and (fl as SpotLight3D).visible:
+			out.append(fl)
+	return out
 
 
 func _free_mg() -> void:

@@ -95,6 +95,9 @@ var band_half := BAND_HALF
 var good_min := GOOD_CENTER - GOOD_HALF
 var good_max := GOOD_CENTER + GOOD_HALF
 var _b0 := 0.06
+## The patient's body paints its own infection (every real body does): our decal stays off, so
+## the limb shows one infection look in and out of this step.
+var _body_paints_infection := false
 var _amp := Vector3.ZERO
 var _ph := Vector3.ZERO
 var _skin := Color(0.93, 0.72, 0.56)
@@ -207,7 +210,11 @@ func _roll_infection(seed_value: int) -> void:
 	_ph = Vector3(rng.randf() * TAU, rng.randf() * TAU, rng.randf() * TAU)
 	var target := rng.randf_range(INFECT_FRONT_MIN, INFECT_FRONT_MAX)
 	var body_front := _body_infection_start()
-	if body_front < PLACE_REACH:
+	# Any body that paints an infection sets the front, however far along the limb it starts (Bob's
+	# Blender model paints his 17 cm past the site, beyond the strap's reach; this used to require
+	# it within PLACE_REACH, so his step rolled its own front a hand's width away from his).
+	if is_finite(body_front):
+		_body_paints_infection = true
 		target = body_front
 		band_center = maxf(body_front, band_half + STRAP_W * 0.5 + 0.006)
 	var lowest := INF
@@ -775,6 +782,10 @@ func _build_decals() -> void:
 	var hi := 0.03 + half_up * 1.9
 	_decal_infect = _decal(_infection_texture(x0, x1, wz), Vector3(x1 - x0, hi, wz), Vector3((x0 + x1) * 0.5, 0.03 - hi * 0.5, 0), 1)
 	_decal_infect.lower_fade = 0.08
+	# Only without a body (the self-test, a stand-in) do we paint the infection ourselves. On a real
+	# body the decal used to cover the body's own infection and still showed its other style at the
+	# edges; the body's shader now draws the one look everywhere.
+	_decal_infect.visible = not _body_paints_infection
 	var soft := _soft_texture(false)
 	_decal_blanch = _decal(soft, Vector3(0.2, h, wz), Vector3.ZERO, 0)
 	_decal_blanch.modulate = Color(0.62, 0.64, 0.68) if _seal else Color(0.96, 0.9, 0.86)

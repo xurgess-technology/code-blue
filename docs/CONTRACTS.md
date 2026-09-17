@@ -200,6 +200,8 @@ func flatline() -> void
 func site_section(site: String) -> Dictionary           # limb sites: {half_up, half_side, axis_depth, shape}; {} elsewhere
 func infection_start(site: String) -> float             # metres along the site's +X to where the body's infection begins; INF if none
 func make_severed_limb(parent: Node) -> Node3D          # adds a static copy of the limb an amputation removes, posed where it is; may be null
+func expose_site(site: String, centre: Vector2, radii: Vector2) -> void  # clear clothing inside an ellipse on the site plane (site X, Z) while a step is up
+func cover_site() -> void                               # undo expose_site
 ```
 
 Sites every patient provides: `injection`, `gunshot`, `limb` (above the infection, where the
@@ -251,10 +253,15 @@ frame and API; underneath:
   Sections: `limb` half_up 0.0489 / half_side 0.049, `limb_cut` 0.0411 / 0.0384, `shape` 2.2;
   `infection_start` 0.172 and 0.0295.
 - The gunshot ailment hides `Human_GownPanel` (a real opening in the gown, not a patch over it).
+  While a step has called `expose_site` (the forceps step, round its skin patch) the panel is back
+  and the cloth shader (`human_cloth.gdshader`, `expose*` uniforms) discards the gown inside the
+  ellipse instead, so gown folds never rise through the patch. Only the panel has skin under it:
+  elsewhere the gown is a shell over nothing, so do not expose sites away from the gunshot panel.
   Amputation hides `Human_Forearm_R`; the upper arm's own stump cap shows. `make_severed_limb` bakes
   `Human_Forearm_R` from the current pose (`bake_mesh_from_current_skeleton_pose`), cut cap included.
 - `skin_mats` is the model's skin ShaderMaterial (`human_skin.gdshader`): `pallor`, `grey`, `infect`
-  (graded by UV2.x, metres along the right arm, from 0.384 to 0.434), plus `gash`, `wound`,
+  (graded by UV2.x, metres along the right arm, from 0.384 to 0.434; the import flips UV2.y, so the
+  right arm reads 0 in the shader), plus `gash`, `wound`,
   `vein_glow`. Overlays (tourniquet, stump dressing from `SealModelBuilder.make_stump_dressing`,
   wound, pad and belly band, drips) are fitted to the model.
 
@@ -312,6 +319,10 @@ are easy to miss:
 - `on_jolt(offset, strength, duration)` is called on the operator's machine when an underdosed
   patient stirs; for `duration` seconds the cursor passed to `handle_cursor` carries a decaying
   shake of up to `offset`. React there rather than inferring jolts from cursor jumps.
+- `ctx.helper_lights` (optional Callable -> Array of SpotLight3D): the surgery system passes the
+  flashlights of living players other than the operator. `helper_light()` turns them into
+  `{amount, spot}` for this site (on, in range, aimed, clear line of sight). The forceps step lifts
+  its channel's darkness with it on every machine.
 - `Minigame.OWN_LAYER` (render layer 20) is reserved for a minigame's own props. Decals project
   only onto layer 1, so nothing on layer 20 gets painted. Cameras keep the default cull mask.
 - `hud_state()` may add `cross_section: {layers: [{name, from, to, color}], depth, layer}`; the

@@ -5,12 +5,17 @@ extends Node3D
 ##         [--ailment=gunshot|amputation] [--variant=pack|stump] [--bot=1.0] [--seconds=40]
 ##         [--shot=res://tools/lab_shots/forceps.png] [--shot-at=6.0] [--flags=sedation:0.6,tourniquet:0.9]
 ##         [--seed=N] [--wide] [--nohud] [--look=or] [--selftest=<game>]
+##         [--teammate-light[=nohelp|away]] [--teammate-aim=dx,dz]
 ##
 ## --flags with sedation under 0.75 makes the patient stir the way the surgery system does.
 ## --look=or lights it like the game: the hospital environment and post effects, a dim ceiling
 ##   light and the surgery system's work lamp on the camera (the default lab light is much brighter).
 ## --nohud hides the lab's text overlay (to judge a screenshot without the hint).
 ## --selftest=<game> runs that minigame's static self_test() and quits.
+## --teammate-light puts a teammate's flashlight (a player's SpotLight3D) beside the table, aimed at the
+##   site (plus --teammate-aim metres on the plane) and handed to the step as ctx.helper_lights, the way
+##   the surgery system hands it teammates' lights. =nohelp: the same light but not handed over (how
+##   the step lit before). =away: handed over but pointed off the table.
 ##
 ## Interactive (no --bot): move the mouse over the plane, left and right mouse buttons act.
 ## With --bot: plays the minigame's own bot_input(t, skill) and prints a report. Add --headless
@@ -34,6 +39,9 @@ var wide := false
 var self_test := ""
 var nohud := false
 var look := ""
+var teammate_light := ""
+var teammate_aim := Vector2.ZERO
+var _teammate: SpotLight3D
 
 # Stirs, the way scripts/surgery/surgery_system.gd makes them when sedation is under 0.75.
 const STIR_JOLT_TIME := 0.35
@@ -78,6 +86,11 @@ func _ready() -> void:
 			"selftest": self_test = v
 			"nohud": nohud = true
 			"look": look = v
+			"teammate-light": teammate_light = v if v != "" else "help"
+			"teammate-aim":
+				var av := v.split(",")
+				if av.size() == 2:
+					teammate_aim = Vector2(float(av[0]), float(av[1]))
 			"flags":
 				for pair in v.split(",", false):
 					var pv := pair.split(":")
@@ -129,12 +142,17 @@ func _ready() -> void:
 		result = r
 		finished_at = t
 		print("[lab] t=%.1f finished %s" % [t, str(r)]))
-	mg.setup({
+	var mg_ctx := {
 		"patient_id": patient_id, "patient": Procedures.patient(patient_id),
 		"ailment_id": ailment_id, "step": step, "variant": variant,
 		"shift": 1, "difficulty": Procedures.difficulty(1), "flags": flags,
 		"seed": seed_value if seed_value >= 0 else hash(game_id + patient_id), "body": body, "operator": true,
-	})
+	}
+	if teammate_light != "":
+		_add_teammate_light()
+		if teammate_light != "nohelp":
+			mg_ctx["helper_lights"] = func() -> Array: return [_teammate]
+	mg.setup(mg_ctx)
 
 	cam = Camera3D.new()
 	add_child(cam)
@@ -166,6 +184,26 @@ func _ready() -> void:
 	_hud.visible = not nohud
 	_stir_rng.seed = hash("lab_stir") + seed_value
 	print("[lab] game=%s patient=%s ailment=%s variant=%s bot=%s" % [game_id, patient_id, ailment_id, variant, str(bot_skill)])
+
+
+## A teammate standing at the table's far side, head height, with their flashlight (built as
+## scripts/player.gd builds it) on the site.
+func _add_teammate_light() -> void:
+	_teammate = SpotLight3D.new()
+	_teammate.name = "TeammateFlashlight"
+	_teammate.light_color = Color(1.0, 0.86, 0.62)
+	_teammate.light_energy = 4.5
+	_teammate.spot_range = C.CONE_RANGE
+	_teammate.spot_angle = C.CONE_DEG
+	_teammate.spot_angle_attenuation = 0.55
+	_teammate.spot_attenuation = 1.1
+	_teammate.shadow_enabled = true
+	add_child(_teammate)
+	var at := site.origin + site.basis.x * teammate_aim.x + site.basis.z * teammate_aim.y
+	_teammate.global_position = site.origin + Vector3(-0.35, 0.75, -0.7)
+	if teammate_light == "away":
+		at = site.origin + Vector3(-2.0, -0.5, -3.0)
+	_teammate.look_at(at, Vector3.UP)
 
 
 func _find_step() -> Dictionary:
