@@ -17,8 +17,8 @@ extends Node
 ##   one vial, +DOSE * DOSE_FALLOFF^n (n = doses so far, case field `doses`), capped at 1.
 ## - Vitals are the brain's condition: nothing drains them and nothing gives them back (the step
 ##   bonus is taken away again). At 0 the case is lost. The last step hands the brain over by the
-##   table (game.brains.spawn_brain, or a plain loot item), the monster flatlines, and the case is
-##   removed REMOVE_AFTER seconds later.
+##   table (game.brains.spawn_brain, or a plain loot item), the monster flatlines, and the case stays
+##   as a body until someone burns it (scripts/loop/corpses.gd).
 
 const SEDATION_SECONDS := 120.0
 const SAW_MULT := 2.5
