@@ -24,6 +24,7 @@ var stamina: float = 1.0
 var sprinting: bool = false
 var moving: bool = false
 var operating: bool = false
+var _op_anchor := Vector3.INF   # where the local player stood when the operation began
 var flashlight_on: bool = true
 var invuln: float = 0.0
 
@@ -820,6 +821,14 @@ func _local_step(delta: float) -> void:
 	var was_air := not is_on_floor()
 	var fall_speed := velocity.y
 	move_and_slide()
+	# Operating: rooted at the table. Something solid passing (the paramedics' gurney leaving the
+	# OR) used to shove the operator out of reach, and the host then ended the operation.
+	if operating and is_local:
+		if _op_anchor == Vector3.INF:
+			_op_anchor = global_position
+		global_position = Vector3(_op_anchor.x, global_position.y, _op_anchor.z)
+	else:
+		_op_anchor = Vector3.INF
 	if diving and _dive_airborne:
 		_dive_peak_y = maxf(_dive_peak_y, global_position.y)
 	if diving and _dive_airborne and was_air and is_on_floor():
