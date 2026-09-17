@@ -128,7 +128,7 @@ func _ready() -> void:
 	# uses to walk out mid-shift), or quit the app outright.
 	settings_ui.exit_to_menu_requested.connect(func(): _back_to_menu(""))
 	settings_ui.exit_to_desktop_requested.connect(func(): get_tree().quit())
-	# The pause fax has left the screen: back into the shift.
+	# The pause fax was dismissed: back into the shift at once, while its page and printer animate away.
 	settings_ui.closed.connect(func():
 		if game.paused and game.phase != Game.Phase.MENU:
 			game.paused = false
@@ -400,7 +400,13 @@ func _back_to_menu(reason: String) -> void:
 	game.end_session("")
 	game.paused = false
 	_set_mouse(false)
-	_show_menu(reason)
+	# From the pause page (Main menu, or the host leaving while paused): the title's printer takes over
+	# in place, the pause page ejects, and then the sign-in sheet feeds in (settings_ui._finish_close).
+	if not shift_fax.is_active() and settings_ui.leave_to_menu():
+		menu.show_menu(reason)
+		menu.hold_in_printer()
+	else:
+		_show_menu(reason)
 	Audio.set_music_intensity(0.0)
 
 
@@ -436,6 +442,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	# The shift fax is still going: nothing reaches the shift (no pause fax over it) until it has gone.
 	if shift_fax.holds_input():
+		get_viewport().set_input_as_handled()
+		return
+	# Its last moments (the page lifting, the printer sinking) are already the shift's, except that the
+	# pause fax waits the fraction of a second for that printer to be gone.
+	if shift_fax.is_active() and event.is_action_pressed("pause"):
 		get_viewport().set_input_as_handled()
 		return
 
@@ -483,7 +494,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 ## Esc in a shift: pause and bring up the settings fax; again (or Resume on the page) sends the page
-## away, and settings_ui.closed unpauses once it has gone.
+## away, and settings_ui.closed unpauses straight away while it goes.
 func _toggle_pause() -> void:
 	if game.paused:
 		settings_ui.close()

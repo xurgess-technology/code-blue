@@ -6,18 +6,23 @@ extends CanvasLayer
 ##   the same printer as the next page; Back ejects it and a fresh sign-in sheet feeds up in turn.
 ##
 ##   In a shift: Esc (main.gd _toggle_pause -> open_pause) pauses, the printer rises from the bottom
-##   of the screen and the settings sheet comes down from the top and feeds into its slot, with the
-##   pause buttons on the page (Resume, Main menu, Quit game). Leaving (Esc or Resume) plays it
-##   backwards: the sheet goes up and out of the top, the printer sinks off the bottom, and only then
-##   does `closed` fire (main.gd unpauses). The game stays visible either side of the paper.
+##   of the screen and the settings sheet feeds up out of its slot, with the pause buttons on the page
+##   (Resume, Main menu, Quit game). Leaving (Esc or Resume) fires `closed` at once (main.gd unpauses
+##   and captures the mouse: the shift has control straight back) while the sheet ejects off the top
+##   and the printer sinks off the bottom; `gone` fires once they have. Esc again before then turns the
+##   same printer and page around. Main menu (leave_to_menu) ejects the page over the title's printer
+##   and the sign-in sheet feeds in after it. The game stays visible either side of the paper.
 ##
 ## Every control writes straight to the Settings autoload, so a change applies the moment it is
 ## made; the page follows Settings.changed, so F2 / F11 stay in sync.
 ##
-##     open() / open_pause() / close() / is_open(), signal closed, exit_to_menu_requested,
-##     exit_to_desktop_requested
+##     open() / open_pause() / close() / is_open() / leave_to_menu(), signal closed, signal gone,
+##     exit_to_menu_requested, exit_to_desktop_requested
 
+## The page was dismissed (Esc, Resume, Back): the moment it happens, before it has animated away.
 signal closed
+## The page and (in a shift) the printer have left the screen.
+signal gone
 ## Pause-only buttons: main.gd connects these to tear the session down and return to the menu, or
 ## quit the app outright.
 signal exit_to_menu_requested
@@ -33,12 +38,9 @@ const COL_GAP := 26.0
 const LABEL_W := 96.0
 const BOTTOM_PAD := 22.0
 const PAGE_MARGIN := 30.0
-## The pause fax: seconds for the printer to rise and the page to feed in, and to leave again.
-const IN_SECONDS := 0.75
-const OUT_SECONDS := 0.55
-## The title menu's fax: a new page feeding up out of the slot, and one ejecting off the top.
-const FEED_SECONDS := 1.0
-const EJECT_SECONDS := 0.5
+## Motions and their timings are the shared ones in scripts/fax_printer.gd (Fax.FEED_SECONDS etc.).
+## Pausing, the page starts feeding once the rising printer is this far up.
+const FEED_AFTER_RISE := 0.3
 const MACHINE_LABEL := "COUNTY GENERAL  /  STAFF SETTINGS"
 
 ## key -> {slider, label, fmt: Callable}
@@ -68,10 +70,13 @@ var _reset_tips_button: Button
 var _back_button: Button
 
 var _open := false
-var _mode := ""          # "menu": over the title menu, still | "game": over a shift, animated
-var _k := 0.0            # 0 printer gone and page away .. 1 at rest (menu: 0 inside the slot)
-var _target := 0.0
-var _eject := -1.0       # menu: seconds into ejecting the page, < 0 when not
+var _mode := ""          # "menu": over the title menu, printer standing | "game": over a shift, printer rises
+var _printer := Fax.Motion.new(0.0)   # 1 standing in place, 0 sunk off the bottom (menu: always 1)
+var _feed := Fax.Motion.new(0.0)      # 0 inside the slot, 1 standing out of it at rest
+var _lift := Fax.Motion.new(0.0)      # 0 where the feed has it, 1 ejected off the top
+var _lift_from := 0.0                 # how far below rest the page was when it started ejecting
+var _feed_wait := 0.0                 # seconds until the page starts feeding (the printer rising first)
+var _feed_tick := 0.0
 var _opening := false    # menu: waiting for the sign-in sheet to eject
 var _grabber: ImageTexture
 
@@ -94,9 +99,9 @@ func _fit() -> void:
 
 ## Settings from the title menu (or, with no menu up, over the game without pausing it).
 func open() -> void:
+	if _opening or _open or (_root.visible and _mode == "menu"):
+		return   # already up, or still leaving for the sign-in sheet
 	if menu != null and is_instance_valid(menu) and menu.visible:
-		if _opening or _open:
-			return
 		_opening = true
 		menu.eject(func():
 			_opening = false
@@ -113,7 +118,8 @@ func open_pause() -> void:
 
 func _show(mode: String, pause: bool) -> void:
 	_sync_all()
-	var leaving := _root.visible and not _open   # reopened while the page was still going away
+	# Sent away and called back before it had gone: the same printer and page turn around.
+	var returning := _root.visible and not _open and mode == _mode
 	_open = true
 	_mode = mode
 	_root.visible = true
@@ -122,22 +128,29 @@ func _show(mode: String, pause: bool) -> void:
 		b.visible = pause
 	_back_button.visible = not pause
 	_status.text = "SHIFT PAUSED" if pause else ""
-	_eject = -1.0
+	_set_live(true)
 	if mode == "menu":
 		var page: int = int(menu.page_no) + 1 if menu != null and is_instance_valid(menu) else 3
 		_status.text = "PAGE %d" % page
 		_status.add_theme_color_override("font_color", Color(Fax.INK_FAINT, 0.92))
-		_k = 1.0 if DisplayServer.get_name() == "headless" else 0.0
-		_target = 1.0
-		if DisplayServer.get_name() != "headless":
-			Audio.play("print_feed", null, -8.0, 0.05, Audio.BUS_UI)
+		# The title's printer is already standing: just the next page, up out of its slot.
+		_printer.snap(1.0)
+		_lift.snap(0.0)
+		_feed.snap(0.0)
+		_feed.go(1.0, Fax.FEED_SECONDS, true)
+		_feed_wait = 0.0
 	else:
 		_status.add_theme_color_override("font_color", Color(Fax.STAMP_INK, 0.92))
-		_k = _k if leaving else 0.0
-		_target = 1.0
-		if DisplayServer.get_name() != "headless":
-			Audio.play("print_feed", null, -8.0, 0.05, Audio.BUS_UI)
-	_root.mouse_filter = Control.MOUSE_FILTER_STOP if mode == "menu" else Control.MOUSE_FILTER_IGNORE
+		if not returning:
+			_lift.snap(0.0)
+			_feed.snap(0.0)
+		# The machine rises in from below; the page starts feeding once it is most of the way up.
+		_feed_wait = maxf(0.0, (FEED_AFTER_RISE - _printer.value) * Fax.RISE_SECONDS)
+		_printer.go(1.0, Fax.RISE_SECONDS, true)
+		_lift.go(0.0, Fax.EJECT_SECONDS, true)
+		_feed.go(1.0, Fax.FEED_SECONDS, true)
+	_feed_tick = _feed_wait
+	Fax.sfx("print_feed", -8.0)
 	_layout()
 	if _first_focus != null:
 		_first_focus.grab_focus.call_deferred()
@@ -147,30 +160,65 @@ func close() -> void:
 	if not _open:
 		return
 	_open = false
+	_send_away()
+	if _mode == "game":
+		_printer.go(0.0, Fax.DROP_SECONDS, false)
+	closed.emit()
+	if Fax.headless():
+		_finish_close()
+
+
+## Main menu from the pause page (main.gd _back_to_menu): the session is gone underneath and the title
+## menu (its room and printer, standing where this one stands) is up below with its sheet held in the
+## printer. This page ejects off the top, then the sign-in sheet feeds in. False if no pause page is up.
+func leave_to_menu() -> bool:
+	if not _root.visible or _mode != "game":
+		return false
+	var was_open := _open
+	_open = false
+	_mode = "menu"
+	_printer.snap(1.0)
+	_send_away()
+	if was_open:
+		closed.emit()
+	if Fax.headless():
+		_finish_close()
+	return true
+
+
+## The page leaves: from wherever it is (even half fed in) it accelerates up and off the top.
+func _send_away() -> void:
 	_listening_key = ""
+	_set_live(false)
 	var focused := _root.get_viewport().gui_get_focus_owner()
 	if focused != null and _root.is_ancestor_of(focused):
 		focused.release_focus()
-	if _mode == "menu":
-		if DisplayServer.get_name() == "headless":
-			_finish_close()
-		else:
-			_eject = 0.0
-			Audio.play("print_feed", null, -8.0, 0.05, Audio.BUS_UI)
-		return
-	_target = 0.0
-	if DisplayServer.get_name() != "headless":
-		Audio.play("print_feed", null, -8.0, 0.05, Audio.BUS_UI)
+	_feed.snap(_feed.value)
+	_feed_wait = 0.0
+	_lift_from = (1.0 - _feed.value) * _feed_dist()
+	_lift.go(1.0, Fax.EJECT_SECONDS, false)
+	Fax.sfx("print_feed", -8.0)
+
+
+## Controls on the page answer the mouse and keyboard focus only while it is up: on its way out the
+## clicks (a captured mouse in a shift) go to the game.
+func _set_live(on: bool) -> void:
+	_clip.mouse_behavior_recursive = Control.MOUSE_BEHAVIOR_INHERITED if on else Control.MOUSE_BEHAVIOR_DISABLED
+	_clip.focus_behavior_recursive = Control.FOCUS_BEHAVIOR_INHERITED if on else Control.FOCUS_BEHAVIOR_DISABLED
+	_root.mouse_filter = Control.MOUSE_FILTER_STOP if on and _mode == "menu" else Control.MOUSE_FILTER_IGNORE
 
 
 func _finish_close() -> void:
 	_root.visible = false
-	_k = 0.0
-	if _mode == "menu" and menu != null and is_instance_valid(menu):
+	_printer.snap(0.0)
+	_feed.snap(0.0)
+	_lift.snap(0.0)
+	var was := _mode
+	_mode = ""
+	if was == "menu" and menu != null and is_instance_valid(menu):
 		menu.visible = true
 		menu.feed_in(0.0, 0.0, int(menu.page_no) + 2)   # a fresh sign-in sheet, the page after this one
-	_mode = ""
-	closed.emit()
+	gone.emit()
 
 
 func is_open() -> bool:
@@ -181,6 +229,12 @@ func is_open() -> bool:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not _root.visible:
+		return
+	if not _open:
+		# On its way out. In a shift control is already back (Esc again reopens it through main.gd);
+		# over the title nothing underneath is showing yet.
+		if _mode == "menu" and (event is InputEventKey or event is InputEventMouseButton):
+			get_viewport().set_input_as_handled()
 		return
 	# SWEEP 4A HOOK (controls): a rebind row is waiting for the next key. Esc cancels it without
 	# changing anything; any other key becomes the new binding.
@@ -193,7 +247,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		return
 	# Esc goes back (to the menu, or out of the pause into the shift), and nothing underneath (pause
-	# toggles, walking out) reacts while the page is up or still leaving.
+	# toggles, walking out) reacts while the page is up.
 	if event.is_action_pressed("pause"):
 		close()
 		get_viewport().set_input_as_handled()
@@ -211,23 +265,29 @@ func _process(delta: float) -> void:
 		return
 	if _mode == "game":
 		var game := get_tree().get_first_node_in_group("game")
-		# The session ended underneath (walked out, host left): no page to animate away.
+		# The session ended underneath without leave_to_menu (walked out, host left): nothing to
+		# animate away over.
 		if game == null or game.phase == Game.Phase.MENU:
-			_open = false
+			if _open:
+				_open = false
+				closed.emit()
 			_finish_close()
 			return
-	if _mode == "menu" and _eject >= 0.0:
-		_eject += delta
-		_layout()
-		if _eject >= EJECT_SECONDS:
-			_finish_close()
-		return
-	if _k != _target:
-		var dur := (FEED_SECONDS if _mode == "menu" else IN_SECONDS) if _target > _k else OUT_SECONDS
-		_k = move_toward(_k, _target, delta / dur)
-		_layout()
-		if _k <= 0.0 and _target <= 0.0:
-			_finish_close()
+	var dt := Fax.ui_dt(delta)
+	_printer.step(dt)
+	_lift.step(dt)
+	if _feed_wait > 0.0:
+		_feed_wait -= dt
+	else:
+		_feed.step(dt)
+		if _open and _feed.moving():
+			_feed_tick -= dt
+			if _feed_tick <= 0.0 and _feed.value < 0.85:
+				_feed_tick = Fax.FEED_TICK
+				Fax.sfx("print_feed", -14.0, 0.1)
+	_layout()
+	if not _open and _lift.at(1.0) and (_mode == "menu" or _printer.at(0.0)):
+		_finish_close()
 
 
 # ------------------------------------------------------------------ building
@@ -530,25 +590,22 @@ func _pct(v: float) -> String:
 
 # ------------------------------------------------------------------ layout and drawing
 
-## How far the printer has sunk below its place (0 at rest, off the bottom of the screen at 0).
+## How far the printer has sunk below its place (0 standing, off the bottom of the screen at 1).
 func _printer_drop(l: Dictionary) -> float:
-	if _mode == "menu":
-		return 0.0
-	var e := ease(clampf(_k / 0.55, 0.0, 1.0), 0.35)
-	return (1.0 - e) * (_root.size.y - float(l.slot_y) + 40.0)
+	return (1.0 - _printer.value) * Fax.printer_gone_px(_root.size, l)
 
 
-## How far above its resting place the page is (0 at rest, clear of the top of the screen at 0).
-func _page_lift(rest_top: float, l: Dictionary) -> float:
-	if _mode == "menu":
-		if _eject >= 0.0:
-			var k := minf(_eject / EJECT_SECONDS, 1.0)
-			return (float(l.slot_y) + PAGE_MARGIN + 20.0) * k * k   # accelerating up and away
-		# Feeding up out of the slot, slowing to a stop: starts with its top edge just inside.
-		var p := 1.0 - (1.0 - _k) * (1.0 - _k)
-		return -(1.0 - p) * (float(l.slot_y) - rest_top + PAGE_MARGIN)
-	var e := ease(clampf((_k - 0.2) / 0.8, 0.0, 1.0), 0.35)
-	return (1.0 - e) * (float(l.slot_y) + PAGE_MARGIN + 20.0)
+## From just inside the slot up to rest: the page's whole height and its margins.
+func _feed_dist() -> float:
+	return _sheet.get_combined_minimum_size().y + BOTTOM_PAD + PAGE_MARGIN
+
+
+## How far above its resting place the page is: negative while still down in the printer (riding with
+## it as it rises or sinks), then up past the top of the screen as it ejects.
+func _page_up(l: Dictionary, drop: float) -> float:
+	var up := -(1.0 - _feed.value) * _feed_dist()
+	up += _lift.value * (float(l.slot_y) + _lift_from + PAGE_MARGIN + 20.0)
+	return up - drop * (1.0 - _lift.value)
 
 
 func _layout() -> void:
@@ -560,7 +617,7 @@ func _layout() -> void:
 	var rest_y: float = float(l.slot_y) - h - BOTTOM_PAD
 	_clip.position = Vector2(l.px, 0.0)
 	_clip.size = Vector2(l.paper_w, float(l.slot_y) + drop)
-	_sheet.position = Vector2(Fax.MARGIN, rest_y - _page_lift(rest_y, l))
+	_sheet.position = Vector2(Fax.MARGIN, rest_y - _page_up(l, drop))
 	_sheet.size = Vector2(l.text_w, h)
 	_canvas.queue_redraw()
 
@@ -572,12 +629,17 @@ func _draw_paper() -> void:
 	var menu_mode := _mode == "menu"
 	if menu_mode:
 		_canvas.draw_rect(Rect2(Vector2.ZERO, sz), Fax.ROOM)
-	# A page its own size (a margin above its first line, a pad below its last), coming down from the
-	# top and feeding into the slot: below the slot it is inside the printer.
+	# A page its own size (a margin above its first line, a pad below its last), feeding up out of the
+	# slot: below the slot it is inside the printer.
 	var page_top := _sheet.position.y - PAGE_MARGIN
 	var page_bottom := minf(_sheet.position.y + _sheet.size.y + BOTTOM_PAD, float(l.slot_y) + drop)
-	Fax.draw_paper(_canvas, sz, l, 0.0, 1.0, page_bottom, false, page_top)
-	Fax.draw_printer(_canvas, sz, l, _font, float(l.tx), "SETTINGS" if _k >= 1.0 else "RECEIVING", Fax.LCD_TEXT, 1.0, drop, MACHINE_LABEL)
+	Fax.draw_paper(_canvas, sz, l, _page_up(l, drop) + _feed_dist(), 1.0, page_bottom, false, page_top)
+	var status := "RECEIVING"
+	if not _open:
+		status = "RECEIVING" if menu_mode else "RESUMING"
+	elif _feed.at(1.0) and _printer.at(1.0):
+		status = "PAUSED" if _pause_button.visible else "SETTINGS"
+	Fax.draw_printer(_canvas, sz, l, _font, float(l.tx), status, Fax.LCD_TEXT, 1.0, drop, MACHINE_LABEL)
 
 
 # ------------------------------------------------------------------ syncing

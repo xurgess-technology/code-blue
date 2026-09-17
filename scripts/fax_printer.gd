@@ -1,7 +1,9 @@
 extends RefCounted
-## The fax printer both paper screens draw: the launch printout (scripts/launch_screen.gd) and the
-## title menu's sign-in sheet (scripts/menu.gd). One layout and one set of drawing calls, so when the
-## launch page feeds out and the menu's page feeds in, the printer underneath doesn't move a pixel.
+## The fax printer every paper screen draws: the launch printout (scripts/launch_screen.gd), the title
+## menu's sign-in sheet (scripts/menu.gd), the settings / pause page (scripts/settings_screen.gd), the
+## shift assignment (scripts/shift_fax.gd) and the pharmacy order form (scripts/economy/fax_order_ui.gd).
+## One layout and one set of drawing calls, so when one page feeds out and the next feeds in, the
+## printer underneath doesn't move a pixel. docs/FAX.md lists every transition and its timing.
 
 const PAPER := Color("dcd8c9")
 const PAPER_BAND := Color(0.55, 0.72, 0.55, 0.13)
@@ -25,6 +27,24 @@ const SLOT := 0.74
 ## than their pixel sizes here, capped so the machine still fits across the screen.
 const UI_SCALE := 1.3
 const FIT_WIDTH := 780.0
+
+## One set of motions for every fax screen (docs/FAX.md), so a page arriving, a page leaving and the
+## machine itself coming and going look and take the same everywhere:
+##   a page feeds UP out of the slot, slowing to a stop (ease out)      FEED_SECONDS
+##   a finished page ejects UP off the top of the screen (ease in)       EJECT_SECONDS
+##   the printer rises in from below the screen (ease out)               RISE_SECONDS
+##   the printer sinks off the bottom (ease in)                          DROP_SECONDS
+## The printer only moves when the machine itself appears or goes (the pause menu, the pharmacy form,
+## the end of the shift assignment); pages that follow one another swap in the same standing printer.
+const FEED_SECONDS := 0.5
+const EJECT_SECONDS := 0.35
+const RISE_SECONDS := 0.38
+const DROP_SECONDS := 0.38
+## Longest step of animation time per frame: a slow frame holds the paper for a moment rather than
+## skipping most of a motion.
+const MAX_STEP := 0.05
+## Seconds between the feed motor's ticks while a page feeds.
+const FEED_TICK := 0.11
 
 
 static func make_font() -> Font:
@@ -153,3 +173,97 @@ static func draw_stamp(ci: CanvasItem, font: Font, text: String, centre: Vector2
 	ci.draw_rect(Rect2(-box * 0.5 + Vector2(6, 6), box - Vector2(12, 12)), Color(col, col.a * 0.5), false, 1.5)
 	ci.draw_string(font, Vector2(-tw * 0.5, big * 0.36), text, HORIZONTAL_ALIGNMENT_LEFT, -1, big, col)
 	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+# -- motion ------------------------------------------------------------------------------------
+
+## Animation seconds for a frame of `delta`: real time (the dev panel's slow motion doesn't slow the
+## paper), clamped to MAX_STEP.
+static func ui_dt(delta: float) -> float:
+	return minf(delta / maxf(Engine.time_scale, 0.001), MAX_STEP)
+
+
+## 0..1 -> 0..1, fast then settling (a page feeding out, the printer rising).
+static func ease_out(t: float) -> float:
+	var u := 1.0 - clampf(t, 0.0, 1.0)
+	return 1.0 - u * u * u
+
+
+## 0..1 -> 0..1, accelerating away (a page ejecting, the printer sinking). Not from a dead stop: it
+## moves the frame it starts, so a click or Esc is answered at once.
+static func ease_in(t: float) -> float:
+	var k := clampf(t, 0.0, 1.0)
+	return k * (0.3 + 0.7 * k)
+
+
+## How far the printer sinks to be fully off the bottom of a screen of `size`.
+static func printer_gone_px(size: Vector2, l: Dictionary) -> float:
+	return size.y - float(l.slot_y) + 40.0
+
+
+## Headless runs (tests) skip every animation.
+static func headless() -> bool:
+	return DisplayServer.get_name() == "headless"
+
+
+## A UI sound, not in headless runs.
+static func sfx(cue: String, db: float, jitter := 0.05) -> void:
+	if not headless():
+		Audio.play(cue, null, db, jitter, Audio.BUS_UI)
+
+
+## A value easing toward a target: go() starts from wherever it is now, so a motion reversed half way
+## (Esc, then Esc again) turns around instead of jumping. `seconds` is for the whole 0..1 distance;
+## shorter moves take proportionally less. Headless, it gets there at once.
+class Motion extends RefCounted:
+	var value := 0.0
+	var _from := 0.0
+	var _to := 0.0
+	var _t := 0.0
+	var _dur := 0.0
+	var _out := true
+
+	func _init(v := 0.0) -> void:
+		snap(v)
+
+	## Toward `to`, easing out (fast, then settling) or in (slow, then accelerating away).
+	func go(to: float, seconds: float, out := true) -> void:
+		if is_equal_approx(to, _to) and (_dur > 0.0 or is_equal_approx(value, to)):
+			return
+		_from = value
+		_to = to
+		_t = 0.0
+		_out = out
+		_dur = seconds * absf(to - value)
+		if _dur <= 0.0 or DisplayServer.get_name() == "headless":
+			snap(to)
+
+	func snap(v: float) -> void:
+		value = v
+		_from = v
+		_to = v
+		_t = 0.0
+		_dur = 0.0
+
+	func step(dt: float) -> void:
+		if _dur <= 0.0:
+			return
+		_t += dt
+		var k := clampf(_t / _dur, 0.0, 1.0)
+		var e := k * (0.3 + 0.7 * k)   # ease_in()
+		if _out:
+			var u := 1.0 - k
+			e = 1.0 - u * u * u
+		value = lerpf(_from, _to, e)
+		if k >= 1.0:
+			snap(_to)
+
+	func moving() -> bool:
+		return _dur > 0.0
+
+	func target() -> float:
+		return _to
+
+	## Resting at `v`.
+	func at(v: float) -> bool:
+		return _dur <= 0.0 and is_equal_approx(value, v)

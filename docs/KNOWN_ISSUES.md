@@ -1859,3 +1859,27 @@ Rebuilt around that:
   "the bot threw the loot into the furnace and sold it for $52" (every run), braintest "nobody is
   left looking through a Walk-In" after a game over (flaky, about 1 in 2), mapcheck seed 1's morgue
   tray (known).
+
+## Fax polish: one motion vocabulary, snappier transitions (2026-09-17)
+
+- **Every fax screen moves the same way** (docs/FAX.md has the full table): pages feed up out of the
+  slot (0.5 s, ease out) and eject up off the top (0.35 s, ease in), the printer rises / sinks
+  (0.38 s) only when the machine itself comes or goes. Shared constants, easing and a reversible
+  `Fax.Motion` live in `scripts/fax_printer.gd`.
+- **Faster:** launch -> title 2.1 -> 0.95 s, title <-> settings 1.5 / 1.8 -> 0.85 s, the shift
+  assignment's tail after the world is ready ~5 -> ~1.5 s (GOOD LUCK types quickly, short beat, and
+  the mouse returns as the page starts leaving), pause close 0.55 -> 0.38 s.
+- **Control returns at once:** closing the pause page unpauses the same frame (`settings_ui.closed`
+  now fires on dismissal; `gone` fires once it has left); Esc again turns it around. The pharmacy
+  form likewise (`is_open()` false at once) and can be called back while leaving.
+- **New motion where things popped:** the pharmacy form rises/feeds in, ejects on cancel, sinks
+  after SEND; Main menu from the pause page ejects the pause page over the title's printer and feeds
+  the sign-in sheet (`settings_ui.leave_to_menu`, `menu.hold_in_printer`); the tip memo's paper slides
+  up as lines print; the secret order's reply page rises out of the slot line by line.
+- **No teleports / double actions:** a sheet sent away half fed in leaves from where it is (menu,
+  shift assignment cancel); Enter / double clicks / Settings while the sign-in sheet is ejecting are
+  ignored (`Menu._accepting`); Esc during the shift assignment's last 0.4 s doesn't open the pause fax
+  over its sinking printer.
+- `tools/settingstest.gd`'s pause check now expects the shift resumed straight after Esc.
+- `tools/faxshot.tscn` (windowed) drives every transition, logs durations, saves contact sheets.
+  Not run: the test suites (settingstest, devtest, faxcheck, inventorytest touch these screens).
