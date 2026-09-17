@@ -141,7 +141,7 @@ func _run() -> void:
 	await _frames(2)
 	game.combat.start_drag(me, m)
 	await _seconds(0.5)
-	_check(game.combat.dragging(me) == m.monster_id and cc.active and cc.offset.z > 0.5 and cc.offset.y > 0.5, "dragging: the camera is up above and behind (%s)" % str(cc.offset.snappedf(0.01)))
+	_check(game.combat.dragging(me) == m.monster_id and cc.active and cc.offset.z > 0.5 and me.camera.global_position.y - me.head.global_position.y > 0.4, "dragging: the camera is up above and behind (%s, %.2f m above the head)" % [str(cc.offset.snappedf(0.01)), me.camera.global_position.y - me.head.global_position.y])
 	_stand_facing(tpos + tside * 1.5, tpos + Vector3(0, 0.9, 0))
 	await _aim_camera(tpos + Vector3(0, 0.9, 0))
 	await _frames(4)

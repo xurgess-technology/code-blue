@@ -20,7 +20,7 @@ const HM := preload("res://scripts/human/human_model.gd")
 ## client's is a large random one) and bots and dummies are small negatives.
 const BODY_BASE := -1000000000
 const PROXY_PREFIX := "corpse_"
-const SLIDE_SECONDS := 1.3
+const SLIDE_SECONDS := 1.9
 
 var game: Node = null
 var _nodes := {}          # case id -> {node, proxy}
@@ -164,7 +164,7 @@ func cremate(q: Node) -> void:
 	if not furnace.hatch_open:
 		furnace.set_hatch(true)
 	game._apply_cases_locally()
-	var data := {"pid": String(c.patient_id), "ail": String(c.get("ailment_id", "")), "from": from}
+	var data := {"pid": String(c.patient_id), "ail": String(c.get("ailment_id", "")), "from": from, "by": int(q.peer_id)}
 	play_cremation(data)
 	game._broadcast("cremate", data)
 	# A monster's case has nothing left to pay or show: it goes once it is burning.
@@ -317,6 +317,10 @@ func play_cremation(data: Dictionary) -> void:
 	game.get_node("Entities").add_child(body)
 	var from: Transform3D = data.get("from", Transform3D())
 	body.global_transform = from
+	# The carrier watches it go from over their shoulder (carry_camera.gd).
+	var me = game.local_player()
+	if me != null and int(data.get("by", 0)) == int(me.peer_id) and me.get("carry_cam") != null:
+		me.carry_cam.linger()
 	var ft: Transform3D = furnace.global_transform
 	var sill := ft * Vector3(0.0, furnace.SILL + 0.15, 0.25)
 	var inside := ft * Vector3(0.0, 0.35, -float(furnace.wall_d) - float(furnace.chamber_d) * 0.4)
@@ -338,13 +342,19 @@ func _tick_slides(delta: float) -> void:
 		var k := clampf(float(s.t) / SLIDE_SECONDS, 0.0, 1.0)
 		# Lying along the window (feet first into the fire), face up, as it goes over the sill.
 		var lie := Basis(Vector3.UP, float(s.yaw) + PI * 0.5)
-		if k < 0.35:
-			var a := ease(k / 0.35, 0.5)
+		if k < 0.5:
+			# Rolled off the shoulders: it tips forward off them, turning over once on the way down onto
+			# the sill, a little up first as the carrier heaves it.
+			var a := k / 0.5
+			var e := a * a * (3.0 - 2.0 * a)
 			var from: Transform3D = s.from
-			node.global_position = from.origin.lerp(s.sill, a)
-			node.global_basis = from.basis.slerp(lie, a)
+			var pos: Vector3 = from.origin.lerp(s.sill, e)
+			pos.y += sin(a * PI) * 0.22
+			node.global_position = pos
+			var roll := Basis((from.basis.x).normalized(), -PI * e)
+			node.global_basis = (roll * from.basis).orthonormalized().slerp(lie, e * e)
 		else:
-			var b := (k - 0.35) / 0.65
+			var b := (k - 0.5) / 0.5
 			node.global_position = (s.sill as Vector3).lerp(s.inside, b * b)
 			node.global_basis = lie
 			if not bool(s.flared) and b > 0.45:

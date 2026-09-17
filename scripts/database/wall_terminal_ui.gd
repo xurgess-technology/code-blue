@@ -10,8 +10,8 @@ extends Control
 ##             three levels, a procedure's steps, each step opening its surgery item), the entry's
 ##             3D model turning on the right (model_preview.gd)
 ## BACK goes up one page (a procedure's item goes back to the procedure), HOME to the top.
-## Chunks 3 and 4 (wall_session.gd): HOLD TO SIGN IN / SIGN OUT in the header and the signed-in
-## player's name in the title; whose database fills the cards comes from the session; the host's
+## Chunks 3 and 4 (wall_session.gd): nobody signed in is a LOCK screen, one big HOLD TO SIGN IN and
+## nothing else; signed in, SIGN OUT sits in the header and the player's name in the title; whose database fills the cards comes from the session; the host's
 ## screen takes every click and everyone else's follows it (set_view); other players' laser dots.
 ##
 ##   page, history(), set_view(page, history), refresh()
@@ -53,6 +53,7 @@ var _pulse_t := -1.0
 var _overlay: Control
 var _title: Label
 var _sign: Button
+var _lock_note: Label
 var _hold := 0.0
 var _remote: Array = []
 
@@ -79,7 +80,7 @@ func _ready() -> void:
 	_back.position = Vector2(W - MARGIN - 130 - 16 - 150, 30)
 	_back.pressed.connect(back)
 	add_child(_back)
-	# Signing in is a hold (scan_fx.gd times it); SIGN OUT is a click.
+	# Signing in is a hold (scan_fx.gd times it) on the lock screen; SIGN OUT is a click in the header.
 	_sign = _button("HOLD TO SIGN IN", Vector2(250, 56), 22)
 	_sign.position = Vector2(_back.position.x - 16 - 250, 30)
 	_sign.pressed.connect(func():
@@ -106,6 +107,12 @@ func _ready() -> void:
 	_preview.size = Vector2(W - MARGIN - 800, H - BODY_Y - 30)
 	_preview.visible = false
 	add_child(_preview)
+
+	_lock_note = _label("POINT YOUR LASER HERE AND HOLD CLICK", 26, GREEN_DIM)
+	_lock_note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_lock_note.size = Vector2(W, 40)
+	_lock_note.position = Vector2(0, H * 0.5 + 110)
+	add_child(_lock_note)
 
 	_overlay = Control.new()
 	_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -154,10 +161,15 @@ func _view() -> Dictionary:
 
 
 func sign_rect() -> Rect2:
-	var g := _game()
-	if not _sign.visible or (g != null and g.get("wall") != null and int(g.wall.user) != 0):
+	if not _sign.visible or not _locked():
 		return Rect2()
 	return Rect2(_sign.position, _sign.size)
+
+
+## Nobody signed in: the whole screen is the lock screen.
+func _locked() -> bool:
+	var g := _game()
+	return g == null or g.get("wall") == null or int(g.wall.user) == 0
 
 
 func set_hold(k: float) -> void:
@@ -192,14 +204,31 @@ func open(to: Dictionary) -> void:
 func _show() -> void:
 	for c in _body.get_children():
 		c.queue_free()
+	_preview.visible = false
+	var locked := _locked()
+	_lock_note.visible = locked
+	if locked:
+		_title.text = "STAFF DATABASE"
+		_crumb.text = "LOCKED"
+		_back.visible = false
+		_home.visible = false
+		_sign.text = "HOLD TO SIGN IN"
+		_sign.add_theme_font_size_override("font_size", 52)
+		_sign.custom_minimum_size = Vector2(620, 150)
+		_sign.size = _sign.custom_minimum_size
+		_sign.position = Vector2((W - _sign.size.x) * 0.5, H * 0.5 - 80)
+		return
 	var at_home := String(page.kind) == "home"
 	_back.visible = not at_home
 	_home.visible = not at_home
-	_preview.visible = false
 	var g := _game()
 	var who: String = g.wall.user_name() if g != null and g.get("wall") != null else ""
-	_title.text = "STAFF DATABASE  /  %s" % (who.to_upper() if who != "" else "GUEST")
-	_sign.text = "SIGN OUT" if who != "" else "HOLD TO SIGN IN"
+	_title.text = "STAFF DATABASE  /  %s" % who.to_upper()
+	_sign.text = "SIGN OUT"
+	_sign.add_theme_font_size_override("font_size", 22)
+	_sign.custom_minimum_size = Vector2(170, 56)
+	_sign.size = _sign.custom_minimum_size
+	_sign.position = Vector2((_back.position.x - 16 - 170) if not at_home else (W - MARGIN - 170), 30)
 	match String(page.kind):
 		"home":
 			_crumb.text = "HOME"
@@ -238,8 +267,10 @@ func _draw_home() -> void:
 		icon.size = Vector2(170, 170)
 		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		card.add_child(icon)
-		var t := _label(String(s.title), 46, GREEN)
-		t.position = Vector2(240, ch * 0.5 - 30)
+		# Two-word titles on two lines (SURGERY / ITEMS), so they never run off the card.
+		var t := _label(String(s.title).replace(" ", "
+"), 46, GREEN)
+		t.position = Vector2(240, ch * 0.5 - 31.0 * float(t.get_line_count()))
 		card.add_child(t)
 
 

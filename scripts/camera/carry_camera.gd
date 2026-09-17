@@ -3,24 +3,28 @@ extends RefCounted
 ## (docs/HANDS_AND_FEEDBACK.md "Over-the-shoulder carry camera"). Local only: nothing new on the wire.
 ##
 ## Ordinary play is always first person, locked -- this camera only ever engages for the
-## carry/drag states below. It moves the camera-feel node (Head/FX) back from the head, over the
-## LEFT shoulder while carrying (the body rides the right shoulder, game.pinned_pose +0.55 x) and
-## higher over the right shoulder while dragging (the body lies behind and below). The offset is in
-## the head's frame, so mouse pitch orbits it around the head, and a teleport moves it with the
+## carry/drag states below. It moves the camera-feel node (Head/FX) a little back from the head, close
+## over the LEFT shoulder while carrying (the body rides the right shoulder, game.pinned_pose +0.55 x)
+## and a little higher over the right shoulder while dragging (the body lies behind and below). The
+## offset is in the player's yaw frame (2026-09-17, Zach: it swung far away): looking up or down turns
+## the camera where it sits instead of orbiting it around the head, and a teleport moves it with the
 ## player (no easing across the world; the wall pull-in snaps to the new place). A sphere cast from
 ## the shoulder keeps it out of walls: in a corridor it pulls in toward the head, and the
 ## first-person hands take back over if it pulls in far enough to put the camera inside the local
 ## body. The local body (and the carried body, while carrying) become visible whenever the shoulder
 ## offset is far enough out to show them; the first-person hands and held item show whenever it is
 ## not. The flashlight stays at the head, pointed where the camera looks.
+## After a body goes into the furnace the camera lingers over the shoulder for LINGER_SECONDS so the
+## carrier sees it roll off into the fire (linger(), corpses.gd).
 ## Setting `carry_camera`: "shoulder" (default) or "first_person".
 
 const EASE_TIME := 0.35
 ## Head-space offsets (x right, y up, z back).
-const CARRY_OFFSET := Vector3(-1.0, 0.45, 2.0)
-const DRAG_OFFSET := Vector3(0.45, 1.0, 3.6)
+const CARRY_OFFSET := Vector3(-0.65, 0.22, 1.6)
+const DRAG_OFFSET := Vector3(0.45, 0.55, 1.9)
 ## Extra downward look while dragging, radians, so the body behind is in frame.
-const DRAG_TILT := 0.45
+const DRAG_TILT := 0.3
+const LINGER_SECONDS := 2.5
 const CAST_RADIUS := 0.16
 ## Below this distance from the head the local body hides (the camera would be inside it).
 const HIDE_BODY_BELOW := 0.55
@@ -42,6 +46,7 @@ var _last_pos := Vector3.INF
 var _len_k := 1.0
 var _side_k := 1.0
 var _body_shown := false
+var _linger := 0.0
 
 
 func _init(p: Node) -> void:
@@ -60,13 +65,22 @@ func wants() -> bool:
 		return false
 	if not setting_on():
 		return false
-	return p.carrying != 0 or p.dragging_monster >= 0
+	return p.carrying != 0 or p.dragging_monster >= 0 or _linger > 0.0
+
+
+## Stay over the shoulder a moment after the carry ends (a body just went into the furnace).
+func linger(seconds: float = LINGER_SECONDS) -> void:
+	_side_offset = CARRY_OFFSET
+	_linger = seconds
 
 
 func update(delta: float) -> void:
 	var p = player
+	_linger = maxf(0.0, _linger - delta)
+	if p != null and (p.downed or not p.alive):
+		_linger = 0.0
 	var want := wants()
-	if want:
+	if want and (p.carrying != 0 or p.dragging_monster >= 0):
 		_side_offset = CARRY_OFFSET if p.carrying != 0 else DRAG_OFFSET
 	blend = move_toward(blend, 1.0 if want else 0.0, delta / EASE_TIME)
 	active = blend > 0.0
@@ -91,7 +105,7 @@ func update(delta: float) -> void:
 	# beside the player moves the camera in over the head (it stays behind them); a wall behind pulls
 	# it in toward the head. Shortening is instant, growing back eases.
 	var hx: Transform3D = head.global_transform
-	var hb := hx.basis.orthonormalized()
+	var hb := Basis(Vector3.UP, (p as Node3D).global_rotation.y)   # yaw only: pitch turns the camera in place
 	var space: PhysicsDirectSpaceState3D = head.get_world_3d().direct_space_state if head.is_inside_tree() else null
 	var top: Vector3 = _cast(space, hx.origin, hx.origin + hb * Vector3(0.0, want_off.y, 0.0))
 	var side_goal: Vector3 = top + hb * Vector3(want_off.x, 0.0, 0.0)

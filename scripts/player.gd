@@ -1184,7 +1184,7 @@ func _update_scan_progress(delta: float) -> void:
 		scan_progress = 0.0
 		scan_target_id = target_id
 		_scan_beep_accum = 0.0
-	if target_id >= 0:
+	if target_id != -1:   # scan props (the waiting Night Nurse) have negative ids
 		scan_progress = clampf(scan_progress + delta / C.SCAN_SECONDS, 0.0, 1.0)
 		# SWEEP 4A HOOK (scanner): a beep while scanning, faster as progress builds. This is a
 		# plain 2D sound (Audio.play), never game.emit_noise(): it is not a noise event, so
