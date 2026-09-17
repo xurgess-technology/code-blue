@@ -255,6 +255,15 @@ func _carry_downed(delta: float) -> void:
 	if p.carrying != 0:
 		var who = game.players.get(p.carrying)
 		status = "carrying %s to the table" % (who.player_name if who != null else "someone")
+		if game.downed_any_table:
+			# The hospital: whichever patient table is free.
+			var ti: int = game.free_patient_table()
+			if ti < 0:
+				_halt()
+				status = "no free table for %s" % (who.player_name if who != null else "someone")
+				return
+			_go_use(game.table_interact_id(ti), game.table_position(ti), delta)
+			return
 		if game.player_table.is_empty():
 			_halt()
 			return
@@ -321,6 +330,10 @@ func _operate_player_table(delta: float) -> void:
 		return
 	status = "walking to the player table"
 	p.set_meta("bot_skill", skill)
+	if game.downed_any_table and game.player_table.has("index"):
+		var ti := int(game.player_table.index)   # the hospital: the patient table they lie on
+		_go_use(game.table_interact_id(ti), game.table_position(ti), delta)
+		return
 	_go_use("player_table", game.player_table.position, delta)
 
 

@@ -1,15 +1,14 @@
 extends Node
 ## Windowed screenshots for the inventory work: the slot bar with normal and bulky stacks, teal
 ## supplies against gold loot in a dark room and in hand, the pharmacy window and the furnace
-## (SWEEP 4A HOOK, pharmacy chunk 3: gold bars and the gold pile are gone), and the dev room's
-## loot rack and shop corner.
+## (SWEEP 4A HOOK, pharmacy chunk 3: gold bars and the gold pile are gone), and with dev mode on,
+## the hidden dev room's loot rack and the hospital's furnace with its hatch open.
 ##
 ##   godot --path . --resolution 1280x720 tools/inventoryshot.tscn -- [--seed=N] [--only=game]
 ##
 ## Writes tools/inventory_shots/<name>.png.
 
 const OUT_DIR := "res://tools/inventory_shots"
-const DevRoomScript := preload("res://scripts/dev/dev_room.gd")
 
 var main: Node3D
 var game: Game
@@ -148,19 +147,24 @@ func _game_shots() -> void:
 	await _shot("08_furnace_burn")
 
 
+## Dev mode on in a normal hospital: the hidden room (past the parking lot) and its loot rack on the
+## south wall, then the hospital's own furnace (the room has no shop corner any more).
 func _dev_shots() -> void:
-	await _start(DevRoomScript.SEED)
+	await _start(_seed)
+	game.set_dev_tools(true, bot)
 	await _frames(40)
-	var info: Dictionary = game.level_info
-	_look_from(Vector3(3.8, 0, 14.2), Vector3(3.8, 1.0, 18.0))
+	# The room's own frame (scripts/dev/dev_level.gd), offset to where it stands in the world.
+	var o: Vector3 = game.dev.room.global_position
+	_look_from(o + Vector3(3.8, 0, 14.2), o + Vector3(3.8, 1.0, 18.0))
 	await _frames(40)
 	await _shot("10_dev_loot_rack")
 	game.add_money(5000, "test")
 	await _frames(30)
 	var furn: Node3D = game.economy.furnace
-	_look_from(furn.global_position + Vector3(0, 0.8, 1.8), furn.global_position + Vector3.UP * 0.8)
+	furn.set_hatch(true, false)   # hub rebuild: the hatch over the window starts shut
+	_look_from(furn.global_position + furn.global_basis.z * 2.4, furn.global_position + Vector3.UP * 0.9)
 	await _frames(40)
-	await _shot("11_dev_shop_corner")
+	await _shot("11_dev_furnace")
 
 
 # =========================================================================

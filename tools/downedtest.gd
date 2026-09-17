@@ -3,18 +3,23 @@ extends Node
 ##
 ##   godot --headless --fixed-fps 60 --path . tools/downedtest.tscn
 ##
-## A generated hospital first (the Re-Gen Pod is gone, suture kits spawn, the fallback player table
-## lands beside the OR table, 0 HP downs, nobody standing fails the shift), then the dev room with a
-## bot and dummies (crawling, carrying and dropping, getting hit while carrying, the player table,
-## stitches with bot skill 1.0 reviving, a kit used up, bleeding out to dead at five minutes,
-## all_players_out, monsters ignoring the downed). Exits 0 when every check passes.
+## A generated hospital first (the Re-Gen Pod is gone, suture kits spawn, the hub's patient tables
+## take a downed teammate (or a level's own player table), 0 HP downs, nobody standing fails the
+## shift), then a second hospital with dev mode on (No monsters, No game over, clocked in): a bot
+## and dummies in the hidden dev room (crawling, carrying and dropping, getting hit while carrying,
+## monsters ignoring the downed), a carry into the hospital's OR onto a free patient table, stitches
+## with bot skill 1.0 reviving, a kit used up, all_players_out, bleeding out to dead at five
+## minutes. Exits 0 when every check passes.
 
-const DevRoomScript := preload("res://scripts/dev/dev_room.gd")
+## The dev-mode session's hospital (tools/devtest.gd uses the same one).
+const DEV_SEED := 4242
 
 var main: Node3D
 var game: Game
 var dev: Node
 var me: Player
+## The hidden dev room's corner (its own frame's origin) in world space.
+var o := Vector3.ZERO
 var t := 0.0
 var _done := false
 var _failures: Array = []
@@ -108,23 +113,40 @@ func _hospital() -> void:
 
 
 # =========================================================================
-# the dev room
+# dev mode: the hidden room and the hospital's OR
 # =========================================================================
 
 func _dev_room() -> void:
 	Net.start_solo("Tester")
-	game.start_session(DevRoomScript.SEED)
-	await _frames(6)
+	game.start_session(DEV_SEED)
+	while game.get_parent().has_node("WarmupCover"):
+		await get_tree().process_frame
+	await _seconds(0.5)
 	me = game.local_player()
 	me.bot_active = true
-	_check(game.dev_mode and not game.player_table.is_empty(), "the dev room has its player table")
-
-	# ---- crawling
-	_stand(Vector3(14.0, 0, 15.0), 0.0)
+	game.set_dev_tools(true, me)
 	await _frames(2)
+	_check(game.dev_on() and dev.room_ready(), "dev mode is on and the hidden room is built")
+	o = dev.room.global_position if dev.room_ready() else Vector3.ZERO
+	# A normal session: no monsters and no game over while the test downs the only player; clock in
+	# (the tables and carrying only work on shift) and keep the phone quiet.
+	dev.request("monsters_off", {"on": true})
+	dev.request("no_game_over", {"on": true})
+	dev.request("clear_shelf")
+	game.clock_in()
+	var ok := await _until(func(): return game.phase == Game.Phase.SHIFT, 90.0)
+	_check(ok, "clocked in (phase %d)" % game.phase)
+	_quiet_loop()
+	_check(game.downed_any_table and game.player_table.is_empty() and game.patient_tables.size() == 3,
+		"the hospital has no fixed player table: its patient tables take a downed teammate (%d tables)" % game.patient_tables.size())
+
+	# ---- crawling (on the room's lab floor)
+	_stand(o + Vector3(14.0, 0, 15.0), 0.0)
+	await _frames(2)
+	_check(dev.in_room(me.global_position), "standing in the hidden room's lab")
 	game.knock_down_player(me, "test")
 	await _seconds(0.8)
-	_stand(Vector3(14.0, 0, 15.0), 0.0)
+	_stand(o + Vector3(14.0, 0, 15.0), 0.0)
 	await _frames(2)
 	var start := me.global_position
 	me.bot_move = Vector2(0, -1)
@@ -146,21 +168,25 @@ func _dev_room() -> void:
 	dev.request("revive_all")
 	await _frames(3)
 	_check(me.alive and not me.downed and me.hp == me.max_hp, "revive all gets you up")
+	_check(game.phase == Game.Phase.SHIFT, "No game over: the only player downed and the shift went on")
 
-	# ---- carrying
+	# ---- carrying (on the room's lab floor)
 	var did: int = dev.spawn_bot("dummy")
 	var dummy: Player = game.players[did]
+	_stand(o + Vector3(14.0, 0, 15.0), 0.0)
+	await _frames(2)
 	var bid: int = dev.spawn_bot("bot", me)
 	var bot: Player = game.players[bid]
 	dev.order_bot(bid, "stay")
 	await _frames(4)
-	dummy.teleport(game._floor_at(Vector3(16.0, 0, 13.0)))
+	_check(dev.in_room(dummy.global_position), "the dummy spawns on the room's dummy floor")
+	dummy.teleport(game._floor_at(o + Vector3(16.0, 0, 13.0)))
 	await _frames(2)
 	game.knock_down_player(dummy, "test")
 	await _seconds(0.6)
 	_check(dummy.downed and game.all_players_out() == false, "a downed dummy; others standing, so not all out")
 	# Walking speed first, to compare.
-	_stand(Vector3(18.5, 0, 12.5), -PI / 2.0)
+	_stand(o + Vector3(18.5, 0, 12.5), -PI / 2.0)
 	await _frames(2)
 	start = me.global_position
 	me.bot_move = Vector2(0, -1)
@@ -184,7 +210,7 @@ func _dev_room() -> void:
 	_check(me.carrying == did and dummy.carried_by == me.peer_id, "holding E picks the downed dummy up")
 	await _frames(2)
 	_check(dummy.global_position.distance_to(me.global_position + Vector3.UP * 1.35) < 0.8, "the carried body rides on the carrier's shoulder")
-	_stand(Vector3(18.5, 0, 12.5), -PI / 2.0)
+	_stand(o + Vector3(18.5, 0, 12.5), -PI / 2.0)
 	await _frames(2)
 	start = me.global_position
 	me.bot_move = Vector2(0, -1)
@@ -196,7 +222,7 @@ func _dev_room() -> void:
 	me.bot_aim_id = ""
 	me.bot_press += 1
 	await _frames(3)
-	_check(me.carrying == 0 and dummy.carried_by == 0 and dummy.downed and dummy.global_position.y < 0.3, "E again puts them down on the floor")
+	_check(me.carrying == 0 and dummy.carried_by == 0 and dummy.downed and dummy.global_position.y < o.y + 0.3, "E again puts them down on the floor")
 	# Getting hit drops them.
 	_stand(dummy.global_position + Vector3(0, 0, 1.4), 0.0)
 	me.bot_aim_id = "pl_%d" % did
@@ -210,20 +236,26 @@ func _dev_room() -> void:
 	await _seconds(3.2)   # the hit's invulnerability
 	me.revive_full()
 
-	# ---- the player table
+	# ---- a patient table in the hospital's OR (the room has no table: carry them there)
 	_stand(dummy.global_position + Vector3(0, 0, 1.4), 0.0)
 	me.bot_aim_id = "pl_%d" % did
 	me.bot_interact = true
 	await _seconds(1.3)
 	me.bot_interact = false
-	var pt: Vector3 = game.player_table.position
-	_stand(pt + Vector3(0, 0, 1.5), 0.0)
-	me.bot_aim_id = "player_table"
+	_check(me.carrying == did, "picked up for the trip to the OR")
+	var ti: int = game.free_patient_table()
+	var tid: String = game.table_interact_id(ti)
+	var pt: Vector3 = game.table_position(ti)
+	_stand_at_table(ti, 1.5)
 	await _frames(3)
-	_check(me.aim_prompt.begins_with("Place "), "carrying to the player table offers to place them ('%s')" % me.aim_prompt)
+	_check(dummy.carried_by == me.peer_id and dummy.global_position.distance_to(me.global_position) < 1.6, "a teleport into the OR brings the carried body along")
+	me.bot_aim_id = tid
+	await _frames(3)
+	_check(me.aim_prompt.begins_with("Place "), "carrying to a free patient table offers to place them ('%s' at %s)" % [me.aim_prompt, tid])
 	me.bot_press += 1
 	await _frames(3)
-	_check(dummy.on_table and me.carrying == 0 and dummy.carried_by == 0, "E at the player table lays them on it")
+	_check(dummy.on_table and me.carrying == 0 and dummy.carried_by == 0, "E at the patient table lays them on it")
+	_check(int(game.player_table.get("index", -1)) == ti, "player_table names that table while they lie there (%s)" % str(game.player_table.get("index", -1)))
 	var top := game.player_table_top()
 	_check(Vector2(dummy.global_position.x - top.x, dummy.global_position.z - top.z).length() < 1.0 and absf(dummy.global_position.y - top.y) < 0.05, "the body lies on the table top")
 	_check(game.player_surgery.patient() == dummy and game.player_surgery.patient_body != null and game.player_surgery.patient_body.has_site("gash"), "the stitches case starts with a lying body and a gash site")
@@ -240,7 +272,7 @@ func _dev_room() -> void:
 	_check(me.aim_prompt.begins_with("Operate"), "with a kit on the shelf the table offers to operate ('%s')" % me.aim_prompt)
 	game.player_surgery.surgery.bot_skill = 1.0
 	me.bot_press += 1
-	var ok := await _until(func(): return me.operating, 5.0)
+	ok = await _until(func(): return me.operating, 5.0)
 	_check(ok and game.player_surgery.surgery.mg != null, "the stitches minigame starts on the table")
 	var op_started := t
 	ok = await _until(func(): return not dummy.downed, 40.0)
@@ -248,8 +280,8 @@ func _dev_room() -> void:
 	_check(ok and dummy.alive and dummy.hp == Game.REVIVE_HP and not dummy.on_table, "stitches with bot 1.0 revive the dummy with partial HP (%.1f s)" % took)
 	_check(took > 6.0 and took < 20.0, "stitching takes a believable time (%.1f s)" % took)
 	_check(game.shelf_count("suture_kit") == 0, "the suture kit is used up")
-	_check(game.player_surgery.case.is_empty() and game.player_surgery.patient_body == null, "the player table is free again")
-	_check(dummy.global_position.distance_to(pt) < 3.5 and dummy.global_position.y < 0.3, "the revived player stands beside the table")
+	_check(game.player_surgery.case.is_empty() and game.player_surgery.patient_body == null and game.player_table.is_empty(), "the patient table is free again")
+	_check(Vector2(dummy.global_position.x - pt.x, dummy.global_position.z - pt.z).length() < 3.5 and absf(dummy.global_position.y - pt.y) < 0.3, "the revived player stands beside the table")
 	game.player_surgery.surgery.bot_skill = -1.0
 
 	# ---- all out
@@ -258,8 +290,8 @@ func _dev_room() -> void:
 	await _frames(2)
 	_check(not game.all_players_out(), "one standing dummy keeps the team in (all_players_out false)")
 	game.knock_down_player(dummy, "test")
-	await _frames(2)
-	_check(game.all_players_out() and game.phase == Game.Phase.SHIFT, "everyone down: all_players_out (the dev room does not end)")
+	await _frames(4)
+	_check(game.all_players_out() and game.phase == Game.Phase.SHIFT, "everyone down: all_players_out (No game over keeps the shift going)")
 	dev.request("revive_all")
 	await _frames(2)
 
@@ -275,6 +307,23 @@ func _dev_room() -> void:
 	_check(not game.alive_players().has(d2) and not d2.alive, "bled out means dead until the next shift")
 	main._back_to_menu("")
 	await _frames(3)
+
+
+## The phone rings on clock-in: hang it up and skip the extra call so no patient arrives.
+func _quiet_loop() -> void:
+	game.loop._end_call()
+	game.loop.first_called = true
+	game.loop.extra_done = true
+
+
+## Stand beside patient table `ti` (on its +Z side, where a revived player gets up), facing it.
+func _stand_at_table(ti: int, dist: float) -> void:
+	var b := Basis(Vector3.UP, game.table_yaw_of(ti))
+	var side: Vector3 = b * Vector3(0, 0, 1)
+	me.teleport(game._floor_at(game.table_position(ti) + side * dist))
+	me.bot_yaw = atan2(side.x, side.z)
+	me.bot_pitch = -0.3
+	me.bot_move = Vector2.ZERO
 
 
 # =========================================================================

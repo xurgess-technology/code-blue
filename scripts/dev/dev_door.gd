@@ -75,9 +75,11 @@ func _set_lamp(on: bool) -> void:
 		return
 	_lamp_on = int(on)
 	var m := _lamp.material_override as StandardMaterial3D
+	var col := Color(0.1, 0.9, 0.3) if on else Color(0.95, 0.1, 0.05)
+	m.albedo_color = col
 	m.emission_enabled = true
-	m.emission = Color(0.2, 1.0, 0.45) if on else Color(1.0, 0.15, 0.1)
-	m.emission_energy_multiplier = 2.5
+	m.emission = col
+	m.emission_energy_multiplier = 0.9
 
 
 func interact_prompt(_player) -> String:

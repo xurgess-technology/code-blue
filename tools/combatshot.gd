@@ -11,8 +11,12 @@ extends Node
 ##   06_drag_fp          your view while dragging, at a free table: "Strap ... to the table"
 ##   07_drag_other       a bot dragging a sedated monster, seen from the side
 ##   08_strapped         the monster case on the table
+##
+## A solo session on a normal hospital (seed 4242) with dev mode on, god mode, no monsters roaming
+## and the phone quiet after clocking in. The fights and drags are in the hidden dev room past the
+## parking lot (room metres offset by its corner `o`); 06 and 08 are at an OR patient table in the
+## entrance building (the dragger is teleported there with the monster in tow).
 
-const DevRoomScript := preload("res://scripts/dev/dev_room.gd")
 const MonsterScript := preload("res://scripts/monster.gd")
 const WindupScript := preload("res://scripts/combat/windup.gd")
 const SHOT_DIR := "res://tools/combat_shots"
@@ -23,6 +27,8 @@ var dev: Node
 var cb: Node
 var me: Player
 var t := 0.0
+## The hidden dev room's corner (its own frame's origin) in world space.
+var o := Vector3.ZERO
 
 
 func _ready() -> void:
@@ -32,16 +38,37 @@ func _ready() -> void:
 	game = main.game
 	dev = game.dev
 	cb = game.combat
+	if main.launching:
+		await main.launched
 	main.menu.hide_menu()
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(SHOT_DIR))
 	Net.start_solo("Zach")
-	game.start_session(DevRoomScript.SEED)
-	await _seconds(2.5)
+	game.start_session(4242)
+	while game.get_parent().has_node("WarmupCover"):
+		await get_tree().process_frame
+	await _seconds(0.5)
 	me = game.local_player()
 	me.bot_active = true
+	game.set_dev_tools(true, me)
+	if not dev.room_ready():
+		push_error("[combatshot] dev mode did not build the hidden room")
+		get_tree().quit(1)
+		return
+	o = dev.room.global_position
 	dev.request("god", {"on": true})
+	dev.request("no_game_over", {"on": true})
+	dev.request("monsters_off", {"on": true})
+	game.clock_in()   # strapping needs a shift
+	var end := t + 60.0
+	while game.phase != Game.Phase.SHIFT and t < end:
+		await get_tree().physics_frame
+	game.loop.first_called = true
+	game.loop._end_call()
+	game.loop.extra_done = true
+	dev.request("clear_patient")
 	for m in game.monsters.values():
 		game.kill_monster(m)
+	await _seconds(3.5)   # the clock-in notices fade
 	await _run()
 	get_tree().quit(0)
 
@@ -53,9 +80,9 @@ func _physics_process(delta: float) -> void:
 func _run() -> void:
 	cb.break_chance = 0.0
 	# ---- 01 / 02: the swing, first person, at a Discharged
-	var m := await _monster(Vector3(15.0, 0, 12.5))
+	var m := await _monster(o + Vector3(15.0, 0, 12.5))
 	_give("bone_saw", 1)
-	_stand(Vector3(15.0, 0, 14.6), 0.0)
+	_stand(o + Vector3(15.0, 0, 14.6), 0.0)
 	_look_at(m.global_position + Vector3.UP * 1.2)
 	await _seconds(0.6)
 	cb.anim_freeze = true
@@ -74,7 +101,7 @@ func _run() -> void:
 	_give("anesthetic", 3)
 	await _frames(2)
 	game.knock_down_monster(m, Vector3.ZERO, 20.0)
-	_stand(Vector3(15.0, 0, 14.0), 0.0)
+	_stand(o + Vector3(15.0, 0, 14.0), 0.0)
 	_look_at(m.global_position + Vector3.UP * 1.1)
 	await _seconds(0.5)
 	cb.anim_freeze = true
@@ -91,13 +118,13 @@ func _run() -> void:
 	var bot: Player = game.players[bid]
 	dev.order_bot(bid, "stay")
 	await _frames(3)
-	bot.teleport(game._floor_at(Vector3(15.0, 0, 14.0)))
+	bot.teleport(game._floor_at(o + Vector3(15.0, 0, 14.0)))
 	bot.bot_yaw = 0.0
 	bot.bot_pitch = 0.0
 	bot.slots[0] = {"kind": "bone_saw", "count": 1}
 	bot.selected = 0
 	await _frames(3)
-	_stand(Vector3(17.0, 0, 12.2), 0.0)
+	_stand(o + Vector3(17.0, 0, 12.2), 0.0)
 	_look_at(bot.global_position + Vector3.UP * 1.3)
 	await _seconds(0.4)
 	cb.anim_freeze = true
@@ -111,12 +138,12 @@ func _run() -> void:
 	cb.stop_anim(bot)
 	cb.anim_freeze = false
 	bot.slots = Player.empty_slots()
-	bot.teleport(game._floor_at(Vector3(19.0, 0, 16.5)))
+	bot.teleport(game._floor_at(o + Vector3(19.0, 0, 16.5)))
 	await _frames(2)
 
 	# ---- 05: sedated, lying, the drag prompt
 	_give("anesthetic", 3)
-	_stand(Vector3(15.0, 0, 14.0), 0.0)
+	_stand(o + Vector3(15.0, 0, 14.0), 0.0)
 	_look_at(m.global_position + Vector3.UP * 1.1)
 	await _frames(2)
 	game.player_shoved(me)
@@ -140,7 +167,8 @@ func _run() -> void:
 	me.bot_aim_id = ""
 	var ti: int = game.free_patient_table()
 	var tp: Vector3 = game.table_position(ti)
-	_stand(tp + Vector3(1.6, 0, 1.4), 0.0)
+	var tyaw: float = game.table_yaw_of(ti)
+	_stand(tp + Vector3(1.6, 0, 1.4).rotated(Vector3.UP, tyaw), 0.0)
 	_look_at(tp + Vector3.UP * 0.9)
 	await _seconds(0.6)
 	me.bot_aim_id = game.table_interact_id(ti)
@@ -151,12 +179,13 @@ func _run() -> void:
 	await _frames(2)
 
 	# ---- 07: a bot dragging it, from the side
-	bot.teleport(game._floor_at(Vector3(15.5, 0, 13.0)))
+	bot.teleport(game._floor_at(o + Vector3(15.5, 0, 13.0)))
 	bot.bot_yaw = -PI / 2.0
 	await _frames(3)
 	bot.dragging_monster = m.monster_id
+	m.dragged_by = bot.peer_id   # the monster pins itself behind its dragger (from the hospital's OR)
 	await _frames(3)
-	_stand(Vector3(16.5, 0, 16.2), 0.0)
+	_stand(o + Vector3(16.5, 0, 16.2), 0.0)
 	_look_at(bot.global_position + Vector3(0.6, 0.6, 0.0))
 	await _seconds(0.6)
 	await _shot("07_drag_other")
@@ -165,9 +194,10 @@ func _run() -> void:
 	# ---- 08: strapped to the table
 	bot.dragging_monster = -1
 	me.dragging_monster = m.monster_id
+	m.dragged_by = me.peer_id
 	cb.strap(me, ti)
 	await _seconds(1.5)
-	_stand(tp + Vector3(1.2, 0, 2.2), 0.0)
+	_stand(tp + Vector3(1.2, 0, 2.2).rotated(Vector3.UP, tyaw), 0.0)
 	_look_at(tp + Vector3.UP * 0.9)
 	await _seconds(0.6)
 	await _shot("08_strapped")

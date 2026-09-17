@@ -4,18 +4,19 @@ extends Node
 ##   godot --headless --fixed-fps 60 --path . tools/dissectiontest.tscn
 ##   godot --path . --resolution 1280x720 tools/dissectiontest.tscn -- --shots   # tools/dissection_shots/
 ##
-## Headless checks, in the dev room (a solo host): the procedures data (monsters never roll), a
-## Walk-In strapped through the dev request, its body (sites, straps, flags), sedation wearing off
-## and 2.5x faster while the saw bites, the local surgeon operating both steps through the real
-## surgery system with bot_input, the brain's condition never going up, the brain handed over with
-## condition -> quality, the flatline and the case clearing itself; the Discharged stirring and
-## awake (thrash botches while operated, shrieks as noise); re-dosing from hands with the tolerance
-## math and vials used (also while someone operates); a ruined brain; the OR screen's model.
+## Headless checks, solo in a normal hospital (seed 4242) with dev mode on, clocked in with the phone
+## quiet and no roaming monsters, on the entrance building's OR patient tables and shelf: the
+## procedures data (monsters never roll), a Walk-In strapped through the dev request, its body (sites,
+## straps, flags), sedation wearing off and 2.5x faster while the saw bites, the local surgeon
+## operating both steps through the real surgery system with bot_input, the brain's condition never
+## going up, the brain handed over with condition -> quality, the flatline and the case clearing
+## itself; the Discharged stirring and awake (thrash botches while operated, shrieks as noise);
+## re-dosing from hands with the tolerance math and vials used (also while someone operates); a
+## ruined brain; the OR screen's model.
 ##
 ## --shots: windowed pictures in the generated hospital's OR: both monsters strapped (sedated and
 ## thrashing), an opened skull, the skull saw and the brain forceps mid-step, the OR monitor.
 
-const DevRoomScript := preload("res://scripts/dev/dev_room.gd")
 const DissectionScript := preload("res://scripts/dissection/dissection.gd")
 const OrModel := preload("res://scripts/orscreen/or_screen_model.gd")
 const RigLookScript := preload("res://scripts/dissection/monster_rig_look.gd")
@@ -38,13 +39,15 @@ func _ready() -> void:
 	await get_tree().process_frame
 	game = main.game
 	dev = game.dev
+	if main.launching:
+		await main.launched
 	main.menu.hide_menu()
 	Net.start_solo("Tester")
 	if shots:
 		await _shots()
 	else:
 		_data_checks()
-		await _dev_room()
+		await _dev_mode()
 	_finish()
 
 
@@ -80,15 +83,37 @@ func _data_checks() -> void:
 
 
 # =========================================================================
-# the dev room
+# dev mode, on the hospital's OR tables
 # =========================================================================
 
-func _dev_room() -> void:
-	game.start_session(DevRoomScript.SEED)
-	await _frames(8)
+## A solo session on a normal hospital with dev mode on, god mode, no game over and no roaming
+## monsters; clocked in with the phone quiet, so the OR tables stay free for the dev requests.
+func _start_dev_session() -> bool:
+	game.start_session(4242)
+	while game.get_parent().has_node("WarmupCover"):
+		await get_tree().process_frame
+	await _seconds(0.5)
 	me = game.local_player()
 	me.bot_active = true
+	game.set_dev_tools(true, me)
+	_check(game.dev_on(), "set-up: dev mode on")
 	dev.request("god", {"on": true})
+	dev.request("no_game_over", {"on": true})
+	dev.request("monsters_off", {"on": true})
+	game.clock_in()
+	var in_shift := await _until(func(): return game.phase == Game.Phase.SHIFT, 60.0)
+	_check(in_shift, "set-up: clocked in")
+	game.loop.first_called = true
+	game.loop._end_call()
+	game.loop.extra_done = true
+	dev.request("clear_patient")
+	await _frames(2)
+	return in_shift and game.dev_on()
+
+
+func _dev_mode() -> void:
+	if not await _start_dev_session():
+		return
 	var dx: Node = game.dissection
 
 	# ---- strap a Walk-In through the dev request

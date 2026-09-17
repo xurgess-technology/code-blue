@@ -4,7 +4,10 @@ extends Node
 ##
 ##   godot --headless --fixed-fps 60 --path . tools/combattest.tscn
 ##
-## Runs in the dev room with dummies: the saw kills a monster in the expected number of hits and
+## Solo, in a normal hospital (seed 4242) with dev mode on, clocked in with the phone quiet, no roaming
+## monsters and no game over. The fights run in the hidden dev room past the parking lot (positions
+## are the room's own metres offset by its corner `o`); strapping uses the entrance building's OR
+## patient tables. The checks: the saw kills a monster in the expected number of hits and
 ## pays nothing, cuts air loudly, respects its cooldown, breaks at the seeded roll (and at about 12%
 ## over many rolls), clangs off the Night Nurse; the needle needs the stun window, uses one vial only
 ## when it sedates, is refused by the Night Nurse; friendly fire (a saw hit costs a heart, a jab knocks
@@ -12,7 +15,6 @@ extends Node
 ## down, strapping it (the case's fields, the monster gone), a taken table, a wake-up while dragged,
 ## a hit dragger letting go. Exits 0 when every check passes.
 
-const DevRoomScript := preload("res://scripts/dev/dev_room.gd")
 const CombatScript := preload("res://scripts/combat/combat.gd")
 const MonsterScript := preload("res://scripts/monster.gd")
 const WindupScript := preload("res://scripts/combat/windup.gd")
@@ -25,6 +27,8 @@ var me: Player
 var t := 0.0
 var _done := false
 var _failures: Array = []
+## The hidden dev room's corner (its own frame's origin) in world space.
+var o := Vector3.ZERO
 
 
 func _ready() -> void:
@@ -34,15 +38,43 @@ func _ready() -> void:
 	game = main.game
 	dev = game.dev
 	cb = game.combat
+	await _start()
+	if not dev.room_ready():
+		_check(false, "dev mode on builds the hidden room")
+		_finish()
+		return
+	await _run()
+	_finish()
+
+
+## A solo session on a normal hospital; dev mode on (the hidden room is built), no roaming monsters,
+## no game over; clocked in (strapping needs a shift) with the phone quiet so no patient takes a table.
+func _start() -> void:
+	if main.launching:
+		await main.launched
 	main.menu.hide_menu()
 	Net.start_solo("Tester")
-	game.start_session(DevRoomScript.SEED)
-	await _frames(8)
+	game.start_session(4242)
+	while game.get_parent().has_node("WarmupCover"):
+		await get_tree().process_frame
+	await _seconds(0.5)
 	me = game.local_player()
 	me.bot_active = true
 	me.bot_invulnerable = true
-	await _run()
-	_finish()
+	game.set_dev_tools(true, me)
+	o = dev.room.global_position if dev.room_ready() else Vector3.ZERO
+	dev.request("monsters_off", {"on": true})
+	dev.request("no_game_over", {"on": true})
+	game.clock_in()
+	var end := t + 60.0
+	while game.phase != Game.Phase.SHIFT and t < end:
+		await get_tree().physics_frame
+	_check(game.phase == Game.Phase.SHIFT, "set-up: clocked in")
+	game.loop.first_called = true
+	game.loop._end_call()
+	game.loop.extra_done = true
+	dev.request("clear_patient")
+	await _frames(2)
 
 
 func _physics_process(delta: float) -> void:
@@ -63,7 +95,7 @@ func _run() -> void:
 	# ---- the saw kills
 	cb.break_chance = 0.0
 	_give("bone_saw", 1)
-	var m := await _monster("discharged", Vector3(12.0, 0, 12.0))
+	var m := await _monster("discharged", o + Vector3(12.0, 0, 12.0))
 	var want_hits := int(m.get("max_hp")) if "max_hp" in m else CombatScript.FALLBACK_HITS
 	var hits := 0
 	var results: Array = []
@@ -86,7 +118,7 @@ func _run() -> void:
 	_check(loud >= CombatScript.NOISE_HIT - 0.01, "a hit is loud (noise %.2f)" % loud)
 
 	# ---- air, cooldown
-	_stand(Vector3(12.0, 0, 16.0), 0.0)
+	_stand(o + Vector3(12.0, 0, 16.0), 0.0)
 	await _seconds(CombatScript.NOISE_HIT + 1.6)   # older noises age out of recent_noises(1.5)
 	await _use()
 	_check(String(cb.last_result.get("what", "")) == "air", "a swing at nothing cuts air")
@@ -103,7 +135,7 @@ func _run() -> void:
 	await _seconds(CombatScript.SWING_COOLDOWN)
 
 	# ---- the Night Nurse: immune, and the saw breaks at the seeded roll
-	var nurse := await _monster("night_nurse", Vector3(16.0, 0, 12.0))
+	var nurse := await _monster("night_nurse", o + Vector3(16.0, 0, 12.0))
 	var nid: int = nurse.monster_id
 	cb.break_chance = CombatScript.SAW_BREAK_CHANCE
 	var seed := 90210
@@ -142,8 +174,8 @@ func _run() -> void:
 	_check(_vials() == 3 and String(cb.last_result.get("result", "")) == "refused" and game.message.contains("needle will not go in"),
 		"the Night Nurse refuses the needle, no vial used ('%s')" % game.message)
 	game.knock_down_monster(nurse, Vector3.ZERO, 30.0)   # a calm nurse, out of the way
-	nurse.global_position = Vector3(3.0, 0.0, 3.0)
-	var b := await _monster("discharged", Vector3(12.0, 0, 12.0))
+	nurse.global_position = o + Vector3(3.0, 0.0, 3.0)
+	var b := await _monster("discharged", o + Vector3(12.0, 0, 12.0))
 	var bid: int = b.monster_id
 	b.calm = 0.0
 	await _use_on(b)
@@ -160,13 +192,13 @@ func _run() -> void:
 	_check(_vials() == 2 and cb.is_sedated(b), "jabbed inside the stun window: sedated, one vial used (%d left)" % _vials())
 	_check(absf(cb.sedation_left(b) - CombatScript.SEDATE_SECONDS) < 2.0, "sedated for about %.0f s (%.1f)" % [CombatScript.SEDATE_SECONDS, cb.sedation_left(b)])
 	await _seconds(3.0)
-	_check(cb.is_sedated(b) and b.global_position.distance_to(Vector3(12.0, 0, 12.0)) < 3.0, "it stays down after the stun would have ended")
+	_check(cb.is_sedated(b) and b.global_position.distance_to(o + Vector3(12.0, 0, 12.0)) < 3.0, "it stays down after the stun would have ended")
 
 	# ---- friendly fire
 	var did: int = dev.spawn_bot("dummy")
 	var dummy: Player = game.players[did]
 	await _frames(3)
-	dummy.teleport(game._floor_at(Vector3(20.0, 0, 16.0)))
+	dummy.teleport(game._floor_at(o + Vector3(20.0, 0, 16.0)))
 	dummy.invuln = 0.0
 	await _frames(2)
 	_give("bone_saw", 1)
@@ -214,7 +246,7 @@ func _run() -> void:
 	await _frames(3)
 	_check(game.find_interactable("mo_%d" % bid).collision_layer == 0, "a dragged monster is not aimable")
 	# Walk speed with and without.
-	_stand(Vector3(13.0, 0, 13.8), -PI / 2.0)
+	_stand(o + Vector3(13.0, 0, 13.8), -PI / 2.0)
 	await _frames(3)
 	var start := me.global_position
 	me.bot_move = Vector2(0, -1)
@@ -237,7 +269,7 @@ func _run() -> void:
 	me.bot_aim_id = ""
 	cb.drop_dragged(me)
 	await _frames(2)
-	_stand(Vector3(13.0, 0, 13.8), -PI / 2.0)
+	_stand(o + Vector3(13.0, 0, 13.8), -PI / 2.0)
 	await _frames(3)
 	start = me.global_position
 	me.bot_move = Vector2(0, -1)
@@ -256,18 +288,19 @@ func _run() -> void:
 	_check(cb.dragging(me) == bid and me.aim_prompt.begins_with("Put the Discharged down"), "dragging again; the prompt says put it down ('%s')" % me.aim_prompt)
 	me.bot_press += 1
 	await _frames(3)
-	_check(cb.dragging(me) < 0 and cb.is_sedated(b) and b.global_position.y < 0.3, "E away from a table puts it down, still sedated")
+	_check(cb.dragging(me) < 0 and cb.is_sedated(b) and b.global_position.y - o.y < 0.3, "E away from a table puts it down, still sedated")
 
 	# ---- strapping
 	var ti: int = game.free_patient_table()
 	_check(ti >= 0, "a free patient table (%d)" % ti)
 	var tpos: Vector3 = game.table_position(ti)
+	var tside := Vector3(0, 0, 1.6).rotated(Vector3.UP, game.table_yaw_of(ti))   # beside the OR table
 	_stand(b.global_position + Vector3(0, 0, 1.6), 0.0)
 	me.bot_aim_id = "mo_%d" % bid
 	me.bot_interact = true
 	await _seconds(1.2)
 	me.bot_interact = false
-	_stand(tpos + Vector3(0, 0, 1.6), 0.0)
+	_stand(tpos + tside, game.table_yaw_of(ti))
 	me.bot_aim_id = game.table_interact_id(ti)
 	await _frames(3)
 	_check(me.aim_prompt.begins_with("Strap the Discharged") and me.aim_id == game.table_interact_id(ti), "a free patient table offers to strap it ('%s')" % me.aim_prompt)
@@ -289,14 +322,14 @@ func _run() -> void:
 	_check(game.money == money0 and game.loop.pay_for(c, game.shift) == 0, "a strapped monster pays nothing by itself")
 
 	# ---- a taken table, waking up while dragged, a hit dragger
-	var c2 := await _sedated_monster(Vector3(15.0, 0, 13.0))
+	var c2 := await _sedated_monster(o + Vector3(15.0, 0, 13.0))
 	_stand(c2.global_position + Vector3(0, 0, 1.6), 0.0)
 	me.bot_aim_id = "mo_%d" % c2.monster_id
 	me.bot_interact = true
 	await _seconds(1.2)
 	me.bot_interact = false
 	_check(cb.dragging(me) == c2.monster_id, "dragging a second monster")
-	_stand(tpos + Vector3(0, 0, 1.6), 0.0)
+	_stand(tpos + tside, game.table_yaw_of(ti))
 	me.bot_aim_id = game.table_interact_id(ti)
 	await _frames(3)
 	_check(me.aim_id == "" and me.aim_prompt.contains("taken"), "a taken table does not offer to strap ('%s')" % me.aim_prompt)
@@ -323,7 +356,7 @@ func _run() -> void:
 	await _frames(2)
 	game.kill_monster(c2)
 	# Getting hit makes the dragger let go.
-	var c3 := await _sedated_monster(Vector3(15.0, 0, 13.0))
+	var c3 := await _sedated_monster(o + Vector3(15.0, 0, 13.0))
 	_stand(c3.global_position + Vector3(0, 0, 1.6), 0.0)
 	me.bot_aim_id = "mo_%d" % c3.monster_id
 	me.bot_interact = true
@@ -348,7 +381,7 @@ func _windups() -> void:
 	me.slots = Player.empty_slots()
 	await _seconds(C.SHOVE_COOLDOWN)
 	# ---- a tap shove: winds up SHOVE_MIN, stuns for 2 s
-	var m := await _monster("discharged", Vector3(12.0, 0, 12.0))
+	var m := await _monster("discharged", o + Vector3(12.0, 0, 12.0))
 	_face(m)
 	await _frames(2)
 	var t_begin: float = game.world_time
@@ -426,7 +459,7 @@ func _windups() -> void:
 		"the jab lands at the end of its %.2f s wind-up (%.2f s): sedated, one vial" % [float(WindupScript.WINDUP_TIME.jab), jab_t])
 	game.kill_monster(m)
 	# ---- a jab on a monster that got up during the wind-up fails
-	var m2 := await _monster("walk_in", Vector3(12.0, 0, 12.0))
+	var m2 := await _monster("walk_in", o + Vector3(12.0, 0, 12.0))
 	await _seconds(CombatScript.JAB_COOLDOWN)
 	_face(m2)
 	await _frames(2)
@@ -445,7 +478,7 @@ func _windups() -> void:
 	game.kill_monster(m2)
 	# ---- taking a hit mid-wind-up cancels it (no strike) and the cooldown still starts
 	await _seconds(CombatScript.JAB_COOLDOWN + 0.1)
-	var m3 := await _monster("discharged", Vector3(12.0, 0, 12.0))
+	var m3 := await _monster("discharged", o + Vector3(12.0, 0, 12.0))
 	_face(m3)
 	me.slots = Player.empty_slots()
 	await _frames(2)

@@ -1,14 +1,18 @@
 extends Node
 ## Headless checks for the over-the-shoulder carry camera (docs/HANDS_AND_FEEDBACK.md "Done when"):
 ## with the camera behind the shoulder, the real aim ray (no bot_aim_id) still puts a carried player
-## on the player table and straps a dragged monster to a patient table; the camera sits back over
+## on a free patient table in the hospital's OR and straps a dragged monster to a patient table; the camera sits back over
 ## the left shoulder while carrying, hides the first-person hands and shows the body, keeps its
 ## offset through a teleport, ignores an interactable between the camera and the head, pulls in
 ## against a wall, and eases back to first person when the body is put down or the setting is off.
 ##
+##
+## A normal hospital (seed 4242) with dev mode on for its dummies, No monsters, clocked in (carrying
+## and the tables work on shift) with the phone hung up.
+##
 ##   godot --headless --fixed-fps 60 --path . tools/carrycamtest.tscn
 
-const DevRoomScript := preload("res://scripts/dev/dev_room.gd")
+const SEED := 4242
 const HandsFP := preload("res://scripts/hands/fp_hands.gd")
 const CarryCam := preload("res://scripts/camera/carry_camera.gd")
 
@@ -28,11 +32,22 @@ func _ready() -> void:
 	main.menu.hide_menu()
 	Settings.use_path("user://carrycamtest_settings.cfg")
 	Net.start_solo("Tester")
-	game.start_session(DevRoomScript.SEED)
+	game.start_session(SEED)
+	while game.get_parent().has_node("WarmupCover"):
+		await get_tree().process_frame
 	await _frames(8)
 	me = game.local_player()
 	me.bot_active = true
 	me.bot_invulnerable = true
+	game.set_dev_tools(true, me)
+	game.dev.request("monsters_off", {"on": true})
+	game.dev.request("no_game_over", {"on": true})
+	game.clock_in()
+	var on_shift := await _until(func(): return game.phase == Game.Phase.SHIFT, 90.0)
+	game.loop._end_call()
+	game.loop.first_called = true
+	game.loop.extra_done = true
+	_check(on_shift and game.dev_on() and game.dev.room_ready(), "set-up: dev mode on, clocked in (phase %d)" % game.phase)
 	await _run()
 	_finish()
 
@@ -58,8 +73,12 @@ func _run() -> void:
 	var did: int = game.dev.spawn_bot("dummy")
 	var dummy: Player = game.players[did]
 	await _frames(3)
-	var pt: Vector3 = game.player_table.position
-	dummy.teleport(game._floor_at(pt + Vector3(0, 0, 2.6)))
+	# Hub rebuild: no fixed player table; a downed teammate goes on whichever patient table is free.
+	var pi: int = game.free_patient_table()
+	var pid: String = game.table_interact_id(pi)
+	var pt: Vector3 = game.table_position(pi)
+	var pside: Vector3 = Basis(Vector3.UP, game.table_yaw_of(pi)) * Vector3(0, 0, 1)
+	dummy.teleport(game._floor_at(pt + pside * 2.6))
 	game.down_player(dummy, "test")
 	await _frames(2)
 	game.start_carry(me, dummy)
@@ -74,19 +93,19 @@ func _run() -> void:
 	var flash_dir: float = (-me.flashlight.global_transform.basis.z).dot(-me.camera.global_transform.basis.z)
 	_check(flash_off < 0.02 and flash_dir > 0.999, "the torch stays at the head and points where the camera looks (%.3f m, dot %.4f)" % [flash_off, flash_dir])
 
-	# Aim at the player table through the real ray from the shoulder.
-	var top := game.player_table_top()
-	_stand_facing(pt + Vector3(0, 0, 1.6), top + Vector3(0, 0.25, 0))
+	# Aim at the patient table through the real ray from the shoulder.
+	var top := pt + Vector3(0, Game.OR_TABLE_TOP, 0)
+	_stand_facing(pt + pside * 1.6, top + Vector3(0, 0.25, 0))
 	await _aim_camera(top + Vector3(0, 0.25, 0))
 	await _frames(4)
-	_check(me.aim_id == "player_table" and me.aim_prompt.begins_with("Place "), "over the shoulder the aim ray finds the player table ('%s' / '%s')" % [me.aim_id, me.aim_prompt])
+	_check(me.aim_id == pid and me.aim_prompt.begins_with("Place "), "over the shoulder the aim ray finds the free patient table ('%s' / '%s')" % [me.aim_id, me.aim_prompt])
 	# Teleport: the camera keeps its offset at once (no easing across the world).
 	var before: Vector3 = cc.offset
 	me.teleport(me.global_position + Vector3(6.0, 0, 0))
 	await _frames(1)
 	var rel: Vector3 = me.head.global_transform.affine_inverse() * me.camera.global_position
 	_check(rel.distance_to(before) < 0.25, "a teleport keeps the shoulder offset on the very next frame (%s vs %s)" % [str(rel.snappedf(0.01)), str(before.snappedf(0.01))])
-	_stand_facing(pt + Vector3(0, 0, 1.6), top + Vector3(0, 0.25, 0))
+	_stand_facing(pt + pside * 1.6, top + Vector3(0, 0.25, 0))
 	await _aim_camera(top + Vector3(0, 0.25, 0))
 	await _frames(4)
 	# An interactable between the camera and the head does not count.
@@ -98,13 +117,13 @@ func _run() -> void:
 	var ray_mid: Vector3 = cam_pos + (-me.camera.global_transform.basis.z) * (head_pos - cam_pos).dot(-me.camera.global_transform.basis.z) * 0.5
 	blocker.global_position = ray_mid
 	await _frames(3)
-	_check(me.aim_id == "player_table", "a stack between the camera and the head is ignored (aim '%s', prompt '%s', item at %s, start %s)" % [me.aim_id, me.aim_prompt, str(blocker.global_position.snappedf(0.01)), str((me.carry_cam.aim_segment()[0] as Vector3).snappedf(0.01))])
+	_check(me.aim_id == pid, "a stack between the camera and the head is ignored (aim '%s', prompt '%s', item at %s, start %s)" % [me.aim_id, me.aim_prompt, str(blocker.global_position.snappedf(0.01)), str((me.carry_cam.aim_segment()[0] as Vector3).snappedf(0.01))])
 	game.world_items.erase(blocker.item_id)
 	blocker.queue_free()
 	await _frames(2)
 	me.bot_press += 1
 	await _frames(3)
-	_check(dummy.on_table and me.carrying == 0, "E from the shoulder lays the carried player on the table")
+	_check(dummy.on_table and me.carrying == 0 and int(game.player_table.get("index", -1)) == pi, "E from the shoulder lays the carried player on the patient table")
 	await _seconds(0.5)
 	_check(not cc.active and me.fx.position == Vector3.ZERO and me.camera.cull_mask & HandsFP.HANDS_LAYER != 0 and not me.body_visual.visible,
 		"put down: back to first person, hands back, body hidden (blend %.2f)" % cc.blend)
@@ -115,14 +134,15 @@ func _run() -> void:
 	# ---- drag a sedated Walk-In and strap it down
 	var ti: int = game.free_patient_table()
 	var tpos: Vector3 = game.table_position(ti)
-	var m = game._add_monster("walk_in", game._floor_at(tpos + Vector3(0, 0, 3.2)))
+	var tside: Vector3 = Basis(Vector3.UP, game.table_yaw_of(ti)) * Vector3(0, 0, 1)
+	var m = game._add_monster("walk_in", game._floor_at(tpos + tside * 3.2))
 	await _frames(3)
 	m.sedate(75.0)
 	await _frames(2)
 	game.combat.start_drag(me, m)
 	await _seconds(0.5)
 	_check(game.combat.dragging(me) == m.monster_id and cc.active and cc.offset.z > 0.5 and cc.offset.y > 0.5, "dragging: the camera is up above and behind (%s)" % str(cc.offset.snappedf(0.01)))
-	_stand_facing(tpos + Vector3(0, 0, 1.5), tpos + Vector3(0, 0.9, 0))
+	_stand_facing(tpos + tside * 1.5, tpos + Vector3(0, 0.9, 0))
 	await _aim_camera(tpos + Vector3(0, 0.9, 0))
 	await _frames(4)
 	var tid: String = game.table_interact_id(ti)
@@ -186,7 +206,7 @@ func _wall_spot() -> Dictionary:
 				continue
 			var spot: Vector3 = hit.position - dir * 0.75
 			if game._floor_at(Vector3(spot.x, base.y, spot.z)).y > base.y + 0.3:
-				continue   # the dev room pen's waist-high barrier: standing on it, not backed against a wall
+				continue   # standing on something waist-high, not backed against a wall
 			var high := Vector3(spot.x, base.y + 2.1, spot.z)
 			var q2 := PhysicsRayQueryParameters3D.create(high, high + dir * 1.2)
 			q2.collision_mask = C.L_WORLD
@@ -231,6 +251,15 @@ func _seconds(s: float) -> void:
 	var end := t + s
 	while t < end:
 		await get_tree().physics_frame
+
+
+func _until(cond: Callable, timeout: float) -> bool:
+	var end := t + timeout
+	while t < end:
+		if cond.call():
+			return true
+		await get_tree().physics_frame
+	return bool(cond.call())
 
 
 ## Turn so the CAMERA's crosshair (over the shoulder, beside the head) lies on `at`, the way a

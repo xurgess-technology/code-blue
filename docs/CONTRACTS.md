@@ -799,17 +799,43 @@ static func slider_to_db(v) -> float     # 0..1 slider to dB (squared amplitude,
 - Tests: `tools/settingstest.tscn` (headless), `tools/settingsshot.tscn` (windowed screenshots to
   `tools/settings_shots/`, plus the mouse-look sensitivity check that needs a captured mouse).
 
-## Dev room (dev worker, sweep 2 wave 1)
+## Dev mode (dev worker, sweep 2 wave 1; redesigned 2026-09-16)
 
-A secret level mode (`scripts/dev/**`). The session seed `SEED` (-4077, in
-`scripts/dev/dev_room.gd`) *is* the dev room: `game.start_lobby` sets `game.dev_mode` from the
-seed, so a client that joins builds the same room from the snapshot with no extra protocol.
-The way in is deliberately not written down here.
+Secret tools for a normal session (`scripts/dev/**`). There is no dev level any more: a secret
+pharmacy fax order (`game.DEV_CODE`, checked first in `game.order_pharmacy`: no money, no delivery)
+calls `game.set_dev_tools(true, p)` on the host, which turns dev mode on for everyone in the session
+(snapshot key `"dt"`) until DEV MODE OFF on the panel or the session ends. The fax UI prints a reply
+page and waits on `dev.room_ready()` before it closes.
+
+```gdscript
+game.dev_tools: bool                     # every machine; replicated
+game.dev_on() -> bool                    # what code checks
+game.set_dev_tools(on, p := null)        # host; off also runs dev.reset_state()
+```
+
+- F1 (or the key left of 1) opens the dev panel anywhere while `dev_on()`. Local-only buttons: go to
+  (you own your position), this machine's database (unlock every entry / reset) and tips.
+- The hidden room (`dev_level.gd`): built on every machine by `dev.build_room()` when dev mode comes
+  on (and again after a level rebuild), south of `level_info.neutral_rect` past the fog, snapped to
+  tiles. `dev.room`, `dev.room_info` (world space: `arrive`, `monster_spawns`, `dummy_spots`,
+  `containers`, `lights`, `dev_gate`, `nav_region`, `door_nodes`), `dev.in_room(pos)`. It holds the
+  specimen pen and gate, one of every container, the item and loot dispensers, the gun rack and the
+  dummy floor, and a separate navigation island (bots only use its dispensers from inside it). No
+  tables, shelf, pharmacy or furnace: those are the hospital's.
+- Every level with an `or_storage` room has `dev_door_closet` on the closet's west wall
+  (`dev_door.gd`, "!Locked" unless dev mode is on); it and the room's `dev_door_exit` move the user
+  (host `dev.walk_through`, a guest by the `dev_tp` event).
+- Toggles default off in a normal session (`freeze_vitals`, `auto_revive`, `monsters_off`,
+  `no_game_over`); `monsters_off` clears the monsters and stops `_spawn_monsters`, `no_game_over`
+  keeps `all_players_out` from ending the run. A new shift's `_spawn_monsters` keeps the room's
+  monsters.
+- Requests new with the redesign: `dev_off`, `monsters_off {on}`, `no_game_over {on}`, `clock_in`,
+  `clock_out` (forced), `skip_to_table` (`loop.dev_skip_to_table`: incoming patients onto free
+  tables now), `abilities` (every ability at max level for the sender).
 
 Game API (host only; wave 3 `downed` changes what these do, not their signatures):
 
 ```gdscript
-game.dev_mode: bool                      # every machine; true inside the dev room
 game.dev: Node                           # scripts/dev/dev_room.gd, child "Dev" of Game, always present
 game.damage_player(p, amount: int, source: String, knock := Vector3.ZERO)
     # every hurt goes here; monster_hit_player calls it. source: "monster:<kind>", "dev_gun:<name>"
@@ -828,16 +854,11 @@ knocked down, no movement; a `"stun"` event plus the dev snapshot block), `nocli
   every id is in `Net.peer_ids()` (the HUD party list uses the roster, so bots are not listed).
   `_sync_players` never removes an `is_bot` player.
 - Snapshot key `"dv"` carries the dev state (`dev.net_state()` / `dev.apply_net_state()`), empty
-  outside the dev room. Clients apply it before the player list so bot nodes exist.
+  without dev mode. Clients apply it before the player list so bot nodes exist.
 - `game._event` passes kinds it does not know to `dev.on_event(kind, data)`.
-- The room fills the level_info keys the game reads today (player/tool/monster spawns, table,
-  table_yaw, shelf, lectern, lights, containers, nav_region) plus `dev_room: true`, `dev_gate`,
-  `dummy_spots`. It has none of the wave 1 hospital keys (tables, or_screen, phone, entrance,
-  neutral, wings): code using those must check for them.
-- The room is always in `Phase.SHIFT` (no clock-in). A saved or lost patient clears the table
-  a few seconds later (loop). The panel's "Phone call" calls `game.dev_phone_call()`; "Extra
-  patient" and "Skip grace" call `game.dev_extra_patient()` / `game.dev_skip_grace()` (requests
-  `phone`, `extra_patient`, `skip_grace`). "Put on the table" uses the first free patient table.
+- The panel's "Phone call" calls `game.dev_phone_call()`; "Extra patient" and "Skip grace" call
+  `game.dev_extra_patient()` / `game.dev_skip_grace()` (requests `phone`, `extra_patient`,
+  `skip_grace`). "Put on the table" uses the first free patient table and clocks in from a lobby.
 - `surgery_system.gd` lets an `is_bot` operator operate on the host with the minigame's
   `bot_input(t, skill)` (skill from the bot's meta `bot_skill`). Minigames must keep
   `bot_input` finishing their step.
@@ -847,7 +868,7 @@ knocked down, no movement; a `"stun"` event plus the dev snapshot block), `nocli
 - Sounds `dev_zap`, `dev_thump`, `dev_defib` from `tools/gen_audio_dev.mjs`.
 - **Pocket spaces** (2026-09-14): request `pocket {kind: "factory" | "restaurant" | ""}` builds that space
   beside the room on every machine (`dv.pk`, `game.pockets.build_kind`); `dev.pocket_go(into)` moves the
-  local player to its spawn and back (panel "Go there" / "Back to the room").
+  local player to its spawn and back (panel "Go there" / "Back to the start").
 - **Night Nurse section** (2026-09-14): requests `nurse_ignore_watch {on}`, `nurse_walk {mode: "" |
   "follow" | "loop"}` (follow: the sender; loop: a 6 x 3.5 m rectangle round where the sender stands,
   long side along their facing, corners snapped to the navigation mesh) and `nurse_pace {i}`
@@ -855,7 +876,7 @@ knocked down, no movement; a `"stun"` event plus the dev snapshot block), `nocli
   front}`. Host fields `nurse_ignore_watch`, `nurse_walk`, `nurse_pace`, `nurse_who`, `nurse_loop`;
   the dv snapshot carries `nn: [ignore, walk, pace]`; `reset_state` clears them.
   `dev.nurse_settings() -> {ignore_watch, walk, who, loop, speed}` is what `Monster.dev_nurse()` hands
-  the nurse brain (empty outside the dev room). Ignoring: `observed` stays false (so the report's `ob`
+  the nurse brain (empty without dev mode). Ignoring: `observed` stays false (so the report's `ob`
   and every client's clip keep running) and she does not stalk; follow stops at 2.5 m and walk modes
   never lunge or hit. The pace replaces her 3.4 m/s in every walk, hunting included.
 
@@ -1256,7 +1277,7 @@ p.refresh_downed_visuals() / p.look_up_from_table()
 # Game (scripts/game.gd)
 game.BLEED_SECONDS (300)  game.TABLE_BLEED_K (0.5)  game.CARRY_HOLD (1.0 s)  game.REVIVE_HP (2)
 game.alive_players()      # standing players only (alive and not downed): monsters, footsteps, perception, holds
-game.all_players_out() -> bool     # every player not waiting to join is downed or dead; fails the shift outside the dev room
+game.all_players_out() -> bool     # every player not waiting to join is downed or dead; fails the shift unless dev mode's No game over is on
 game.down_player(p, source, knock := Vector3.ZERO)   # host; damage_player calls it at 0 HP
 game.kill_player(p, source)        # host; "bleed" when the clock runs out
 game.revive_player(p, source := "stitches")   # host; REVIVE_HP, standing beside the player table
@@ -1909,7 +1930,7 @@ door.is_closed() / is_hinged() / is_automatic() / limit(side) / leaf_xform(i, a)
   crew): players (downed too), paramedic crews, monsters. Closed pairs pick their swing then: into
   the tunnel, or out of the face when the nearest one is coming through the tunnel and there is room.
   They close 1.2 s after nobody is near. A locked gate opens for nobody.
-- **Gates** are locked (host: `phase != SHIFT or not wing_loader.wings_ready`, never in the dev room),
+- **Gates** are locked (host: `phase != SHIFT or not wing_loader.wings_ready`),
   shut, lamp red, prompt "!Locked until the shift starts", E plays `doors_locked`. Unlocking plays
   `doors_unlock` and holds each gate open 2.6 s. While a clock-in waits for the wings the lamps
   blink amber. **Jams**: a gate of one of the two deepest wings (three or more wings), once per
@@ -1988,9 +2009,7 @@ game.clock_in_pending        # host: clock-in waits for the wings
 - The pen has two partitions with doors (`dr_dev_hinged`, `dr_dev_double`); monsters spawn in its
   middle bay and reach the side bays through them.
 - Panel section "Doors": "Open all doors", "Close all doors" (hinged doors; requests `doors_all
-  {open}`), "Regenerate wings now" (`regen_wings`; in the dev room it says there are none). After a
-  visit to the dev room (`DevRoom.tools_unlocked`, per process) F1 in a hospital run opens a small
-  panel with just these three buttons, and the host accepts those two requests there.
+  {open}`), "Regenerate wings now" (`regen_wings`).
 
 ### Tests
 
