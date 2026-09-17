@@ -13,6 +13,8 @@ extends "res://scripts/surgery/minigame.gd"
 ##         Forcing the tips into a wall makes it flush red under them and the patient wince;
 ##         keep forcing (or shove hard, e.g. cutting across a bend) and the wall tears: a spurt
 ##         of blood, a flinch and TEAR_COST vitals. The bullet glints in the dark channel.
+##         A teammate's flashlight on the wound (ctx.helper_lights) lifts the darkness: a warm pool
+##         of light where their beam lands, and less gloom down the whole tract.
 ## GRIP    when the tips are close enough the glint turns into a green ring: hold primary and the
 ##         jaws close on the slug. Closing anywhere else closes on nothing; let go and try again.
 ## EXTRACT keep holding primary and draw it back; the opening glows green. The slug makes the
@@ -1024,6 +1026,9 @@ func _build_channel() -> void:
 shader_type spatial;
 render_mode cull_disabled;
 uniform float dark_floor = 0.06;
+uniform float helper = 0.0;
+uniform vec2 helper_spot = vec2(0.0);
+uniform float helper_r = 0.045;
 varying vec2 pp;
 varying float lvis;
 varying float shine;
@@ -1039,6 +1044,10 @@ void fragment() {
 	float n4 = vnoise(vec2(s * 60.0, UV.y * 2.0) + 11.0);
 	// darkness: light reaching into the tract falls off with depth
 	float vis = mix(1.0, dark_floor, smoothstep(0.03, 0.85, s));
+	// a teammate's flashlight: some light down the whole tract, most where their beam lands
+	float hspot = helper * (1.0 - smoothstep(helper_r * 0.3, helper_r, distance(pp, helper_spot)));
+	float lift = clamp(helper * 0.45 + hspot * 0.5, 0.0, 0.9);
+	vis = mix(vis, 1.0, lift);
 	float mouth_f = 1.0 - smoothstep(0.0, 0.09, s);
 	float inside = 1.0 - smoothstep(0.97, 1.03, u);
 	float wall = smoothstep(0.4, 1.0, u);
@@ -1059,6 +1068,7 @@ void fragment() {
 	ROUGHNESS = 0.5;
 	AO = mix(1.0, mix(0.1, 0.9, wall) * vis, inside);
 	AO_LIGHT_AFFECT = 0.0;
+	EMISSION = ALBEDO * vec3(1.0, 0.8, 0.55) * hspot * 0.5 * (0.4 + 0.6 * inside);
 	vec3 bump = vec3(n1 - 0.5, 0.0, n4 - 0.5) * 0.22 * (1.0 - rt) * mix(1.0, 0.3, pool);
 	NORMAL = normalize(NORMAL + (VIEW_MATRIX * vec4(bump, 0.0)).xyz);
 }
@@ -1073,12 +1083,18 @@ void light() {
 	var m := ShaderMaterial.new()
 	m.shader = sh
 	_skin_params(m)
+	m.set_shader_parameter("helper_r", HELP_SPOT_R)
+	_channel_mat = m
 	mi.material_override = m
 	add_child(mi)
 	_channel_task = WorkerThreadPool.add_task(_build_channel_geometry.bind(mi), false, "forceps channel")
 
 
 var _channel_task := -1
+var _channel_mat: ShaderMaterial
+var _help := 0.0                 # smoothed teammate light, 0..1
+var _help_spot := Vector2.ZERO
+const HELP_SPOT_R := 0.045       # radius of the warm pool where a teammate's beam lands
 
 
 func _exit_tree() -> void:
@@ -1415,6 +1431,7 @@ func tick(delta: float) -> void:
 		_bullet.position = plane_to_local(bp, _surface_y(bs, 0.0) + BULLET_R * 0.55)
 		_bullet.basis = Basis(Vector3.UP, atan2(tg.y, -tg.x))
 		depth_vis = _vis_dark(bs)
+	depth_vis = lerpf(depth_vis, 1.0, _help_lift(_bullet.position))
 	var bc := Color(0.62, 0.46, 0.26).lerp(Color(0.35, 0.05, 0.04), 0.35 if _d_stage != Stage.DONE else 0.2)
 	_bullet_mat.albedo_color = bc * lerpf(0.35, 1.0, depth_vis)
 	_lead_mat.albedo_color = Color(0.3, 0.3, 0.32) * lerpf(0.3, 1.0, depth_vis)
@@ -1429,6 +1446,7 @@ func tick(delta: float) -> void:
 		_bleed_cd = 0.2
 	_tick_cues(delta)
 	_tick_droplets(delta)
+	_tick_helper(delta)
 
 
 func _tick_cues(delta: float) -> void:
@@ -1470,6 +1488,26 @@ func _tick_cues(delta: float) -> void:
 		_mouth.position = plane_to_local(pts[0], LIFT + 0.002)
 		_mouth.scale = Vector3(m, m * 0.3, m)
 		_mouth_mat.albedo_color = Color(0.25, 1.0, 0.45, 0.55 + 0.25 * sin(_cue_t * 5.0))
+
+
+## Teammates' flashlights on the wound, on every machine: the channel shader's `helper` lifts the
+## darkness and warms the spot their beam lands on. Eased so a sweeping beam does not flicker.
+func _tick_helper(delta: float) -> void:
+	var h := helper_light()
+	var want := float(h.amount)
+	_help = move_toward(_help, want, delta * (3.0 if want > _help else 1.5))
+	if want > 0.0:
+		_help_spot = _help_spot.lerp(h.spot, 1.0 - exp(-delta * 10.0)) if _help > 0.02 else h.spot
+	if _channel_mat != null:
+		_channel_mat.set_shader_parameter("helper", _help)
+		_channel_mat.set_shader_parameter("helper_spot", _help_spot)
+
+
+## The shader's lift at a local position (for the bullet's own darkening).
+func _help_lift(local: Vector3) -> float:
+	var p := Vector2(local.x, local.z)
+	var hspot := _help * (1.0 - smoothstep(HELP_SPOT_R * 0.3, HELP_SPOT_R, p.distance_to(_help_spot)))
+	return clampf(_help * 0.45 + hspot * 0.5, 0.0, 0.9)
 
 
 func _vis_dark(s: float) -> float:
