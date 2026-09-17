@@ -1,13 +1,13 @@
 extends Node
 ## Windowed check of the two loading screens, the way a player meets them: the launch printout
 ## (scripts/launch_screen.gd, while the one-time warmup runs), then a Solo start from the title menu
-## (the heart monitor, scripts/loading_screen.gd). Logs every frame slower than SLOW_MS (the screen
-## visibly stalling) and saves screenshots.
+## (the shift assignment fax, scripts/shift_fax.gd, until it has gone and the player is in). Logs
+## every frame slower than SLOW_MS (the screen visibly stalling) and saves screenshots.
 ##
 ##   godot --path . tools/loadingshot.tscn
 ##
-## Writes tools/game_shots/launch_<n>.png and loading_<n>.png every 0.4 s, and menu_<n>.png every
-## 0.3 s through the menu's feed-in, then quits.
+## Writes tools/game_shots/launch_<n>.png every 0.4 s, menu_<n>.png every 0.3 s through the menu's
+## feed-in, and loading_<n>.png every 0.4 s through the shift fax, then quits.
 
 const OUT_DIR := "res://tools/game_shots"
 const SLOW_MS := 100
@@ -41,7 +41,7 @@ func _ready() -> void:
 	await _watch("menu", tm, func(): return Time.get_ticks_msec() - tm > 3000, 300)
 	var t1 := Time.get_ticks_msec()
 	_main._start_solo("Shot")
-	await _watch("loading", t1, func(): return _main.game.phase != Game.Phase.MENU and not Loading.visible)
+	await _watch("loading", t1, func(): return _main.game.phase != Game.Phase.MENU and not _main.shift_fax.is_active())
 	RenderingServer.frame_pre_draw.disconnect(_on_pre_draw)
 	RenderingServer.frame_post_draw.disconnect(_on_post_draw)
 	get_tree().quit(0)
