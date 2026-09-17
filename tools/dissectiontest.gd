@@ -195,7 +195,8 @@ func _dev_mode() -> void:
 	_check(absf(float(c.vitals) - cond_before) < 0.01, "the finished case keeps the condition, not the step bonus (%.1f)" % float(c.vitals))
 	await _frames(3)
 	_check(body != null and is_instance_valid(body) and bool(body.get("_flat")), "the monster flatlines on the table")
-	_check(String(game._table_prompt(me, table)) == "!The brain is out.", "table prompt after: '%s'" % game._table_prompt(me, table))
+	# Patient exits: the dead monster is a body waiting for the furnace now.
+	_check(String(game._table_prompt(me, table)).begins_with("Hold E: lift"), "table prompt after: '%s'" % game._table_prompt(me, table))
 	var model: Dictionary = OrModel.build(game)
 	var panel := {}
 	for p in model.panels:
@@ -203,7 +204,9 @@ func _dev_mode() -> void:
 			panel = p
 	_check(not panel.is_empty() and bool(panel.get("monster", false)), "the OR screen model marks the monster panel")
 	var gone := await _until(func(): return game.case_by_id(case_id).is_empty(), 9.0)
-	_check(gone, "the case is removed about 6 s later")
+	_check(not gone, "the finished case stays on the table as a body")
+	await _burn(case_id)
+	_check(game.case_by_id(case_id).is_empty(), "burned in the furnace, the case is gone")
 
 	# ---- the Discharged: stirring, awake, thrashing, shrieking
 	var did: int = dx.dev_strap("discharged", 0.6, table)
@@ -268,8 +271,8 @@ func _dev_mode() -> void:
 	await _frames(3)
 	_check(String(d.state) == "dead", "condition 0: the case is lost (%s)" % String(d.state))
 	_check(String(game.message).contains("ruined"), "'%s'" % game.message)
-	var gone2 := await _until(func(): return game.case_by_id(did).is_empty(), 9.0)
-	_check(gone2, "the ruined case clears too")
+	await _burn(did)
+	_check(game.case_by_id(did).is_empty(), "the ruined case's body burns too")
 	game.surgery_bot_skill = -1.0
 
 
@@ -467,3 +470,13 @@ func _until(cond: Callable, timeout: float) -> bool:
 			return true
 		await get_tree().physics_frame
 	return bool(cond.call())
+
+
+## Patient exits: lift a dead case's body and put it in the furnace (hands emptied for the lift).
+func _burn(case_id: int) -> void:
+	var kept: Array = me.slots.duplicate(true)
+	me.slots = Player.empty_slots()
+	game.corpses.lift(me, case_id)
+	game.corpses.cremate(me)
+	me.slots = kept
+	await _frames(3)
