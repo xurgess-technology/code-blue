@@ -67,29 +67,36 @@ def body_for(V):
     return b
 
 
-def add_cart_bones(arm, body):
-    """The Sonographer's cart is part of the model, so it rides bones like everything else:
-    `cart_pivot` hangs off the right hand (pointing straight down, so turning it about its own axis
-    is a clean yaw of the whole cart: that is the trailer swing chunk B drives), and one bone per
-    castor, each lying along its axle so turning it about its own axis rolls the wheel."""
-    sk = st_char.Skel(body)
-    H = Vector(tuple(st_char.cart_anchor(sk)))
-    specs = [('cart_pivot', H, H + Vector((0, 0, -0.14)), 'hand.R', Vector((0, -1, 0)))]
-    for name, _dx, _dy in st_char.CASTORS:
-        c = Vector(tuple(st_char.castor_centre(sk, name)))
-        specs.append((name, c - Vector((0, 0.03, 0)), c + Vector((0, 0.03, 0)), 'cart_pivot', Vector((0, 0, 1))))
+def add_neck_bones(arm, body):
+    """The Sonographer's neck is a chain, so it can stretch. The shared skeleton's one `neck` bone is
+    cut into four (`neck`, `neck2`, `neck3`, `neck4`) between the collar joint and the head joint, and
+    the head is hung off the last of them. The game stretches the chain by pushing each bone further
+    along its parent (scripts/monsters/sonographer_rig.gd), which pulls the windpipe rings apart with
+    it, because the neck, the windpipe and the throat's skin are all weighted along the same chain.
+    This is the one place the Sonographer leaves the shared skeleton, and it stops at the neck."""
+    J = body.J
+    a = Vector(J['neck'])
+    b = Vector(J['headj'])
+    step = (b - a) / 4.0
     bpy.context.view_layer.objects.active = arm
     bpy.ops.object.mode_set(mode='EDIT')
     eb = arm.data.edit_bones
-    for n, h, t, par, roll in specs:
-        b = eb.new(n)
-        b.head, b.tail = h, t
-        b.parent = eb[par]
-        b.use_connect = False
-        b.align_roll(roll)
+    eb['neck'].tail = a + step
+    prev = eb['neck']
+    for i in (2, 3, 4):
+        n = eb.new('neck%d' % i)
+        n.head = a + step * (i - 1)
+        n.tail = a + step * i
+        n.parent = prev
+        # not connected: a connected bone ignores its pose location, and the stretch is a location
+        n.use_connect = False
+        n.align_roll(Vector((0, -1, 0)))
+        prev = n
+    eb['head'].parent = prev
+    eb['head'].use_connect = False
     bpy.ops.object.mode_set(mode='OBJECT')
-    for b in arm.data.bones:
-        b.use_deform = b.name != 'root'
+    for bo in arm.data.bones:
+        bo.use_deform = bo.name != 'root'
 
 
 # ====================================================================== materials
@@ -232,6 +239,22 @@ def set_charge(v):
         m.node_tree.nodes['Charge'].outputs[0].default_value = v
 
 
+def sono_gel_material():
+    """The gel drips: clear, wet, barely there."""
+    m = bpy.data.materials.get('ST_SonoGel')
+    if m:
+        return m
+    m = attr_material('ST_SonoGel', coat=1.0, spec=0.7)
+    b = m.node_tree.nodes['Principled BSDF']
+    b.inputs['Alpha'].default_value = 0.55
+    for attr, val in (('surface_render_method', 'BLENDED'), ('blend_method', 'BLEND')):
+        try:
+            setattr(m, attr, val)
+        except Exception:
+            pass
+    return m
+
+
 def material_for(kind, hive_eye=False):
     if kind == st_char.GLOW:
         return sono_glow_material()
@@ -290,10 +313,18 @@ def mesh_part(prefix, part, V, coll):
 # ====================================================================== weights
 ALLOWED = {
     'Head': ['head', 'neck', 'upperchest', 'chest'],
+    'Coat': ['hips', 'spine', 'chest', 'upperchest', 'shoulder.L', 'shoulder.R', 'upperarm.L', 'upperarm.R', 'thigh.L', 'thigh.R'],
+    'Shirt': ['hips', 'spine', 'chest', 'upperchest', 'shoulder.L', 'shoulder.R', 'upperarm.L', 'upperarm.R', 'forearm.L', 'forearm.R'],
+    'Tie': ['chest', 'upperchest'],
+    'Cable_A': ['neck', 'upperchest', 'shoulder.R', 'upperarm.R'],
+    'Cable_B': ['upperarm.R', 'forearm.R'],
+    'Cable_C': ['forearm.R', 'hand.R'],
     'Top': ['hips', 'spine', 'chest', 'upperchest', 'shoulder.L', 'shoulder.R', 'upperarm.L', 'upperarm.R', 'forearm.L', 'forearm.R'],
     'Gown': ['hips', 'spine', 'chest', 'upperchest', 'shoulder.L', 'shoulder.R', 'upperarm.L', 'upperarm.R'],
     'Pants': ['hips', 'thigh.L', 'thigh.R', 'shin.L', 'shin.R'],
     'Wristband': ['forearm.L'],
+    'Throat': ['neck', 'neck2', 'neck3', 'neck4', 'head'],
+    'ThroatSkin': ['neck', 'neck2', 'neck3', 'neck4', 'head'],
 }
 
 
@@ -395,23 +426,49 @@ def assign_weights(ob, part, sk, arm):
     groups = {n: ob.vertex_groups.new(name=n) for n in names}
     if len(names) == 1:
         groups[names[0]].add(list(range(len(P))), 1.0, 'REPLACE')
-    elif part.name == 'Head':
-        # by height up the neck: chest below the neck joint, the head from just under the jaw
+    elif part.name in ('Head', 'Throat', 'ThroatSkin'):
+        chain = 'neck2' in {b.name for b in arm.data.bones}
         z = P[:, 2]
         zn = sk.J['neck'][2]
         zh = sk.J['headj'][2]
-        w_head = st_char.smooth01((z - (zh - 0.085)) / 0.035)
-        w_neck = st_char.smooth01((z - (zn - 0.03)) / 0.05) * (1 - w_head)
-        w_up = (1 - w_head - w_neck) * st_char.smooth01((z - 1.25 * sk.s) / 0.08)
-        w_ch = 1 - w_head - w_neck - w_up
-        for n, w in (('head', w_head), ('neck', w_neck), ('upperchest', w_up), ('chest', w_ch)):
+        W = {}
+        if chain:
+            # the stretching neck: four bones share the run from the collar to the jaw, so pushing
+            # them apart stretches the neck and pulls the windpipe's rings apart with it
+            names = list(st_char.NECK_CHAIN)
+            edges = [zn + (zh - zn) * i / len(names) for i in range(len(names) + 1)]
+            w_head = st_char.smooth01((z - (zh - 0.055)) / 0.030)
+            rest = 1.0 - w_head
+            for i, n in enumerate(names):
+                lo, hi = edges[i], edges[i + 1]
+                band = st_char.smooth01((z - (lo - 0.018)) / 0.036) * (1 - st_char.smooth01((z - (hi - 0.018)) / 0.036))
+                W[n] = band
+            tot = sum(W.values())
+            for n in W:
+                W[n] = W[n] / np.maximum(tot, 1e-9) * rest
+            W['head'] = w_head
+            if part.name == 'Head':
+                below = 1.0 - st_char.smooth01((z - (zn - 0.05)) / 0.06)
+                for n in W:
+                    W[n] = W[n] * (1.0 - below)
+                W['upperchest'] = below * st_char.smooth01((z - 1.25 * sk.s) / 0.08)
+                W['chest'] = below * (1.0 - st_char.smooth01((z - 1.25 * sk.s) / 0.08))
+        else:
+            w_head = st_char.smooth01((z - (zh - 0.085)) / 0.035)
+            w_neck = st_char.smooth01((z - (zn - 0.03)) / 0.05) * (1 - w_head)
+            w_up = (1 - w_head - w_neck) * st_char.smooth01((z - 1.25 * sk.s) / 0.08)
+            W = {'head': w_head, 'neck': w_neck, 'upperchest': w_up,
+                 'chest': 1 - w_head - w_neck - w_up}
+        for n, w in W.items():
+            if n not in groups:
+                groups[n] = ob.vertex_groups.new(name=n)
             for i in np.nonzero(w > 1e-3)[0]:
                 groups[n].add([int(i)], float(w[i]), 'REPLACE')
-    elif part.name in ('Top', 'Gown', 'Pants', 'Belly', 'TopRolled'):
-        arms = part.name in ('Top', 'Gown')
-        legs = part.name in ('Gown', 'Pants')
+    elif part.name in ('Top', 'Gown', 'Pants', 'Belly', 'TopRolled', 'Coat', 'Shirt'):
+        arms = part.name in ('Top', 'Gown', 'Coat', 'Shirt')
+        legs = part.name in ('Gown', 'Pants', 'Coat')
         W = trunk_weights(P, sk, arms=arms, legs=legs, leg_k=1.0 if part.name == 'Pants' else 0.85,
-                          skirt=part.name == 'Gown')
+                          skirt=part.name in ('Gown', 'Coat'))
         for n, w in W.items():
             if n not in groups:
                 groups[n] = ob.vertex_groups.new(name=n)
@@ -473,9 +530,22 @@ def pose_hive(rig):
 
 
 def pose_sono(rig):
-    """The review stand: the Sonographer's own idle, so the cart, the turned head and the hand on the
-    handle are all exactly where the clips put them."""
+    """The review stand: the Sonographer's own idle, so the hunched neck, the cocked head and the
+    probe hand are all exactly where the clips put them."""
     return st_sono_clips.idle_pose(rig, 30)
+
+
+def set_crane(c, amount):
+    """Stretch the neck chain for a render. The game does this every frame in code
+    (scripts/monsters/sonographer_rig.gd); here it is just so the review can see it craned."""
+    arm = c['arm']
+    per = st_char.CRANE_M * amount / 4.0
+    for b in st_sono_clips.NECK:
+        pb = arm.pose.bones.get(b)
+        if pb is None:
+            continue
+        pb.location = (0.0, per, 0.0)
+    bpy.context.view_layer.update()
 
 
 def pose_for(V):
@@ -504,7 +574,7 @@ def build_variant(name, x_off):
     bpy.context.scene.collection.children.link(coll)
     arm = hu_rig.build_armature(body, name + '_Rig')
     if V.get('sono'):
-        add_cart_bones(arm, body)
+        add_neck_bones(arm, body)
     bpy.context.scene.collection.objects.unlink(arm)
     coll.objects.link(arm)
     obs = []
@@ -810,9 +880,11 @@ def main():
     bpy.context.view_layer.update()
     for nm, c in chars.items():
         # which way the posed head faces, in armature axes: the Sonographer's must point the way it
-        # side-steps (+X), not at its own cart
+        # side-steps (+X)
         o = head_point(c, (0, 0, 0))
-        log('%s head faces' % nm, tuple(round(v, 2) for v in (head_point(c, (0, -0.3, 0)) - o).normalized()))
+        log('%s head at (%.2f, %.2f, %.2f)  faces %s' % (
+            nm, o.x - c['arm'].location.x, o.y, o.z,
+            tuple(round(v, 2) for v in (head_point(c, (0, -0.3, 0)) - o).normalized())))
     if '--export' in ARGS:
         export_and_compare(chars[ONLY[0]], ONLY[0])
         log('done')
@@ -923,36 +995,48 @@ def main():
         show_only(chars, ('sonographer',))
         c = chars['sonographer']
         x0 = layout['sonographer']
-        for shot, cam_at, tgt, lens, res in (('sono_front', (x0, -5.6, 1.15), (x0, 0, 1.02), 70, (900, 1300)),
-                                             ('sono_side', (x0 + 5.0, -0.5, 1.15), (x0, 0, 1.02), 70, (900, 1300)),
-                                             ('sono_34', (x0 + 2.6, -4.8, 1.45), (x0, 0, 1.02), 70, (900, 1300)),
-                                             ('sono_back', (x0 - 1.7, 4.8, 1.60), (x0, 0, 1.05), 70, (900, 1300))):
-            if want(shot):
-                L = std_lights((x0, 0.0, 1.1))
-                cam = camera(cam_at, tgt, lens)
-                render(shot, res)
-                clear(L + [cam])
-        nz = 0.5 * (c['body'].J['neck'].z + c['body'].HC.z)
-        for charge in (0.0, 1.0):
-            set_charge(charge)
-            sfx = '_charge' if charge else ''
+        for crane in (0.0, 1.0):
+            set_crane(c, crane)
+            sfx = '_craned' if crane else ''
+            set_charge(crane)
+            for shot, cam_at, tgt, lens, res in (
+                    ('sono_front' + sfx, (x0, -6.0, 1.35), (x0, 0, 1.20), 70, (900, 1400)),
+                    ('sono_side' + sfx, (x0 + 5.4, -0.5, 1.35), (x0, 0, 1.20), 70, (900, 1400)),
+                    ('sono_34' + sfx, (x0 + 2.8, -5.0, 1.55), (x0, 0, 1.20), 70, (900, 1400)),
+                    ('sono_back' + sfx, (x0 - 1.8, 5.0, 1.70), (x0, 0, 1.25), 70, (900, 1400))):
+                if want(shot):
+                    L = std_lights((x0, 0.0, 1.3))
+                    cam = camera(cam_at, tgt, lens)
+                    render(shot, res)
+                    clear(L + [cam])
             if want('sono_throat' + sfx):
-                # the long neck and the window in it, from the front and a little below
+                # the neck and the window in it, from the front and a little below
+                nz = 0.5 * (c['body'].J['neck'].z + c['body'].HC.z) + 0.30 * crane
                 tgt = (x0, 0.0, nz)
                 L = std_lights(tgt, 0.3)
-                cam = camera((x0 + 0.10, -0.85, nz - 0.08), tgt, 85)
+                cam = camera((x0 + 0.10, -0.95, nz - 0.10), tgt, 85)
                 render('sono_throat' + sfx, (900, 1100))
                 clear(L + [cam])
             if want('sono_dark' + sfx):
                 # the game's look: near dark, a teal ambient, a warm flashlight from the viewer
                 bpy.context.scene.world.node_tree.nodes['Background'].inputs['Color'].default_value = (0.004, 0.012, 0.012, 1)
-                tgt = (x0, 0, 1.35)
-                cam = camera((x0 + 0.3, -3.4, 1.70), tgt, 32)
-                fl = add_light('SPOT', (x0 + 0.5, -3.3, 1.58), tgt, 700, (1.0, 0.82, 0.58), 0.05, 'Flash', spot=(40, 0.6))
-                amb = add_light('AREA', (x0, 0, 3.4), (x0, 0, 0), 40, (0.35, 0.8, 0.75), 4.0, 'Amb')
+                tgt = (x0, 0, 1.45 + 0.3 * crane)
+                cam = camera((x0 + 0.3, -3.6, 1.75), tgt, 32)
+                fl = add_light('SPOT', (x0 + 0.5, -3.5, 1.62), tgt, 700, (1.0, 0.82, 0.58), 0.05, 'Flash', spot=(40, 0.6))
+                amb = add_light('AREA', (x0, 0, 3.6), (x0, 0, 0), 40, (0.35, 0.8, 0.75), 4.0, 'Amb')
                 render('sono_dark' + sfx, (1400, 1100))
                 clear([cam, fl, amb])
                 bpy.context.scene.world.node_tree.nodes['Background'].inputs['Color'].default_value = (0.02, 0.025, 0.03, 1)
+            if want('sono_probe' + sfx) and not crane:
+                # the wand grown into the right palm and the cable running up the arm
+                sk = st_char.Skel(c['body'])
+                tip = st_char.probe_tip(sk)
+                tgt = tuple(tip + np.array([0.0, 0.0, 0.06]))
+                L = std_lights(tgt, 0.3)
+                cam = camera(tuple(tip + np.array([-0.22, -0.52, 0.22])), tgt, 70)
+                render('sono_probe', (1000, 1000))
+                clear(L + [cam])
+        set_crane(c, 0.0)
         set_charge(0.0)
     for key, shot in (('surgeon', 'face_surgeon'), ('hive', 'face_hive'), ('hive', 'face_hive_lock'),
                       ('sonographer', 'face_sono'), ('surgeon_graft', 'face_graft')):

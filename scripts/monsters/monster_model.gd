@@ -79,27 +79,23 @@ func setup(monster_kind: String) -> void:
 	play("idle")
 
 
-## The Sonographer's look, on top of the clip: how suspicious it is (0..1, a faint throat glow), how
-## far an echo is charged (0..1, the throat and the pump line ramping up), which mode it is in (idle,
-## suspicious, charging, echo, turning, rush, wail, stagger, lying), how far round the cart is swung
-## on its pivot bone (radians; 0 dragging at its right, SonoRig.CART_BEHIND round behind it), and
-## whether the pump line is still plugged into its neck (false once it is sedated or killed, which
-## also takes the cart off the model). Safe on any model: the others ignore it.
-## See docs/CONTRACTS.md, "The Sonographer's model and its cart".
-func set_sono_look(suspicion: float, charge: float, mode: String, cart_angle := 0.0, plugged := true) -> void:
+## The Sonographer's look, on top of the clip. Safe on any model: the others ignore it.
+##   suspicion   0..1  the neck cranes with it and the throat glows brighter: the body is the meter
+##   charge      0..1  the charge pose, and the glow running down the cable into the probe
+##   mode              which clip family is playing (idle, wander, suspicious, charging, echo, rush,
+##                     wail, search, stagger, lying)
+##   aim               the world direction the probe points while it charges and echoes
+##   crane_limit 0..1  how far the neck may stretch up before it bends forward instead (the ceiling
+##                     check; the brain does the raycast, the model just obeys the number)
+## See docs/CONTRACTS.md, "The Sonographer's model".
+func set_sono_look(suspicion: float, charge: float, mode: String, aim := Vector3.ZERO, crane_limit := 1.0) -> void:
 	if sono != null:
-		sono.set_look(suspicion, charge, mode, cart_angle, plugged)
+		sono.set_look(suspicion, charge, mode, aim, crane_limit)
 
 
-## How fast the Sonographer is hauling its cart (m/s): its castors roll with it.
-func set_cart_speed(speed: float) -> void:
-	if sono != null:
-		sono.cart_speed = speed
-
-
-## Where the pump line plugs into the nape of its neck, in world space.
-func cable_point() -> Vector3:
-	return sono.cable_point() if sono != null else global_position + Vector3.UP
+## Where an echo fires from and which way it points: the probe's tip (its -Z), not the head.
+func echo_origin() -> Transform3D:
+	return sono.echo_origin() if sono != null else global_transform
 
 
 ## Ears that turn toward a sound and flare while listening (the Discharged). Every machine,
@@ -143,10 +139,9 @@ static func make_lying(monster_kind: String) -> Node3D:
 		m.skeleton.reset_bone_poses()
 		back = 0.1   # the dress at her shoulder blades; the flared skirt sinks into whatever she lies on
 	elif m.sono != null:
-		# Its rest pose is standing straight, and the poser's `lying` brings the arms in, as the Hive
-		# does. The cart comes off with it: a copy is left standing wherever it went down (chunk B
-		# turns that copy into smoke).
-		m.sono.set_cart_visible(false)
+		# Its rest pose is standing straight and the poser's `lying` brings the arms in, as the Hive
+		# does. The neck goes back to rest length with it: nothing is craned on the table.
+		m.sono.set_look(0.0, 0.0, "lying")
 		m.anim.stop()
 		m.skeleton.reset_bone_poses()
 		back = 0.11
@@ -267,5 +262,4 @@ func _build_fallback() -> void:
 func _process(delta: float) -> void:
 	if iv != null and iv.has_method("follow"):
 		iv.follow(self, delta)
-	if sono != null:
-		sono.tick(delta)
+

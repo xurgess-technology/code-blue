@@ -1,26 +1,17 @@
-"""The Sonographer's clips, on the shared human skeleton plus the cart bones st_build.add_cart_bones
-adds (art/human/blender_src/hu_rig.py conventions: armature-space poses built with hu_rig.Pose, in
-place, no root motion, 30 fps).
+"""The Sonographer's clips, on the shared human skeleton with its neck cut into a chain
+(st_build.add_neck_bones). Same conventions as everything else here: armature-space poses built with
+hu_rig.Pose, in place, no root motion, 30 fps.
 
-Two postures, and the character lives in the difference between them.
+The character is a blind doctor who learned to see with sound. Tall and thin, shoulders rounded,
+the head cocked to one side. **Calm, the neck is hunched down**: these clips all pose it hunched,
+because the stretch is not a clip. The crane is a 0..1 blend the game lays on top of whatever is
+playing (scripts/monsters/sonographer_rig.gd), driven by suspicion, and it is the suspicion meter:
+the neck rises, the windpipe rings pull apart and the throat burns brighter.
 
-**Dragging.** It walks sideways. Its chest faces the way it always faces (-Y), it side-steps toward
-its own left (+X), its right arm is stretched out to its right holding the cart, and its head is
-turned hard over its left shoulder to face where it is going. The spine stays upright in every clip
-on purpose: in the dark it must never read like the Hive, which is bent double.
-
-**Rushing.** It swings round to face its target and comes at them head on, the left arm flailing out
-in front, the cart hauled round behind it.
-
-The cart is part of the model. Every clip but the lying one puts the right hand back on the handle
-(`_anchor`, the right wrist's rest position, which is where the cart is authored) and sets the cart's
-pivot bone in armature space, so the cart is always in the same place relative to the body and always
-upright. `yaw` is how far round the pivot the cart is swung: 0 leaves it out to the right where it
-was built, CART_BEHIND swings it round behind for the rush. Chunk B drives that same angle in code
-for the trailer swing, so these are only its resting values.
-
-The throat and line glow, the ears turning and the head tracking a sound are not clips either: the
-game drives them on top of whatever is playing (scripts/monsters/sonographer_rig.gd).
+The right hand has an ultrasound probe grown into it, so it is never a free hand: it hangs and
+sways, it rises to point where the noise came from, and it clubs. The left hand is long-fingered and
+spread, feeling the air. The ears turning, the throat and cable glow and the head tracking a sound
+are all driven by the game on top of these.
 """
 import math
 from mathutils import Vector
@@ -31,315 +22,268 @@ from hu_mesh import smooth01, lerp
 
 # name: (frames, loop, speed m/s or None, what it is)
 CLIPS = {
-    'SonoIdle': (150, True, None, 'standing sideways over the cart, head turned, a slow listening sway'),
-    'SonoDrag': (52, True, 0.95, 'the sideways drag-walk, head turned to where it is going; 0.95 m/s'),
-    'SonoListen': (40, True, None, 'frozen mid-step, the head locked over one ear, only a tremor'),
-    'SonoCharge': (36, False, None, 'the head lifts off the shoulders and the jaw drops open; holds'),
-    'SonoEcho': (18, False, None, 'the pulse: the head punches out and the chest empties'),
-    'SonoTurn': (26, False, None, 'swinging round out of the drag to face its target, hauling the cart after it'),
-    'SonoRush': (30, True, 3.10, 'head-on run, the left arm flailing, the cart bouncing behind; 3.1 m/s'),
-    'SonoWail': (78, False, None, 'a one-armed flurry of blows, left, with two pauses in it'),
-    'SonoStagger': (24, False, None, 'shoved: the chest goes back and the head whips after it'),
-    'SonoLying': (90, True, None, 'straight on its back for the table (the shared Lying pose, no cart)'),
+    'SonoIdle': (150, True, None, 'neck low, head cocked, the free hand twitching, the jaw ticking with its clicks'),
+    'SonoWander': (64, True, 0.80, 'a careful, high-stepping walk, the free hand out feeling the air; 0.8 m/s'),
+    'SonoListen': (40, True, None, 'frozen mid-step, the ears snapped round, the head turned to the sound'),
+    'SonoCharge': (36, False, None, 'the head tips up, the jaw drops and the probe arm rises to point; holds'),
+    'SonoEcho': (26, False, None, 'a pulse through the body, a jolt back, and the neck snaps down'),
+    'SonoRush': (30, True, 3.10, 'neck low and forward, head leading, both arms out, a loping run; 3.1 m/s'),
+    'SonoWail': (96, False, None, 'clubbing with the probe and clawing with the free hand, with listening pauses'),
+    'SonoSearch': (110, True, None, 'still, the neck slowly rising, the head sweeping side to side'),
+    'SonoStagger': (26, False, None, 'shoved: it reels back, ears pinned, the neck recoiling down'),
+    'SonoLying': (90, True, None, 'on its back for the table, the neck at rest and the probe hand at its side'),
 }
-DRAG_SPEED = CLIPS['SonoDrag'][2]
+WANDER_SPEED = CLIPS['SonoWander'][2]
 RUSH_SPEED = CLIPS['SonoRush'][2]
 
-LEAN = 0.05           # near nothing: it is upright, the neck does the leaning
-NECK_OUT = 0.42       # the neck carried forward out of the shoulders
-HEAD_UP = -0.28       # the head levelled back up at the end of that neck
-COCK = 0.24           # tipped over toward one ear
-TURN = 1.30           # how far the head is turned toward where it is going while it drags
-CART_BEHIND = -1.50   # the pivot's yaw that swings the cart round behind it for the rush
-CASTOR_BONES = ('castor_fl', 'castor_fr', 'castor_bl', 'castor_br')
-
-_ANCHOR = None
+LEAN = 0.10           # the trunk itself stays near upright; the neck does the work
+HUNCH = 0.70          # how far the neck chain is folded down when it is calm
+COCK = 0.30           # the head tipped over toward one ear
+NECK = ('neck', 'neck2', 'neck3', 'neck4')
+# how the hunch is shared down the chain: most of it low, so the head ends up forward and down
+SHARE = (0.34, 0.28, 0.22, 0.16)
 
 
-def _anchor(rig):
-    """Where the cart's handle is: the right wrist's rest position, which is what the cart was built
-    around, so putting the hand back here puts the cart exactly where it was authored."""
-    global _ANCHOR
-    if _ANCHOR is None:
-        J = rig.body.J
-        _ANCHOR = Vector((-J['wrist'].x, J['wrist'].y, J['wrist'].z))
-    return _ANCHOR
+def neck(p, hunch=1.0, turn=0.0, lift=0.0, roll=0.0):
+    """Fold the neck chain forward by `hunch` (1 = the calm hunch), swing it `turn` toward its left,
+    and `lift` straightens it back up. The game's crane blend goes on top of this, so nothing here
+    ever straightens it fully."""
+    # +Rx on this chain folds the neck forward and down, which is the calm pose
+    k = HUNCH * hunch - lift
+    for i, b in enumerate(NECK):
+        p.rel(b, Rx(k * SHARE[i]) @ Rz(turn * SHARE[i]) @ Ry(roll * SHARE[i]))
 
 
-def _cart(p, yaw=0.0, jostle=0.0, spin=0.0):
-    """Put the cart where it belongs: upright, yawed `yaw` about the pivot at the right hand, with a
-    little jostle off the floor, and the castors rolled to `spin`."""
-    p.absolute('cart_pivot', Rz(yaw) @ Rx(0.02 * jostle) @ Ry(0.03 * jostle))
-    for name in CASTOR_BONES:
-        p.absolute(name, Rz(yaw) @ Ry(spin))
+def head_pose(p, up=0.0, cock=1.0, turn=0.0, jaw=0.0):
+    """The head on the end of it: levelled back up out of the hunch, cocked over one ear."""
+    # -Rx brings the head back up out of the fold, so it ends up low and pushed forward, not hanging
+    p.rel('head', Rx(-0.58 - up - 0.22 * jaw) @ Ry(COCK * cock) @ Rz(turn))
 
 
-def _hand_on_handle(p, rig, back=0.0, out=0.0):
-    """The right hand back on the cart's handle. `back` slides the grip toward the body's back and
-    `out` away from its side, which is how the rush hauls the cart round behind it."""
-    a = _anchor(rig)
-    target = Vector((a.x - out, a.y + back, a.z))
-    arm_to(p, 'R', target, Vector((-0.6, -0.2, -1.0)), palm_ref=Vector((0, 0, 1)),
-           hand_dir=Vector((0.15, -1.0, -0.1)))
-    hand_relax(p, 'R', curl=0.85, thumb=0.45)
+def probe_hang(p, swing=0.0, out=0.0, bend=0.30, twist=0.0):
+    """The right arm, with the wand grown into it: heavier than the other, and it never opens."""
+    arm_hang(p, 'R', swing=swing, abduct=0.12 + out, bend=bend, wrist=-0.10, twist=twist)
+    hand_relax(p, 'R', curl=0.82, thumb=0.45)
 
 
-def _head(p, out=1.0, cock=1.0, turn=0.0, jaw=0.0):
-    """The listening head: pushed out ahead on the long neck, levelled, cocked over one ear, and
-    turned `turn` radians toward its own left (+X, where it is going while it drags)."""
-    # +Rz on this chain turns the face toward +X, which is the way it side-steps
-    p.rel('neck', Rx(NECK_OUT * out) @ Rz(turn * 0.42))
-    p.rel('head', Rx(HEAD_UP * out - 0.18 * jaw) @ Ry(COCK * cock) @ Rz(turn * 0.58))
+def feeler(p, reach=0.0, spread=1.0, curl=0.10):
+    """The left hand, long fingers spread, feeling the air ahead of it."""
+    arm_hang(p, 'L', swing=reach, abduct=0.14 + 0.10 * spread, bend=0.55 - 0.25 * reach,
+             wrist=-0.30 * spread, twist=0.25)
+    hand_relax(p, 'L', curl=curl, thumb=0.05, spread=0.6 * spread)
 
 
-# ====================================================================== dragging
+def _stand(p, rig, sway=0.0, spread=1.0):
+    for side, sg in (('L', 1.0), ('R', -1.0)):
+        ball = Vector((rig.ball[side].x * spread, rig.ball[side].y, rig.ball[side].z))
+        planted(p, side, ball, 0.0, yaw=sg * 0.06)
+
+
+# ====================================================================== calm
 def idle_pose(rig, f, n=150):
-    """Standing over the cart, side on, weight rocking slowly, the head turned and listening."""
+    """Stood still, the neck low, the head cocked. The free hand's fingers twitch and the jaw ticks
+    with every click."""
     t = f / n
     s = rig.body.s
     p = Pose(rig)
     br = math.sin(t * math.tau * 3)
     sway = math.sin(t * math.tau) * 0.8 + 0.25 * math.sin(t * math.tau * 2 + 0.7)
-    listen = math.sin(t * math.tau * 2 + 1.4)
-    p.hips = Vector((0.010 * s * sway, 0.0, -0.006 * s + 0.002 * s * br))
-    spine(p, lean=LEAN + 0.015 * br, yaw=0.10 + 0.03 * sway, roll=0.03 * sway, breathe=br, neck_comp=0.0)
-    _head(p, out=1.0 + 0.05 * br, cock=1.0 + 0.12 * listen, turn=TURN * 0.82 + 0.08 * listen)
-    for side, sg, spread in (('L', 1.0, 1.35), ('R', -1.0, 1.05)):
-        ball = Vector((rig.ball[side].x * spread, rig.ball[side].y, rig.ball[side].z))
-        planted(p, side, ball, 0.0, yaw=(0.28 if side == 'L' else 0.10))
-    arm_hang(p, 'L', swing=0.05 + 0.03 * sway, abduct=0.10, bend=0.20, wrist=0.05, twist=0.0)
-    hand_relax(p, 'L', curl=0.32, thumb=0.15)
-    _hand_on_handle(p, rig)
-    _cart(p, 0.0, jostle=0.25 * sway, spin=0.0)
+    # a click about every second: the jaw ticks open for a frame or two
+    click = max(0.0, math.sin(t * math.tau * 5.0)) ** 14
+    p.hips = Vector((0.008 * s * sway, 0.0, -0.008 * s + 0.002 * s * br))
+    spine(p, lean=LEAN + 0.02 * br, yaw=0.05 * sway, roll=0.03 * sway, breathe=br, neck_comp=0.0)
+    neck(p, hunch=1.0 + 0.04 * br, turn=0.10 * sway)
+    head_pose(p, cock=1.0 + 0.10 * math.sin(t * math.tau * 2 + 1.4), turn=0.12 * sway, jaw=click)
+    _stand(p, rig, spread=1.0)
+    probe_hang(p, swing=0.04 + 0.03 * sway, bend=0.26)
+    feeler(p, reach=0.10, spread=1.0, curl=0.10 + 0.22 * max(0.0, math.sin(t * math.tau * 7.0)) ** 3)
     return p
 
 
-def drag_pose(rig, f, n=52):
-    """The sideways drag-walk: it side-steps toward its own left (+X) with the cart hauled along on
-    its right, the trunk upright and square on, the head turned over its shoulder to where it is
-    going. The lead (left) foot reaches out, the trailing (right) foot is pulled in after it."""
-    ph = f / n
-    T = n / FPS
-    v = DRAG_SPEED
+def wander_pose(rig, f, n=64):
+    """A careful, high-stepping walk: it lifts each foot well clear and sets it down deliberately,
+    the free hand out in front feeling the air, the probe arm hanging and swaying."""
     s = rig.body.s
-    p = Pose(rig)
-    stride = v * T
-    heave = math.cos(math.tau * (ph - 0.15))            # +1 when its weight is over the lead foot
-    p.hips = Vector((0.018 * s * heave, 0.0, -0.022 * s + 0.014 * s * math.cos(math.tau * 2 * ph)))
-    spine(p, lean=LEAN + 0.03, yaw=0.12 - 0.06 * heave, roll=0.05 * heave,
-          breathe=0.4 * math.sin(math.tau * 2 * ph), neck_comp=0.0)
-    _head(p, out=1.0, cock=0.85, turn=TURN + 0.06 * math.sin(math.tau * ph))
-    # both feet travel in +X: planted they slide back at exactly the body's speed, swung they reach out
-    for side, off, duty, lift, spread in (('L', 0.0, 0.56, 0.055 * s, 1.35), ('R', 0.5, 0.60, 0.030 * s, 1.00)):
-        q = (ph + off) % 1.0
-        front = stride * duty * 0.5
-        if q < duty:
-            u = q / duty
-            x = front - stride * u
-            zb = rig.ball[side].z
-            pitch = 0.08 + 0.40 * smooth01((u - 0.55) / 0.45) ** 1.5
-        else:
-            w = (q - duty) / (1 - duty)
-            x = lerp(front - stride * duty, front, smooth01(w))
-            zb = rig.ball[side].z + lift * math.sin(math.pi * w)
-            pitch = lerp(0.48, 0.05, smooth01(w * 1.4))
-        bx = rig.ball[side].x * spread + x
-        planted(p, side, Vector((bx, rig.ball[side].y, zb)), pitch, yaw=(0.30 if side == 'L' else 0.10))
-    # the free (left) arm swings a little across the front; the right one stays on the handle
+    p = gait_pose(rig, f, n, WANDER_SPEED, 0.62, 0.135 * s, LEAN, 0.020 * s, False, 0.0, 0.0, arms=False)
+    ph = f / n
+    neck(p, hunch=1.0, turn=0.12 * math.sin(math.tau * ph))
+    head_pose(p, cock=0.9, turn=0.14 * math.sin(math.tau * ph))
     sw = math.cos(math.tau * (ph - 0.1))
-    arm_hang(p, 'L', swing=0.16 + 0.22 * sw, abduct=0.12, bend=0.30, wrist=0.1, twist=0.1)
-    hand_relax(p, 'L', curl=0.40)
-    _hand_on_handle(p, rig, back=0.02 * math.sin(math.tau * ph))
-    _cart(p, 0.06 * math.sin(math.tau * ph), jostle=math.sin(math.tau * 2 * ph),
-          spin=-math.tau * 4.0 * ph)
+    probe_hang(p, swing=0.06 + 0.24 * sw, bend=0.26 + 0.10 * sw)
+    feeler(p, reach=0.75 + 0.18 * math.sin(math.tau * (ph + 0.3)), spread=1.0, curl=0.06)
     return p
 
 
 def listen_pose(rig, f, n=40):
-    """Frozen: it has stopped dead mid-step, its head round over one ear. Nothing moves but a tremor
-    in the neck and the breath it is holding."""
+    """Frozen mid-step. The head has turned to the sound and everything else has stopped."""
     t = f / n
     s = rig.body.s
     p = Pose(rig)
     trem = math.sin(t * math.tau * 6) * math.sin(t * math.tau)
-    p.hips = Vector((0.012 * s, 0.004 * s, -0.014 * s))
-    spine(p, lean=LEAN + 0.04, yaw=0.16, roll=0.02, breathe=0.0, neck_comp=0.0)
-    _head(p, out=1.12, cock=1.55 + 0.04 * trem, turn=TURN * 1.05 + 0.02 * trem)
-    planted(p, 'L', Vector((rig.ball['L'].x * 1.45, rig.ball['L'].y, rig.ball['L'].z)), 0.0, yaw=0.32)
-    planted(p, 'R', Vector((rig.ball['R'].x * 1.00, rig.ball['R'].y, rig.ball['R'].z)), 0.28, yaw=0.10)
-    arm_hang(p, 'L', swing=0.10, abduct=0.11, bend=0.26, wrist=0.05, twist=0.1)
-    hand_relax(p, 'L', curl=0.45)
-    _hand_on_handle(p, rig)
-    _cart(p, 0.0, jostle=0.0, spin=0.0)
+    p.hips = Vector((0.010 * s, 0.006 * s, -0.012 * s))
+    spine(p, lean=LEAN + 0.03, yaw=0.10, breathe=0.0, neck_comp=0.0)
+    neck(p, hunch=0.88, turn=0.42 + 0.02 * trem, lift=0.06)
+    head_pose(p, up=0.06, cock=1.5 + 0.05 * trem, turn=0.34)
+    planted(p, 'L', Vector((rig.ball['L'].x, rig.ball['L'].y - 0.13 * s, rig.ball['L'].z)), 0.0, yaw=0.06)
+    planted(p, 'R', Vector((rig.ball['R'].x, rig.ball['R'].y + 0.14 * s, rig.ball['R'].z)), 0.36, yaw=-0.08)
+    probe_hang(p, swing=0.10, bend=0.30)
+    feeler(p, reach=0.55, spread=1.0, curl=0.04)
     return p
 
 
+def search_pose(rig, f, n=110):
+    """It has lost you: stood still, the neck slowly rising, the head sweeping side to side. The
+    rising here is only the clip's share of it; the crane blend does the rest."""
+    t = f / n
+    s = rig.body.s
+    p = Pose(rig)
+    rise = smooth01(math.sin(t * math.tau - math.pi * 0.5) * 0.5 + 0.5)
+    sweep = math.sin(t * math.tau * 2.0)
+    p.hips = Vector((0.0, 0.0, -0.006 * s))
+    spine(p, lean=LEAN - 0.04 * rise, yaw=0.10 * sweep, breathe=0.5 * math.sin(t * math.tau * 3), neck_comp=0.0)
+    neck(p, hunch=1.0 - 0.45 * rise, turn=0.55 * sweep, lift=0.10 * rise)
+    head_pose(p, up=0.10 * rise, cock=0.7 + 0.5 * abs(sweep), turn=0.45 * sweep)
+    _stand(p, rig)
+    probe_hang(p, swing=0.02, bend=0.22)
+    feeler(p, reach=0.30 + 0.20 * rise, spread=1.0, curl=0.05)
+    return p
+
+
+# ====================================================================== the echo
 def charge_pose(rig, f, n=36):
-    """The charge: the head comes up off the end of the neck until the throat points where the echo
-    is going, the jaw drops, the chest fills. The right hand never leaves the handle. Holds."""
+    """At full stretch: the head tips up, the jaw drops, and the probe arm comes up to point where
+    it heard you. About 1.2 s, and it holds on the last frame while the glow runs down the cable."""
     t = min(f / max(n - 1, 1), 1.0)
     k = smooth01(t)
     s = rig.body.s
     p = Pose(rig)
-    p.hips = Vector((0.006 * s, 0.0, 0.010 * s * k))
-    spine(p, lean=LEAN - 0.12 * k, yaw=0.14 + 0.10 * k, breathe=-1.2 * k, neck_comp=0.0)
-    p.rel('neck', Rx(NECK_OUT * (1 - 0.70 * k) - 0.28 * k) @ Rz(TURN * 0.42))
-    p.rel('head', Rx(HEAD_UP * (1 - k) - 0.48 * k) @ Ry(COCK * (1 - 0.7 * k)) @ Rz(TURN * 0.58))
-    planted(p, 'L', Vector((rig.ball['L'].x * 1.35, rig.ball['L'].y, rig.ball['L'].z)), 0.0, yaw=0.28)
-    planted(p, 'R', Vector((rig.ball['R'].x * 1.05, rig.ball['R'].y, rig.ball['R'].z)), 0.0, yaw=0.10)
-    arm_hang(p, 'L', swing=lerp(0.10, -0.30, k), abduct=lerp(0.12, 0.36, k), bend=lerp(0.28, 0.70, k),
-             wrist=-0.15, twist=0.2)
-    hand_relax(p, 'L', curl=lerp(0.40, 0.15, k), thumb=0.3)
-    _hand_on_handle(p, rig)
-    _cart(p, 0.0, jostle=0.0, spin=0.0)
+    p.hips = Vector((0.0, 0.010 * s * k, 0.012 * s * k))
+    spine(p, lean=LEAN - 0.16 * k, yaw=0.06, breathe=-1.3 * k, neck_comp=0.0)
+    # the clip only unfolds part of the hunch: the crane blend is what has it at full stretch
+    neck(p, hunch=1.0 - 0.55 * k, lift=0.16 * k, turn=0.10 * (1 - k))
+    head_pose(p, up=0.62 * k, cock=1.0 - 0.6 * k, jaw=1.2 * k)
+    _stand(p, rig, spread=1.05)
+    # the probe comes up and points forward and a little up
+    probe_hang(p, swing=lerp(0.06, 1.62, k), out=0.10 * k, bend=lerp(0.26, 0.34, k), twist=0.2 * k)
+    feeler(p, reach=lerp(0.10, -0.35, k), spread=1.0 - 0.4 * k, curl=0.10 + 0.5 * k)
     return p
 
 
-def echo_pose(rig, f, n=18):
-    """The pulse leaves: the head punches out off the charge and the chest empties, then it settles
-    back a little. One-shot, straight out of SonoCharge's last frame."""
+def echo_pose(rig, f, n=26):
+    """The pulse leaves the probe: it jolts back, then the neck snaps down again over about half a
+    second. One-shot, straight out of SonoCharge's last frame."""
     t = min(f / max(n - 1, 1), 1.0)
-    punch = smooth01(t / 0.22)
-    back = smooth01((t - 0.35) / 0.65)
+    jolt = smooth01(t / 0.18) * (1.0 - smooth01((t - 0.18) / 0.35))
+    down = smooth01((t - 0.25) / 0.75)
     s = rig.body.s
     p = Pose(rig)
-    p.hips = Vector((0.006 * s, -0.008 * s * punch, 0.010 * s * (1 - back * 0.7)))
-    spine(p, lean=LEAN - 0.12 + 0.26 * punch - 0.12 * back, yaw=0.24 - 0.06 * back,
-          breathe=lerp(-1.2, 0.6, punch), neck_comp=0.0)
-    p.rel('neck', Rx(-0.28 + 0.56 * punch - 0.20 * back) @ Rz(TURN * 0.42))
-    p.rel('head', Rx(-0.48 + 0.38 * punch + 0.10 * back) @ Ry(COCK * 0.3 * back) @ Rz(TURN * 0.58))
-    planted(p, 'L', Vector((rig.ball['L'].x * 1.35, rig.ball['L'].y, rig.ball['L'].z)), 0.0, yaw=0.28)
-    planted(p, 'R', Vector((rig.ball['R'].x * 1.05, rig.ball['R'].y, rig.ball['R'].z)), 0.0, yaw=0.10)
-    arm_hang(p, 'L', swing=lerp(-0.30, 0.10, back), abduct=lerp(0.36, 0.14, back), bend=0.50, wrist=-0.1, twist=0.2)
-    hand_relax(p, 'L', curl=lerp(0.15, 0.40, back), thumb=0.3)
-    _hand_on_handle(p, rig)
-    _cart(p, 0.0, jostle=0.0, spin=0.0)
+    p.hips = Vector((0.0, 0.030 * s * jolt + 0.010 * s * (1 - down), -0.016 * s * down))
+    spine(p, lean=LEAN - 0.16 + 0.22 * jolt + 0.14 * down, breathe=lerp(-1.3, 0.8, down), neck_comp=0.0)
+    neck(p, hunch=lerp(0.45, 1.0, down) + 0.18 * jolt, lift=0.16 * (1 - down))
+    head_pose(p, up=lerp(0.62, 0.0, down) - 0.30 * jolt, cock=lerp(0.4, 1.0, down), jaw=1.2 * (1 - down))
+    _stand(p, rig, spread=1.05)
+    probe_hang(p, swing=lerp(1.62, 0.10, down) + 0.25 * jolt, out=0.10 * (1 - down), bend=0.30)
+    feeler(p, reach=lerp(-0.35, 0.10, down), spread=1.0, curl=0.3 * (1 - down) + 0.1)
     return p
 
 
-# ====================================================================== rushing
-def turn_pose(rig, f, n=26):
-    """Out of the drag and round to face you: the head comes round first, the hips swing after it,
-    the feet shuffle in under the body, and the cart is hauled round behind on its pivot. One-shot,
-    and it ends in exactly the pose SonoRush starts from."""
-    t = min(f / max(n - 1, 1), 1.0)
-    k = smooth01(t)
-    early = smooth01(t / 0.45)
-    s = rig.body.s
-    p = Pose(rig)
-    p.hips = Vector((0.016 * s * (1 - k), 0.0, -0.030 * s * math.sin(math.pi * t) - 0.012 * s))
-    spine(p, lean=LEAN + 0.10 * k, yaw=lerp(0.12, -0.10, k), roll=0.08 * math.sin(math.pi * t), neck_comp=0.0)
-    # the head is already round at the start and unwinds as the body catches it up
-    _head(p, out=lerp(1.0, 0.8, k), cock=lerp(0.85, 0.35, k), turn=TURN * (1.0 - early))
-    for side, sg, spread in (('L', 1.0, 1.35), ('R', -1.0, 1.05)):
-        bx = rig.ball[side].x * lerp(spread, 1.0, k)
-        by = rig.ball[side].y + (0.10 * s * k if side == 'R' else -0.06 * s * k)
-        lift = 0.05 * s * math.sin(math.pi * min(1.0, t / 0.8)) * (1.0 if side == 'R' else 0.5)
-        planted(p, side, Vector((bx, by, rig.ball[side].z + lift)), 0.15 * k,
-                yaw=lerp(0.30 if side == 'L' else 0.10, sg * 0.08, k))
-    arm_hang(p, 'L', swing=lerp(0.16, 0.85, k), abduct=lerp(0.12, 0.30, k), bend=lerp(0.30, 0.75, k),
-             wrist=0.1, twist=0.1)
-    hand_relax(p, 'L', curl=lerp(0.40, 0.25, k))
-    _hand_on_handle(p, rig, back=0.30 * k, out=0.16 * k)
-    _cart(p, CART_BEHIND * k, jostle=2.0 * math.sin(math.pi * t), spin=-6.0 * k)
-    return p
-
-
+# ====================================================================== on you
 def rush_pose(rig, f, n=30):
-    """Head on, at speed: long strides, the trunk driving forward but still upright, the left arm
-    thrown out ahead and flailing, the right arm back hauling the cart, which bounces along behind."""
+    """Neck low and forward, the head leading, both arms out, a fast loping stride."""
     s = rig.body.s
-    p = gait_pose(rig, f, n, RUSH_SPEED, 0.38, 0.115 * s, LEAN + 0.22, 0.030 * s, True, 0.0, 0.0, arms=False)
+    p = gait_pose(rig, f, n, RUSH_SPEED, 0.36, 0.12 * s, LEAN + 0.26, 0.032 * s, True, 0.0, 0.0, arms=False)
     ph = f / n
-    _head(p, out=0.70, cock=0.30, turn=0.08 * math.sin(math.tau * ph))
-    # the left arm is not running, it is reaching: thrown out in front and thrashing
-    flail = math.sin(math.tau * ph * 2.0)
-    arm_hang(p, 'L', swing=1.55 + 0.35 * flail, abduct=0.26 + 0.18 * math.sin(math.tau * (ph * 2.0 + 0.25)),
-             bend=0.45 - 0.30 * flail, wrist=-0.35 + 0.3 * flail, twist=0.25)
-    hand_relax(p, 'L', curl=0.30 + 0.35 * (0.5 + 0.5 * flail), thumb=0.2)
-    _hand_on_handle(p, rig, back=0.30, out=0.16)
-    _cart(p, CART_BEHIND + 0.07 * math.sin(math.tau * ph), jostle=2.0 * math.sin(math.tau * 2 * ph),
-          spin=-math.tau * 6.0 * ph)
+    lope = math.sin(math.tau * ph)
+    neck(p, hunch=1.25, turn=0.05 * lope)
+    head_pose(p, up=0.30, cock=0.25, turn=0.06 * lope, jaw=0.5)
+    probe_hang(p, swing=1.15 + 0.30 * lope, out=0.16, bend=0.42 - 0.18 * lope, twist=0.15)
+    feeler(p, reach=1.25 - 0.30 * lope, spread=1.0, curl=0.02)
     return p
 
 
-# the wail: four left-handed blows with a gap after the second and after the fourth, so there is
-# always a way out of it
-_BLOWS = (0.00, 0.17, 0.46, 0.63)
-_BLOW_LEN = 0.15
+# the wail: two bursts of blows with a long listening pause after each, so there is always a way out
+_BURSTS = ((0.04, 4), (0.52, 3))
+_BLOW = 0.075
 
 
-def wail_pose(rig, f, n=78):
-    """A one-armed flurry: the left arm comes over and down again and again, with two pauses in it.
-    The right arm never lets go of the cart, so the whole machine rocks with every blow."""
+def wail_pose(rig, f, n=96):
+    """Clubbing with the probe arm and clawing with the free hand, in bursts. Between them it stops
+    dead and cocks its head to listen, and that pause is the way out."""
     t = min(f / max(n - 1, 1), 1.0)
     s = rig.body.s
     p = Pose(rig)
-    k = 0.0
-    for t0 in _BLOWS:
-        u = (t - t0) / _BLOW_LEN
-        if -0.45 <= u <= 1.0:
-            k = smooth01(u) if u >= 0.0 else -smooth01(-u / 0.45) * 0.55
-    drive = max(0.0, k)
-    up = max(0.0, -k)
-    p.hips = Vector((-0.012 * s * drive, -0.030 * s * drive, -0.016 * s - 0.010 * s * drive))
-    spine(p, lean=LEAN + 0.10 + 0.30 * drive, yaw=-0.16 * drive + 0.10 * up,
-          roll=0.10 * up - 0.06 * drive, neck_comp=0.0)
-    _head(p, out=0.55, cock=0.25, jaw=0.6 + 0.4 * drive)
-    planted(p, 'L', Vector((rig.ball['L'].x * 1.05, rig.ball['L'].y - 0.10 * s, rig.ball['L'].z)), 0.0, yaw=0.08)
-    planted(p, 'R', Vector((rig.ball['R'].x * 1.05, rig.ball['R'].y + 0.10 * s, rig.ball['R'].z)), 0.18, yaw=-0.08)
-    arm_hang(p, 'L', swing=lerp(0.35, -0.60, up) + 2.00 * drive, abduct=0.22 + 0.18 * up,
-             bend=lerp(1.20, 1.60, up) - 1.00 * drive, wrist=-0.2 + 0.5 * drive, twist=0.2)
-    hand_relax(p, 'L', curl=0.92 - 0.25 * drive, thumb=0.5)
-    _hand_on_handle(p, rig, back=0.28, out=0.14)
-    _cart(p, CART_BEHIND, jostle=3.0 * drive, spin=-0.6 * drive)
+    club = 0.0
+    claw = 0.0
+    busy = 0.0
+    for t0, count in _BURSTS:
+        for i in range(count):
+            u = (t - (t0 + i * _BLOW)) / _BLOW
+            if -0.6 <= u <= 1.0:
+                k = smooth01(u) if u >= 0.0 else -smooth01(-u / 0.6) * 0.6
+                busy = 1.0
+                if i % 2 == 0:
+                    club = k
+                else:
+                    claw = k
+    drive = max(0.0, club) + max(0.0, claw)
+    p.hips = Vector((0.010 * s * club, -0.028 * s * drive, -0.018 * s - 0.010 * s * drive))
+    spine(p, lean=LEAN + 0.12 + 0.30 * drive, yaw=-0.18 * club + 0.16 * claw,
+          roll=0.08 * max(0.0, -club), neck_comp=0.0)
+    # in the pauses the neck comes back and the head cocks over: it is listening for you
+    neck(p, hunch=1.0 - 0.25 * drive, turn=0.35 * (1.0 - busy))
+    head_pose(p, up=0.20 * drive, cock=0.4 + 0.9 * (1.0 - busy), turn=0.30 * (1.0 - busy), jaw=0.7 * drive)
+    planted(p, 'L', Vector((rig.ball['L'].x, rig.ball['L'].y - 0.10 * s, rig.ball['L'].z)), 0.0, yaw=0.08)
+    planted(p, 'R', Vector((rig.ball['R'].x, rig.ball['R'].y + 0.10 * s, rig.ball['R'].z)), 0.18, yaw=-0.08)
+    up_c, thr_c = max(0.0, -club), max(0.0, club)
+    probe_hang(p, swing=lerp(0.20, -0.75, up_c) + 2.20 * thr_c, out=0.20 * up_c,
+               bend=lerp(1.05, 1.55, up_c) - 0.95 * thr_c, twist=0.2)
+    up_f, thr_f = max(0.0, -claw), max(0.0, claw)
+    arm_hang(p, 'L', swing=lerp(0.25, -0.55, up_f) + 1.95 * thr_f, abduct=0.22 + 0.20 * up_f,
+             bend=lerp(1.00, 1.45, up_f) - 0.85 * thr_f, wrist=-0.2 + 0.5 * thr_f, twist=0.2)
+    hand_relax(p, 'L', curl=0.15 + 0.25 * thr_f, thumb=0.1, spread=0.7)
     return p
 
 
-def stagger_pose(rig, f, n=24):
-    """Shoved: the chest goes back off its feet, the long neck whips after it, the cart jerks."""
+def stagger_pose(rig, f, n=26):
+    """Shoved: it reels back and the long neck recoils down into its shoulders."""
     t = min(f / max(n - 1, 1), 1.0)
-    hit = smooth01(t / 0.25)
+    hit = smooth01(t / 0.22)
     recover = smooth01((t - 0.40) / 0.60)
     k = hit * (1.0 - recover)
     s = rig.body.s
     p = Pose(rig)
-    p.hips = Vector((0.0, 0.055 * s * k, -0.035 * s * k))
-    spine(p, lean=LEAN - 0.42 * k, yaw=0.12 + 0.14 * k, roll=-0.10 * k, neck_comp=0.0)
-    p.rel('neck', Rx(NECK_OUT + 0.55 * k) @ Rz(TURN * 0.30))
-    p.rel('head', Rx(HEAD_UP - 0.20 * k) @ Ry(COCK * (1 + 0.8 * k)) @ Rz(TURN * 0.40))
-    planted(p, 'L', Vector((rig.ball['L'].x * 1.20, rig.ball['L'].y + 0.16 * s * k, rig.ball['L'].z)), 0.10 * k, yaw=0.20)
-    planted(p, 'R', Vector((rig.ball['R'].x * 1.05, rig.ball['R'].y + 0.05 * s * k, rig.ball['R'].z)), 0.0, yaw=0.0)
-    arm_hang(p, 'L', swing=0.10 + 1.05 * k, abduct=0.14 + 0.30 * k, bend=0.30 + 0.35 * k, wrist=-0.3 * k, twist=0.1)
-    hand_relax(p, 'L', curl=0.35 - 0.20 * k, thumb=0.2)
-    _hand_on_handle(p, rig, back=0.10 * k)
-    _cart(p, 0.22 * k, jostle=4.0 * k, spin=1.5 * k)
+    p.hips = Vector((0.0, 0.060 * s * k, -0.040 * s * k))
+    spine(p, lean=LEAN - 0.40 * k, yaw=0.14 * k, roll=-0.10 * k, neck_comp=0.0)
+    neck(p, hunch=1.0 + 0.55 * k, turn=-0.20 * k)
+    head_pose(p, up=-0.18 * k, cock=1.0 + 0.7 * k, turn=-0.14 * k, jaw=0.5 * k)
+    planted(p, 'L', Vector((rig.ball['L'].x, rig.ball['L'].y + 0.17 * s * k, rig.ball['L'].z)), 0.10 * k, yaw=0.06)
+    planted(p, 'R', Vector((rig.ball['R'].x, rig.ball['R'].y + 0.06 * s * k, rig.ball['R'].z)), 0.0, yaw=-0.06)
+    probe_hang(p, swing=0.10 + 0.95 * k, out=0.26 * k, bend=0.30 + 0.30 * k)
+    feeler(p, reach=0.10 + 1.05 * k, spread=1.0, curl=0.05)
     return p
 
 
 def lying_sono(rig, f, n=90):
-    """On its back on the table. No cart: the game hides the cart's pieces in this mode and leaves a
-    copy of it standing wherever the Sonographer went down."""
+    """On its back for the table and for dragging: the neck at rest length (the game takes the crane
+    to 0) and the probe hand down at its side."""
     return lying_pose(rig, f, n)
 
 
 FNS = {
     'SonoIdle': idle_pose,
-    'SonoDrag': drag_pose,
+    'SonoWander': wander_pose,
     'SonoListen': listen_pose,
     'SonoCharge': charge_pose,
     'SonoEcho': echo_pose,
-    'SonoTurn': turn_pose,
     'SonoRush': rush_pose,
     'SonoWail': wail_pose,
+    'SonoSearch': search_pose,
     'SonoStagger': stagger_pose,
     'SonoLying': lying_sono,
 }
 
 
 def build_actions(arm, body):
-    global _ANCHOR
-    _ANCHOR = None
     rig = hu_rig.Rig(arm, body)
     for name, (frames, loop, speed, _) in CLIPS.items():
         hu_rig.keyframe_action(arm, rig, name, frames, loop, FNS[name])

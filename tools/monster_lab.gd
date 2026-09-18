@@ -20,7 +20,6 @@ const Modes := preload("res://scripts/monsters/modes.gd")
 const NurseRig := preload("res://scripts/monsters/night_nurse_rig.gd")
 const NurseGrab := preload("res://scripts/monsters/nurse_grab.gd")
 const MonsterModelScript := preload("res://scripts/monsters/monster_model.gd")
-const SonoRig := preload("res://scripts/monsters/sonographer_rig.gd")
 const SHOT_DIR := "res://tools/monster_shots"
 
 ## The stand-in game: exactly the surface monsters and Perception use.
@@ -1056,16 +1055,19 @@ func _run_shots() -> void:
 		["sedated", _shot_sedated],
 		["lying_copies", _shot_lying],
 		# the Sonographer: the model only (sono-brain builds the hunting), driven by hand
-		["sono_4m", _shot_sono.bind(4.2, 0.25, "idle", 0.0, 0.0, 0.0, 0.0)],
-		["sono_drag", _shot_sono.bind(3.4, 0.30, "walk", 0.1, 0.0, 0.1, 0.0)],
-		["sono_drag_back", _shot_sono.bind(3.2, PI - 0.35, "walk", 0.1, 0.4, 0.1, 0.0)],
-		["sono_listen", _shot_sono.bind(2.6, 0.55, "listen", 1.0, 0.0, 1.0, 0.0)],
-		["sono_charge", _shot_sono.bind(2.6, 0.55, "charge", 1.0, 1.0, 0.7, 0.0)],
-		["sono_turn", _shot_sono.bind(3.2, 0.30, "turn", 0.6, 0.0, 0.3, SonoRig.CART_BEHIND)],
-		["sono_rush", _shot_sono.bind(3.4, 0.20, "run", 0.4, 0.0, 0.1, SonoRig.CART_BEHIND)],
-		["sono_wail", _shot_sono.bind(2.4, 0.35, "attack", 0.3, 0.0, 0.0, SonoRig.CART_BEHIND)],
-		["sono_throat", _shot_sono.bind(1.1, 0.25, "charge", 1.0, 1.0, 0.7, 0.0, 1.30)],
-		["sono_face", _shot_sono.bind(1.0, 0.40, "listen", 1.0, 0.0, 1.0, 0.0, 1.66)],
+		["sono_4m", _shot_sono.bind(4.4, 0.25, "idle", 0.0, 0.0, 0.0)],
+		["sono_wander", _shot_sono.bind(3.6, 0.30, "walk", 0.1, 0.0, 0.1)],
+		["sono_crane_0", _shot_sono.bind(4.4, 0.25, "listen", 0.0, 0.0, 0.6)],
+		["sono_crane_half", _shot_sono.bind(4.4, 0.25, "listen", 0.5, 0.0, 0.8)],
+		["sono_crane_full", _shot_sono.bind(4.4, 0.25, "listen", 1.0, 0.0, 1.0)],
+		["sono_crane_ceiling", _shot_sono.bind(4.4, 0.25, "listen", 1.0, 0.0, 1.0, 0.2)],
+		["sono_charge", _shot_sono.bind(3.6, 0.22, "charge", 1.0, 1.0, 0.7)],
+		["sono_probe", _shot_sono.bind(1.2, 0.60, "charge", 1.0, 1.0, 0.5, 1.0, 1.35)],
+		["sono_rush", _shot_sono.bind(3.6, 0.20, "run", 0.2, 0.0, 0.1)],
+		["sono_wail", _shot_sono.bind(2.6, 0.35, "attack", 0.2, 0.0, 0.0)],
+		["sono_search", _shot_sono.bind(3.6, 0.30, "search", 0.6, 0.0, 0.4)],
+		["sono_throat", _shot_sono.bind(1.2, 0.25, "listen", 1.0, 0.0, 0.7, 1.0, 1.70)],
+		["sono_face", _shot_sono.bind(1.0, 0.40, "listen", 0.0, 0.0, 1.0, 1.0, 1.80)],
 		["sono_lying", _shot_sono_lying],
 		["sono_review_view", _shot_sono_review],
 	]
@@ -1717,17 +1719,15 @@ func _perf_measure(label: String, frames: int, bot: Node) -> void:
 
 
 ## The Sonographer for the shot list: a bare MonsterModel (no brain yet) posed by hand at `clip`,
-## with the look interface set, seen from `dist` metres round `view` radians. `cart` is the pivot
-## angle, and `aim_y` above the floor is what the camera looks at (0 picks chest height).
+## with the look interface set, seen from `dist` metres round `view` radians. `crane` is suspicion
+## (which is what stretches the neck), `limit` is the ceiling check, and `aim_y` above the floor is
+## what the camera looks at (0 picks chest height).
 var _sono_holder: Node3D = null
 
 
-func _shot_sono(dist: float, view: float, clip: String, sus: float, chg: float, ear: float,
-		cart := 0.0, aim_y := 0.0) -> void:
+func _sono_model(pos: Vector3, yaw: float) -> Node3D:
 	if _sono_holder != null:
 		_sono_holder.queue_free()
-	var pos := cor(21.0, -0.4)
-	var yaw := -PI * 0.5
 	_sono_holder = Node3D.new()
 	_sono_holder.name = "SonographerShot"
 	game.add_child(_sono_holder)
@@ -1736,22 +1736,30 @@ func _shot_sono(dist: float, view: float, clip: String, sus: float, chg: float, 
 	var model: Node3D = MonsterModelScript.new()
 	_sono_holder.add_child(model)
 	model.setup("sonographer")
+	return model
+
+
+func _shot_sono(dist: float, view: float, clip: String, crane: float, chg: float, ear: float,
+		limit := 1.0, aim_y := 0.0) -> void:
+	var pos := cor(21.0, -0.4)
+	var yaw := -PI * 0.5
+	var model := _sono_model(pos, yaw)
 	model.play(clip, 1.0, 0.0)
 	set_light(1, true)
-	for i in 70:
+	var fwd := Vector3(-sin(yaw), 0.0, -cos(yaw))
+	# the crane eases in, so give it long enough to get all the way up
+	for i in 150:
 		await get_tree().physics_frame
-		model.set_sono_look(sus, chg, clip, cart, clip != "lying")
-		model.set_cart_speed(0.0 if clip in ["idle", "listen", "charge", "lying"] else 1.2)
+		model.set_sono_look(crane, chg, clip, fwd, limit)
 		model.set_ears(ear, 0.9 * ear, 1.0 / 60.0)
 		if model.shaper != null:
 			model.shaper.listen = ear
 			model.shaper.listen_yaw = 0.9 * ear
 			model.shaper.lying = 1.0 if clip == "lying" else 0.0
-	if model.anim != null and clip in ["charge", "echo", "stagger", "attack", "turn"]:
+	if model.anim != null and clip in ["charge", "echo", "stagger", "attack"]:
 		# these are one-shot: hold them where they land
 		model.anim.speed_scale = 0.0
-	var aim := pos + Vector3.UP * (aim_y if aim_y > 0.0 else 1.15)
-	var fwd := Vector3(-sin(yaw), 0.0, -cos(yaw))
+	var aim := pos + Vector3.UP * (aim_y if aim_y > 0.0 else 1.25 + 0.45 * crane)
 	# `view` turns the camera round it: 0 is face on, PI/2 its side, PI behind. The corridor is only
 	# two tiles wide, so keep views near 0 or PI at anything past arm's length. The watcher stands on
 	# the floor like a player, so the eye is always at eye height.
@@ -1768,110 +1776,8 @@ func _shot_sono(dist: float, view: float, clip: String, sus: float, chg: float, 
 	await wait(0.3)
 
 
-# =========================================================================
-# the Sonographer, up close (--sono): chunk A's review
-# =========================================================================
-
-## The model and its cart, walked through every clip with a caption saying which one and what the
-## look interface is set to. No brain: this is the model only (sono-brain builds the hunting). The
-## watcher can walk about while it runs.
-func _run_sono() -> void:
-	for i in bulbs.size():
-		set_light(i, true)
-	var here := cor(21.0, -0.4)
-	var holder := Node3D.new()
-	holder.name = "SonographerHolder"
-	game.add_child(holder)
-	holder.global_position = here
-	holder.rotation.y = -PI * 0.5
-	var model: Node3D = MonsterModelScript.new()
-	holder.add_child(model)
-	model.setup("sonographer")
-	# the corridor is two tiles wide, so the lane has to stay inside about +-1.4
-	place_player(cor(24.6, 0.9), here + Vector3.UP * 1.35, true)
-	var eye: Vector3 = p1.global_position + Vector3.UP * C.EYE_H
-	var to: Vector3 = (here + Vector3.UP * 1.35) - eye
-	print("[monster_lab] sono ready %.1fs after launch: watcher at %.1f,%.1f (lane %.2f), %.2f m from it, %.0f deg off" % [
-		Time.get_ticks_msec() / 1000.0, eye.x, eye.z, eye.z - 6.0 * C.TILE, to.length(),
-		rad_to_deg(absf(Vector3(-sin(p1.rotation.y), 0, -cos(p1.rotation.y)).signed_angle_to(Vector3(to.x, 0, to.z), Vector3.UP)))])
-
-	var layer := CanvasLayer.new()
-	layer.layer = 40
-	add_child(layer)
-	var cap := Label.new()
-	cap.position = Vector2(24, 64)
-	cap.add_theme_font_size_override("font_size", 20)
-	cap.add_theme_color_override("font_color", Color(0.95, 0.96, 0.9))
-	cap.add_theme_color_override("font_outline_color", Color(0, 0, 0))
-	cap.add_theme_constant_override("outline_size", 6)
-	layer.add_child(cap)
-
-	# It side-steps toward its own left, so while the drag clip plays the holder slides that way and
-	# the cart comes with it, because the cart is part of the model.
-	var B := SonoRig.CART_BEHIND
-	var steps := [
-		{"say": "idle: standing over the cart, head turned, listening", "clip": "idle", "s": 6.0, "sus": 0.0, "chg": [0.0, 0.0], "ear": 0.0, "cart": 0.0, "v": 0.0, "side": true},
-		{"say": "drag: the sideways walk, the cart trailing on its right", "clip": "walk", "s": 8.0, "sus": 0.05, "chg": [0.0, 0.0], "ear": 0.1, "cart": 0.0, "v": 0.95, "side": true},
-		{"say": "listen: frozen, the ears snap round, the throat comes up", "clip": "listen", "s": 5.0, "sus": 1.0, "chg": [0.0, 0.0], "ear": 1.0, "cart": 0.0, "v": 0.0, "side": true},
-		{"say": "charge: head up, jaw down, the glow runs down the line", "clip": "charge", "s": 3.0, "sus": 1.0, "chg": [0.0, 1.0], "ear": 0.8, "cart": 0.0, "v": 0.0, "side": true},
-		{"say": "echo: the pulse goes out, from where the head points", "clip": "echo", "s": 1.6, "sus": 0.2, "chg": [1.0, 0.0], "ear": 0.4, "cart": 0.0, "v": 0.0, "side": true},
-		{"say": "turn: swinging round to come at you, hauling the cart after it", "clip": "turn", "s": 1.8, "sus": 0.4, "chg": [0.0, 0.0], "ear": 0.3, "cart": B, "swing": true, "v": 0.0, "side": true},
-		{"say": "rush: head on, left arm flailing, the cart bouncing behind", "clip": "run", "s": 4.5, "sus": 0.4, "chg": [0.0, 0.0], "ear": 0.1, "cart": B, "v": 3.1, "side": false},
-		{"say": "wail: a one-armed flurry, with pauses in it", "clip": "attack", "s": 5.2, "sus": 0.3, "chg": [0.0, 0.0], "ear": 0.0, "cart": B, "v": 0.0, "side": false},
-		{"say": "stagger: shoved", "clip": "stagger", "s": 2.2, "sus": 0.1, "chg": [0.0, 0.0], "ear": 0.0, "cart": 0.3, "v": 0.0, "side": false},
-		{"say": "unplugged: sedated, the cart comes off and a copy is left standing", "clip": "idle", "s": 4.5, "sus": 0.0, "chg": [0.0, 0.0], "ear": 0.0, "cart": 0.0, "v": 0.0, "side": true, "plug": false},
-		{"say": "lying: how it goes on the table, no cart", "clip": "lying", "s": 4.0, "sus": 0.0, "chg": [0.0, 0.0], "ear": 0.0, "cart": 0.0, "v": 0.0, "side": true, "plug": false},
-	]
-	var i := 0
-	var copy: Node3D = null
-	while true:
-		var st: Dictionary = steps[i % steps.size()]
-		i += 1
-		var mode: String = String(st.say).split(":")[0]
-		model.play(String(st.clip), 1.0, 0.15)
-		var plug: bool = bool(st.get("plug", true))
-		if not plug and copy == null and model.sono != null:
-			# what chunk B will do when it is sedated: take the cart off the model and leave a copy
-			# of it standing where it was
-			copy = model.sono.make_cart()
-			game.add_child(copy)
-		elif plug and copy != null:
-			copy.queue_free()
-			copy = null
-		var t := 0.0
-		var dur := float(st.s)
-		while t < dur:
-			await get_tree().physics_frame
-			var dt := 1.0 / 60.0
-			t += dt
-			var k: float = clampf(t / maxf(dur, 0.01), 0.0, 1.0)
-			var chg: Array = st.chg
-			var charge: float = lerpf(float(chg[0]), float(chg[1]), k)
-			# the turn swings the cart round on its pivot, which is what chunk B does in code
-			var cart: float = lerpf(0.0, float(st.cart), k) if bool(st.get("swing", false)) else float(st.cart)
-			model.set_sono_look(float(st.sus) * minf(1.0, k * 2.0), charge, mode, cart, plug)
-			model.set_cart_speed(float(st.v))
-			var ear: float = float(st.ear)
-			model.set_ears(ear, sin(t * 2.2) * 1.1 * ear, dt)
-			if model.shaper != null:
-				model.shaper.listen = ear
-				model.shaper.listen_yaw = sin(t * 2.2) * 1.1 * ear
-				model.shaper.lying = 1.0 if String(st.clip) == "lying" else 0.0
-			# move it the way the clip says it travels: sideways to its own left while it drags,
-			# straight ahead while it rushes
-			var v := float(st.v)
-			if v > 0.0:
-				var b := holder.global_transform.basis
-				holder.global_position += (b.x if bool(st.side) else -b.z) * v * dt
-				if holder.global_position.x < cor(13.0).x or holder.global_position.x > cor(31.0).x:
-					holder.rotation.y += PI
-			cap.text = "SONOGRAPHER  %s\n  suspicion %.2f   charge %.2f   cart pivot %+.2f rad   line %s" % [
-				st.say, float(st.sus) * minf(1.0, k * 2.0), charge, cart,
-				"plugged in" if plug else "out"]
-
-
-## The lying copy the dissection table gets, built the way the game builds it (MonsterModel.make_lying):
-## flat on its back, arms in, and no cart.
+## The lying copy the dissection table gets, built the way the game builds it: flat on its back, the
+## neck back at rest length, the probe hand at its side.
 func _shot_sono_lying() -> void:
 	if _sono_holder != null:
 		_sono_holder.queue_free()
@@ -1899,24 +1805,101 @@ func _shot_sono_lying() -> void:
 
 ## Exactly what the review window opens on: the same spot, the same lights, the same watcher.
 func _shot_sono_review() -> void:
-	if _sono_holder != null:
-		_sono_holder.queue_free()
 	for i in bulbs.size():
 		set_light(i, true)
 	var here := cor(21.0, -0.4)
-	_sono_holder = Node3D.new()
-	_sono_holder.name = "SonographerReview"
-	game.add_child(_sono_holder)
-	_sono_holder.global_position = here
-	_sono_holder.rotation.y = -PI * 0.5
-	var model: Node3D = MonsterModelScript.new()
-	_sono_holder.add_child(model)
-	model.setup("sonographer")
+	var model := _sono_model(here, -PI * 0.5)
 	model.play("walk", 1.0, 0.0)
 	for i in 40:
 		await get_tree().physics_frame
-		model.set_sono_look(0.05, 0.0, "drag", 0.0, true)
-		model.set_cart_speed(0.95)
+		model.set_sono_look(0.05, 0.0, "wander")
 		model.set_ears(0.1, 0.1, 1.0 / 60.0)
 	place_player(cor(24.6, 0.9), here + Vector3.UP * 1.35, true)
 	await wait(0.4)
+
+
+# =========================================================================
+# the Sonographer, up close (--sono): chunk A's review
+# =========================================================================
+
+## The model walked through every clip, with the neck crane ramping and a caption saying which clip
+## and what the look interface is set to. No brain: this is the model only (sono-brain builds the
+## hunting). The watcher can walk about while it runs.
+func _run_sono() -> void:
+	for i in bulbs.size():
+		set_light(i, true)
+	var here := cor(21.0, -0.4)
+	var holder := Node3D.new()
+	holder.name = "SonographerHolder"
+	game.add_child(holder)
+	holder.global_position = here
+	holder.rotation.y = -PI * 0.5
+	var model: Node3D = MonsterModelScript.new()
+	holder.add_child(model)
+	model.setup("sonographer")
+	# the corridor is two tiles wide, so the lane has to stay inside about +-1.4
+	place_player(cor(24.6, 0.9), here + Vector3.UP * 1.35, true)
+	var eye: Vector3 = p1.global_position + Vector3.UP * C.EYE_H
+	var to: Vector3 = (here + Vector3.UP * 1.35) - eye
+	print("[monster_lab] sono ready %.1fs after launch: watcher at %.1f,%.1f (lane %.2f), %.2f m from it" % [
+		Time.get_ticks_msec() / 1000.0, eye.x, eye.z, eye.z - 6.0 * C.TILE, to.length()])
+
+	var layer := CanvasLayer.new()
+	layer.layer = 40
+	add_child(layer)
+	var cap := Label.new()
+	cap.position = Vector2(24, 64)
+	cap.add_theme_font_size_override("font_size", 20)
+	cap.add_theme_color_override("font_color", Color(0.95, 0.96, 0.9))
+	cap.add_theme_color_override("font_outline_color", Color(0, 0, 0))
+	cap.add_theme_constant_override("outline_size", 6)
+	layer.add_child(cap)
+
+	# say, clip, seconds, suspicion (from -> to), charge (from -> to), ears, crane_limit, speed
+	var steps := [
+		{"say": "idle: neck low, head cocked, the free hand twitching", "clip": "idle", "s": 6.0, "sus": [0.0, 0.0], "chg": [0.0, 0.0], "ear": 0.0, "v": 0.0},
+		{"say": "wander: careful high steps, the free hand feeling the air", "clip": "walk", "s": 8.0, "sus": [0.03, 0.10], "chg": [0.0, 0.0], "ear": 0.1, "v": 0.8},
+		{"say": "listen: frozen, ears round, and the neck starts to rise", "clip": "listen", "s": 5.0, "sus": [0.1, 0.65], "chg": [0.0, 0.0], "ear": 1.0, "v": 0.0},
+		{"say": "crane: suspicion takes the neck up and the rings apart", "clip": "listen", "s": 5.0, "sus": [0.65, 1.0], "chg": [0.0, 0.0], "ear": 0.8, "v": 0.0},
+		{"say": "crane under a ceiling: crane_limit 0.2, so it bends forward instead", "clip": "listen", "s": 5.0, "sus": [1.0, 1.0], "chg": [0.0, 0.0], "ear": 0.6, "limit": 0.2, "v": 0.0},
+		{"say": "charge: head up, jaw down, the glow runs out to the probe", "clip": "charge", "s": 3.0, "sus": [1.0, 1.0], "chg": [0.0, 1.0], "ear": 0.6, "v": 0.0},
+		{"say": "echo: the pulse fires out of the probe and the neck snaps down", "clip": "echo", "s": 2.0, "sus": [1.0, 0.1], "chg": [1.0, 0.0], "ear": 0.3, "v": 0.0},
+		{"say": "rush: neck low and forward, head leading, both arms out", "clip": "run", "s": 4.5, "sus": [0.2, 0.2], "chg": [0.0, 0.0], "ear": 0.1, "v": 3.1},
+		{"say": "wail: clubbing and clawing, with listening pauses in it", "clip": "attack", "s": 6.4, "sus": [0.2, 0.2], "chg": [0.0, 0.0], "ear": 0.0, "v": 0.0},
+		{"say": "search: still, the neck rising, the head sweeping", "clip": "search", "s": 7.0, "sus": [0.2, 0.7], "chg": [0.0, 0.0], "ear": 0.4, "v": 0.0},
+		{"say": "stagger: shoved, ears pinned, the neck recoiling", "clip": "stagger", "s": 2.4, "sus": [0.3, 0.05], "chg": [0.0, 0.0], "ear": 0.0, "v": 0.0},
+		{"say": "lying: how it goes on the table, the neck back at rest", "clip": "lying", "s": 4.5, "sus": [0.0, 0.0], "chg": [0.0, 0.0], "ear": 0.0, "v": 0.0},
+	]
+	var i := 0
+	while true:
+		var st: Dictionary = steps[i % steps.size()]
+		i += 1
+		var mode: String = String(st.say).split(":")[0]
+		model.play(String(st.clip), 1.0, 0.15)
+		var t := 0.0
+		var dur := float(st.s)
+		while t < dur:
+			await get_tree().physics_frame
+			var dt := 1.0 / 60.0
+			t += dt
+			var k: float = clampf(t / maxf(dur, 0.01), 0.0, 1.0)
+			var sus: Array = st.sus
+			var chg: Array = st.chg
+			var suspicion: float = lerpf(float(sus[0]), float(sus[1]), k)
+			var charge: float = lerpf(float(chg[0]), float(chg[1]), k)
+			var limit: float = float(st.get("limit", 1.0))
+			var fwd: Vector3 = -holder.global_transform.basis.z
+			model.set_sono_look(suspicion, charge, mode, fwd, limit)
+			var ear: float = float(st.ear)
+			model.set_ears(ear, sin(t * 2.2) * 1.1 * ear, dt)
+			if model.shaper != null:
+				model.shaper.listen = ear
+				model.shaper.listen_yaw = sin(t * 2.2) * 1.1 * ear
+				model.shaper.lying = 1.0 if String(st.clip) == "lying" else 0.0
+			var v := float(st.v)
+			if v > 0.0:
+				holder.global_position += fwd * v * dt
+				if holder.global_position.x < cor(13.0).x or holder.global_position.x > cor(31.0).x:
+					holder.rotation.y += PI
+			cap.text = "SONOGRAPHER  %s\n  suspicion %.2f   charge %.2f   crane %.2f   crane_limit %.2f" % [
+				st.say, suspicion, charge, model.sono.crane() if model.sono != null else 0.0, limit]

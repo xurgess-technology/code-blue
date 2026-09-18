@@ -25,18 +25,21 @@ BUDGET = {'Head': 7200, 'Eye_L': 480, 'Eye_R': 480, 'Arm_L': 2400, 'Arm_R': 2400
           # the Hive: gown, bare legs in grip socks, the wristband and the fungus in its open skull
           'Gown': 3000, 'Leg_L': 1300, 'Leg_R': 1300, 'Wristband': 120, 'Fungus': 3600,
           # the Sonographer: the ears swivel and the windpipe glows, so each is its own piece
-          'Ear_L': 900, 'Ear_R': 900, 'Throat': 1100, 'ThroatSkin': 420,
-          # and its cart, which is part of the same model, on the cart bones
-          'Cart': 2400, 'CartScreen': 60, 'Castor_FL': 220, 'Castor_FR': 220, 'Castor_BL': 220, 'Castor_BR': 220}
+          'Ear_L': 900, 'Ear_R': 900, 'Throat': 1200, 'ThroatSkin': 420,
+          # its doctor's whites, the probe grown into its right hand, the cable up the arm, the gel
+          'Coat': 3000, 'Shirt': 1500, 'Tie': 200, 'Probe': 700,
+          'Cable_A': 240, 'Cable_B': 200, 'Cable_C': 200,
+          'Gel_L': 180, 'Gel_R': 180, 'Gel_Chin': 100}
 # parts baked into the Skin atlas; everything else shares the Cloth atlas (for the Hive that is the gown,
 # its legs and the fungus, so the head, hands and eyes keep the Skin atlas's resolution to themselves)
-SKIN_PARTS = ('Head', 'Eye_L', 'Eye_R', 'Arm_L', 'Arm_R', 'Belly', 'Ear_L', 'Ear_R', 'Throat', 'ThroatSkin')
+SKIN_PARTS = ('Head', 'Eye_L', 'Eye_R', 'Arm_L', 'Arm_R', 'Belly', 'Ear_L', 'Ear_R', 'Throat',
+              'ThroatSkin', 'Gel_L', 'Gel_R', 'Gel_Chin')
 # parts the game shows only on the player table: they must not occlude the rest in the bake
 HIDDEN_PIECES = ('TopRolled', 'Belly', 'ThroatSkin')
 # parts that stay their own object in the GLB instead of being joined into Human, because the game
 # moves them or lights them on their own: the eyes, the Sonographer's ears and its windpipe
 LOOSE_PARTS = ('Eye_L', 'Eye_R', 'Ear_L', 'Ear_R', 'Throat', 'ThroatSkin',
-               'Cart', 'CartScreen', 'Castor_FL', 'Castor_FR', 'Castor_BL', 'Castor_BR')
+               'Probe', 'Cable_A', 'Cable_B', 'Cable_C', 'Gel_L', 'Gel_R', 'Gel_Chin')
 
 
 def _log(*a):
@@ -309,26 +312,26 @@ def make_sites(c, arm):
     p = el + fa * 0.03 + out * 0.036 * sk.s
     sites.append(site_empty(arm, 'injection', 'forearm.L', godot_frame(fa, out, p)))
     if c['V'].get('sono'):
-        # where each ear turns, the middle of the throat's window, and where the cart's cable plugs in
+        # where each ear turns, the middle of the throat's window, where the cable enters the neck,
+        # and the probe's tip: the echo fires from there, pointing out of the wand
         for tag, sg in (('L', 1.0), ('R', -1.0)):
             r = head.EAR_ROOT * np.array([sg, 1.0, 1.0])
             ep = Vector(tuple(head.world(r)))
             sites.append(site_empty(arm, 'ear_' + tag, 'head', godot_frame(Vector((sg, 0, 0)), Vector((0, 0, 1)), ep)))
         ext = head.neck_ext()
-        thr = Vector(tuple(head.world(np.array([0.0, -0.030, -0.126 - 0.5 * ext]))))
-        sites.append(site_empty(arm, 'throat', 'neck', godot_frame(Vector((0, -1, 0)), Vector((0, 0, 1)), thr)))
-        cab = Vector(tuple(head.world(np.array([0.0, 0.050, -0.172 - ext]))))
-        sites.append(site_empty(arm, 'cable', 'neck', godot_frame(Vector((0, 1, 0)), Vector((0, 0, 1)), cab)))
-        # where the echo leaves: in front of the face, pointing the way the head points (X out of it)
-        ep = Vector(tuple(head.world(np.array([0.0, -0.105, ec[2] - 0.004]))))
-        sites.append(site_empty(arm, 'echo', 'head', godot_frame(Vector((0, -1, 0)), Vector((0, 0, 1)), ep)))
-        # the pump line's outlet on the cart, on the cart's own pivot bone
-        cc = st_char.cart_centre(sk)
-        pmp = Vector((cc[0] - 0.06, cc[1] - 0.16, 0.95))
-        sites.append(site_empty(arm, 'pump', 'cart_pivot', godot_frame(Vector((0, 0, 1)), Vector((0, -1, 0)), pmp)))
-        # the middle of the cart's one collision box, on the pivot too
-        bc = st_char.cart_centre(sk) + st_char.CART_BOX_C
-        sites.append(site_empty(arm, 'cart_box', 'cart_pivot', godot_frame(Vector((1, 0, 0)), Vector((0, 0, 1)), Vector(tuple(bc)))))
+        thr = Vector(tuple(head.world(np.array([0.0, -0.028, -0.140 - 0.5 * ext]))))
+        sites.append(site_empty(arm, 'throat', 'neck2', godot_frame(Vector((0, -1, 0)), Vector((0, 0, 1)), thr)))
+        cab = Vector(tuple(head.world(st_char.CABLE_NECK)))
+        sites.append(site_empty(arm, 'cable', 'neck', godot_frame(Vector((-1, 0, 0)), Vector((0, 0, 1)), cab)))
+        tip = st_char.probe_tip(sk)
+        _wr, pd = st_char.probe_axis(sk)
+        up = np.array([0.0, 0.0, 1.0])
+        if abs(float(pd @ up)) > 0.9:
+            up = np.array([0.0, 1.0, 0.0])
+        side = np.cross(up, pd)
+        side = side / np.linalg.norm(side)
+        sites.append(site_empty(arm, 'probe', 'hand.R',
+                                godot_frame(Vector(tuple(side)), Vector(tuple(np.cross(pd, side))), Vector(tuple(tip)))))
     g = st_char.LAST_GASH.get(c['V']['name'])
     if g is not None:
         gc, gn = Vector(tuple(g[0])), Vector(tuple(g[1]))

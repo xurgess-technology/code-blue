@@ -151,21 +151,23 @@ const MODELS := {
 		"anims": {"idle": "HiveIdle", "walk": "HiveWalk", "run": "HiveWalk", "attack": "HiveAttack"},
 		"note": "The Hive, made for Malpractice with Blender scripts (art/stylized). No third-party licence.",
 	},
-	# The Sonographer (2026-09-18): the stylized kit (art/stylized, variant `sonographer`), 2.05 m,
-	# feet at y 0, facing +Z, on the human skeleton with its own clips. Blind: the sockets are scarred
-	# flat, and there are no eye pieces. **Its ultrasound cart is part of the same model**, on a pivot
-	# bone at the right hand (`cart_pivot`) with a bone per castor. Its big swivelling ears
-	# (Human_Ear_L / _R), its glowing windpipe (Human_Throat) behind the thin skin of its throat
-	# (Human_ThroatSkin), the cart and its four castors are all their own pieces; Site_ear_L/_R,
-	# Site_throat, Site_cable, Site_pump, Site_echo and Site_cart_box say where things go.
+	# The Sonographer (2026-09-18): the stylized kit (art/stylized, variant `sonographer`), about
+	# 2.1 m at rest and 2.7 m craned, feet at y 0, facing +Z. A standalone model: no cart. On the human
+	# skeleton except for its neck, which is a chain of four bones (`neck`, `neck2`, `neck3`, `neck4`)
+	# so it can stretch; the game drives that stretch from suspicion. Blind: the sockets are scarred
+	# flat and there are no eye pieces. Its big swivelling ears (Human_Ear_L / _R), its glowing
+	# windpipe (Human_Throat) behind the see-through skin of its throat (Human_ThroatSkin), the
+	# ultrasound probe grown into its right hand (Human_Probe), the three runs of cable up that arm
+	# (Human_Cable_A/B/C) and the gel drips (Human_Gel_*) are all their own pieces; Site_ear_L/_R,
+	# Site_throat, Site_cable and Site_probe say where things go.
 	# No root motion. scripts/monsters/sonographer_rig.gd.
 	"monster/sonographer": {
 		"path": "res://assets/models/monsters/sonographer/sonographer_st.glb",
 		"scale": 1.0, "yaw": 180,
 		"anims": {
-			"idle": "SonoIdle", "walk": "SonoDrag", "run": "SonoRush", "attack": "SonoWail",
+			"idle": "SonoIdle", "walk": "SonoWander", "run": "SonoRush", "attack": "SonoWail",
 			"listen": "SonoListen", "charge": "SonoCharge", "echo": "SonoEcho",
-			"turn": "SonoTurn", "stagger": "SonoStagger", "lying": "SonoLying",
+			"search": "SonoSearch", "stagger": "SonoStagger", "lying": "SonoLying",
 		},
 		"note": "The Sonographer, made for Malpractice with Blender scripts (art/stylized). No third-party licence.",
 	},
