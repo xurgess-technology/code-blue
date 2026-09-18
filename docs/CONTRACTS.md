@@ -965,8 +965,22 @@ knocked down, no movement; a `"stun"` event plus the dev snapshot block), `nocli
   `bot_input(t, skill)` (skill from the bot's meta `bot_skill`). Minigames must keep
   `bot_input` finishing their step.
 - Interactables: `dev_disp_<item kind>` dispensers (endless stacks) and `dev_disp_dev_gun`.
+- Test tool: `--dev` after `--` turns dev mode on as soon as the level exists, so a review window
+  (`tools
+eview.bat 2 "..." --dev`) opens with the panel a keypress away.
 - World changes from the panel or tests: `game.dev.request(action, args)`; the host applies,
   a client sends. Shots: `game.dev.fire(shooter, from, dir, "kill" | "knock")`.
+- **Control Dr. Botsworth** (grafting chunk B, 2026-09-18): the panel's button spawns a bot called
+  Dr. Botsworth if he is not there (an ordinary `is_bot` Player: real hands, a real operator at a
+  table) and moves this machine's input and camera into him; the same button hands them back. Local
+  only and host only, like the free camera -- nothing is replicated, so the rest of the session sees
+  an ordinary bot, and your own surgeon stays where you left it, strapped down or not.
+  `dev.control_botsworth()`, `dev.possess_bot(id)`, `dev.release_bot()`, `dev.possessing`,
+  `dev.possessed_player()`; `Player.set_possessed(on)` / `possessed_local` / `view_local()`
+  (`is_local or possessed_local`: first-person hands, the mouse, the aim highlight);
+  `game.possessed`, `game.driving_player()` / `driving_id()` (what `viewed_player()`, the HUD and
+  `surgery_system`'s local-operator and report routing use, so the minigames run under your mouse).
+  The bot's brain is skipped while you drive it and picks its order back up afterwards.
 - Sounds `dev_zap`, `dev_thump` from `tools/gen_audio_dev.mjs`.
 - **Pocket spaces** (2026-09-14): request `pocket {kind: "factory" | "restaurant" | ""}` builds that space
   beside the room on every machine (`dv.pk`, `game.pockets.build_kind`); `dev.pocket_go(into)` moves the
@@ -1460,6 +1474,61 @@ game.downed_view           # scripts/downed/downed_view.gd: blood trails, the lo
   (`tools/gen_audio_downed.mjs`).
 - Tests: `tools/downedtest.tscn` (headless), `tools/downedshot.tscn` (windowed shots into
   `tools/downed_shots/`), nettest scenario `downed`, devtest downed checks.
+
+### Strapping yourself down (grafting chunk B, 2026-09-18, docs/GRAFTING.md)
+
+A healthy surgeon can lie on the table themselves, awake, and hold E to get up. The state is the
+same `on_table` as a downed patient's, with no case and no stitches, so everything that already
+follows `on_table` (the pinned pose, the look-up camera, the "lying" clip, `ot` in the snapshot)
+works unchanged. `Player.strapped()` is the difference: `on_table and alive and not downed`.
+
+```gdscript
+game.TABLE_STRAP_HOLD (1.2 s)  game.TABLE_UP_HOLD (1.2 s)  game.STRAP_IN_PROMPT
+game.strap_in_prompt(q) -> String        # STRAP_IN_PROMPT, "!..." or "" (not on offer)
+game.strap_in(q, table_index := -1)      # host; the hold finished (never a tap)
+game.get_up_block(p) -> String           # "" = free to go. CHUNK C REFUSES HERE after the scoop
+game.get_up_prompt(p) -> String          # what the strapped surgeon sees looking up
+game.get_up_from_table(p)                # host; the straps come off, they stand beside the table
+game.someone_on_table() -> Node          # whoever lies on a table (downed or strapped), else null
+game.table_free(ti) -> bool              # no case, no gurney on the way, nobody lying on it
+game.strap_table: int                    # hub: the patient table they strapped to (-1); snapshot "st"
+```
+
+- The prompt hangs off the existing aim spots: `player_table` on levels with one, and each patient
+  table (`table`, `table_<i>`) on the hub, where `strap_table` rides the snapshot so every machine's
+  `player_table` (and so `pinned_pose`) names the same table. Only one person is ever on a table.
+- **Both ways on and off are holds**, timed by `game._tick_table_holds` on `carry_hold` from the
+  player's `wants_interact` (`Player._pinned_step` reports E while strapped). The HUD ring says
+  STRAPPING IN / GETTING UP. E has to be let go in between (`_table_hold_gate`), so the press that
+  straps you in never also stands you up. A prompt starting with "Hold E" is never a tap (the HUD
+  already draws those as `[Hold E]`, and `Player._local_step` no longer fires `interact_count`
+  for one), so the table's other taps -- operate, place a teammate -- still work.
+- Strapped in, your arms are by your sides: the first-person hands and the held stack are hidden
+  in first person and in third (`Player.refresh_held_visuals`), and **every light you carry goes
+  out** -- the torch and the soft bubble in the head -- or they light your own face up for whoever
+  leans over you (`Player.refresh_own_lights`, driven by `on_table` on every machine). Neither
+  touches `flashlight_on`, so getting up leaves the torch exactly as you left it.
+- `refresh_downed_visuals` only hides the body for a *downed* patient on the table, who has a lying
+  `PlayerBody` standing in; a strapped surgeon's own body lies there for everyone else to see.
+  `_update_down_pose` draws it at the table top, like that stand-in, not at the player node, which
+  `pinned_pose` parks 0.8 m up the table so the camera sits at the head end.
+- **Which way it lies.** A table's long axis is its local X with the head end at -X (that is where
+  `pinned_pose` puts the camera, and `look_up_from_table` faces it down +X at its own feet). The
+  human rig's "Lying" clip runs along its own Z, head at +Z, so the drawn body takes a quarter
+  turn, `Player.LYING_CLIP_YAW` (the primitive fallback is a standing model tipped onto its back,
+  head toward its local -Z, so `LYING_FALLBACK_YAW` turns it the other way), plus
+  `LYING_ALONG_OFFSET` up the table so the 1.5 m body sits in the middle of the 2.2 m top with its
+  head where the eyes are. All of it comes off `game.player_table_yaw()`, never the player node's
+  own yaw, which follows the strapped player's mouse. straptest measures the head, hips and foot
+  bones against the table's axis at five yaws.
+- Your own body is normally drawn to nobody. `Player.set_dev_body(on)` shows it out in the world
+  on its ordinary layers (not the mirrors' `LightRooms.SELF`) and keeps the carry camera from
+  switching it off again; driving Dr. Botsworth turns it on, and hides your first-person arms so
+  they do not float over the table in his view.
+- Tests: `tools/straptest.tscn` (headless), `tools/strapshot.tscn` (the smoke look: shots into
+  `tools/strap_shots/`, run through `tools
+eview.bat 2 "SMOKE" -Scene res://tools/strapshot.tscn`
+  so no window ever takes focus).
 
 ## Combat (combat worker, sweep 3)
 

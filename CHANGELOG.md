@@ -5,6 +5,9 @@ patch per thing we did that day. How to add to it: [RULES.md](RULES.md#changelog
 
 **2026-09-18 (0.6.x)**
 
+- **0.6.9**: Lie down, doc
+    - Added: Hold E at an OR table to strap yourself down, face up and awake. Let go and hold E again to get up.
+    - Changed: A strapped-down body lies along the table for everyone, with no torch or other light on it.
 - **0.6.8**: A new way of working 🧑‍⚕️🧑‍⚕️🧑‍⚕️
     - Added: One orchestrator agent hands work to subagents in four reusable work slots; see [RULES.md](RULES.md#workflow).
     - Added: Review windows: a game window from a slot, titled with what to go look at. It waits in the taskbar instead of popping up in your face.

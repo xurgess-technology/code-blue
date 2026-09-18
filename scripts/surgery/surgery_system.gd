@@ -287,7 +287,7 @@ func receive_operator_report(peer_id: int, report: Dictionary) -> void:
 		if report.has("stir"):
 			_stir_count += 1
 			_stir_strength = float(report.stir)
-			if peer_id != Net.my_id():
+			if peer_id != _my_op_id():
 				_body_stir(_stir_strength)
 			_seen_stirs = _stir_count
 		if report.has("finished") and not _finished_keys.has(key):
@@ -334,7 +334,7 @@ func physics_tick(delta: float) -> void:
 	if game.is_host():
 		_host_tick(delta)
 
-	var me := Net.my_id()
+	var me := _my_op_id()   # GRAFT HOOK: a possessed Dr. Botsworth operates with this machine's mouse
 	var should_op: bool = operator_id != 0 and operator_id == me and mg != null and not mg.done and not _exit_requested
 	if should_op and not _local_op:
 		_start_local_operating()
@@ -547,7 +547,7 @@ func _start_local_operating() -> void:
 	_op_time = 0.0
 	_report_accum = 0.0
 	mg.ctx["operator"] = true
-	var p = game.local_player()
+	var p = _my_player()
 	var head_cam: Camera3D = p.camera if p != null and "camera" in p and p.camera != null else null
 	if head_cam != null:
 		_head_fov = head_cam.fov
@@ -587,6 +587,23 @@ func _unhandled_input(event: InputEvent) -> void:
 	if _local_op and _op_time > 0.35 and event.is_action_pressed("interact"):
 		local_operator_exit()
 		get_viewport().set_input_as_handled()
+
+
+## GRAFT HOOK (dev panel, "Control Dr. Botsworth"): the peer id this machine's mouse acts as. Your
+## own, unless you are driving a bot's body, in which case that bot operates with your hands.
+func _my_op_id() -> int:
+	if game != null and game.has_method("driving_id"):
+		return int(game.driving_id())
+	return Net.my_id()
+
+
+## The player this machine looks out of: whose head the surgery camera blends out of and back into.
+func _my_player():
+	if game == null:
+		return null
+	if game.has_method("driving_player"):
+		return game.driving_player()
+	return game.local_player()
 
 
 func _bot_driving() -> bool:
@@ -632,7 +649,7 @@ var _bot_op_key := ""
 
 
 func _bot_operator() -> Node:
-	if operator_id == 0 or operator_id == Net.my_id():
+	if operator_id == 0 or operator_id == _my_op_id():
 		return null
 	var p = game.players.get(operator_id)
 	return p if p != null and is_instance_valid(p) and bool(p.get("is_bot")) else null
@@ -755,7 +772,7 @@ func _update_camera(delta: float) -> void:
 		return
 	_cam_blend = clampf(_cam_blend + float(_cam_dir) * delta / TWEEN_TIME, 0.0, 1.0)
 	var target := _pose()
-	var p = game.local_player()
+	var p = _my_player()
 	var head: Transform3D = target
 	if p != null and "camera" in p and p.camera != null:
 		head = p.camera.global_transform

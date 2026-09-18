@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="9" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <clipPath id="ball"><circle cx="128" cy="128" r="76"/></clipPath>
+  </defs>
+
+  <!-- the ability slot -->
+  <circle cx="128" cy="128" r="122" fill="#0b1416"/>
+
+  <g filter="url(#glow)">
+    <!-- the eyeball -->
+    <circle cx="128" cy="128" r="78" fill="#ff8a2a"/>
+
+    <!-- bloodshot veins, creeping in from the edge -->
+    <g clip-path="url(#ball)" fill="none" stroke="#c0341c" stroke-linecap="round" stroke-linejoin="round">
+      <g stroke-width="6">
+        <path d="M76 70 Q92 88 90 100"/>
+        <path d="M204 120 Q184 124 170 118"/>
+        <path d="M140 204 Q138 186 146 172"/>
+        <path d="M58 160 Q74 154 86 158"/>
+        <path d="M166 60 Q160 76 164 86"/>
+      </g>
+      <g stroke-width="3.5">
+        <path d="M86 84 Q98 84 104 92"/>
+        <path d="M186 122 Q182 108 176 102"/>
+        <path d="M139 188 Q126 184 122 176"/>
+      </g>
+    </g>
+
+    <!-- iris, pupil, glint -->
+    <circle cx="128" cy="128" r="34" fill="#ffc45e"/>
+    <circle cx="128" cy="128" r="20" fill="#2a0e03"/>
+    <circle cx="113" cy="111" r="8" fill="#fff6e6"/>
+
+    <!-- chunky outline -->
+    <circle cx="128" cy="128" r="78" fill="none" stroke="#4a1a06" stroke-width="10"/>
+  </g>
+</svg>

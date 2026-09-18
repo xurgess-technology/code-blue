@@ -161,6 +161,11 @@ func _build() -> void:
 	_c["free_cam"] = _check(fc, "Free camera", func(on): _set_free_cam(on))
 	_c["free_cam_mode"] = _label(fc, "", 12, DIM)
 	_label(col, "Free camera: P swaps between flying the camera and walking the surgeon. WASD, mouse, Space up, Ctrl down, Shift fast.", 11, DIM)
+	# GRAFT HOOK: a second pair of hands to operate on you while you lie strapped to the table.
+	var bw := _row(col)
+	_c["botsworth"] = _button(bw, "Control Dr. Botsworth", func(): game.dev.control_botsworth())
+	_c["botsworth_label"] = _label(bw, "", 12, DIM)
+	_label(col, "Spawns Dr. Botsworth beside you (a full surgeon: he can pick things up and operate) and moves your input and camera into him. The same button brings you back; your own body stays where you left it.", 11, DIM)
 
 	# ---- world
 	_section(col, "World")
@@ -524,6 +529,10 @@ func _refresh() -> void:
 	(_c["free_cam"] as CheckBox).set_pressed_no_signal(free_cam.is_on())
 	(_c["free_cam_mode"] as Label).text = "" if not free_cam.is_on() else ("P: flying the camera" if free_cam.flying else "P: walking the surgeon")
 	(_c["gun"] as CheckBox).set_pressed_no_signal(dev.gun.has(me))
+	# GRAFT HOOK
+	var driving = dev.possessed_player()
+	(_c["botsworth"] as Button).text = "Back to my own body" if driving != null else "Control Dr. Botsworth"
+	(_c["botsworth_label"] as Label).text = "You are %s." % driving.player_name if driving != null else ""
 	if _places_level != game.level:
 		_rebuild_places()
 	(_c["monsters_off"] as CheckBox).set_pressed_no_signal(dev.monsters_off)
