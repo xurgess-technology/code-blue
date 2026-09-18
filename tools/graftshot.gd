@@ -106,6 +106,26 @@ func _run() -> void:
 	_stand(pt + tb * Vector3(0, 0, 1.0))
 	_look_at(eye_at)
 	var sys = game.surgery_for_table(table)
+	if OS.get_cmdline_user_args().has("--cut-only"):
+		game.give_hand(me, "scalpel", 1)
+		me.selected = _slot("scalpel")
+		game.surgery_bot_skill = 1.0
+		game._proxy_used(game.table_interact_id(table), me)
+		await _until(func(): return sys.mg != null and sys.mg.get("variant") != null and sys.is_local_operating(), 8.0)
+		var mg = sys.mg
+		mg.set("bot_slow", 0.25)
+		mg.set("bot_hold", 4.0)
+		await _seconds(2.5)
+		await _shot("20_scalpel_raised")
+		await _until(func(): return bool(mg.get("down")), 10.0)
+		await _seconds(0.8)
+		await _shot("21_scalpel_lowered")
+		var k := 22
+		for mark in [1.0, 2.2, 3.4, 4.6, 5.6]:
+			await _until(func(): return not is_instance_valid(mg) or float(mg.get("cut")) > mark, 20.0)
+			await _shot("%d_ring_%.1f" % [k, mark])
+			k += 1
+		return
 	var n := 8
 	for step in ["scalpel", "eye_spoon", "scalpel"]:
 		game.give_hand(me, step, 1)

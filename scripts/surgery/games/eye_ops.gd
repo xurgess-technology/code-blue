@@ -92,6 +92,11 @@ var _mat_front: StandardMaterial3D
 var _mat_good: StandardMaterial3D
 var _mat_bad: StandardMaterial3D
 var _hid_body_eye := false
+var bot_slow := 1.0                     # tests and smoke looks: slow the cut bot down
+var bot_hold := 0.0                     # ... and make it hover this many seconds before lowering
+var _dt := 0.016
+var _cut_yaw := 0.0                     # the cut scalpel's heading, eased round as it follows the marking
+var _cut_h := 0.03                      # its tip height above the plane: hovering, dropping onto the eye
 
 
 func setup(context: Dictionary) -> void:
@@ -149,6 +154,7 @@ func handle_cursor(p: Vector2, buttons: int, delta: float) -> void:
 	_have_last = true
 	cursor = p
 	_hint_t = maxf(0.0, _hint_t - delta)
+	_dt = delta
 	var primary := (buttons & BUTTON_PRIMARY) != 0
 	var pressed := primary and not _prev_primary
 	_prev_primary = primary
@@ -261,6 +267,7 @@ func _rules_snip(p: Vector2, pressed: bool, up: bool, delta: float) -> void:
 
 func tick(delta: float) -> void:
 	_t += delta
+	_dt = delta
 	_flash = maxf(0.0, _flash - delta)
 	if slips != _seen_slips:
 		_seen_slips = slips
@@ -314,9 +321,9 @@ func bot_input(t: float, skill: float) -> Dictionary:
 				return {"cursor": cursor, "buttons": 0}
 			var front := _ring_pos(cut + 0.05, ring_r)
 			if not down:
-				var c := cursor.move_toward(front, 0.3 * dt)
-				return {"cursor": c, "buttons": BUTTON_PRIMARY if c.distance_to(front) < 0.006 and click else 0}
-			return {"cursor": cursor.move_toward(front, lerpf(0.12, 0.05, skill) * dt), "buttons": 0}
+				var c := cursor.move_toward(front, 0.3 * bot_slow * dt)
+				return {"cursor": c, "buttons": BUTTON_PRIMARY if c.distance_to(front) < 0.006 and click and t > bot_hold else 0}
+			return {"cursor": cursor.move_toward(front, lerpf(0.12, 0.05, skill) * bot_slow * dt), "buttons": 0}
 		"scoop":
 			if not down:
 				var c := cursor.move_toward(Vector2(0.012, 0.0), 0.2 * dt)
@@ -402,9 +409,51 @@ func _build() -> void:
 			_target = _box(Vector3(SLICE_TOL * 1.6, 0.0008, SLICE_TOL * 1.6), _mat_good)
 			_target.position = plane_to_local(NERVE_AT, 0.002)
 			_target.visible = false
-	_tool = ItemModels.make("eye_spoon" if variant == "scoop" else "scalpel")
+	_tool = _make_cut_scalpel() if variant == "cut" else ItemModels.make("eye_spoon" if variant == "scoop" else "scalpel")
 	add_child(_tool)
 	_set_layers(self)
+
+
+## The cut's scalpel: a slim handle and a small pointed blade, tip down at the origin, handle up, so it hangs
+## over the eye and drops onto it.
+func _make_cut_scalpel() -> Node3D:
+	var root := Node3D.new()
+	var steel := StandardMaterial3D.new()
+	steel.albedo_color = Color(0.9, 0.92, 0.95)
+	steel.metallic = 0.6
+	steel.roughness = 0.25
+	var grip := StandardMaterial3D.new()
+	grip.albedo_color = Color(0.6, 0.63, 0.68)
+	grip.metallic = 0.5
+	grip.roughness = 0.4
+	var blade := MeshInstance3D.new()
+	var prism := PrismMesh.new()
+	prism.size = Vector3(0.006, 0.017, 0.0011)
+	blade.mesh = prism
+	blade.material_override = steel
+	blade.rotation_degrees = Vector3(0, 0, 180)   # the point down
+	blade.position = Vector3(0, 0.0085, 0)
+	root.add_child(blade)
+	var neck := MeshInstance3D.new()
+	var nc := CylinderMesh.new()
+	nc.top_radius = 0.0028
+	nc.bottom_radius = 0.0012
+	nc.height = 0.008
+	neck.mesh = nc
+	neck.material_override = grip
+	neck.position = Vector3(0, 0.021, 0)
+	root.add_child(neck)
+	var handle := MeshInstance3D.new()
+	var hc := CylinderMesh.new()
+	hc.top_radius = 0.0034
+	hc.bottom_radius = 0.0028
+	hc.height = 0.06
+	hc.radial_segments = 10
+	handle.mesh = hc
+	handle.material_override = grip
+	handle.position = Vector3(0, 0.055, 0)
+	root.add_child(handle)
+	return root
 
 
 func _place_on_ring(mi: MeshInstance3D, theta: float, r: float, lift_y: float) -> void:
@@ -427,10 +476,19 @@ func _update_visuals() -> void:
 		return
 	# The tool's tip on the cursor: on the plane when lowered, hovering above it when not. The model's tip
 	# is at +X, so the handle trails to the left of the screen, tilted up.
-	var tip_y := 0.004 if (down or variant == "snip") else 0.03
-	var tilt := Basis(Vector3(0, 0, 1), deg_to_rad(18.0))
-	_tool.basis = tilt
-	_tool.position = plane_to_local(cursor, tip_y) - tilt * Vector3(TIP_X, 0.0, 0.0)
+	if variant == "cut":
+		# Upright over the eye, leaning a little away from its centre; it turns slowly to stay that way as it
+		# follows the marking, and drops onto the eye when lowered.
+		if cursor.length() > 0.004:
+			_cut_yaw = lerp_angle(_cut_yaw, atan2(cursor.x, cursor.y), clampf(_dt * 2.5, 0.0, 1.0))
+		_cut_h = move_toward(_cut_h, 0.002 if down else 0.03, _dt * 0.25)
+		_tool.basis = Basis(Vector3.UP, _cut_yaw) * Basis(Vector3.RIGHT, deg_to_rad(22.0))
+		_tool.position = plane_to_local(cursor, _cut_h)
+	else:
+		var tip_y := 0.004 if (down or variant == "snip") else 0.03
+		var tilt := Basis(Vector3(0, 0, 1), deg_to_rad(18.0))
+		_tool.basis = tilt
+		_tool.position = plane_to_local(cursor, tip_y) - tilt * Vector3(TIP_X, 0.0, 0.0)
 	match variant:
 		"cut":
 			var n := int(floor(cut / TAU * CUT_SEGS))
