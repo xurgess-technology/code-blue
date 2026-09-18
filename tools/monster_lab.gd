@@ -136,9 +136,6 @@ func _ready() -> void:
 	if OS.get_cmdline_user_args().has("--perf"):
 		await _run_perf()
 		return
-	if OS.get_cmdline_user_args().has("--sono"):
-		await _run_sono()
-		return
 	for a in OS.get_cmdline_user_args():
 		if a == "--shots":
 			shots = true
@@ -161,7 +158,9 @@ func _ready() -> void:
 	p1.name_tag.visible = false
 	for i in 4:
 		await get_tree().physics_frame
-	if shots:
+	if OS.get_cmdline_user_args().has("--sono"):
+		await _run_sono()
+	elif shots:
 		await _run_shots()
 	else:
 		await _run_scenarios()
