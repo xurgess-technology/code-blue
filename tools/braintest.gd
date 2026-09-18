@@ -38,6 +38,10 @@ func _ready() -> void:
 	me = game.local_player()
 	me.bot_active = true
 	me.bot_invulnerable = false
+	# A run starts out in the lot's fog (game._arrive_at_start), where the fog turns you toward the
+	# lot and pushes drops back out of it. These checks want level floor: start in the lobby.
+	me.teleport(game.spawn_points()[0])
+	await _frames(2)
 	await _run()
 	_finish()
 

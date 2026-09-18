@@ -216,6 +216,12 @@ func _path_from(from: Vector3, to: Vector3) -> PackedVector3Array:
 func _process(delta: float) -> void:
 	if not active or game == null:
 		return
+	# The Walk-In gone mid fly-back (a new run clears the monsters the same frame game over ends the
+	# view): snap back, as when it dies while you look through it, instead of gliding across the
+	# new hospital.
+	if _phase == "out" and not game.monsters.has(monster_id):
+		_deactivate()
+		return
 	if _phase == "in" or _phase == "out":
 		_fly(delta)
 	else:
