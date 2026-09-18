@@ -259,6 +259,20 @@ var carry_hold: float = 0.0
 ## GRAFT HOOK: awake and strapped to the player table (not a downed patient on it).
 func strapped() -> bool:
 	return on_table and alive and not downed
+
+
+## GRAFTING chunk C: a lying PlayerBody is standing in for this player on the table (the stitches
+## case, or Eyeball Grafting on a strapped surgeon), so their own body must not draw on top of it.
+## Every machine, set from the case by scripts/downed/player_surgery.gd.
+var stand_in := false
+
+
+func set_stand_in(on: bool) -> void:
+	if on == stand_in:
+		return
+	stand_in = on
+	_refresh_self_body()
+	refresh_downed_visuals()
 ## The Night Nurse's grab (scripts/monsters/nurse_grab.gd): the monster id of the Nurse holding this
 ## player up by the neck (-1 nobody), and where they stood when she took them (host authoritative,
 ## report key `nh`; held_from is recorded on every machine). Held, the body hangs from her grip
@@ -1234,6 +1248,8 @@ func _pinned_step(delta: float) -> void:
 		# GRAFT HOOK: strapped in awake, holding E gets you back up (game._tick_table_holds times
 		# it, exactly like the hold that picks a downed teammate up).
 		wants_interact = strapped() and (bot_interact if bot_active else (keys and Input.is_action_pressed("interact")))
+		if strapped():
+			_strapped_look()   # GRAFTING chunk C: awake on the table, and you can only look so far
 		if held_by >= 0:
 			_held_look(delta)
 		rotation.y = _yaw
@@ -1244,6 +1260,25 @@ func _pinned_step(delta: float) -> void:
 	else:
 		rotation.y = pose.basis.get_euler().y
 		head.rotation.x = lerpf(head.rotation.x, _pitch, clampf(delta * 12.0, 0.0, 1.0))
+
+
+## GRAFTING chunk C (docs/GRAFTING.md): the awake patient's camera. Strapped to the table you lie
+## face up, and your head turns in a cone about that: enough to follow the surgeon round the table
+## and watch the tools come down, never enough to spin the camera through your own chest. The rest
+## is `look_up_from_table`: down the table toward your own feet, 66 degrees up.
+const LYING_LOOK_YAW := 1.15      # radians either side of the head's rest heading
+const LYING_LOOK_PITCH := Vector2(0.45, 1.5)   # how far the head tips down toward your feet / back
+
+
+func _strapped_look() -> void:
+	if game == null:
+		return
+	var rest := float(game.player_table_yaw()) - PI * 0.5
+	_yaw = rest + clampf(angle_difference(rest, _yaw), -LYING_LOOK_YAW, LYING_LOOK_YAW)
+	_pitch = clampf(_pitch, LYING_LOOK_PITCH.x, LYING_LOOK_PITCH.y)
+	if bot_active:
+		bot_yaw = _yaw
+		bot_pitch = _pitch
 
 
 ## The Nurse who holds this player (every machine's copy of her), or null.
@@ -1824,7 +1859,9 @@ func set_carry_body(on: bool) -> void:
 ## shadowing (the torch sits inside the head), and seen by the first-person camera only for the carry
 ## camera.
 func _refresh_self_body() -> void:
-	var show := _mirror_self or _carry_body or dev_body_shown
+	# GRAFTING chunk C: while a lying stand-in body is on the table for you, your own never draws --
+	# not even for the mirrors, the carry camera or the body Dr. Botsworth is driven past.
+	var show := (_mirror_self or _carry_body or dev_body_shown) and not (on_table and stand_in)
 	if body_visual != null:
 		body_visual.visible = show
 		if show and not dev_body_shown:
@@ -2092,7 +2129,7 @@ func refresh_downed_visuals() -> void:
 	# A downed patient on the table has a lying PlayerBody standing in for them (player_surgery).
 	# GRAFT HOOK: a healthy surgeon who strapped themselves in has no case and no stand-in, so their
 	# own body lies there (body_hands plays the "lying" clip from `on_table`) for everyone else.
-	if on_table and downed and not view_local():
+	if on_table and (downed or stand_in) and not view_local():
 		body_visual.visible = false
 		name_tag.visible = false
 	refresh_own_lights()   # GRAFT HOOK: no torch and no head glow on a strapped face

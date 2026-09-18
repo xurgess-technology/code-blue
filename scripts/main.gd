@@ -6,6 +6,8 @@ var game: Game
 var hud: Hud
 var menu: Menu
 var post = null
+## GRAFTING chunk C: the first-person tint of a grafted eye (scripts/grafting/graft_view.gd).
+var graft_view: CanvasLayer = null
 ## The database terminal UI (a CanvasLayer with open/close/is_open).
 
 ## 0 low, 1 medium, 2 high. Medium is the default: it keeps the volumetric fog that
@@ -76,6 +78,10 @@ func _ready() -> void:
 	hud.name = "HUD"
 	hud.game = game
 	hud_layer.add_child(hud)
+
+	# GRAFTING chunk C: the grafted eye's orange down the left edge, above the look pass's grade.
+	graft_view = load("res://scripts/grafting/graft_view.gd").create(game)
+	add_child(graft_view)
 
 	var menu_layer := CanvasLayer.new()
 	# Above the look pass's grain and vignette (layer 50), like the launch printout it continues:

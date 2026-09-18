@@ -471,7 +471,8 @@ func _spawn_mg() -> void:
 		c["flags"] = {}
 	var body = _body()
 	var shift := int(game.shift)
-	mg.setup({
+	# GRAFTING chunk C: knobs a case hands its minigame (the graft: no botches, which eye, how big).
+	var ctx := {
 		"patient_id": String(c.get("patient_id", "")),
 		"patient": Procedures.patient(String(c.get("patient_id", ""))),
 		"ailment_id": String(c.get("ailment_id", "")),
@@ -484,7 +485,11 @@ func _spawn_mg() -> void:
 		"body": body,
 		"operator": false,
 		"helper_lights": _helper_lights,
-	})
+	}
+	for k in ["no_fail", "eye_kind", "eye_kind_in", "eye_radius"]:
+		if c.flags.has(k):
+			ctx[k] = c.flags[k]
+	mg.setup(ctx)
 	if _mg_state_key == mg_key and not _mg_state.is_empty():
 		mg.apply_net_state(_mg_state)
 

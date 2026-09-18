@@ -3,15 +3,21 @@ extends Node3D
 ## "Downed players"). The same surface as scripts/patient_body.gd, as far as a minigame needs it.
 ##
 ## Frame: lying on its back along local X, head toward -X, feet toward +X, origin at the table top
-## centre. One site, `gash`: a laceration across the belly, +Y out of the skin, X along the body
-## (and along the gash), Z across it.
+## centre. Sites: `gash`, a laceration across the belly (+Y out of the skin, X along the body and
+## along the gash, Z across it), and -- GRAFTING chunk C -- `eye`, the LEFT eyeball in its socket,
+## for Eyeball Grafting on a strapped surgeon.
 
 const Kit := preload("res://scripts/patients/patient_kit.gd")
 const HumanModel := preload("res://scripts/human/human_model.gd")   # HUMAN HOOK
+const GraftEye := preload("res://scripts/grafting/graft_eye.gd")   # GRAFTING chunk C
 
 const GASH_POS := Vector3(-0.2, 0.24, 0.04)
 const GASH_HALF_LEN := 0.1
 const GASH_HALF_GAP := 0.016
+## GRAFTING chunk C: how far the left eye sits from the eyes' site (the body's left is model -X),
+## and the eyeball's radius on a surgeon.
+const EYE_SIDE := 0.033
+const EYE_RADIUS := 0.0135
 
 var player_id: int = 0
 var ailment_id := "stitches"
@@ -41,6 +47,12 @@ var _lying: Animation = null
 var _gash_mesh: MeshInstance3D = null
 var _gash_open := 1.0
 var _idle_t := 0.0
+## GRAFTING chunk C: the parts a minigame may reach for, the left eyeball, and what is in the socket.
+var parts := {}
+var _eye_l: MeshInstance3D = null
+var _graft_eye: Node3D = null
+var _eye_kind := ""      # "" the surgeon's own, "eye_hive" a grafted Hive eye
+var _eye_out := false    # the socket is empty (between the scoop and the seat)
 ## Tools and A/B: build the primitive body.
 static var primitive_only := false
 
@@ -153,6 +165,36 @@ func site_section(site: String) -> Dictionary:
 	return {}
 
 
+## GRAFTING chunk C: what sits in the left socket -- "" the surgeon's own eye, "eye_hive" a grafted
+## Hive eye, and `out` while the socket is empty (between the scoop and the seat).
+func set_eye(kind: String, out := false) -> void:
+	_eye_kind = kind
+	_eye_out = out
+	_apply_eye()
+
+
+var _eye_key := "?"
+
+
+## Idempotent and cheap: only rebuilds when what is in the socket actually changed. The minigame's
+## `eye_hidden` meta (the scoop and the seat draw their own eye) is polled here every frame.
+func _apply_eye() -> void:
+	if _eye_l == null or not is_instance_valid(_eye_l):
+		return
+	var hidden: bool = _eye_out or bool(get_meta("eye_hidden", false))
+	var key := "%s|%s" % [_eye_kind, hidden]
+	if key == _eye_key:
+		return
+	_eye_key = key
+	_eye_l.visible = not hidden and _eye_kind == ""
+	if _graft_eye != null and is_instance_valid(_graft_eye):
+		_graft_eye.queue_free()
+		_graft_eye = null
+	if hidden or _eye_kind == "":
+		return
+	_graft_eye = GraftEye.build(_eye_l, _eye_kind, EYE_RADIUS)
+
+
 func infection_start(_site: String) -> float:
 	return INF
 
@@ -204,6 +246,20 @@ func set_gash_open(f: float) -> void:
 
 
 func _apply_visuals() -> void:
+	# GRAFTING chunk C: a graft is on the face, so the scrub top stays down and the belly is covered.
+	if _human != null:
+		var belly: bool = ailment_id != "eye_graft"
+		HumanModel.show_piece(_human, "Human_TopLower", not belly)
+		HumanModel.show_piece(_human, "Human_TopRolled", belly)
+		HumanModel.show_piece(_human, "Human_GashSkin", belly)
+		if not belly:
+			if _gash != null:
+				_gash.visible = false
+			if _scar != null:
+				_scar.visible = false
+			if _skin_blood != null:
+				_skin_blood.visible = false
+			return
 	var stitched := bool(_flags.get("stitched", false))
 	if _human != null:
 		var open := 0.0 if stitched else _gash_open
@@ -219,6 +275,7 @@ func _apply_visuals() -> void:
 
 
 func _process(delta: float) -> void:
+	_apply_eye()   # GRAFTING chunk C: the socket follows the case and the minigame's own eye
 	delta = minf(delta, 0.1)
 	_t += delta
 	var v01 := _vitals / 100.0
@@ -290,6 +347,19 @@ func _build_human() -> bool:
 	var y := Vector3.UP
 	var gxf := Transform3D(Basis(x, y, x.cross(y)), xf.origin)
 	_sites["gash"] = gxf
+	# GRAFTING chunk C: the left eye, from the eyes' site on the head bone (the body's left is -X of
+	# the model, which lying along the table is +Z here). The eyeball is skinned, so its own node
+	# transform says nothing about where it ends up: the bone does.
+	var eyes_site := root.find_child("Site_eyes", true, false) as Node3D
+	if eyes_site != null:
+		var ea := eyes_site.get_parent() as BoneAttachment3D
+		var e_bone := HumanModel.bone_global(skel, skel.find_bone(ea.bone_name))
+		var exf: Transform3D = to_rig * e_bone * eyes_site.transform
+		# The model's -X (its left) after the quarter turn onto the table: take it from the basis.
+		var left: Vector3 = (to_rig * e_bone).basis.orthonormalized() * Vector3.LEFT
+		_sites["eye"] = Transform3D(Basis(x, y, x.cross(y)), exf.origin + left * EYE_SIDE)
+	_eye_l = HumanModel.piece(root, "Human_Eye_L")
+	parts["eye_l"] = _eye_l
 	var inj := root.find_child("Site_injection", true, false) as Node3D
 	if inj != null:
 		var ia := inj.get_parent() as BoneAttachment3D

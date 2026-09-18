@@ -189,6 +189,11 @@ static func run(game: Node, progress: Callable = Callable(), ready_to_draw: Call
 		pb.set_bleeding("gash", 0.8)
 		pb.apply_flags({"stitched": stitched})
 		bodies["player|stitches"] = pb
+		# GRAFTING chunk C: the same body runs Eyeball Grafting (site "eye"), and one of them wears
+		# the grafted Hive eyeball, so its shader and the stitches round the socket compile here.
+		bodies["player|eye_graft"] = pb
+		if stitched:
+			pb.set_eye("eye_hive", false)
 		bx += 0.4
 		await _slice(slice)
 	_inert(shelf)
@@ -212,6 +217,12 @@ static func run(game: Node, progress: Callable = Callable(), ready_to_draw: Call
 	shelf.add_child(ptable)
 	ptable.position = Vector3(0.0, -1.4, -2.2)
 	ptable.scale = Vector3.ONE * 0.5
+	# GRAFTING chunk C: the vat stand that sits beside every OR table.
+	var vstand := Node3D.new()
+	Vats.build_stand(vstand)
+	shelf.add_child(vstand)
+	vstand.position = Vector3(0.6, -1.4, -2.2)
+	vstand.scale = Vector3.ONE * 0.5
 	_inert(shelf)
 	_report(progress, "staff", HumanModelScript.SURGEONS.size())
 	await _frame(slice)

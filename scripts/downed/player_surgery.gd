@@ -1,5 +1,7 @@
 extends Node
-## The operation on the OR's player table: a downed teammate, the `stitches` ailment, one step.
+## The operation on the OR's player table: a downed teammate, the `stitches` ailment, one step --
+## and, GRAFTING chunk C, Eyeball Grafting on a surgeon who strapped themselves to the same table
+## (`eye_graft`, four steps, no botches; scripts/grafting/grafts.gd owns its rules and its result).
 ## Child "PlayerSurgery" of Game on every machine (so its RPCs line up), created in game._ready.
 ##
 ## Self-contained on purpose (docs/SWEEP2.md, "Faster schedule"): until `game.add_case` exists this
@@ -93,11 +95,25 @@ func patient() -> Node:
 	return p if p != null and is_instance_valid(p) else null
 
 
+func is_graft() -> bool:
+	return String(case.get("ailment_id", "")) == "eye_graft"
+
+
 func _vitals() -> float:
 	var p := patient()
-	if p == null:
-		return 100.0
+	if p == null or is_graft():
+		return 100.0   # GRAFTING chunk C: a graft has nothing to lose, so the monitor stays calm
 	return clampf(float(p.bleed) / float(game.BLEED_SECONDS) * 100.0, 0.0, 100.0)
+
+
+## GRAFTING chunk C: why a strapped surgeon cannot get off the table right now ("" when they can).
+## They are free to leave until the scoop; after it the socket is open and they are committed.
+func graft_commit_block(p: Node) -> String:
+	if p == null or not is_graft() or int(case.get("player_id", 0)) != int(p.peer_id):
+		return ""
+	if int(case.get("step_index", 0)) < 2:
+		return ""
+	return "Not with your eye out."
 
 
 # =========================================================================
@@ -112,6 +128,18 @@ func start(p: Node, table := -1) -> void:
 	_revive_in = 0.0
 	case = {"patient_id": "player", "player_id": p.peer_id, "ailment_id": "stitches", "step_index": 0,
 		"flags": {"sedation": 1.0}, "table": table}
+	apply_locally()
+
+
+## GRAFTING chunk C, host: `q` began Eyeball Grafting on the strapped surgeon lying on the table.
+func start_graft(q: Node) -> void:
+	if not is_host() or not case.is_empty():
+		return
+	var c: Dictionary = game.grafts.make_case(q)
+	if c.is_empty():
+		return
+	_revive_in = 0.0
+	case = c
 	apply_locally()
 
 
@@ -136,6 +164,7 @@ func apply_locally() -> void:
 		patient_body = null
 		if key == "":
 			surgery.clear_case()
+			_refresh_stand_in()
 			return
 		var p := patient()
 		patient_body = PlayerBodyScript.create(int(case.player_id), p.colour if p != null else Color("3d8f80"))
@@ -144,10 +173,31 @@ func apply_locally() -> void:
 		patient_body.rotation.y = game.player_table_yaw()
 		patient_body.set_ailment(String(case.ailment_id))
 		surgery.start_case("player", String(case.ailment_id))
+	_refresh_stand_in()
 	var fk := str(case.get("flags", {})) + str(case.get("step_index", 0))
 	if fk != _flags_key and patient_body != null:
 		_flags_key = fk
 		patient_body.apply_flags(case.get("flags", {}))
+	# GRAFTING chunk C: what is in the socket follows the step. The old eye is there until the
+	# scoop takes it out, the socket is empty until the seat puts the new one in, and from then on
+	# the new one sits there (stitched in by the last step).
+	if is_graft() and patient_body != null and patient_body.has_method("set_eye"):
+		var si := int(case.get("step_index", 0))
+		var out_kind := String(case.get("out_kind", "eye_surgeon"))
+		var in_kind := String(case.get("in_kind", ""))
+		if si < 2:
+			patient_body.set_eye("" if out_kind != "eye_hive" else "eye_hive", false)
+		elif si == 2:
+			patient_body.set_eye("", true)
+		else:
+			patient_body.set_eye("" if in_kind != "eye_hive" else "eye_hive", false)
+
+
+## Every machine: the player on the table has a lying stand-in body, so their own must not draw.
+func _refresh_stand_in() -> void:
+	for p in game.players.values():
+		var want: bool = not case.is_empty() and int(p.peer_id) == int(case.get("player_id", 0)) and patient_body != null
+		p.set_stand_in(want)
 
 
 # =========================================================================
@@ -183,8 +233,15 @@ func surgery_step_done(result: Dictionary, operator_peer: int = 0) -> void:
 	case.step_index = int(case.step_index) + 1
 	apply_locally()
 	game._sound("step_done", table_pos())
+	game.grafts.on_step(case, result)   # GRAFTING chunk C: the scoop drops the old eye in the vat
 	var next := Procedures.step(String(case.ailment_id), int(case.step_index))
 	if next.is_empty():
+		if is_graft():
+			# GRAFTING chunk C: nobody is revived; the surgeon simply gets their new eye and is
+			# free to hold E and get up again.
+			game.grafts.finish(case)
+			clear()
+			return
 		# A moment to see the closed wound before they sit up and climb off the table.
 		_revive_in = REVIVE_DELAY
 
@@ -221,6 +278,8 @@ func physics_tick(delta: float) -> void:
 		var p := patient()
 		if p == null or not p.alive or not p.on_table:
 			clear()
+		elif is_graft():
+			pass   # GRAFTING chunk C: nothing to bleed out, and nobody to revive
 		elif _revive_in > 0.0:
 			_revive_in -= delta
 			if _revive_in <= 0.0:
@@ -234,8 +293,16 @@ func physics_tick(delta: float) -> void:
 ## The prompt for someone aiming at the player table while nobody is being carried.
 func operate_prompt(q: Node) -> String:
 	var p := patient()
-	if p == null or q == p:
+	if p == null:
+		return game.grafts.table_prompt(q)   # GRAFTING chunk C: a strapped surgeon and a loaded vat
+	if q == p:
 		return ""
+	if is_graft():
+		var step_g := Procedures.step(String(case.ailment_id), int(case.step_index))
+		if step_g.is_empty():
+			return ""
+		var why_g: String = surgery.can_begin(q)
+		return "!" + why_g if why_g != "" else "Operate: %s" % step_g.label
 	var step := Procedures.step(String(case.get("ailment_id", "")), int(case.get("step_index", 0)))
 	if step.is_empty():
 		return ""
@@ -246,8 +313,11 @@ func operate_prompt(q: Node) -> String:
 
 
 func begin(q: Node) -> void:
-	if operate_prompt(q).begins_with("Operate"):
-		surgery.begin(q)
+	if not operate_prompt(q).begins_with("Operate"):
+		return
+	if case.is_empty():
+		start_graft(q)   # GRAFTING chunk C: the case starts with the first step someone begins
+	surgery.begin(q)
 
 
 func end(q: Node) -> void:
@@ -277,3 +347,8 @@ func reset() -> void:
 	_revive_in = 0.0
 	case = {}
 	apply_locally()
+
+
+## GRAFTING chunk C: test seam -- the graft case on the table right now ({} when there is none).
+func graft_case() -> Dictionary:
+	return case if is_graft() else {}

@@ -208,10 +208,12 @@ const CombatScript := preload("res://scripts/combat/combat.gd")
 const DissectionScript := preload("res://scripts/dissection/dissection.gd")
 const BrainsScript := preload("res://scripts/brains/brains.gd")
 const VatsScript := preload("res://scripts/grafting/vats.gd")
+const GraftsScript := preload("res://scripts/grafting/grafts.gd")
 var combat: Node = null       # bone saw swings, anesthetic jabs, dragging and strapping monsters
 var dissection: Node = null   # monster cases on the patient tables: sedation, re-dosing, the brain
 var _step_operator := 0     # host: who finished the step that is finishing the case (only inside surgery_step_done)
 var vats: Node = null         # GRAFTING part one: specimen vats, eye spoilage (scripts/grafting/vats.gd)
+var grafts: Node = null       # GRAFTING chunk C: Eyeball Grafting on a strapped surgeon (scripts/grafting/grafts.gd)
 var brains: Node = null       # brain spoilage, the blender, per-player upgrades, Echo and Hive Eyes
 # POCKETS HOOK: pocket spaces (the Factory, the Restaurant), their seams and crossings.
 const PocketSpacesScript := preload("res://scripts/level/pockets/pocket_spaces.gd")
@@ -295,6 +297,10 @@ func _ready() -> void:
 	vats.name = "Vats"
 	add_child(vats)
 	vats.setup(self)
+	grafts = GraftsScript.new()
+	grafts.name = "Grafts"
+	add_child(grafts)
+	grafts.setup(self)
 	# POCKETS HOOK: after Entities, so crossings see this frame's movement. Same path everywhere.
 	pockets = PocketSpacesScript.new()
 	pockets.name = "Pockets"
@@ -1056,7 +1062,10 @@ func _table_prompt(p, table_index: int) -> String:
 	if c.is_empty() or String(c.get("patient_id", "")) == "player":
 		# GRAFT HOOK: on the hub a free patient table is also where you strap yourself down.
 		if downed_any_table and table_free(table_index):
-			return strap_in_prompt(p)
+			var sp: String = strap_in_prompt(p)
+			if sp != "":
+				return sp
+			return grafts.empty_table_prompt(p, table_index)   # GRAFTING chunk C: nobody strapped down
 		return ""
 	# Patient exits: a body waiting for the furnace (a patient or a dissected monster).
 	if p != null and corpses.is_corpse(c):
@@ -1732,6 +1741,8 @@ func reset_money() -> void:
 		economy.on_reset()
 	if brains != null:
 		brains.on_reset()   # SWEEP 3 HOOK: absorbed brains go with the money
+	if grafts != null:
+		grafts.on_reset()   # GRAFTING chunk C: a graft lasts the run, and goes with a game over
 
 
 ## SWEEP 4A HOOK (pharmacy, chunk 3): the flat price of one bottle of placebo pills. Never
@@ -3230,7 +3241,9 @@ func strap_in(q: Node, table_index := -1) -> void:
 func get_up_block(p: Node) -> String:
 	if p == null or not p.strapped():
 		return "Not on the table."
-	return ""
+	# GRAFTING chunk C: you can get up until the scoop; after that the socket is open and you are
+	# committed until the graft is finished.
+	return player_surgery.graft_commit_block(p)
 
 
 ## GRAFT HOOK: what a strapped surgeon sees on their own screen, looking up at the ceiling.
@@ -3998,6 +4011,7 @@ func _global_fields() -> Dictionary:
 		"pn": pill_notes.duplicate(),  # SWEEP 4A HOOK (pharmacy, chunk 3): OR green blip notes
 		# SWEEP 3 HOOK: small dictionaries of quantized values only (see docs/SWEEP3.md)
 		"cb": combat.net_state(), "dx": dissection.net_state(), "br": brains.net_state(),
+		"gf": grafts.net_state(),   # GRAFTING chunk C: who has a grafted part
 	}
 	# loop: the cases, one field per case so a vitals tick resends a float, not every case:
 	# "cs" the ids in order, "c.<id>" the case without vitals, "v.<id>" its vitals.
@@ -4239,6 +4253,7 @@ func _apply_state(state: Dictionary, msg: Dictionary, keyframe: bool) -> void:
 	combat.apply_net_state(g.get("cb", {}))
 	dissection.apply_net_state(g.get("dx", {}))
 	brains.apply_net_state(g.get("br", {}))
+	grafts.apply_net_state(g.get("gf", {}))   # GRAFTING chunk C
 	var new_tools := bool(g.get("dt", dev_tools))   # DEV HOOK
 	if new_tools != dev_tools:
 		dev_tools = new_tools

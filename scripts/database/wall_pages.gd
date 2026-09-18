@@ -81,7 +81,7 @@ const LOOT_BLURBS := {
 	"brain_hive": "A Hive's brain. Drink it to grow Hive Eyes.",
 	"brain_discharged": "A Discharged brain. Drink it to grow Echo.",
 	"eye_hive": "The eyeball of a strapped Hive. It clouds over and spoils in a minute or two unless it goes in a vat.",
-	"eye_surgeon": "A surgeon's own eye, labelled with whose it is. It spoils outside a vat, too.",
+	"eye_surgeon": "A surgeon's own eyeball, labelled with whose it is. It spoils outside a vat, too.",
 }
 
 

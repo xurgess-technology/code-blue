@@ -5,10 +5,17 @@ extends RefCounted
 ## (loot_table.gd) that SPOIL outside a vat: over about a minute or two the eye clouds over and
 ## dulls, and a spoiled eye can't be grafted. A vat stops the clock (vats.gd).
 ##
-## An eye's owner rides in the stack's/item's `x` string ("" for an Eyeball of Hive); the spoil clock is
-## `bt` (world time it came out), exactly like a brain's.
+## A part's owner rides in the stack's/item's `x` string ("Hive" for one cut out of a Hive); the
+## spoil clock is `bt` (world time it came out), exactly like a brain's.
+##
+## PART KINDS. Body parts are named "X's Y" everywhere (2026-09-18). Everything here and in vats.gd
+## works on a *part kind* string, not on eyes as such: a vat holds one part of whatever kind, and
+## the graft (grafts.gd) swaps parts of one kind. Part two (docs/GRAFTING_TRACHEA.md) adds a
+## trachea by putting it in KINDS / NOUN and giving it a model; nothing else here has to change.
 
 const KINDS := ["eye_hive", "eye_surgeon"]
+## Part kind -> the noun in "X's <noun>". The owner comes from `x` (or the Hive).
+const NOUN := {"eye_hive": "eyeball", "eye_surgeon": "eyeball"}
 
 const FRESH_SECONDS := 40.0     # no change for this long
 const ROTTEN_SECONDS := 130.0   # fully clouded by here
@@ -27,6 +34,10 @@ uniform float pupil_glow = 0.0;
 uniform float pupil_r = 0.30;
 uniform float ring_r = 0.62;
 instance uniform float rot = 0.0;
+// GRAFTING part one C: the Hive eye material's `Lock` (art/stylized/README.md). 0 = a low pinpoint,
+// 1 = the whole ball lit. Per instance, so a grafted surgeon's eye can flare while the item in a vat
+// stays dim. Grafts.gd drives it; everything else leaves it at 0.
+instance uniform float lock = 0.0;
 varying vec3 obj;
 
 void vertex() { obj = VERTEX; }
@@ -47,7 +58,9 @@ void fragment() {
 	ALBEDO = col;
 	ROUGHNESS = mix(0.12, 0.8, r);
 	SPECULAR = mix(0.9, 0.2, r);
+	float lit = clamp(lock, 0.0, 1.0);
 	EMISSION = iris * glow * (1.0 - r) * ring * (1.0 - pupil) + pupil_col * pupil_glow * pupil * (1.0 - r);
+	EMISSION += iris * (1.0 - r) * lit * 2.4 + pupil_col * pupil * lit * 2.0;
 }
 """
 
@@ -83,12 +96,13 @@ static func rot_of(f: float) -> float:
 	return clampf(1.0 - (f - MIN_FACTOR) / (1.0 - MIN_FACTOR), 0.0, 1.0)
 
 
-## "Eyeball of Hive" / "Zach's eye".
+## "Hive's eyeball" / "Zach's eyeball". Body parts are named "X's Y" everywhere.
 static func label(kind: String, owner: String) -> String:
-	if kind == "eye_hive":
-		return "Eyeball of Hive"
+	var noun := String(NOUN.get(kind, "part"))
 	var o := owner.strip_edges()
-	return "%s's eye" % (o if o != "" else "A surgeon")
+	if kind == "eye_hive":
+		return "%s's %s" % [o if o != "" else "Hive", noun]
+	return "%s's %s" % [o if o != "" else "A surgeon", noun]
 
 
 # ------------------------------------------------------------------ vat contents (a string)
@@ -176,6 +190,14 @@ static func set_rot(node: Node, r: float) -> void:
 		return
 	for mi in node.find_children("EyeBall*", "MeshInstance3D", true, false):
 		(mi as MeshInstance3D).set_instance_shader_parameter("rot", r)
+
+
+## The Hive eye material's `Lock` on every eyeball under `node`: 0 a low pinpoint, 1 the whole ball lit.
+static func set_lock(node: Node, v: float) -> void:
+	if node == null or not is_instance_valid(node):
+		return
+	for mi in node.find_children("EyeBall*", "MeshInstance3D", true, false):
+		(mi as MeshInstance3D).set_instance_shader_parameter("lock", clampf(v, 0.0, 1.0))
 
 
 static func footprint() -> Vector3:
