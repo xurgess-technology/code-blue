@@ -193,6 +193,7 @@ func _botsworth() -> void:
 		if (n as VisualInstance3D).visible:
 			meshes += 1
 	_check(meshes > 0, "the whole surgeon model is there, not a pair of arms (%d visible meshes)" % meshes)
+	await _lies_along_the_table()
 	_check(bw.global_position.distance_to(top) < 4.0, "he stands beside the table, in reach of you")
 	dev.control_botsworth()
 	await _frames(4)
@@ -202,6 +203,51 @@ func _botsworth() -> void:
 	var still = game.players.get(bw.peer_id)
 	_check(still != null and not still.possessed_local and still.bot_active and still.body_visual.visible,
 		"Dr. Botsworth stays behind with his body and his brain")
+
+
+## GRAFT HOOK: the drawn body has to lie ALONG the table, head at the head end, whichever way the
+## table faces -- the rig's "Lying" clip runs along its own Z, the table's long axis is its X, and
+## pinned_pose puts the strapped player's camera at the -X end looking down +X at their own feet.
+func _lies_along_the_table() -> void:
+	var skel: Skeleton3D = me.body_hands.skeleton if me.body_hands != null else null
+	if skel == null or skel.find_bone("head") < 0:
+		_check(false, "the surgeon rig has a skeleton to measure")
+		return
+	var ti := int(game.player_table.get("index", -1))
+	var was := game.player_table_yaw()
+	for yaw in [0.0, PI * 0.5, PI, -PI * 0.5, 0.7]:
+		_set_table_yaw(ti, yaw)
+		await _frames(12)
+		var head: Vector3 = skel.global_transform * skel.get_bone_global_pose(skel.find_bone("head")).origin
+		var hips: Vector3 = skel.global_transform * skel.get_bone_global_pose(skel.find_bone("hips")).origin
+		var foot: Vector3 = skel.global_transform * skel.get_bone_global_pose(skel.find_bone("foot.L")).origin
+		var b := Basis(Vector3.UP, game.player_table_yaw())
+		var along: Vector3 = b * Vector3(-1.0, 0.0, 0.0)   # the table's long axis, toward the head end
+		var dir: Vector3 = head - hips
+		dir.y = 0.0
+		_check(dir.length() > 0.2 and dir.normalized().dot(along) > 0.95,
+			"yaw %.2f: the body lies along the table, head toward the head end (%.2f)" % [yaw, dir.normalized().dot(along) if dir.length() > 0.001 else 0.0])
+		# and not sticking out over the sides: everything within half the table's width of its middle
+		var top: Vector3 = game.player_table_top()
+		for part in [["head", head], ["hips", hips], ["foot", foot]]:
+			var local: Vector3 = b.inverse() * ((part[1] as Vector3) - top)
+			_check(absf(local.z) < 0.45 and absf(local.x) < 1.05,
+				"yaw %.2f: the %s is on the table, not over the side (%.2f across, %.2f along)" % [yaw, part[0], local.z, local.x])
+		# the camera the strapped player looks out of is at the same end as their head
+		var cam: Vector3 = b.inverse() * (game.pinned_pose(me).origin - top)
+		var head_l: Vector3 = b.inverse() * (head - top)
+		_check(signf(cam.x) == signf(head_l.x),
+			"yaw %.2f: your own camera sits at the end your head is at (%.2f vs %.2f)" % [yaw, cam.x, head_l.x])
+	_set_table_yaw(ti, was)
+	await _frames(6)
+
+
+func _set_table_yaw(ti: int, yaw: float) -> void:
+	for t in game.patient_tables:
+		if int(t.index) == ti:
+			t["yaw"] = yaw
+	if ti < 0:
+		game.player_table["yaw"] = yaw
 
 
 # =========================================================================

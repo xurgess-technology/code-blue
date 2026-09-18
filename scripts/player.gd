@@ -268,6 +268,12 @@ var _held_cracked := false
 var downed_aim: Area3D
 
 const CRAWL_SPEED := 0.75
+## GRAFT HOOK: the quarter turns that line a lying body up with the table (see _update_down_pose).
+const LYING_CLIP_YAW := -PI * 0.5
+const LYING_FALLBACK_YAW := PI * 0.5
+## And how far up the table (toward the head end) the clip's own origin has to slide so the body
+## sits in the middle of the 2.2 m top instead of hanging off the foot end.
+const LYING_ALONG_OFFSET := -0.35
 const CARRY_SPEED_K := 0.6
 
 ## SWEEP 3 HOOK (combat): the monster id this player drags (scripts/combat/combat.gd), -1 for none.
@@ -2108,17 +2114,23 @@ func _update_down_pose(delta: float) -> void:
 		# camera, the dev free camera or driving Dr. Botsworth all show it: pose it like a remote one.
 		if not body_visual.visible:
 			return
-	# GRAFT HOOK: on the table the body is drawn where the lying PlayerBody stand-in goes -- origin
-	# on the table top, along the table (scripts/downed/player_body.gd) -- not at the player node,
-	# which pinned_pose parks 0.8 m up the table so the camera sits at the head end. Every machine
-	# works it out the same way, so it lies the same from Dr. Botsworth's camera as on any screen.
+	# GRAFT HOOK: the table's long axis is its local X, head end at -X (game.pinned_pose parks the
+	# player node, and so the camera, 0.8 m along -X and look_up_from_table faces it down +X toward
+	# its own feet). The rig's "Lying" clip instead runs along Z with the head at +Z, so the drawn
+	# body needs a quarter turn to line up with the table: -Z onto -X. The primitive fallback is a
+	# standing model tipped onto its back, head toward its local -Z, so it turns the other way.
+	# It is drawn at the table top, like the lying PlayerBody stand-in, not at the player node.
+	# Every machine works it out the same way, so the body lies the same from Dr. Botsworth's
+	# camera as it does on any other player's screen.
 	if on_table and game != null:
-		var b := Basis(Vector3.UP, game.player_table_yaw())
-		var lie := Transform3D(b, game.player_table_top())
+		var yaw: float = game.player_table_yaw()
+		var b := Basis(Vector3.UP, yaw)
+		var top: Vector3 = game.player_table_top() + b * Vector3(LYING_ALONG_OFFSET, 0.0, 0.0)
 		if body_hands != null and body_hands.lies_by_clip():
-			body_visual.global_transform = lie   # the rig lies down by its own "lying" clip
+			body_visual.global_transform = Transform3D(Basis(Vector3.UP, yaw + LYING_CLIP_YAW), top)
 		else:
-			body_visual.global_transform = lie * Transform3D(Basis(Vector3.RIGHT, -PI * 0.47), Vector3(0.0, 0.3, 0.0))
+			body_visual.global_transform = Transform3D(Basis(Vector3.UP, yaw + LYING_FALLBACK_YAW)
+				* Basis(Vector3.RIGHT, -PI * 0.47), top + Vector3(0.0, 0.3, 0.0))
 		return
 	if body_hands != null and body_hands.lies_by_clip():
 		# HUMAN HOOK: the human lies, crawls and hangs over the shoulder by its own clips; the Carried

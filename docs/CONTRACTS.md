@@ -1508,15 +1508,24 @@ game.strap_table: int                    # hub: the patient table they strapped 
   torch comes back on when you get up.
 - `refresh_downed_visuals` only hides the body for a *downed* patient on the table, who has a lying
   `PlayerBody` standing in; a strapped surgeon's own body lies there for everyone else to see.
-  `_update_down_pose` draws it where that stand-in goes -- origin on the table top, along the
-  table -- not at the player node, which `pinned_pose` parks 0.8 m up the table so the camera sits
-  at the head end.
+  `_update_down_pose` draws it at the table top, like that stand-in, not at the player node, which
+  `pinned_pose` parks 0.8 m up the table so the camera sits at the head end.
+- **Which way it lies.** A table's long axis is its local X with the head end at -X (that is where
+  `pinned_pose` puts the camera, and `look_up_from_table` faces it down +X at its own feet). The
+  human rig's "Lying" clip runs along its own Z, head at +Z, so the drawn body takes a quarter
+  turn, `Player.LYING_CLIP_YAW` (the primitive fallback is a standing model tipped onto its back,
+  head toward its local -Z, so `LYING_FALLBACK_YAW` turns it the other way), plus
+  `LYING_ALONG_OFFSET` up the table so the 1.5 m body sits in the middle of the 2.2 m top with its
+  head where the eyes are. All of it comes off `game.player_table_yaw()`, never the player node's
+  own yaw, which follows the strapped player's mouse. straptest measures the head, hips and foot
+  bones against the table's axis at five yaws.
 - Your own body is normally drawn to nobody. `Player.set_dev_body(on)` shows it out in the world
   on its ordinary layers (not the mirrors' `LightRooms.SELF`) and keeps the carry camera from
   switching it off again; driving Dr. Botsworth turns it on, and hides your first-person arms so
   they do not float over the table in his view.
 - Tests: `tools/straptest.tscn` (headless), `tools/strapshot.tscn` (the smoke look: shots into
-  `tools/strap_shots/`, run through `toolseview.bat 2 "SMOKE" -Scene res://tools/strapshot.tscn`
+  `tools/strap_shots/`, run through `tools
+eview.bat 2 "SMOKE" -Scene res://tools/strapshot.tscn`
   so no window ever takes focus).
 
 ## Combat (combat worker, sweep 3)

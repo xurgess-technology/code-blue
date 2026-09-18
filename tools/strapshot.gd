@@ -66,19 +66,36 @@ func _run() -> void:
 	me.bot_interact = false
 	await _shot("03_strapped_own_view")
 
-	# 4. Dr. Botsworth, looking back at you on the table: the whole surgeon, lying down.
+	# 4-8. Dr. Botsworth, looking back at you on the table: the whole surgeon, lying ALONG it, head
+	# at the head end. Both table orientations, from his eyes and from above.
 	game.dev.control_botsworth()
 	await _frames(6)
 	var bw = game.dev.possessed_player()
 	if bw != null:
-		_look_at_with(bw, game._floor_at(top + Vector3(0.0, -Game.OR_TABLE_TOP, 2.0)), top)
+		bw.noclip = true   # so the "from above" shots can leave the floor
+		_look_at_with(bw, game._floor_at(top + Vector3(0.0, -Game.OR_TABLE_TOP, 2.2)), top)
 		await _shot("04_from_botsworth")
-		_look_at_with(bw, game._floor_at(top + Vector3(-2.0, -Game.OR_TABLE_TOP, 1.4)), top)
+		_look_at_with(bw, game._floor_at(top + Vector3(-2.2, -Game.OR_TABLE_TOP, 1.4)), top)
 		await _shot("05_from_botsworth_side")
-		var bb := AABB(me.body_visual.global_position, Vector3.ZERO)
-		for n in me.body_visual.find_children("*", "VisualInstance3D", true, false):
-			bb = bb.merge((n as VisualInstance3D).global_transform * (n as VisualInstance3D).get_aabb())
-		print("[strapshot] body visible=%s at %s (table top %s) aabb %s size %s" % [me.body_visual.visible, me.body_visual.global_position, top, bb.position, bb.size])
+		_above(bw, top)
+		await _shot("06_from_above")
+		_report(top)
+		# The other orientation. Every table in this OR sits at yaw 0, so this turns the table DATA a
+		# quarter turn: the body and the camera follow it, the built table model does not, so the two
+		# shots below are for the body's own alignment (the numbers printed with them), not for how it
+		# sits on a table. straptest measures five yaws properly.
+		_turn_table(ti, PI * 0.5)
+		await _frames(20)
+		top = game.player_table_top()
+		_look_at_with(bw, game._floor_at(top + Vector3(2.2, -Game.OR_TABLE_TOP, 0.0)), top)
+		await _shot("07_yaw_turned_from_botsworth")
+		_above(bw, top)
+		await _shot("08_yaw_turned_from_above")
+		_report(top)
+		_turn_table(ti, 0.0)
+		await _frames(20)
+		top = game.player_table_top()
+		bw.noclip = false
 	game.dev.control_botsworth()
 	await _frames(6)
 
@@ -88,9 +105,44 @@ func _run() -> void:
 	me.bot_interact = false
 	await _seconds(0.5)
 	_look_from(me.global_position, top)
-	await _shot("06_back_up")
+	await _shot("09_back_up")
 	print("[strapshot] done, %d shots" % _i)
 	get_tree().quit(0)
+
+
+## A camera above the table, looking straight down the long axis from overhead.
+func _above(p: Player, top: Vector3) -> void:
+	p.teleport(top + Vector3(0.0, 3.4, 0.01))
+	p.bot_yaw = game.player_table_yaw() - PI * 0.5
+	p._yaw = p.bot_yaw
+	p.rotation.y = p.bot_yaw
+	p.bot_pitch = -1.45
+	p._pitch = -1.45
+	p.head.rotation.x = -1.45
+
+
+func _turn_table(ti: int, yaw: float) -> void:
+	for t in game.patient_tables:
+		if int(t.index) == ti:
+			t["yaw"] = yaw
+	if ti < 0:
+		game.player_table["yaw"] = yaw
+
+
+## The numbers behind the picture: where the head and the feet actually are, along the table.
+func _report(top: Vector3) -> void:
+	var skel: Skeleton3D = me.body_hands.skeleton if me.body_hands != null else null
+	if skel == null:
+		return
+	var b := Basis(Vector3.UP, game.player_table_yaw())
+	var out := []
+	for n in ["head", "hips", "foot.L"]:
+		var bi := skel.find_bone(n)
+		if bi >= 0:
+			var w: Vector3 = skel.global_transform * skel.get_bone_global_pose(bi).origin
+			var l: Vector3 = b.inverse() * (w - top)
+			out.append("%s along %.2f across %.2f up %.2f" % [n, l.x, l.z, l.y])
+	print("[strapshot] yaw %.2f  %s  (table top is 2.2 x 0.7)" % [game.player_table_yaw(), ", ".join(out)])
 
 
 func _free_table() -> int:
