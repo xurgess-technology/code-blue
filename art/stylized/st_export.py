@@ -323,6 +323,8 @@ def make_sites(c, arm):
         sites.append(site_empty(arm, 'throat', 'neck2', godot_frame(Vector((0, -1, 0)), Vector((0, 0, 1)), thr)))
         cab = Vector(tuple(head.world(st_char.CABLE_NECK)))
         sites.append(site_empty(arm, 'cable', 'neck', godot_frame(Vector((-1, 0, 0)), Vector((0, 0, 1)), cab)))
+        mth = Vector(tuple(head.world(np.array([0.0, -0.100, head.mouth_z]))))
+        sites.append(site_empty(arm, 'mouth', 'head', godot_frame(Vector((1, 0, 0)), Vector((0, -1, 0)), mth)))
         tip = st_char.probe_tip(sk)
         _wr, pd = st_char.probe_axis(sk)
         up = np.array([0.0, 0.0, 1.0])

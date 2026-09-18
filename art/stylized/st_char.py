@@ -279,10 +279,14 @@ class Head:
         h = S.union(h, chin, k=0.03)
         h = S.union(h, cheek, k=0.03)
         ec, er = self.eye_c, self.eye_r
-        br = S.chain([np.array([-0.048, ec[1] + 0.001, ec[2] + 0.019]), np.array([-0.014, ec[1] - 0.012, ec[2] + 0.021]),
-                      np.array([0.014, ec[1] - 0.012, ec[2] + 0.021]), np.array([0.048, ec[1] + 0.001, ec[2] + 0.019])],
-                     [0.0055, 0.0068, 0.0068, 0.0055])
-        h = S.union(h, br, k=0.016)
+        if not self.V.get('sono'):
+            br = S.chain([np.array([-0.048, ec[1] + 0.001, ec[2] + 0.019]), np.array([-0.014, ec[1] - 0.012, ec[2] + 0.021]),
+                          np.array([0.014, ec[1] - 0.012, ec[2] + 0.021]), np.array([0.048, ec[1] + 0.001, ec[2] + 0.019])],
+                         [0.0055, 0.0068, 0.0068, 0.0055])
+            h = S.union(h, br, k=0.016)
+        else:
+            # a soft fullness where the brow would be, so the blank face still has a front to it
+            h = S.union(h, S.ellipsoid((0.0, ec[1] + 0.010, ec[2] + 0.014), (0.050, 0.026, 0.020)), k=0.026)
         # a small nose
         bridge = S.round_cone((0, -0.084, 0.016), (0, -0.099, -0.014), 0.0055, 0.0095)
         wings = S.mirror_x(S.sphere((0.0088, -0.090, -0.019), 0.0062))
@@ -301,11 +305,11 @@ class Head:
             wide = 0.0135 * (1.0 + 0.55 * (1.0 if self.V.get('sono') else 0.0))
             gap = E((0, -0.092, -0.0475 - 0.002 * mo), (wide, 0.016, 0.0028 + 0.0030 * mo))
             h = S.subtract(h, gap, k=0.0022)
-        if self.V.get('sono') and eyes:
-            # no eyes and no sockets: a smooth pad of scar tissue fills each one flush with the face,
-            # with a faint seam where the lids used to meet scored across it
-            h = S.union(h, self.scar_pads(), k=0.016)
-            h = S.subtract(h, self.scar_seam(), k=0.0012)
+        if self.V.get('sono'):
+            # No eyes, and nothing eye-shaped: no sockets, no pads, no seam. The face is smooth blank
+            # skin from the brow down to the cheeks, and only the ears, the nose and the wide mouth
+            # break it.
+            pass
         elif eyes:
             # eyes: a spherical socket exactly round the ball, then lids as a shell on that same sphere
             ball = S.mirror_x(S.sphere(ec, er + self.gap))
@@ -815,19 +819,12 @@ class Head:
         V = self.V
         ec = self.eye_c
         x, y, z = np.abs(L[:, 0]), L[:, 1], L[:, 2]
-        d = np.sqrt(((x - ec[0]) / 0.0245) ** 2 + ((z - ec[2]) / 0.0180) ** 2)
-        pad = smooth01((1.05 - d) / 0.30) * (y < ec[1] + 0.016)
-        sc = srgb(V.get('scar', (0.76, 0.74, 0.70))) * (0.96 + 0.07 * S.fbm(L, 220.0, 29, 2))[:, None]
-        # a faint web of old tension lines pulling in to the middle of each pad
-        web = smooth01(1 - np.abs(S.fbm(L, 150.0, 37, 2) - 0.5) / 0.03) * pad
-        sc = mix(sc, sc * 0.86, np.clip(web * 0.45, 0, 1))
-        col = mix(col, sc, np.clip(pad, 0, 1))
-        rough = rough * (1 - pad) + 0.18 * pad
-        # the seam: a thin line a little darker and pinker than the pad
-        sx, sz = (x - ec[0]) / 0.021, (z - ec[2] - 0.0025 + 0.004 * ((x - ec[0]) / 0.021)) / 0.0022
-        seam = smooth01(1 - np.abs(sz)) * smooth01((1.05 - np.abs(sx)) / 0.35) * pad
-        col = mix(col, srgb((0.48, 0.36, 0.36)), np.clip(seam * 0.75, 0, 1))
-        rough = rough + 0.20 * seam
+        # A blank face: the skin over the whole eye band is just skin, a shade paler and smoother
+        # than the rest because it is stretched over nothing, with no edge anywhere to read as an eye.
+        band = smooth01((0.030 - np.abs(z - ec[2] - 0.004)) / 0.030) * smooth01((0.062 - x) / 0.030) * (y < ec[1] + 0.020)
+        sc = srgb(V.get('scar', (0.86, 0.78, 0.78))) * (0.97 + 0.05 * S.fbm(L, 220.0, 29, 2))[:, None]
+        col = mix(col, sc, np.clip(band * 0.55, 0, 1))
+        rough = rough * (1 - 0.5 * band) + 0.16 * band
         # the throat window: the skin thins to a bruised, bluish pane over the windpipe
         w = self.throat_window()(L)
         win = smooth01((0.004 - w) / 0.006)
@@ -1035,9 +1032,12 @@ def build(name, body):
         hl = np.minimum(hl, np.array([-0.2, -0.13, 1.19 * s]))
         hh = np.maximum(hh, np.array([0.2, 0.13, H]))
     else:
-        hl = np.minimum(hl, np.array([-0.2, -0.13, 1.30 * s]))
-        chest = trunk_sdf(s, V['girth'], grow=-0.004, z_lo=1.36 * s, z_hi=1.50 * s)
-        chest = S.intersect(chest, lambda P: np.abs(P[:, 0]) - 0.10 * s, k=0.02)
+        hl = np.minimum(hl, np.array([-0.2, -0.13, 1.24 * s]))
+        # The Sonographer's stops well under its collar: only the neck is meant to come out of the
+        # shirt, and when the neck stretches nothing of the torso goes with it.
+        top = 1.345 * s if V.get('sono') else 1.50 * s
+        chest = trunk_sdf(s, V['girth'], grow=-0.004, z_lo=1.28 * s if V.get('sono') else 1.36 * s, z_hi=top)
+        chest = S.intersect(chest, lambda P: np.abs(P[:, 0]) - (0.075 if V.get('sono') else 0.10) * s, k=0.02)
         hsdf = S.union(hsdf, chest, k=0.03)
     parts.append(Part('Head', SKIN, hsdf, hl, hh, 0.0011, paint=lambda P: head.paint_skin(P, V['graft'])))
 
@@ -1166,13 +1166,16 @@ def _sono_hands(V, sk, parts):
 
     # the probe: a chunky wand fused into the right palm, the fingers grown half round it
     wr, d = probe_axis(sk)
-    a = wr + d * 0.012
-    b = wr + d * 0.20
-    body = S.round_cone(tuple(a), tuple(b - d * 0.05), 0.026, 0.021)
-    head_ = S.rbox(tuple(b - d * 0.012), (0.030, 0.030, 0.014), 0.008, _aim_frame(d))
-    grip = S.torus(tuple(wr + d * 0.055), 0.028, 0.008, _aim_frame(d))
-    f = S.union(body, head_, k=0.010)
-    f = S.union(f, grip, k=0.006)
+    # the grip runs through the middle of the palm, so the fingers curl right round it
+    a = wr + d * 0.030
+    b = wr + d * 0.215
+    grip_body = S.round_cone(tuple(wr - d * 0.020), tuple(a + d * 0.055), 0.0225, 0.0215)
+    neck_ = S.round_cone(tuple(a + d * 0.055), tuple(b - d * 0.045), 0.020, 0.023)
+    head_ = S.rbox(tuple(b - d * 0.010), (0.032, 0.032, 0.015), 0.008, _aim_frame(d))
+    collar = S.torus(tuple(a + d * 0.050), 0.026, 0.0075, _aim_frame(d))
+    f = S.union(grip_body, neck_, k=0.012)
+    f = S.union(f, head_, k=0.010)
+    f = S.union(f, collar, k=0.006)
 
     def probe_paint(Pp):
         col = np.tile(srgb((0.80, 0.79, 0.74)), (len(Pp), 1)) * (0.92 + 0.14 * S.fbm(Pp, 60.0, 71, 2))[:, None]
@@ -1241,22 +1244,24 @@ def _coat(V, sk, parts):
     T2[:, 4] = np.minimum(T2[:, 4], 2.2)
 
     # ---- the shirt: close to the body, open at the collar
-    shirt = trunk_sdf(s, g, grow=0.012, z_lo=0.90 * s, z_hi=1.50 * s, table=T2)
+    # it tucks in: the shirt stops just above the waistband and the trousers sit outside it
+    shirt = trunk_sdf(s, g, grow=0.012, z_lo=0.97 * s, z_hi=1.435 * s, table=T2)
     for side in (1, -1):
         sh, el, wr, kn = arm_points(sk, side)
         ax = (el - sh) / np.linalg.norm(el - sh)
         end = sh + (el - sh) * 0.86
         sleeve = S.intersect(S.round_cone(sh + ax * 0.01, end, 0.048 * s * g, 0.040 * s * g),
                              S.plane(ax, end @ ax), k=0.004)
-        shirt = S.union(shirt, sleeve, k=0.035)
+        # a fat blend instead of a cap: the sleeve grows out of a rounded shoulder, no shelf
+        shirt = S.union(shirt, sleeve, k=0.075)
 
     def collar(Pp):
         # a wide V, open low: the throat stays bare
         x, y, z = Pp[:, 0], Pp[:, 1], Pp[:, 2]
-        zv = 1.290 * s + np.abs(x) * 1.7
+        zv = 1.330 * s + np.abs(x) * 0.95
         return np.maximum(zv - z, y - 0.01)
     shirt = S.subtract(shirt, collar, k=0.008)
-    shirt = S.subtract(shirt, S.capsule((0, 0.02, 1.44 * s), (0, 0.02, 1.70 * s), 0.072 * s), k=0.010)
+    shirt = S.subtract(shirt, S.capsule((0, 0.02, 1.375 * s), (0, 0.02, 1.70 * s), 0.064 * s), k=0.014)
 
     def shirt_extra(Pp, c, r):
         st = smooth01((S.fbm(Pp, 5.0, 44, 3) - 0.54) / 0.09) * (Pp[:, 1] < 0.02)
@@ -1282,14 +1287,14 @@ def _coat(V, sk, parts):
         (0.70, 0.200, 0.160, 0.004, 2.2),
         (0.88, 0.192, 0.150, 0.008, 2.3),
     ] + [tuple(r) for r in TRUNK[4:]])
-    coat = trunk_sdf(s, g, grow=0.030, table=COAT, z_lo=0.52 * s, z_hi=1.50 * s)
+    coat = trunk_sdf(s, g, grow=0.030, table=COAT, z_lo=0.52 * s, z_hi=1.455 * s)
     for side in (1, -1):
         sh, el, wr, kn = arm_points(sk, side)
         ax = (el - sh) / np.linalg.norm(el - sh)
         end = sh + (el - sh) * 1.02
         sleeve = S.intersect(S.round_cone(sh - ax * 0.02, end, 0.062 * s * g, 0.050 * s * g),
                              S.plane(ax, end @ ax), k=0.005)
-        coat = S.union(coat, sleeve, k=0.030)
+        coat = S.union(coat, sleeve, k=0.085)
 
     def hem(Pp):
         # chunky tatters: big square-ish teeth, not a fringe
@@ -1302,10 +1307,10 @@ def _coat(V, sk, parts):
         w = 0.030 * s + 0.085 * s * smooth01((1.30 * s - z) / (0.55 * s))
         return np.maximum(np.abs(x - 0.012 * s) - w, y + 0.02)
     coat = S.subtract(coat, front, k=0.010)
-    coat = S.subtract(coat, S.capsule((0, 0.02, 1.42 * s), (0, 0.02, 1.72 * s), 0.082 * s), k=0.012)
+    coat = S.subtract(coat, S.capsule((0, 0.02, 1.385 * s), (0, 0.02, 1.72 * s), 0.078 * s), k=0.016)
     # the tear: a bite out of the left shoulder
     shL = arm_points(sk, 1)[0]
-    coat = S.subtract(coat, S.ellipsoid(tuple(shL + np.array([-0.02, -0.01, 0.02])), (0.075, 0.085, 0.060)), k=0.012)
+    coat = S.subtract(coat, S.ellipsoid(tuple(shL + np.array([-0.035, -0.02, 0.040])), (0.052, 0.058, 0.040)), k=0.014)
     coat = S.displace(coat, lambda Pp: 0.004 * np.sin(np.arctan2(Pp[:, 0], -Pp[:, 1]) * 7 + 0.4)
                       * smooth01((1.15 * s - Pp[:, 2]) / 0.35))
 
@@ -1322,7 +1327,7 @@ def _coat(V, sk, parts):
                                                            seed=31, extra=coat_extra)))
 
     # ---- trousers, frayed at the cuff, and scuffed shoes
-    pel = trunk_sdf(s, g, grow=0.010, z_lo=0.80 * s, z_hi=0.99 * s, table=T2)
+    pel = trunk_sdf(s, g, grow=0.026, z_lo=0.80 * s, z_hi=1.005 * s, table=T2)
     pants = pel
     for side in (1, -1):
         m = (lambda p: p) if side > 0 else sk.mirror

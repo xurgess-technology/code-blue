@@ -39,6 +39,9 @@ const WANDER_SPEED := 0.80
 const RUSH_SPEED := 3.10
 ## How far the neck chain stretches from rest to fully craned, in metres (art/stylized: CRANE_M).
 const CRANE_M := 0.60
+## How long the echo's burst lasts, and how far its rings get.
+const BURST_T := 0.75
+const BURST_R := 1.9
 ## How far the chain unfolds out of its hunch at full crane, in radians, shared down the chain.
 const CRANE_LIFT := 0.70
 ## Where the crane goes instead when there is a ceiling: forward, not up.
@@ -89,6 +92,12 @@ var _light: OmniLight3D = null
 var _probe: Node3D = null
 var _shown := -1.0
 var _crane := 0.0
+var _mouth: Node3D = null
+var _rings: Array = []          ## [MeshInstance3D], the echo's rings: mouth first, then the probe
+var _ring_mats: Array = []
+var _flash: Array = []          ## [OmniLight3D] at the mouth and the probe
+var _burst := -1.0              ## seconds since the echo fired, or -1 for nothing happening
+var _was_echo := false
 
 static var _looped := false
 
@@ -150,6 +159,9 @@ func _setup(root: Node3D, sk: Skeleton3D, model: Node3D) -> void:
 	_cable_glow(root)
 	_wet_skin(root)
 	_probe = _marker(root, sk, "Site_probe", "hand.R", "ProbeTip", Vector3(0.0, 0.0, -0.18))
+	_mouth = _marker(root, sk, "Site_mouth", "head", "Mouth", Vector3(0.0, 0.02, 0.10))
+	_make_burst()
+	set_process(true)
 	_set_glow(0.0)
 
 
@@ -304,6 +316,11 @@ func set_look(susp: float, chg: float, m: String, probe_aim := Vector3.ZERO, lim
 	aim = probe_aim
 	crane_limit = clampf(limit, 0.0, 1.0)
 	_set_glow(maxf(charge, suspicion))
+	# the echo is a beat: fire the burst the moment the mode turns to it
+	var echoing := m == "echo"
+	if echoing and not _was_echo:
+		fire_echo()
+	_was_echo = echoing
 
 
 ## How far the neck is craned right now, 0..1. Suspicion drives it; a charge holds it at full.
@@ -447,10 +464,13 @@ func _stretch(sk: Skeleton3D, amount: float) -> void:
 		var bi := _bone(sk, NECK_BONES[i])
 		if bi < 0:
 			continue
-		# on top of whatever the clip left, the way _turn does for rotations
-		var d := sk.get_bone_pose_position(bi)
-		if d.length() > 1e-5:
-			sk.set_bone_pose_position(bi, d + d.normalized() * per * NECK_SHARE[i])
+		# The bottom bone never moves: its head sits on the collarbones, and pushing it would carry
+		# the shoulders and the shirt's collar up with the neck. Only the three above it stretch.
+		if i > 0:
+			# on top of whatever the clip left, the way _turn does for rotations
+			var d := sk.get_bone_pose_position(bi)
+			if d.length() > 1e-5:
+				sk.set_bone_pose_position(bi, d + d.normalized() * per * NECK_SHARE[i] / (1.0 - NECK_SHARE[0]))
 		# unfold out of the hunch, and under a ceiling bend forward instead of standing up
 		_turn(sk, NECK_BONES[i], Vector3.RIGHT, (-CRANE_LIFT * up + CRANE_FORWARD * fwd) * amount * NECK_SHARE[i])
 	# the head levels out with it, so it ends up looking where it is listening
@@ -497,3 +517,87 @@ func _cock(sk: Skeleton3D, amt: float) -> void:
 		_turn(sk, NECK_BONES[i], Vector3.UP, yaw * 0.54 * NECK_SHARE[i] * amt)
 	_turn(sk, "head", Vector3.UP, yaw * float(LOOK_SHARE["head"]) * amt)
 	_turn(sk, "head", Vector3.BACK, -0.24 * amt)
+
+
+# ====================================================================== the echo's burst
+## Rings that fly out of its mouth and off the probe when the echo goes, so the pulse is a beat you
+## can see and not just a pose. Three from each, staggered, growing and fading, with a violet flash
+## behind them. Built once and hidden; `fire_echo()` starts them, and `set_look` fires it for you the
+## moment the mode turns to "echo".
+func _make_burst() -> void:
+	for where in [_mouth, _probe]:
+		if where == null:
+			continue
+		var light := OmniLight3D.new()
+		light.light_color = GLOW
+		light.omni_range = 2.4
+		light.light_energy = 0.0
+		light.shadow_enabled = false
+		light.visible = false
+		where.add_child(light)
+		_flash.append(light)
+		for i in 3:
+			var m := StandardMaterial3D.new()
+			m.albedo_color = Color(GLOW.r, GLOW.g, GLOW.b, 0.55)
+			m.emission_enabled = true
+			m.emission = GLOW
+			m.emission_energy_multiplier = 6.0
+			m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+			m.cull_mode = BaseMaterial3D.CULL_DISABLED
+			m.disable_receive_shadows = true
+			var torus := TorusMesh.new()
+			torus.inner_radius = 0.30
+			torus.outer_radius = 0.38
+			torus.material = m
+			var mi := MeshInstance3D.new()
+			mi.name = "EchoRing"
+			mi.mesh = torus
+			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			mi.visible = false
+			# a torus lies in its own XZ plane, so stand it up to face the way the mouth or the wand
+			# points (both markers point along their -Z)
+			mi.rotation = Vector3(PI * 0.5, 0.0, 0.0)
+			where.add_child(mi)
+			_rings.append(mi)
+			_ring_mats.append(m)
+
+
+## Fire the echo's burst now. sono-brain can call this on the exact frame the fan goes out; set_look
+## also calls it when the mode first becomes "echo".
+func fire_echo() -> void:
+	_burst = 0.0
+
+
+func _process(delta: float) -> void:
+	if _burst < 0.0:
+		return
+	_burst += delta
+	if _burst > BURST_T:
+		_burst = -1.0
+		for mi in _rings:
+			(mi as MeshInstance3D).visible = false
+		for l in _flash:
+			(l as OmniLight3D).visible = false
+		return
+	for l in _flash:
+		var light := l as OmniLight3D
+		light.visible = true
+		light.light_energy = 5.0 * pow(1.0 - _burst / BURST_T, 2.2)
+	for i in _rings.size():
+		var mi := _rings[i] as MeshInstance3D
+		# three rings per mouth/probe, each starting a beat after the one before it
+		var t := _burst / BURST_T - 0.14 * float(i % 3)
+		if t <= 0.0 or t >= 1.0:
+			mi.visible = false
+			continue
+		mi.visible = true
+		var r := 0.12 + BURST_R * t
+		mi.scale = Vector3(r, r, r)
+		# they fly out in front of whatever they hang on, and thin as they go
+		mi.position = Vector3(0.0, 0.0, -0.10 - 1.5 * t)
+		var m := _ring_mats[i] as StandardMaterial3D
+		var a := (1.0 - t) * (1.0 - t)
+		m.albedo_color = Color(GLOW.r, GLOW.g, GLOW.b, 0.65 * a)
+		m.emission_energy_multiplier = 9.0 * a

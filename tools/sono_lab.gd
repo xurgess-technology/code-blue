@@ -128,7 +128,7 @@ func _steps() -> Array:
 		{"say": "crane: suspicion takes the neck up and the rings apart", "clip": "listen", "s": 5.0, "sus": [0.35, 1.0], "chg": [0.0, 0.0], "ear": 0.8},
 		{"say": "crane under a ceiling: crane_limit 0.2, so it bends forward instead", "clip": "listen", "s": 4.5, "sus": [1.0, 1.0], "chg": [0.0, 0.0], "ear": 0.6, "limit": 0.2},
 		{"say": "charge: head up, jaw down, the glow runs out to the probe", "clip": "charge", "s": 3.0, "sus": [1.0, 1.0], "chg": [0.0, 1.0], "ear": 0.6},
-		{"say": "echo: the pulse fires from the probe, the neck snaps down", "clip": "echo", "s": 2.0, "sus": [1.0, 0.1], "chg": [1.0, 0.0], "ear": 0.3},
+		{"say": "echo: mouth wide, rings out of the mouth and the probe", "clip": "echo", "s": 3.0, "sus": [1.0, 0.1], "chg": [1.0, 0.0], "ear": 0.3},
 		{"say": "rush: neck low and forward, head leading, both arms out", "clip": "run", "s": 3.5, "sus": [0.2, 0.2], "chg": [0.0, 0.0], "ear": 0.1},
 		{"say": "wail: clubbing and clawing, with listening pauses in it", "clip": "attack", "s": 6.4, "sus": [0.2, 0.2], "chg": [0.0, 0.0], "ear": 0.0},
 		{"say": "search: still, the neck rising, the head sweeping", "clip": "search", "s": 6.0, "sus": [0.2, 0.7], "chg": [0.0, 0.0], "ear": 0.4},

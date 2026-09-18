@@ -63,7 +63,8 @@ def head_pose(p, up=0.0, cock=1.0, turn=0.0, jaw=0.0):
 def probe_hang(p, swing=0.0, out=0.0, bend=0.30, twist=0.0):
     """The right arm, with the wand grown into it: heavier than the other, and it never opens."""
     arm_hang(p, 'R', swing=swing, abduct=0.12 + out, bend=bend, wrist=-0.10, twist=twist)
-    hand_relax(p, 'R', curl=0.82, thumb=0.45)
+    # shut hard round the wand: the fingers wrap the grip and the thumb comes over them
+    hand_relax(p, 'R', curl=1.15, thumb=0.95)
 
 
 def feeler(p, reach=0.0, spread=1.0, curl=0.10):
@@ -180,7 +181,9 @@ def echo_pose(rig, f, n=26):
     p.hips = Vector((0.0, 0.030 * s * jolt + 0.010 * s * (1 - down), -0.016 * s * down))
     spine(p, lean=LEAN - 0.16 + 0.22 * jolt + 0.14 * down, breathe=lerp(-1.3, 0.8, down), neck_comp=0.0)
     neck(p, hunch=lerp(0.45, 1.0, down) + 0.18 * jolt, lift=0.16 * (1 - down))
-    head_pose(p, up=lerp(0.62, 0.0, down) - 0.30 * jolt, cock=lerp(0.4, 1.0, down), jaw=1.2 * (1 - down))
+    # the jaw is thrown wide for the pulse and only closes as the neck comes back down
+    head_pose(p, up=lerp(0.62, 0.0, down) - 0.30 * jolt, cock=lerp(0.4, 1.0, down),
+              jaw=2.6 * (1.0 - smooth01((t - 0.10) / 0.55)) + 0.5 * (1 - down))
     _stand(p, rig, spread=1.05)
     probe_hang(p, swing=lerp(1.62, 0.10, down) + 0.25 * jolt, out=0.10 * (1 - down), bend=0.30)
     feeler(p, reach=lerp(-0.35, 0.10, down), spread=1.0, curl=0.3 * (1 - down) + 0.1)
