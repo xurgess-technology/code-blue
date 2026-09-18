@@ -19,6 +19,7 @@ downloaded or generated models. Replaces the realistic `art/human` surgeons for 
 | `st_sdf.py` | Signed distance fields in numpy (smooth unions, round cones, noise) and a surface-nets mesher |
 | `st_char.py` | The characters as data plus shapes: skeleton numbers, the head (v2 = the surgeon's), hands, limbs, scrubs, gown, gash pieces, per-vertex paint |
 | `st_build.py` | Blender driver: meshes every part, weights it to the human pipeline's skeleton, poses and renders review shots, animation strips (`--anim`), the game export (`--export`) |
+| `st_clips.py` | Clips added on top of the shared 11: `Dive` (the sprint-dive, flat out in the air and belly-sliding; body_hands plays it) |
 | `st_export.py` | Game export: decimation (~21.7k tris), UV atlas per material, bakes from the dense sculpt (albedo + AO, roughness, normals, shader masks), the belly gash pieces, sites, the 11 clips, GLB |
 
 The skeleton, bone names, clips and posing helpers come from `art/human/blender_src` (`hu_body`, `hu_rig`),

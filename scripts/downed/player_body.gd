@@ -274,6 +274,7 @@ func _build_human() -> bool:
 	_gash_mesh = gash
 	HumanModel.show_piece(root, "Human_TopLower", false)
 	HumanModel.show_piece(root, "Human_TopRolled", true)
+	HumanModel.show_piece(root, "Human_GashSkin", true)
 	# Lying frame 0: back on the origin, head toward model -Z; yaw 180 then -90 puts the head at -X.
 	root.rotation.y = -PI * 0.5
 	HumanModel.sample_clip(skel, lying, 0.0)

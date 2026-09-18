@@ -22,7 +22,7 @@ class LabGame extends Node3D:
 	var level_info: Dictionary = {}
 	var world_time := 0.0
 	var noises: Array = []
-	var combat: Node = null   # no fights in the lab: body_hands reads this and skips combat poses
+	var combat: Node = null   # set to a LabCombat for the shots that pose a wind-up
 
 	func _ready() -> void:
 		add_to_group("game")
@@ -47,6 +47,17 @@ class LabGame extends Node3D:
 		return []
 
 	func say(_text: String, _seconds: float = 3.0) -> void:
+		pass
+
+
+## Stand-in for game.combat: every player is in the wind-up in `act` (combat.action_of's shape).
+class LabCombat extends Node:
+	var act := {}
+
+	func action_of(_p: Node) -> Dictionary:
+		return act
+
+	func animate_held(_p: Node, _delta: float, _fp: Node3D, _tp: Node3D) -> void:
 		pass
 
 
@@ -194,6 +205,9 @@ func surgeon(id: int, pos: Vector3, yaw: float, new_model := true) -> Node:
 
 
 func clear_subjects() -> void:
+	if game.combat != null:
+		game.combat.queue_free()
+		game.combat = null
 	for p in subjects:
 		game.players.erase(p.peer_id)
 		p.queue_free()
@@ -219,6 +233,11 @@ func _run_shots() -> void:
 		["walking", _shot_walk],
 		["throw_windup", _shot_throw.bind(true)],
 		["throw_release", _shot_throw.bind(false)],
+		["walk_no_gashskin", _shot_walk_hiding.bind("Human_GashSkin")],
+		["walk_no_toplower", _shot_walk_hiding.bind("Human_TopLower")],
+		["dive_air", _shot_dive],
+		["shove_charge_lights", _shot_shove.bind(true)],
+		["shove_charge_nolights", _shot_shove.bind(false)],
 	]
 	for s in list:
 		if only != "" and not only.split(",").has(s[0]):
@@ -283,6 +302,45 @@ func _shot_walk() -> void:
 	look_from(cor(24.0, 1.2) + Vector3.UP * C.EYE_H, cor(21.0, 0.0) + Vector3.UP * 1.0)
 	p.moving = true
 	await wait(0.55)
+
+
+## Mid-dive, as a teammate sees it: the replicated in-the-air bit, the body half a metre up.
+func _shot_dive() -> void:
+	var pos := cor(21.0, 0.0) + Vector3.UP * 0.35
+	var p := surgeon(1, pos, -PI * 0.5 + 1.1)
+	p._remote_dive_air = true
+	set_light(1, true)
+	set_light(2, true)
+	look_from(cor(23.4, 1.6) + Vector3.UP * 1.3, cor(21.0, 0.0) + Vector3.UP * 0.7)
+	for i in 40:
+		p.global_position = pos
+		await get_tree().physics_frame
+
+
+## The walking shot with one body piece hidden (to see which piece shows through which).
+func _shot_walk_hiding(piece: String) -> void:
+	var p := surgeon(1, cor(21.0, 0.0), -PI * 0.5 + 0.9)
+	HumanModel.show_piece(p.body_visual, piece, false)
+	set_light(1, true)
+	set_light(2, true)
+	look_from(cor(22.6, 0.9) + Vector3.UP * 1.3, cor(21.0, 0.0) + Vector3.UP * 1.1)
+	p.moving = true
+	await wait(0.55)
+
+
+## A full-charge shove wind-up seen from the front, with the shover's own flashlight and glow on or off.
+func _shot_shove(own_lights: bool) -> void:
+	var lc := LabCombat.new()
+	lc.act = {"k": "shove", "ph": 0, "u": 1.0, "charge": 1.0}
+	game.add_child(lc)
+	game.combat = lc
+	var p := surgeon(1, cor(21.0, 0.0), -PI * 0.5)
+	p.set_flashlight(own_lights)
+	for l in p.find_children("*", "OmniLight3D", true, false):
+		(l as OmniLight3D).visible = own_lights
+	set_light(1, true)
+	look_from(cor(22.6, 0.25) + Vector3.UP * 1.62, cor(21.0, 0.0) + Vector3.UP * 1.5, false)
+	await wait(1.0)
 
 
 func _shot_throw(windup: bool) -> void:

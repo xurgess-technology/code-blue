@@ -48,7 +48,7 @@ const HUMAN := {
 		"arm_l": {"offset": Vector3(0.0, 0.055, 0.0)},
 	},
 	"clips": {"idle": "Idle", "walk": "Jog", "run": "Sprint", "slow": "Walk", "crawl": "Crawl", "carried": "Carried",
-		"lying": "Lying", "interact": "Interact", "pickup": "PickUp"},
+		"lying": "Lying", "interact": "Interact", "pickup": "PickUp", "dive": "Dive"},
 	"scale": 1.0,
 	# Poses that read differently on a two-bone arm (merged over POSES by pose_of()).
 	"poses": {

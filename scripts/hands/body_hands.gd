@@ -303,6 +303,37 @@ func _after_skeleton() -> void:
 	var to_body := body.global_transform.affine_inverse() * skeleton.global_transform
 	_socket_r = _socket(to_body, "arm_r")
 	_socket_l = _socket(to_body, "arm_l")
+	_lights_follow_head()
+
+
+## Everyone else's copy of a player: the flashlight and the glow sit at the camera, inside the head.
+## When the body leans (a charged shove leans back) the face would slide behind them and light up
+## from point blank, so they ride along with the head bone's movement instead. The local player's
+## own lights stay on the camera: first person is unchanged.
+var _head_bone := -2
+var _light_home := {}   # light -> its local position on its parent
+
+
+func _lights_follow_head() -> void:
+	if player.is_local or not is_instance_valid(skeleton):
+		return
+	if _head_bone == -2:
+		_head_bone = skeleton.find_bone(String(rig.bones.get("head", "")))
+	if _head_bone < 0:
+		return
+	var sx := skeleton.global_transform
+	var moved: Vector3 = sx * skeleton.get_bone_global_pose(_head_bone).origin - sx * skeleton.get_bone_global_rest(_head_bone).origin
+	if _light_home.is_empty():
+		var lights: Array = [player.flashlight] if player.flashlight != null else []
+		for l in player.head.get_children():
+			if l is OmniLight3D:
+				lights.append(l)
+		for l in lights:
+			_light_home[l] = (l as Node3D).position
+	for l in _light_home:
+		var n := l as Node3D
+		if is_instance_valid(n):
+			n.global_position = n.get_parent().global_transform * (_light_home[l] as Vector3) + moved
 
 
 func _socket(to_body: Transform3D, side: String) -> Transform3D:
@@ -336,6 +367,12 @@ func lies_by_clip() -> bool:
 	return has_rig() and rig.get("generic", false)
 
 
+## Faster than this along the ground while prone and it's still the dive's belly slide, not a crawl.
+const DIVE_SLIDE_SPEED := 2.2
+var _last_pos := Vector3.INF
+var _speed := 0.0
+
+
 func _human_clip(delta: float, act: Dictionary) -> void:
 	var clips: Dictionary = rig.clips
 	var want := "idle"
@@ -345,12 +382,25 @@ func _human_clip(delta: float, act: Dictionary) -> void:
 	if _interact_seen < 0:
 		_interact_seen = ic
 	_oneshot_t = maxf(0.0, _oneshot_t - delta)
+	# Ground speed from the body's own movement (every machine's copy has it, replicated or not).
+	var here: Vector3 = body.global_position
+	if delta > 0.0 and _last_pos != Vector3.INF:
+		var v := Vector2(here.x - _last_pos.x, here.z - _last_pos.z).length() / delta
+		_speed = lerpf(_speed, v, clampf(delta * 12.0, 0.0, 1.0))
+	_last_pos = here
 	var down: bool = player.downed or (player.is_bot and not player.alive) or player.stun > 0.0 or player.prone
+	# SPRINT-DIVE HOOK: flat out in the air, then belly-sliding on the landing until it slows to a crawl.
+	var dive: bool = anim.has_animation(String(clips.get("dive", ""))) and not player.downed and player.carried_by == 0 and not player.on_table \
+		and (player.dive_in_air() or (player.prone and _speed > DIVE_SLIDE_SPEED))
 	if player.carried_by != 0:
 		want = "carried"
 		_oneshot_t = 0.0
 	elif player.on_table:
 		want = "lying"
+		_oneshot_t = 0.0
+	elif dive:
+		want = "dive"
+		blend = 0.08
 		_oneshot_t = 0.0
 	elif down:
 		want = "crawl"

@@ -104,6 +104,9 @@ static func spawn(variant: String, tint := BAKED_TINT, own_skin := false) -> Nod
 	root.set_meta("human_cloth", cloth)
 	root.set_meta("human_skin", skin)
 	show_piece(root, "Human_TopRolled", false)
+	# The belly skin under the scrub top only shows while the top is rolled up (the player table);
+	# the rest of the time it could poke through the top as the torso twists.
+	show_piece(root, "Human_GashSkin", false)
 	return root
 
 

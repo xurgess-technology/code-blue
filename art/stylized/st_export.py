@@ -17,11 +17,14 @@ import numpy as np
 from mathutils import Vector, Matrix
 import hu_rig
 import st_char
+import st_clips
 
 # triangle budget per dense part (the whole character lands near the old surgeons' ~20k)
 BUDGET = {'Head': 7200, 'Eye_L': 480, 'Eye_R': 480, 'Arm_L': 2400, 'Arm_R': 2400,
           'Top': 3000, 'Pants': 2300, 'Shoe_L': 650, 'Shoe_R': 650, 'Belly': 1400, 'TopRolled': 800}
 SKIN_PARTS = ('Head', 'Eye_L', 'Eye_R', 'Arm_L', 'Arm_R', 'Belly')
+# parts the game shows only on the player table: they must not occlude the rest in the bake
+HIDDEN_PIECES = ('TopRolled', 'Belly')
 
 
 def _log(*a):
@@ -354,7 +357,12 @@ def export(c, out_dir, variant, tex=2048, ao_samples=24):
             set_signal(sig, which)
         for pname, lo in lows.items():
             key = 'Skin' if pname in SKIN_PARTS else 'Cloth'
+            hidden = [highs[q] for q in HIDDEN_PIECES if q in highs and q != pname]
+            for h in hidden:
+                h.hide_render = True
             bake_into(lo, highs[pname], kind, mats[key][1][key_img], samples)
+            for h in hidden:
+                h.hide_render = False
         _log('baked %s %.1fs' % (key_img, time.time() - t0))
     for lo in lows.values():
         for attr in ('visible_camera', 'visible_diffuse', 'visible_glossy', 'visible_transmission', 'visible_volume_scatter', 'visible_shadow'):
@@ -424,6 +432,7 @@ def export(c, out_dir, variant, tex=2048, ao_samples=24):
         ho.hide_render = True
     sites = make_sites(c, arm)
     hu_rig.build_actions(arm, c['body'])
+    st_clips.build_actions(arm, c['body'])
     rest(arm)
     arm.name = 'Human_Rig'
     _select(pieces + sites + [arm], active=arm)

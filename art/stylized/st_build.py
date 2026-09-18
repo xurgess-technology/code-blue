@@ -21,8 +21,8 @@ import bpy
 import numpy as np
 from mathutils import Vector, Matrix
 import hu_params, hu_body, hu_rig
-import st_sdf, st_char
-for m in (st_sdf, st_char):
+import st_sdf, st_char, st_clips
+for m in (st_sdf, st_char, st_clips):
     importlib.reload(m)
 
 ARGS = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
@@ -468,10 +468,11 @@ def anim_strips(c, frames_per=6, clips=None):
     arm = c['arm']
     body = c['body']
     hu_rig.build_actions(arm, body)
+    st_clips.build_actions(arm, body)
     scn = bpy.context.scene
     tmp = os.path.join(OUT, '_tmp')
     os.makedirs(tmp, exist_ok=True)
-    for name, (nf, loop, speed, about) in hu_rig.CLIPS.items():
+    for name, (nf, loop, speed, about) in list(hu_rig.CLIPS.items()) + list(st_clips.CLIPS.items()):
         if clips and name not in clips:
             continue
         act = bpy.data.actions[name]

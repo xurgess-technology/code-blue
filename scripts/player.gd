@@ -92,9 +92,11 @@ var bot_laser_hold := false
 var _bot_laser_click_seen: int = 0
 ## SPRINT-DIVE HOOK: pressing crouch while sprinting forward launches a dive that lands prone.
 ## Purely client-owned local movement, like the rest of _local_step (see docs/KNOWN_ISSUES.md
-## "Sprint + crouch-dive"). Not replicated as its own field: it forces `prone` for its duration
-## through the same _apply_crouch() capsule-resize path, and `prone` replicates.
+## "Sprint + crouch-dive"). It forces `prone` from touchdown through the same _apply_crouch()
+## capsule-resize path, and `prone` replicates. The airborne part replicates as one bit (report bit
+## 128 / report_full "da") so every copy of the body can fly flat out (body_hands' Dive clip).
 var diving: bool = false
+var _remote_dive_air: bool = false
 var _dive_t: float = 0.0
 var _dive_airborne: bool = false
 var _dive_dir: Vector3 = Vector3.ZERO
@@ -294,6 +296,11 @@ static func human_carried_pose(carrier: Node3D) -> Transform3D:
 var name_tag: Label3D
 var hands: Node3D
 var game: Node = null
+
+
+## SPRINT-DIVE HOOK: in the air in a dive: this machine's own dive, or the replicated bit for others.
+func dive_in_air() -> bool:
+	return (diving and _dive_airborne) or _remote_dive_air
 
 
 static func new_player(id: int, display_name: String, local: bool) -> CharacterBody3D:
@@ -1859,11 +1866,11 @@ func _update_down_pose(delta: float) -> void:
 ## Client -> host, 20 Hz: everything about my own surgeon. A positional array rather than a
 ## dictionary: no key strings on the wire, about a third of the size.
 ##   [position, yaw, pitch, flag bits (1 light, 2 sprint, 4 moving, 8 holding E, 16 crouching,
-##    32 scan-holding, 64 prone), shove count, drop count, aim id, interact count, selected hand, use count,
+##    32 scan-holding, 64 prone, 128 in the air in a dive), shove count, drop count, aim id, interact count, selected hand, use count,
 ##    ability slot 1..4 press counts]
 func report_state() -> Array:
 	var bits := (1 if flashlight_on else 0) | (2 if sprinting else 0) | (4 if moving else 0) | (8 if wants_interact else 0) \
-		| (16 if crouching else 0) | (32 if scan_holding else 0) | (64 if prone else 0)
+		| (16 if crouching else 0) | (32 if scan_holding else 0) | (64 if prone else 0) | (128 if dive_in_air() else 0)
 	return [global_position, rotation.y, head.rotation.x, bits, shove_count, drop_count, aim_id, interact_count, selected, use_count,
 		ability_slot_press[0], ability_slot_press[1], ability_slot_press[2], ability_slot_press[3],
 		snappedf(drop_charge, 0.02),   # SWEEP 4A HOOK (pharmacy, chunk 3)
@@ -1888,6 +1895,7 @@ func apply_remote_state(s: Array) -> void:
 	crouching = bits & 16 != 0   # SWEEP 4A HOOK (controls): the host trusts the client's own crouch
 	scan_holding = bits & 32 != 0
 	prone = bits & 64 != 0
+	_remote_dive_air = bits & 128 != 0   # SPRINT-DIVE HOOK
 	shove_count = int(s[4])
 	drop_count = int(s[5])
 	aim_id = String(s[6])
@@ -1922,6 +1930,7 @@ func report_full() -> Dictionary:
 		"hv": hive_view,   # SWEEP 3 HOOK (brains)
 		"cr": crouching,   # SWEEP 4A HOOK (controls)
 		"pr": prone,
+		"da": dive_in_air(),   # SPRINT-DIVE HOOK
 		"sh": scan_holding,   # terminal redesign, chunk 4: everyone sees everyone's laser
 		"tw": snappedf(throw_wind, 0.02),   # THROW HOOK: everyone sees the wind-up
 	}
@@ -1976,5 +1985,6 @@ func apply_remote_full(s: Dictionary) -> void:
 	crouching = bool(s.get("cr", false))   # SWEEP 4A HOOK (controls)
 	scan_holding = bool(s.get("sh", false))   # terminal redesign, chunk 4
 	prone = bool(s.get("pr", false))
+	_remote_dive_air = bool(s.get("da", false))   # SPRINT-DIVE HOOK
 	throw_wind = float(s.get("tw", 0.0))   # THROW HOOK
 	moving = s.mv

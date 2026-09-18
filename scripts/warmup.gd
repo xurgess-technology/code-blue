@@ -193,6 +193,7 @@ static func run(game: Node, progress: Callable = Callable(), ready_to_draw: Call
 			hb.position = Vector3(bx, -0.3, -0.8)
 			hb.scale = Vector3.ONE * 0.5
 			HumanModelScript.show_piece(hb, "Human_TopRolled", true)
+			HumanModelScript.show_piece(hb, "Human_GashSkin", true)
 			var hap := HumanModelScript.anim_player(hb)
 			if hap != null and hap.has_animation("Idle"):
 				hap.play("Idle")
