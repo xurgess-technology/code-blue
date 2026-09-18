@@ -7,7 +7,9 @@ Co-op hospital horror in Godot 4.7 / GDScript. The game is **Malpractice** and t
 - [DESIGN.md](DESIGN.md): what the game is. [docs/CONTRACTS.md](docs/CONTRACTS.md): how the systems fit together.
 - [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md): open problems, grouped by system (long; search it).
 - [docs/FAX.md](docs/FAX.md): every fax-screen transition and its timing.
-- **[RULES.md](RULES.md): how we work, including how every change gets logged in [CHANGELOG.md](CHANGELOG.md) (same commit, next patch under today's date, `config/version` in `project.godot` to match).**
+- **[RULES.md](RULES.md) › Workflow: who does what. Talking to Zach, you are the orchestrator (or the theory agent, if Zach says so); handed a slot and a branch, you are a subagent. Follow your part.**
+- **NOW.md (gitignored, may be missing): what's being worked on right now.**
+- **[RULES.md](RULES.md): how we work, including how every change gets logged in [CHANGELOG.md](CHANGELOG.md) (written by the orchestrator when work lands on `main`: next patch under today's date, `config/version` in `project.godot` to match).**
 
 ## Gotchas
 - Headless tests: add `--fixed-fps 60`, and run them one at a time per checkout (parallel runs in one directory segfault).

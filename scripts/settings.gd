@@ -304,6 +304,9 @@ func _apply_window_mode() -> void:
 func _window_control_allowed() -> bool:
 	if DisplayServer.get_name() == "headless":
 		return false
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--review="):   # review windows stay windowed (scripts/review.gd)
+			return false
 	for a in OS.get_cmdline_args():
 		if a.ends_with(".tscn") or a in ["--resolution", "-f", "--fullscreen", "-w", "--windowed", "--position", "-m", "--maximized"]:
 			return false

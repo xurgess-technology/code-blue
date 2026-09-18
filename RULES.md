@@ -2,6 +2,87 @@
 
 How we work on Malpractice. Short, and meant to be followed. More rules land here as we make them.
 
+## Workflow
+
+Zach talks to one **orchestrator**, sometimes to a second **theory** agent, and never directly to
+the subagents doing the work.
+
+- **The orchestrator** takes what Zach wants, splits it into tasks, and hands each one to a
+  subagent. It owns `main`: it merges, writes the changelog, bumps the version and keeps NOW.md
+  current. It writes code only for merge fixes and one-line tweaks; everything else goes to a
+  subagent so it stays free to talk.
+- **Subagents** build one task each, in a work slot. Sonnet on medium by default; Opus on high for
+  netcode, work across several systems, or a bug that already beat one attempt. They commit on
+  their own branch only: no merging, no pushing, and no touching CHANGELOG.md or `config/version`.
+- **The theory agent** bounces ideas around. It reads NOW.md to know what's in flight and doesn't
+  change code.
+
+### Work slots
+
+Four long-lived worktrees in `..\Malpractice-slots\wt-1` to `wt-4`, reused from task to task so
+Godot's import cache stays warm. At most four tasks run at once, one per slot. They leave out
+`deprecated/`.
+
+- `tools\slots.bat` makes any missing slots. `tools\slots.bat status` shows what each holds.
+- `tools\slots.bat take 2 hive-lunge` starts branch `hive-lunge` from `main` in slot 2 (about 10 s).
+- `tools\slots.bat free 2` puts slot 2 back on `main` after its branch is merged.
+- Don't use the Agent tool's own worktrees: tell the subagent its slot's path and to stay in it.
+
+### The brief
+
+The orchestrator gives each subagent: the goal, what done looks like, what Zach should see, the
+slot, and the branch.
+
+### Reviews
+
+Nothing gets tested hard until Zach has played it.
+
+- When there's something to see, the subagent opens it and stops:
+  `tools\review.bat 2 "HIVE: does the lunge read?"`. The window's title and a yellow bar at the top
+  of the screen say `SYSTEM: what to do`, short. Add `-Scene res://...` to start in a lab scene,
+  `-Count 2` for two co-op windows, and game flags after that (`--seed=3`).
+- The subagent ends its turn with exactly: the window's line, one sentence on what to look at, and
+  anything it's unsure of. The orchestrator relays that as is, then continues **the same subagent**
+  with Zach's reply, so it keeps its context.
+- Zach closes the window when done. The log is in the slot's `.godot\review-1.log`.
+
+### Tests that make sense
+
+- **While building:** it loads, it parses, and the one check that proves it works passes. No
+  screenshot loops and no full suites for something Zach hasn't seen.
+- **After Zach's okay:** merge `main` into the branch, then run the tests for the systems it
+  touched. Anything failing that isn't in docs/FAILING_TESTS.md gets fixed before merging.
+- **The full sweep** (every headless test scene, the playtest shifts, `tools/nettest_run.gd`) is
+  the orchestrator's, after several merges or at the end of a day. What it finds gets fixed or
+  written into docs/FAILING_TESTS.md.
+
+### Merging
+
+The orchestrator merges one branch at a time into `main` with `git merge --no-ff`, writes its
+changelog entry and version bump in the same commit (or in a commit right after the merge), updates
+NOW.md, and frees the slot.
+
+### NOW.md
+
+A gitignored file at the root that says what's happening right now. The orchestrator rewrites it
+whenever something changes, so the theory agent (or Zach) can read it cold.
+
+```markdown
+# Now
+
+- **wt-1** `hive-lunge`: the Hive's lunge gets a wind-up. **Waiting on Zach** (review window open).
+- **wt-2** `fax-stamps`: stamps land on the beat. Building.
+- **wt-3**, **wt-4**: idle.
+
+## Next
+- Rocket boot fuel pickup at the pharmacy.
+
+## Recently merged
+- 0.6.9 Cameras: over-the-shoulder follows the flashlight.
+```
+
+Statuses: Building, **Waiting on Zach**, Testing, Ready to merge.
+
 ## Changelog
 
 [CHANGELOG.md](CHANGELOG.md) is the log of what we do.
@@ -25,8 +106,9 @@ How we work on Malpractice. Short, and meant to be followed. More rules land her
   - **0.6.2**: Rocket boots
       - Added: Rocket boots at the pharmacy: fly on a fuel bar, faceplant into walls.
   ```
-- **Log it when it lands.** A change and its changelog entry go in the same commit. There is no
-  "Unreleased" section: new work goes straight under today's date as the next patch.
+- **Log it when it lands.** An entry is written when its work lands on `main`, by the orchestrator,
+  as part of the merge. There is no "Unreleased" section (work in flight is in NOW.md): new work
+  goes straight under today's date as the next patch.
 - **The version lives in two places.** Update `config/version` in `project.godot` to match the
   newest entry.
 - **Tone.** Casual, and a joke now and then is welcome, but every line says what actually changed.
