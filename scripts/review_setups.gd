@@ -122,23 +122,20 @@ static func floor_item(game: Game, kind: String, pos: Vector3, count := 1, value
 # ---------------------------------------------------------------------------
 # the setups
 
-## ICONS (docs/ITEMS_AND_ICONS.md chunk C): beside the break-room database, hands holding a stack, a
-## body part that is starting to spoil, a used-up trinket and a small loot item, a heart monitor and a
-## defibrillator on the floor to pick up (bulky, wide slot), both abilities. Switch slots, hold Alt,
-## pick things up, walk up to the screen.
+## ICONS (docs/ITEMS_AND_ICONS.md chunk C): in the operating room facing the table (patient, monitors,
+## lamp all in view), hands holding a stack, a body part that is starting to spoil, a used-up trinket and
+## a small loot item, with a heart monitor and a defibrillator on the floor in front to pick up (bulky,
+## wide slot), and both abilities. Switch slots, hold Alt, pick things up; the database is in the break
+## room, a walk away.
 static func _icons(game: Game) -> void:
-	var wt: Node3D = game.wall_terminal()
-	var base: Vector3 = wt.global_position if wt != null else game.clock_pos()
-	var out := open_direction(game, base + Vector3.UP * 1.2, 3.0)
-	var side := out.cross(Vector3.UP).normalized()
-	place(game, base + out * 2.4, base + Vector3(0, 1.2, 0))
+	var t: Vector3 = game.table_pos()
+	place(game, t + Vector3(0.6, 0, 3.4), t + Vector3(0, 1.0, 0))
 	clear_hands(game)
 	give(game, "anesthetic", 3)
 	give(game, "eye_hive", 1, 150, {"bt": game.world_time - 25.0})
 	give(game, "laptop", 1, 120, {"used": true})
 	give(game, "gold_watch", 1, 90)
 	give_abilities(game)
-	var p = game.local_player()
-	p.selected = 0
-	floor_item(game, "heart_monitor", base + out * 1.6 + side * 0.7, 1, 200)
-	floor_item(game, "defibrillator", base + out * 1.6 - side * 0.7, 1, 300)
+	game.local_player().selected = 0
+	floor_item(game, "heart_monitor", t + Vector3(0.1, 0, 2.3), 1, 200)
+	floor_item(game, "defibrillator", t + Vector3(1.1, 0, 2.3), 1, 300)
