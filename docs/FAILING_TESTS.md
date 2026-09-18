@@ -49,6 +49,19 @@ How to run things is at the bottom of this file.
   the cue `dev_zap`, picked at random), the way `scripts/dev/dev_room.gd` line 522 already uses it.
 - **Likely fix:** call `_sfx("dev_zap", -10.0)`. The WAV files exist; nothing needs regenerating.
 
+## 4. devtest: the free camera leaves your body showing when you untick it
+
+- **Command:** `godot --headless --path . --fixed-fps 60 tools/devtest.tscn`
+- **Result:** `result=FAIL failures=1`, the check `unticking it puts you back behind your eyes`
+- **The check:** `tools/devtest.gd`, in `_free_cam()` (around line 496). After the panel's "Free
+  camera" box is unticked it wants `not fc.is_on() and me.camera.current and not me.dev_input_held
+  and not me.body_visual.visible`; one of those is still wrong, most likely the body.
+- **Noticed 2026-09-18** on the `graft-strap` branch and confirmed on `main` at `a50899a` with the
+  branch's changes stashed, so it is not that branch's doing. It was not in this file before, so it
+  broke some time after the 2026-09-17 sweep.
+- **Where to look:** `scripts/dev/free_cam.gd` `stop()` / `_show_body_on`, and whatever else turns
+  the local body on and off (the carry camera's `set_carry_body`, `Player._refresh_self_body`).
+
 ---
 
 ## Running the tests
@@ -61,7 +74,8 @@ The Godot binary is `C:\Users\ZachBurgess\Desktop\Godot_v4.7.2-stable_win64.exe\
 - **Run headless tests one at a time per checkout.** Parallel runs in the same directory segfault.
 - Test scenes, each prints `result=PASS` or `FAIL` at the end: `tools/*test.tscn` (braintest,
   carrycamtest, combattest, controlstest, databasetest, devtest, dissectiontest, doortest,
-  downedtest, fogtest, inventorytest, looptest, orscreentest, pockettest, settingstest) and
+  downedtest, fogtest, inventorytest, looptest, orscreentest, pockettest, settingstest,
+  straptest) and
   `tools/monster_lab.tscn`
 - A bot plays a whole shift: `tools/playtest.tscn -- --god --seed=N`
 - Map validation: `godot --headless --path . -s tools/mapcheck.gd`
