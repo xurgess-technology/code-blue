@@ -231,10 +231,13 @@ def seg_dist(P, a, b):
     return np.linalg.norm(P - (a + np.outer(t, ab)), axis=1)
 
 
-def trunk_weights(P, sk, arms=True, legs=False, leg_k=1.0):
+def trunk_weights(P, sk, arms=True, legs=False, leg_k=1.0, skirt=False):
     """Garment weights: the trunk blends by height along the spine; past the shoulder joint along the
     upper arm the sleeve belongs to the arm (upper arm / forearm by distance); below the hip joint along
-    the thigh the trouser leg belongs to the leg."""
+    the thigh the trouser leg belongs to the leg. skirt: a loose garment over both legs (the Hive's gown):
+    below the hips each side follows its thigh more and more toward the hem, wide enough to take the whole
+    skirt round that leg and blended across the middle, so a thigh swinging forward carries the cloth in
+    front of it instead of poking through, and the two halves never tear apart at a seam."""
     sm = st_char.smooth01
     z = P[:, 2]
     spine = ['hips', 'spine', 'chest', 'upperchest']
@@ -263,7 +266,15 @@ def trunk_weights(P, sk, arms=True, legs=False, leg_k=1.0):
             limb['upperarm.' + side] = wa * iu / (iu + if_)
             limb['forearm.' + side] = wa * if_ / (iu + if_)
             rest -= wa
-        if legs:
+        if legs and skirt:
+            a, e = sk.bones['thigh.' + side]
+            d = (e - a) / np.linalg.norm(e - a)
+            t = (P - a) @ d
+            share = sm((P[:, 0] * sg + 0.07) / 0.14)            # half each at the middle
+            wl = sm(t / 0.20) * share * leg_k
+            limb['thigh.' + side] = wl
+            rest -= wl
+        elif legs:
             a, e = sk.bones['thigh.' + side]
             d = (e - a) / np.linalg.norm(e - a)
             t = (P - a) @ d
@@ -308,7 +319,8 @@ def assign_weights(ob, part, sk, arm):
     elif part.name in ('Top', 'Gown', 'Pants', 'Belly', 'TopRolled'):
         arms = part.name in ('Top', 'Gown')
         legs = part.name in ('Gown', 'Pants')
-        W = trunk_weights(P, sk, arms=arms, legs=legs, leg_k=1.0 if part.name == 'Pants' else 0.6)
+        W = trunk_weights(P, sk, arms=arms, legs=legs, leg_k=1.0 if part.name == 'Pants' else 0.85,
+                          skirt=part.name == 'Gown')
         for n, w in W.items():
             if n not in groups:
                 groups[n] = ob.vertex_groups.new(name=n)
