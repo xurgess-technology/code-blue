@@ -74,6 +74,10 @@ class LabCombat extends Node:
 	func animate_held(_p: Node, _delta: float, _fp: Node3D, _tp: Node3D) -> void:
 		pass
 
+	## The hands pose from this every frame (scripts/hands/); nobody winds anything up in the lab.
+	func action_of(_p: Node) -> Dictionary:
+		return {}
+
 	func drop_dragged(p: Node) -> void:
 		dropped.append(p)
 		for m in p.get_tree().get_nodes_in_group("monster"):
