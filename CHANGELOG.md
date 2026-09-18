@@ -17,7 +17,18 @@ so they're summaries rather than a line per commit.
 
 ## [Unreleased]
 
-Nothing yet. The OR is suspiciously quiet.
+### Changed
+- **The Hive got a glow-up, literally.** A new model on the surgeons' own body: charcoal skin, the
+  skull broken open and the brain gone, a pale shelf fungus bulging out of the hole and rooting into
+  the scalp. Still in the gown, still hunched, still dragging that right leg, now with a proper
+  shamble and a lunge of its own.
+- **Its eyes tell you when it's seen you.** Wandering, they're a soft orange pinpoint. Once it locks
+  on, the head comes up out of its hang to stare right at you, the whole eyeball floods orange and
+  lights up its face. Lose it and the head sinks back and the eyes go dim again.
+- The Hive's gown now moves with its legs instead of having its thighs punch through the front on
+  every step. Modesty, sort of.
+- Strapped to an OR table, the Hive is its new self too (no brain to take out any more; that part is
+  getting rethought).
 
 ## [0.6.0] - 2026-09-18
 
