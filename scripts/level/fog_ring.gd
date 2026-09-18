@@ -84,6 +84,28 @@ static func steer_yaw(pos: Vector3, yaw: float, level_info: Dictionary, delta: f
 	return lerp_angle(yaw, want, clampf(k * STEER_MAX_RATE * delta, 0.0, 1.0))
 
 
+## How deep in the fog, straight out from the main doors, a run's players arrive, and how far apart
+## they stand side by side.
+const ARRIVAL_DEPTH_M := 3.6
+const ARRIVAL_SPACING_M := 1.3
+
+
+## Where a run's players arrive: `count` spots in a row across the walkway to the main doors, deep in
+## the south fog belt (fully blind), so they walk out of the fog toward the hospital. Empty when the
+## level has no lot. The lot is centred on the main doors, so its centre line is the walkway.
+static func arrival_points(level_info: Dictionary, count: int, y := 0.0) -> Array:
+	var outer: Rect2 = level_info.get("neutral_rect", Rect2())
+	if outer.size == Vector2.ZERO:
+		return []
+	var r := inner_rect(level_info)
+	var z := minf(r.end.y + ARRIVAL_DEPTH_M, outer.end.y - 1.0)
+	var cx := outer.get_center().x
+	var out: Array = []
+	for i in maxi(1, count):
+		out.append(Vector3(cx + (float(i) - (count - 1) * 0.5) * ARRIVAL_SPACING_M, y, z))
+	return out
+
+
 ## Where to put a dropped/thrown item that came to rest in the fog: pulled back onto the lot,
 ## just inside the clear area's edge. `pos` unchanged if it is not in the fog at all.
 static func pull_from_fog(pos: Vector3, level_info: Dictionary) -> Vector3:

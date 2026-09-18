@@ -86,10 +86,18 @@ func _run() -> void:
 	if _pocket == "factory" or _pocket == "restaurant":
 		_check(game.pockets.active() and String(game.pockets.pocket.kind) == _pocket, "POCKETS: shift 1 has the forced %s" % _pocket)
 		pocket_root1 = game.pockets.pocket.get("root")
+	# 2026-09-17: a run starts out in the fog past the parking lot (game._arrive_at_start), on levels
+	# with a lot; otherwise at the level's player spawns.
+	var starts: Array = FogRing.arrival_points(game.level_info, 1)
+	var from_fog := not starts.is_empty()
+	if not from_fog:
+		starts = game.spawn_points()
 	var near_spawn := false
-	for s in game.spawn_points():
-		near_spawn = near_spawn or bot.global_position.distance_to(s) < 1.0
-	_check(near_spawn, "the bot starts at a spawn point (%s)" % ("the neutral area" if game.level_info.has("neutral") else "the level's player spawns, no neutral area on this level"))
+	for s in starts:
+		near_spawn = near_spawn or Vector2(bot.global_position.x, bot.global_position.z).distance_to(Vector2(s.x, s.z)) < 1.0
+	_check(near_spawn, "the bot starts at %s" % ("the arrival point in the lot's fog" if from_fog else "a spawn point (the level's player spawns, no lot on this level)"))
+	if from_fog:
+		_check(FogRing.visibility01(FogRing.depth_m(bot.global_position, game.level_info)) >= 0.999, "the arrival point is deep enough in the fog to see nothing")
 	_check(game.patient_tables.size() >= 2, "there are two patient tables (%d%s)" % [game.patient_tables.size(), ", one placed beside the level's own" if game.level_info.get("tables_fallback", false) else ""])
 	_check(game.surgeries.size() == game.patient_tables.size(), "one surgery system per patient table")
 	_check(game.loop.phone != null and game.find_interactable("phone") != null, "the break-room phone is placed")
@@ -98,11 +106,10 @@ func _run() -> void:
 	_check(ok, "walking to the time clock and holding E clocks in")
 	_check(bot.global_position.distance_to(start) > 1.0 or start.distance_to(game.clock_pos()) < 3.0, "the bot walked to the clock")
 	if game.level_info.has("zones"):
-		# SWEEP 4A HOOK (fog lot, chunk 2): the run's start and every respawn are inside the main
-		# doors now (the lobby), not out in the neutral area, so the bot is already in the
-		# entrance building both before and after walking to the clock.
-		_check(Zones.zone_of(game.level_info, start) == "entrance" and Zones.zone_of(game.level_info, bot.global_position) == "entrance",
-			"it starts and stays inside the entrance building (%s -> %s)" % [Zones.zone_of(game.level_info, start), Zones.zone_of(game.level_info, bot.global_position)])
+		# 2026-09-17: the run starts out on the lot (in the fog) and the bot walks in through the main
+		# doors to the clock. Respawns are still inside, in the lobby.
+		_check(Zones.zone_of(game.level_info, start) == "neutral" and Zones.zone_of(game.level_info, bot.global_position) == "entrance",
+			"it starts out on the lot and walks into the entrance building (%s -> %s)" % [Zones.zone_of(game.level_info, start), Zones.zone_of(game.level_info, bot.global_position)])
 		_check(not game.monster_may_wander_to(game.clock_pos()) and not game.monster_may_wander_to(start), "monsters may not wander into the entrance building or the neutral area")
 	_check(game.loop.call_kind == "first" and game.loop.call_state == "ringing", "the phone starts ringing immediately at clock-in, no grace period")
 	_check(game.cases.is_empty() and game.monsters.size() > 0, "no patient yet, monsters are awake")

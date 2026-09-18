@@ -48,8 +48,12 @@ const CANOPY_Y := 3.15
 ## reasonable lamp position on the lot (chunk 2 already pulled the lamps in from the old
 ## parking-lot edge placements; a 19 m range still lit the wall well past that). Cut down so the
 ## lamps read as pools of light over the walkway, not a wash all the way to the fog belt.
-const OUTDOOR_LIGHT_RANGE := 9.0
-const OUTDOOR_LIGHT_ENERGY := 3.6
+## 2026-09-17 (user request, a good deal brighter out there): more lamps (neutral.gd), each
+## stronger and a little wider, still well short of the border wall.
+const OUTDOOR_LIGHT_RANGE := 11.0
+const OUTDOOR_LIGHT_ENERGY := 6.5
+const CANOPY_LIGHT_RANGE := 8.0
+const CANOPY_LIGHT_ENERGY := 2.6
 
 const TILE_FLOOR_ROOMS := ["restroom", "morgue", "or", "or_storage", "or_lockers", "hub_crematorium", "janitor_closet", "lab", "radiology"]
 const WARM_FLOOR_ROOMS := ["lobby", "break_room", "waiting_room", "hub_waiting", "cafeteria", "office"]
@@ -1322,8 +1326,8 @@ static func _make_outdoor_light(kind: String) -> Node3D:
 	var n := Node3D.new()
 	var bulb := OmniLight3D.new()
 	bulb.name = "Bulb"
-	bulb.omni_range = OUTDOOR_LIGHT_RANGE if kind == "street" else 7.0
-	bulb.light_energy = OUTDOOR_LIGHT_ENERGY if kind == "street" else 1.6
+	bulb.omni_range = OUTDOOR_LIGHT_RANGE if kind == "street" else CANOPY_LIGHT_RANGE
+	bulb.light_energy = OUTDOOR_LIGHT_ENERGY if kind == "street" else CANOPY_LIGHT_ENERGY
 	bulb.light_color = Color(1.0, 0.78, 0.52) if kind == "street" else Color(0.95, 0.95, 1.0)
 	bulb.light_volumetric_fog_energy = 0.35
 	bulb.shadow_enabled = false

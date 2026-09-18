@@ -375,7 +375,7 @@ func start_lobby(new_seed: int, new_shift: int) -> void:
 	_set_phase(Phase.LOBBY)
 	_sync_players()
 	for p in players.values():
-		_respawn_at_start(p)
+		_arrive_at_start(p)
 	# First lobby of the session: build and draw one of everything behind a short cover so
 	# nothing hitches the first time it appears later.
 	Warmup.run(self)
@@ -1138,7 +1138,10 @@ func _sync_players() -> void:
 		var p: CharacterBody3D = PlayerScene.new_player(id, Net.name_for(id), id == Net.my_id())
 		players[id] = p
 		_entities.add_child(p)
-		_respawn_at_start(p)
+		if phase == Phase.LOBBY:
+			_arrive_at_start(p)
+		else:
+			_respawn_at_start(p)
 		# net: joining mid-shift means watching until the next lobby.
 		if is_host() and phase != Phase.LOBBY:
 			_hold_until_next_shift(p)
@@ -1167,6 +1170,23 @@ func _respawn_at_start(p: Node) -> void:
 	var idx: int = maxi(0, Net.peer_ids().find(p.peer_id))
 	p.teleport(spots[idx % spots.size()])
 	p.revive_full()
+
+
+## A run's start, or joining in the lobby: out in the fog past the parking lot, facing the main
+## doors, walking out of it on their own until they take over (player.gd, arrival_walk). Levels
+## without a lot, and dev bots, start at the usual spawn points. Respawns after dying, and the
+## next shift's lobby, stay in the lobby (_respawn_at_start).
+func _arrive_at_start(p: Node) -> void:
+	var spots := spawn_points()
+	var ids := Net.peer_ids()
+	var arrive := FogRing.arrival_points(level_info, maxi(1, ids.size()), (spots[0] as Vector3).y if not spots.is_empty() else 0.0)
+	if arrive.is_empty() or p.is_bot:
+		_respawn_at_start(p)
+		return
+	var idx: int = maxi(0, ids.find(p.peer_id))
+	p.teleport(arrive[idx % arrive.size()])
+	p.revive_full()
+	p.begin_arrival_walk()
 
 
 ## Players on their feet: alive and not downed. Monsters, footsteps, perception and holds only

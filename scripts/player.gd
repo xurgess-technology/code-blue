@@ -249,6 +249,11 @@ var _held_fp: Node3D
 var _held_tp: Node3D
 var _shove_cd: float = 0.0
 var _yaw: float = 0.0
+## Seconds left of walking out of the fog on arrival (game._arrive_at_start); any movement key ends it.
+var arrival_walk := 0.0
+const ARRIVAL_WALK_MAX := 8.0
+## After stepping out of the fog, how much longer the walk carries on toward the doors.
+const ARRIVAL_WALK_TAIL := 0.7
 var _pitch: float = 0.0
 var _knock: Vector3 = Vector3.ZERO
 var _step_accum: float = 0.0
@@ -652,6 +657,14 @@ func _local_step(delta: float) -> void:
 			_bot_dive_fire = true
 	elif can_move:
 		input_dir = Input.get_vector("move_left", "move_right", "move_forward", "move_back")
+		if arrival_walk > 0.0:
+			if input_dir.length() > 0.1:
+				arrival_walk = 0.0
+			else:
+				input_dir = Vector2(0, -1)
+				arrival_walk -= delta
+				if g != null and FogRingScript.depth_m(global_position, g.level_info) <= 0.0:
+					arrival_walk = minf(arrival_walk, ARRIVAL_WALK_TAIL)
 		wants_interact = Input.is_action_pressed("interact")
 		if String(Settings.get_value("sprint_mode")) == "hold":
 			want_sprint = Input.is_action_pressed("sprint")
@@ -1600,6 +1613,16 @@ func teleport(pos: Vector3) -> void:
 	_target_pos = pos
 	velocity = Vector3.ZERO
 	_knock = Vector3.ZERO
+	arrival_walk = 0.0   # a respawn or an eviction ends a walk in from the fog
+
+
+## Face the main doors (the lot's hospital side is -Z) and walk forward out of the fog until the
+## player moves on their own. Only a human's own player walks; the timer runs while they have control.
+func begin_arrival_walk() -> void:
+	_yaw = 0.0
+	_pitch = 0.0
+	rotation.y = _yaw
+	arrival_walk = ARRIVAL_WALK_MAX if is_local and not is_bot else 0.0
 
 
 func revive_full() -> void:

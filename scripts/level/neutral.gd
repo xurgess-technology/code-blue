@@ -72,6 +72,11 @@ static func build(st: S, door_x: float, oy: int, rng: Rng) -> Rect2i:
 		[Vector2(6.0, 4.0), E], [Vector2(6.0, 12.0), E],
 		[Vector2(38.0, 4.0), WEST], [Vector2(38.0, 12.0), WEST],
 		[Vector2(15.0, 11.0), SOUTH], [Vector2(33.0, 11.0), SOUTH],
+		# 2026-09-17: the walk in from the fog, lit both sides from the fog's edge to the canopy
+		# (runs start out there now, game._arrive_at_start), and the middle of each half of the lot.
+		[Vector2(18.5, 7.5), E], [Vector2(25.5, 7.5), WEST],
+		[Vector2(18.5, 12.5), E], [Vector2(25.5, 12.5), WEST],
+		[Vector2(11.0, 8.0), SOUTH], [Vector2(33.0, 5.5), SOUTH],
 	]
 	for l in lamps:
 		put.call("street_light", l[0].x, l[0].y, l[1], {"lamp": true})
