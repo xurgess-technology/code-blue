@@ -70,6 +70,8 @@ func _ready() -> void:
 			{"name": "84_wall_gunshot", "fn": _pose_wall2.bind({"kind": "entry", "section": "procedures", "key": "amputation"}), "settle": 45},
 			{"name": "85_wall_tool_hover", "fn": _pose_wall2_tool.bind(false), "settle": 4},
 			{"name": "85b_wall_tool_clicked", "fn": _pose_wall2_tool.bind(true), "settle": 45},
+			{"name": "86_wall_upside_down", "fn": _pose_wall2.bind({"kind": "section", "id": "monsters", "index": 0}, "flip"), "settle": 30},
+			{"name": "87_wall_jammed", "fn": _pose_wall2.bind({"kind": "section", "id": "surgery", "index": 0}, "jam"), "settle": 20},
 		]
 	# --nurse: scan the waiting room's Night Nurse the way a player would (she keeps running).
 	if OS.get_cmdline_user_args().has("--nurse"):
@@ -127,10 +129,13 @@ func _pose_scan_nurse() -> void:
 
 ## Chunk 2: stand square to the screen with the projector on and open `to` (a scanned Walk-In with
 ## Hive Eyes at level 1, a stethoscope picked up).
-func _pose_wall2(to: Dictionary) -> void:
+func _pose_wall2(to: Dictionary, quirk := "") -> void:
 	var wt: Node3D = _level_wall_terminal()
 	if wt == null:
 		return
+	# The carousel misbehaves only when a shot asks it to (projector chunk 3).
+	wt.ui.quirks = false
+	wt.ui.next_quirk = quirk
 	game._set_projector(true)
 	bot.bot_scan = false
 	bot.bot_laser_hold = false
