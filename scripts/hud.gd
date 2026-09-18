@@ -237,9 +237,10 @@ const SLOT_GOLD := Color(1.0, 0.74, 0.28)
 const SLOT_PX := 56.0          # one hand slot, square
 const SLOT_GAP := 8.0
 const BAR_MARGIN := 16.0       # from the bottom of the screen
+const SMALL_LIFT := 46.0       # the small rows (Alt items, idle abilities) sit this far above the bar top: clear of a lifted slot
 const SMALL_PX := 28.0         # a slot in the Alt (shrunk) row
 const NAME_SECONDS := 2.0      # how long a held item's name hangs above the bar
-const POP_SECONDS := 0.3       # the pickup pop: crosshair to slot
+const POP_SECONDS := 0.4       # the pickup pop: crosshair to slot
 const SLOT_BG := Color(0.04, 0.05, 0.07)
 const SELECT_COL := Color("f6efd4")
 
@@ -313,7 +314,7 @@ static func bar_units(w: float, h: float, slots: Array, selected_head: int, t: f
 	var n := slots.size()
 	var x0 := w * 0.5 - (SLOT_PX * n + SLOT_GAP * (n - 1)) * 0.5
 	var y := h - BAR_MARGIN - SLOT_PX
-	var small_y := y - SMALL_PX - 6.0
+	var small_y := y - SMALL_LIFT
 	var rects := []
 	for i in n:
 		var big_r := Rect2(x0 + i * (SLOT_PX + SLOT_GAP), y, SLOT_PX, SLOT_PX)
@@ -544,7 +545,7 @@ func _draw_name_flash(w: float, bar_y: float, t: float) -> void:
 	drawn.append("item_name")
 	var left := _flash_until - _t
 	var a := clampf(left / 0.5, 0.0, 1.0) * clampf((NAME_SECONDS - left) / 0.08, 0.0, 1.0)
-	var y := bar_y - 28.0
+	var y := bar_y - SMALL_LIFT - 24.0
 	var tw := _font.get_string_size(_flash_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x
 	draw_rect(Rect2(w * 0.5 - tw * 0.5 - 12, y - 19, tw + 24, 28), Color(0, 0, 0, 0.55 * a))
 	_text(Vector2(0, y), _flash_name, 18, Color(SELECT_COL, a), HORIZONTAL_ALIGNMENT_CENTER, w)
@@ -598,7 +599,7 @@ func _draw_ability_bar(w: float, h: float, me) -> void:
 	var bar_y := h - BAR_MARGIN - SLOT_PX
 	var big_y := bar_y - 2.0   # just under the small item row, room below for the pips and the name
 	var small := Vector2(26, 26)
-	var small_y := bar_y - small.y - 6.0
+	var small_y := bar_y - SMALL_LIFT
 	var t := clampf(_alt_t, 0.0, 1.0)
 	for i in n:
 		var big_r := Rect2(x0 + i * (box.x + gap), big_y, box.x, box.y)
@@ -867,7 +868,7 @@ func _draw_message(w: float, h: float, in_surgery: bool) -> void:
 		return
 	drawn.append("message")
 	var text := game.message
-	var y := h - 150.0 if not in_surgery else 90.0
+	var y := h - 180.0 if not in_surgery else 90.0
 	var tw := _font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
 	draw_rect(Rect2(w * 0.5 - tw * 0.5 - 14, y - 20, tw + 28, 30), Color(0, 0, 0, 0.65))
 	_text(Vector2(0, y), text, 16, Color("f0e6c8"), HORIZONTAL_ALIGNMENT_CENTER, w)

@@ -44,19 +44,22 @@ func _ready() -> void:
 	_look_from(t + Vector3(0.6, 0, 3.4), t + Vector3(0, 1.0, 0))
 	await _frames(20)
 
-	# 1. four things, the first selected; the bar has settled (name flash gone).
-	_clear()
-	bot.take_into("anesthetic", 3)
-	bot.take_into("forceps", 1)
-	bot.take_into("gold_watch", 1, 90)
-	bot.take_into("laptop", 1, 120)
-	bot.selected = 0
-	await _frames(200)
+	game.brains.set_level(bot.peer_id, "echo", 3)
+	game.brains.set_level(bot.peer_id, "hive_in", 2)
+	var suf := "_%d" % int(get_viewport().get_visible_rect().size.x)
+	for sel in 4:
+		_clear()
+		bot.take_into("anesthetic", 3)
+		bot.take_into("forceps", 1)
+		bot.take_into("gold_watch", 1, 90)
+		bot.take_into("laptop", 1, 120)
+		bot.selected = 0 if sel != 0 else 1
+		await _frames(150)
+		bot.selected = sel
+		await _frames(14)
+		await _shot("sel%d%s" % [sel + 1, suf])
+	await _frames(150)
 	await _shot("bar_four")
-	# 2. switch slot: the name flashes.
-	bot.selected = 3
-	await _frames(14)
-	await _shot("bar_switch_name")
 	# 3. a bulky item takes a wide slot.
 	_clear()
 	bot.take_into("anesthetic", 2)
@@ -66,6 +69,14 @@ func _ready() -> void:
 	await _shot("bar_bulky_pop")
 	await _frames(200)
 	await _shot("bar_bulky")
+	bot.selected = 1
+	await _frames(200)
+	bot.selected = 1
+	bot.selected = 3
+	await _frames(200)
+	bot.selected = 1
+	await _frames(10)
+	await _shot("bar_bulky_sel%s" % suf)
 	# 4. spoiling eyes, a used trinket.
 	_clear()
 	bot.selected = 0
@@ -91,7 +102,7 @@ func _ready() -> void:
 	await _shot("abilities_idle")
 	Input.action_press("ability_alt")
 	await _frames(30)
-	await _shot("abilities_alt")
+	await _shot("abilities_alt%s" % suf)
 	Input.action_release("ability_alt")
 	await _frames(20)
 	# 6. the table's prompt naming its item.
