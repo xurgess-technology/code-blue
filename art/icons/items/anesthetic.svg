@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"><rect x="6" y="6" width="244" height="244" rx="36" fill="#0b1416"/><rect x="9" y="9" width="238" height="238" rx="33" fill="none" stroke="#2a3438" stroke-width="4"/><g transform="translate(128 128) scale(1.3) translate(-128 -138)">
+<g transform="rotate(-12 128 136)" stroke="#1c2226" stroke-width="8" stroke-linejoin="round">
+<rect x="92" y="92" width="72" height="128" rx="18" fill="#dfeef6"/>
+<path d="M96 146 L160 146 L160 202 Q160 216 146 216 L110 216 Q96 216 96 202 Z" fill="#9cc8e8" stroke="none"/>
+<rect x="92" y="92" width="72" height="128" rx="18" fill="none"/>
+<rect x="92" y="126" width="72" height="30" fill="#f7f9fa" stroke-width="5"/>
+<path d="M128 132 L128 150 M119 141 L137 141" stroke="#3a7bd5" stroke-width="6" stroke-linecap="round"/>
+<rect x="100" y="56" width="56" height="40" rx="8" fill="#5b93d6"/>
+<path d="M108 170 L108 204" stroke="#ffffff" stroke-width="7" stroke-linecap="round" opacity="0.8"/>
+</g>
+</g><circle cx="204" cy="204" r="30" fill="#1c2226" stroke="#f1f4f6" stroke-width="4"/><text x="204" y="215" text-anchor="middle" font-family="Arial Black, Arial, sans-serif" font-weight="900" font-size="30" fill="#f1f4f6">x3</text>
+</svg>

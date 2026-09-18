@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <filter id="glow" x="-60%" y="-20%" width="220%" height="140%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="9" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="spill" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="16"/>
+    </filter>
+    <clipPath id="slot"><circle cx="128" cy="128" r="120"/></clipPath>
+  </defs>
+
+  <circle cx="128" cy="128" r="122" fill="#0b1416"/>
+
+  <g clip-path="url(#slot)">
+    <!-- the neck, filling the slot -->
+    <path d="M44 0 L212 0 C200 90 200 170 220 256 L36 256 C56 170 56 90 44 0 Z" fill="#c7a0a6" stroke="#3a1a2a" stroke-width="8"/>
+    <!-- shadow under the jaw -->
+    <path d="M30 0 L226 0 L226 34 Q128 96 30 34 Z" fill="#9c7680"/>
+    <path d="M40 38 Q128 96 216 38" fill="none" stroke="#3a1a2a" stroke-width="6"/>
+    <!-- veins -->
+    <g fill="none" stroke="#8e3a5c" stroke-width="4" stroke-linecap="round">
+      <path d="M70 110 Q62 140 70 170 Q74 186 68 204"/>
+      <path d="M68 150 Q80 158 84 172"/>
+      <path d="M190 96 Q184 124 194 150"/>
+    </g>
+    <!-- the collarbone notch -->
+    <path d="M84 250 Q128 222 172 250" fill="none" stroke="#9a6f7a" stroke-width="6" stroke-linecap="round"/>
+
+    <!-- light spilling through the skin -->
+    <rect x="72" y="70" width="112" height="200" rx="40" fill="#9b6bff" opacity="0.55" filter="url(#spill)"/>
+
+    <!-- the glowing trachea -->
+    <g filter="url(#glow)">
+      <path d="M100 64 Q128 74 156 64 L164 256 L92 256 Z" fill="#9b6bff" stroke="#3a1a2a" stroke-width="5" stroke-linejoin="round"/>
+      <g fill="none" stroke="#6a3fd6" stroke-width="7" stroke-linecap="round">
+        <path d="M101 94 Q128 104 156 94"/>
+        <path d="M100 122 Q128 132 157 122"/>
+        <path d="M99 150 Q128 160 158 150"/>
+        <path d="M97 178 Q128 188 160 178"/>
+        <path d="M96 206 Q128 216 161 206"/>
+        <path d="M95 234 Q128 244 162 234"/>
+      </g>
+      <path d="M128 80 L128 250" stroke="#f3ecff" stroke-width="16" stroke-linecap="round" opacity="0.9"/>
+    </g>
+  </g>
+
+  <circle cx="128" cy="128" r="120" fill="none" stroke="#3a1a2a" stroke-width="6"/>
+</svg>

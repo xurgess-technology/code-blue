@@ -44,7 +44,7 @@ from it. The surgeon's own eye goes into the vat and can be swapped back in or s
 - **Another player has to operate.** You can't graft yourself, and there's no solo robot yet.
   For testing alone, the dev panel lets you take control of Dr. Botsworth (below).
 - **Eyes are labelled with their owner.** A surgeon's eye is "Zach's eye" on the vat label and
-  in the hand. A Hive eye is "Hive eye".
+  in the hand. The item taken out of a Hive is called **Eyeball of Hive**.
 - **A first-person tell:** a grafted surgeon sees a faint orange tint or vignette on the left edge
   of their view (the side of the grafted eye), stronger while Hive Eyes is active.
 - **Eyes can be sold** by throwing them into the crematorium furnace, like any loot.
@@ -80,7 +80,7 @@ from it. The surgeon's own eye goes into the vat and can be swapped back in or s
 A and B can run at the same time. C starts after both are merged.
 
 ### A. `graft-extract`: the eye, the vat, the extraction (Sonnet)
-- New items: the scalpel, the eye spoon, the Hive eye, a surgeon's eye (owner-labelled). The
+- New items: the scalpel, the eye spoon, the Eyeball of Hive, a surgeon's eye (owner-labelled). The
   eyes spoil; they sell at the furnace.
 - The specimen vat: a glass jar of cloudy fluid, carried in both hands like bulky loot. Aim + E
   with an eye in hand puts it in; the eye floats in the jar. Taking an eye back out needs its own

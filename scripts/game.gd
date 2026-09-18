@@ -186,6 +186,11 @@ const BLEED_SECONDS := 300.0
 const TABLE_BLEED_K := 0.5
 ## Hold E this long on a downed teammate to pick them up.
 const CARRY_HOLD := 1.0
+## GRAFT HOOK: hold E this long, strapped to the player table awake, to undo the straps and get up.
+const TABLE_UP_HOLD := 1.2
+## GRAFT HOOK: and this long, aiming at a free table, to lie down and be strapped in.
+const TABLE_STRAP_HOLD := 1.2
+const STRAP_IN_PROMPT := "Hold E: lie down and strap in"
 ## What a stitched-up player gets back.
 const REVIVE_HP := 2
 const CALL_COOLDOWN := 4.0
@@ -311,8 +316,30 @@ func local_player() -> Node:
 	return players.get(Net.my_id())
 
 
+## GRAFT HOOK (dev panel, "Control Dr. Botsworth"): the peer id of the body this machine's human is
+## driving, 0 for none. Local only, never replicated: the rest of the session sees an ordinary bot.
+var possessed: int = 0
+
+
+## The body this machine drives right now: a possessed bot, or your own surgeon.
+func driving_player() -> Node:
+	var p = players.get(possessed) if possessed != 0 else null
+	if p != null and is_instance_valid(p) and p.alive:
+		return p
+	return local_player()
+
+
+## The peer id whatever this machine's mouse and keyboard act as (Net.my_id(), or a possessed bot).
+func driving_id() -> int:
+	var p := driving_player()
+	return int(p.peer_id) if p != null else Net.my_id()
+
+
 ## Whose eyes we are looking through: yours, or a teammate's while you are dead.
 func viewed_player() -> Node:
+	var driving := driving_player()
+	if possessed != 0 and driving != null and driving.peer_id == possessed:
+		return driving
 	var me := local_player()
 	if me != null and me.alive:
 		return me
@@ -851,11 +878,20 @@ func table_interact_id(index: int) -> String:
 
 
 ## The index of the first patient table nobody lies on or is being wheeled to, or -1.
+## GRAFT HOOK: a surgeon strapped to one is not a case, so `table_free` checks for them too --
+## without it the next patient is wheeled on top of them.
 func free_patient_table() -> int:
 	for t in patient_tables:
-		if case_on_table(int(t.index)).is_empty() and not loop.table_reserved(int(t.index)):
+		if table_free(int(t.index)):
 			return int(t.index)
 	return -1
+
+
+## Nothing and nobody on patient table `ti`: no case, no gurney on the way, nobody lying on it.
+func table_free(ti: int) -> bool:
+	if not case_on_table(ti).is_empty() or loop.table_reserved(ti):
+		return false
+	return int(player_table.get("index", -1)) != ti or someone_on_table() == null
 
 
 func surgery_for_table(index: int) -> Node:
@@ -1005,9 +1041,14 @@ func _table_prompt(p, table_index: int) -> String:
 		if p.carrying != 0 and not corpses.is_body(p.carrying):
 			return _downed_place_prompt(p, table_index)
 		if int(player_table.get("index", -1)) == table_index:
-			return player_surgery.operate_prompt(p)
+			var op: String = player_surgery.operate_prompt(p)
+			if op != "":
+				return op
 	var c := case_on_table(table_index)
 	if c.is_empty() or String(c.get("patient_id", "")) == "player":
+		# GRAFT HOOK: on the hub a free patient table is also where you strap yourself down.
+		if downed_any_table and table_free(table_index):
+			return strap_in_prompt(p)
 		return ""
 	# Patient exits: a body waiting for the furnace (a patient or a dissected monster).
 	if p != null and corpses.is_corpse(c):
@@ -2106,7 +2147,8 @@ func surgery_step_done(result: Dictionary, table_index: int = -1, operator_peer:
 ## carry "tb", the table index of the surgery system that sent them.
 func send_operator_report(report: Dictionary) -> void:
 	if is_host():
-		_route_operator_report(Net.my_id(), report)
+		# GRAFT HOOK: driving Dr. Botsworth, the reports are his, not yours.
+		_route_operator_report(driving_id(), report)
 	elif Net.active:
 		if report.has("botches") or report.has("finished") or report.has("exit") or report.has("reliable"):
 			_rpc_operator_report_reliable.rpc_id(Net.HOST_ID, report)
@@ -2403,7 +2445,21 @@ func _tick_scan(delta: float) -> void:
 			_scan_progress[peer] = prog
 
 
+## Test tool (tools/review.bat, tools/playtest): `--dev` after `--` turns dev mode on as soon as
+## there is a level to build the hidden room in, so a review window opens with the panel ready.
+var _dev_arg_done := false
+
+
+func _tick_dev_arg() -> void:
+	if _dev_arg_done or dev_tools or level == null or phase == Phase.MENU:
+		return
+	_dev_arg_done = true
+	if OS.get_cmdline_user_args().has("--dev"):
+		set_dev_tools(true, local_player())
+
+
 func _simulate(delta: float) -> void:
+	_tick_dev_arg()
 	_tick_noise(delta)
 	_tick_scan(delta)   # SWEEP 4A HOOK (scanner)
 	var pop: int = player_surgery.operator_peer()   # downed: operating on the player table counts too
@@ -2415,7 +2471,9 @@ func _simulate(delta: float) -> void:
 			players[op].operating = true
 	if phase != Phase.MENU:
 		_tick_downed(delta)
+		_tick_table_holds(delta)   # GRAFT HOOK: hold E to strap yourself in, and again to get up
 		_tick_carry_holds(delta)
+		_apply_strap_table()       # GRAFT HOOK: a cleared stitches case hands the table back
 		_sync_player_case()   # loop: the player table's operation as a "player" case
 	match phase:
 		Phase.LOBBY:
@@ -2748,6 +2806,8 @@ func _release_downed_links(p: Node) -> void:
 		p.on_table = false
 		if player_surgery.patient() == p:
 			player_surgery.clear()
+		strap_table = -1   # GRAFT HOOK: whatever took them off the table, the table is free again
+		_apply_strap_table()
 		p.refresh_downed_visuals()
 
 
@@ -2783,6 +2843,8 @@ func can_pick_up(q: Node, p: Node, check_hands: bool = true) -> bool:
 ## Host: holding E on a downed teammate picks them up after CARRY_HOLD seconds.
 func _tick_carry_holds(delta: float) -> void:
 	for q in players.values():
+		if _table_holding.has(q.peer_id):
+			continue   # GRAFT HOOK: this hold is the table's (_tick_table_holds), not a lift
 		var target = null
 		if q.wants_interact and q.aim_id.begins_with("pl_"):
 			target = players.get(int(q.aim_id.substr(3)))
@@ -2928,6 +2990,7 @@ func _add_player_table() -> void:
 	# player table of its own: a downed teammate goes on whichever patient table is free, and
 	# `player_table` names that table only while they lie on it (set_downed_table).
 	downed_any_table = false
+	strap_table = -1   # GRAFT HOOK: a new level, nobody strapped in
 	var has_player_table := false
 	for t in level_info.get("tables", []):
 		if t is Dictionary and String(t.get("kind", "")) == "player":
@@ -2941,6 +3004,19 @@ func _add_player_table() -> void:
 ## Hub rebuild, chunk 2: true when a downed teammate is laid on any free patient table instead of
 ## a player table of the level's own.
 var downed_any_table := false
+## GRAFT HOOK: on such a level, the patient table a healthy surgeon strapped themselves to (-1 for
+## none). Host authoritative, snapshot field "st"; every machine feeds it to set_downed_table, which
+## is what pinned_pose reads through `player_table`. A downed patient's table comes from the stitches
+## case instead (player_surgery.apply_locally), so only one of the two is ever set.
+var strap_table := -1
+
+
+## GRAFT HOOK: every machine. `player_table` follows the stitches case when there is one, else the
+## strapped surgeon's table. Idempotent and cheap; run after either can have changed.
+func _apply_strap_table() -> void:
+	if not downed_any_table or not player_surgery.case.is_empty():
+		return
+	set_downed_table(strap_table)
 ## The top of an OR table above its floor position (piece_defs "or_table").
 const OR_TABLE_TOP := 0.945
 
@@ -3038,14 +3114,45 @@ func player_table_prompt(q: Node) -> String:
 			if other.on_table:
 				return "!The table is taken."
 		return "Place %s on the table" % (p.player_name if p != null else "them")
-	return player_surgery.operate_prompt(q)
+	var operate: String = player_surgery.operate_prompt(q)
+	if operate != "":
+		return operate
+	return strap_in_prompt(q)   # GRAFT HOOK: nobody on it, so you can strap yourself in
+
+
+## GRAFT HOOK: what aiming at a free table offers a healthy surgeon on their feet. "" when strapping
+## yourself in is not on offer at all (someone is already lying on a table, hands full of a monster);
+## "!..." for a reason you cannot right now.
+func strap_in_prompt(q: Node) -> String:
+	if q == null or not q.alive or q.downed or q.on_table or q.carried_by != 0 or int(q.held_by) >= 0:
+		return ""
+	if q.dragging_monster >= 0 or q.carrying != 0 or q.hive_view:
+		return ""
+	if phase != Phase.SHIFT:
+		return ""
+	# Hub rebuild: no player table of its own, so a free patient table takes you (see _table_prompt).
+	if player_table.is_empty() and not downed_any_table:
+		return ""
+	if not player_surgery.case.is_empty() or someone_on_table() != null:
+		return ""
+	if q.operating:
+		return "!Step back from the operation first."
+	return STRAP_IN_PROMPT
+
+
+## GRAFT HOOK: whoever is lying on the player table right now (downed or strapped in), or null.
+func someone_on_table() -> Node:
+	for p in players.values():
+		if p.on_table and is_instance_valid(p):
+			return p
+	return null
 
 
 func _player_table_used(q: Node) -> void:
 	if q.carrying != 0:
 		carrier_pressed_interact(q, "player_table")
 	else:
-		player_surgery.begin(q)
+		player_surgery.begin(q)   # GRAFT HOOK: strapping yourself in is a hold, not this tap
 
 
 ## Host: the carrier lays their downed teammate on the player table; the stitches case starts.
@@ -3067,6 +3174,118 @@ func place_on_player_table(q: Node, table_index := -1) -> void:
 	p.refresh_downed_visuals()
 	_sound("thud", player_table_top())
 	say("%s is on the table. Hold a suture kit and stitch them up." % p.player_name, 4.0)
+
+
+## GRAFT HOOK: host. A healthy surgeon lies down on the player table and the straps go on: `on_table`
+## with no case and no stitches, face up, awake, in first person. They stay there until they hold E
+## to get up (or something else takes them off the table).
+func strap_in(q: Node, table_index := -1) -> void:
+	if not is_host() or q == null or not is_instance_valid(q):
+		return
+	if strap_in_prompt(q) != STRAP_IN_PROMPT:
+		return
+	end_operations(q)
+	q.carry_hold = 0.0
+	q.on_table = true
+	# Hub rebuild: `player_table` names the patient table you lie on; it rides the snapshot as "st"
+	# so every machine's pinned_pose puts your body in the same place.
+	strap_table = table_index if downed_any_table else -1
+	_apply_strap_table()
+	q.teleport(pinned_pose(q).origin)
+	if q.is_local or q.is_bot:
+		q.look_up_from_table()
+	q.refresh_downed_visuals()
+	_sound("thud", player_table_top())
+	say("%s is strapped to the table. Hold E to get up." % q.player_name, 4.0)
+
+
+## GRAFT HOOK: why `p` cannot get off the player table right now, "" when they can. A pure function
+## of replicated state, so every machine's prompt agrees. Chunk C (the graft) refuses here once the
+## eye is out: a surgeon mid-graft is committed.
+func get_up_block(p: Node) -> String:
+	if p == null or not p.strapped():
+		return "Not on the table."
+	return ""
+
+
+## GRAFT HOOK: what a strapped surgeon sees on their own screen, looking up at the ceiling.
+func get_up_prompt(p: Node) -> String:
+	if p == null or not p.strapped():
+		return ""
+	var why := get_up_block(p)
+	return "!" + why if why != "" else "Hold E: get up"
+
+
+## GRAFT HOOK: peers who must let go of E before it counts again, so one long press cannot strap
+## you in and then stand you straight back up.
+var _table_hold_gate := {}
+## GRAFT HOOK: peers whose carry_hold this tick owns, so _tick_carry_holds leaves it alone.
+var _table_holding := {}
+
+
+## GRAFT HOOK: host, every frame. Both of the table's holds: aiming at a free table and holding E
+## lies you down strapped; strapped in, holding E undoes the straps. The key has to be let go in
+## between, so the press that straps you in never also gets you up.
+func _tick_table_holds(delta: float) -> void:
+	_table_holding.clear()
+	for p in players.values():
+		var to_table: int = -2 if p.on_table else _aimed_strap_table(p)
+		if not p.strapped() and to_table == -2:
+			_table_hold_gate.erase(p.peer_id)
+			continue
+		_table_holding[p.peer_id] = true
+		if not p.wants_interact:
+			_table_hold_gate.erase(p.peer_id)   # let go: the next press is a fresh hold
+			p.carry_hold = 0.0
+			continue
+		if _table_hold_gate.has(p.peer_id) or (p.strapped() and get_up_block(p) != ""):
+			p.carry_hold = 0.0
+			continue
+		p.carry_hold += delta
+		if to_table != -2:
+			if p.carry_hold >= TABLE_STRAP_HOLD:
+				p.carry_hold = 0.0
+				_table_hold_gate[p.peer_id] = true
+				strap_in(p, to_table)
+		elif p.carry_hold >= TABLE_UP_HOLD:
+			p.carry_hold = 0.0
+			_table_hold_gate[p.peer_id] = true
+			get_up_from_table(p)
+
+
+## GRAFT HOOK: the table `q` is aiming at and could strap themselves to: its index, -1 for the
+## level's own player table, -2 for "not that". Host side, and it checks reach like every hold.
+func _aimed_strap_table(q: Node) -> int:
+	if q == null or q.aim_id == "" or strap_in_prompt(q) != STRAP_IN_PROMPT:
+		return -2
+	var node := find_interactable(q.aim_id)
+	if node == null or not _within_reach(q, node):
+		return -2
+	if q.aim_id == "player_table":
+		return -1
+	if not downed_any_table or not q.aim_id.begins_with("table"):
+		return -2
+	for t in patient_tables:
+		if table_interact_id(int(t.index)) == q.aim_id:
+			return int(t.index) if table_free(int(t.index)) else -2
+	return -2
+
+
+## GRAFT HOOK: host. The straps come off and the surgeon stands beside the table.
+func get_up_from_table(p: Node) -> void:
+	if not is_host() or p == null or not is_instance_valid(p) or not p.strapped():
+		return
+	var from: Vector3 = p.global_position
+	if not player_table.is_empty():
+		var b := Basis(Vector3.UP, player_table_yaw())
+		from = (player_table.position as Vector3) + b * Vector3(0.0, 0.0, 1.1)
+	p.on_table = false
+	p.carry_hold = 0.0
+	strap_table = -1
+	_apply_strap_table()
+	p.teleport(_scatter_spot(from))
+	p.refresh_downed_visuals()
+	_sound("thud", player_table_top())
 
 
 ## Host: the stitches operation on the player on the table (docs/SWEEP2.md: the integration wave
@@ -3742,6 +3961,7 @@ func _global_fields() -> Dictionary:
 		"t": snappedf(world_time, 0.5), "ph": phase, "sh": shift, "sd": seed_value,
 		"pu": snappedf(punch, 0.01),
 		"pt": player_surgery.net_state(),  # downed: the player table's case and its surgery
+		"st": strap_table,  # GRAFT HOOK: the table a healthy surgeon strapped themselves to
 		"et": snappedf(end_timer, 0.1), "sf": shelf.duplicate(),
 		"wp": waiting_peers.keys(),
 		"dv": dev.net_state() if dev_on() else {},  # DEV HOOK
@@ -4028,6 +4248,8 @@ func _apply_state(state: Dictionary, msg: Dictionary, keyframe: bool) -> void:
 	# downed: the player table's case, after the players so its patient's colour is known.
 	var pt = g.get("pt", {})
 	player_surgery.apply_net_state(pt if pt is Dictionary else {})
+	strap_table = int(g.get("st", -1))   # GRAFT HOOK: after the case, which wins when there is one
+	_apply_strap_table()
 
 	# Monsters and items are created and destroyed to match the host.
 	_apply_entities(monsters, state.mo, msg.get("mo", {}), removed.get("mo", []), keyframe,

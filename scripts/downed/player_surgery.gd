@@ -64,6 +64,15 @@ func viewed_player() -> Node:
 	return game.viewed_player()
 
 
+## GRAFT HOOK: the body this machine drives (your own, or a possessed Dr. Botsworth).
+func driving_player() -> Node:
+	return game.driving_player()
+
+
+func driving_id() -> int:
+	return int(game.driving_id())
+
+
 func shelf_count(kind: String) -> int:
 	return game.shelf_count(kind)
 
@@ -182,7 +191,7 @@ func surgery_step_done(result: Dictionary, operator_peer: int = 0) -> void:
 
 func send_operator_report(report: Dictionary) -> void:
 	if is_host():
-		surgery.receive_operator_report(Net.my_id(), report)
+		surgery.receive_operator_report(driving_id(), report)   # GRAFT HOOK: Dr. Botsworth's, when driven
 	elif Net.active:
 		if report.has("botches") or report.has("finished") or report.has("exit") or report.has("reliable"):
 			_rpc_report_reliable.rpc_id(Net.HOST_ID, report)
