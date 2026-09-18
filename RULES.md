@@ -27,6 +27,9 @@ Godot's import cache stays warm. At most four tasks run at once, one per slot. T
 - `tools\slots.bat take 2 hive-lunge` starts branch `hive-lunge` from `main` in slot 2 (about 10 s).
 - `tools\slots.bat free 2` puts slot 2 back on `main` after its branch is merged.
 - Don't use the Agent tool's own worktrees: tell the subagent its slot's path and to stay in it.
+- Each slot has its own save folder (`%APPDATA%\Malpractice-wt-N`, set by a gitignored
+  `override.cfg`), seeded with Zach's settings and seen tips. Review windows and tests in a slot
+  never touch Zach's own saves, and slots never share test files.
 
 ### The brief
 
@@ -41,6 +44,8 @@ Nothing gets tested hard until Zach has played it.
   `tools\review.bat 2 "HIVE: does the lunge read?"`. The window's title and a yellow bar at the top
   of the screen say `SYSTEM: what to do`, short. Add `-Scene res://...` to start in a lab scene,
   `-Count 2` for two co-op windows, and game flags after that (`--seed=3`).
+- **Review windows never take focus.** They open minimized and flash in the taskbar. Nothing
+  opens a game window any other way while Zach might be using the machine.
 - The subagent ends its turn with exactly: the window's line, one sentence on what to look at, and
   anything it's unsure of. The orchestrator relays that as is, then continues **the same subagent**
   with Zach's reply, so it keeps its context.
@@ -61,6 +66,8 @@ Nothing gets tested hard until Zach has played it.
 The orchestrator merges one branch at a time into `main` with `git merge --no-ff`, writes its
 changelog entry and version bump in the same commit (or in a commit right after the merge), updates
 NOW.md, and frees the slot.
+
+**Pushing:** `main` goes to GitHub only when Zach says to push. Branches stay local.
 
 ### NOW.md
 

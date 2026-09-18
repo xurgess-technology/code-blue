@@ -1,5 +1,6 @@
-# Opens a game window from a work slot for Zach to look at. The window's title, and a yellow bar
-# at the top of the screen, say what it's for. See RULES.md, "Reviews".
+# Opens a game window from a work slot for Zach to look at. It starts minimized and flashes in the
+# taskbar (it never takes focus). The window's title, and a yellow bar at the top of the screen,
+# say what it's for. See RULES.md, "Reviews".
 #
 #   tools\review.bat 2 "HIVE: does the lunge read?"
 #   tools\review.bat 2 "OR: try the new saw" -Scene res://tools/monster_lab.tscn
@@ -39,6 +40,7 @@ for ($i = 1; $i -le $Count; $i++) {
     if ($Scene) { $a += $Scene }
     $a += @("--", "`"--review=$title`"", "--no-steam")
     foreach ($g in $GameArgs) { $a += "`"$g`"" }
-    Start-Process -FilePath $GodotGui -ArgumentList $a -WorkingDirectory $p | Out-Null
+    # Minimized, so it never steals focus: it waits in the taskbar, flashing, until Zach opens it.
+    Start-Process -FilePath $GodotGui -ArgumentList $a -WorkingDirectory $p -WindowStyle Minimized | Out-Null
     Write-Host "Opened: $title  (log: $log)"
 }

@@ -24,5 +24,8 @@ Thumbs.db
 # Multiplayer test logs (tools/nettest_run.gd)
 tools/nettest_logs/
 
+# Per-checkout save folder for work slots (tools/slots.ps1)
+override.cfg
+
 # What the orchestrator is working on right now (RULES.md, "NOW.md")
 NOW.md

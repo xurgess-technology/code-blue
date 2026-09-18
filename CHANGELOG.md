@@ -7,7 +7,7 @@ patch per thing we did that day. How to add to it: [RULES.md](RULES.md#changelog
 
 - **0.6.8**: A new way of working 🧑‍⚕️🧑‍⚕️🧑‍⚕️
     - Added: One orchestrator agent hands work to subagents in four reusable work slots; see [RULES.md](RULES.md#workflow).
-    - Added: Review windows: a game window from a slot, titled with what to go look at.
+    - Added: Review windows: a game window from a slot, titled with what to go look at. It waits in the taskbar instead of popping up in your face.
     - Changed: Play it first, test it hard later; big test sweeps get batched.
 - **0.6.7**: Spring cleaning 🧹
     - Removed: The first Night Nurse, unused models and the old web prototype (moved to `deprecated/`).

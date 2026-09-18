@@ -28,6 +28,25 @@ function Import-Slot([string]$path) {
     & $GodotConsole --headless --path $path --import 2>&1 | Out-File -Encoding utf8 (Join-Path $path ".godot\import.log")
 }
 
+# Each slot gets its own user:// (%APPDATA%\Malpractice-wt-N) through a gitignored override.cfg,
+# so review windows and tests don't touch Zach's saves, and two slots never share test files. It
+# starts with Zach's settings and seen tips, so review windows feel like his game.
+function Ensure-UserDir([string]$path, [string]$n) {
+    $name = "Malpractice-wt-$n"
+    $cfg = Join-Path $path "override.cfg"
+    if (-not (Test-Path $cfg)) {
+        Set-Content -Encoding ascii $cfg "[application]`r`n`r`nconfig/use_custom_user_dir=true`r`nconfig/custom_user_dir_name=`"$name`"`r`n"
+    }
+    $dst = Join-Path $env:APPDATA $name
+    if (-not (Test-Path $dst)) {
+        New-Item -ItemType Directory -Force $dst | Out-Null
+        $src = Join-Path $env:APPDATA "Godot\app_userdata\Malpractice"
+        foreach ($f in @("settings.cfg", "prefs.cfg", "tips.cfg")) {
+            if (Test-Path (Join-Path $src $f)) { Copy-Item (Join-Path $src $f) $dst }
+        }
+    }
+}
+
 function Slot-Branch([string]$path) {
     $b = (git -C $path branch --show-current 2>$null)
     if ($b) { return $b } else { return "" }
@@ -60,7 +79,7 @@ switch ($Command) {
         New-Item -ItemType Directory -Force $SlotsDir | Out-Null
         for ($i = 1; $i -le $Count; $i++) {
             $p = SlotPath $i
-            if (Test-Path $p) { continue }
+            if (Test-Path $p) { Ensure-UserDir $p $i; continue }
             Write-Host "Making wt-$i"
             git -C $Main worktree add --no-checkout --detach $p main
             if ($LASTEXITCODE -ne 0) { exit 1 }
@@ -70,6 +89,7 @@ switch ($Command) {
                 Write-Host "  copying the import cache from main ..."
                 robocopy (Join-Path $Main ".godot") (Join-Path $p ".godot") /E /NFL /NDL /NJH /NJS /NP | Out-Null
             }
+            Ensure-UserDir $p $i
             Import-Slot $p
         }
         Show-Status

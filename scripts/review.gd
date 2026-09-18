@@ -35,3 +35,5 @@ func _ready() -> void:
 	# The engine names the window after autoloads are ready, so ours goes on a frame later.
 	await get_tree().process_frame
 	DisplayServer.window_set_title(text)
+	# tools/review.ps1 opens it minimized so it never grabs focus; flash the taskbar instead.
+	DisplayServer.window_request_attention()
