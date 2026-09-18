@@ -47,6 +47,7 @@ const CUT_SEGS := 72
 const CUT_SAMPLES := 96                # ring samples the incision ribbon is built from
 const WOUND_HW := 0.0019               # half width of the slit
 const WOUND_LIFT := 0.0004             # sits just off the skin so it never z-fights
+const SCOOP_TIP_Y := 0.006             # the lowered spoon's bowl height: in the socket, beside the eye
 const CUT_TIP_Y := 0.008               # the lowered scalpel's tip height: on the skin around the eye, in view
 const TIP_X := 0.09                    # where the item model's tip is along its X
 const INK_SHEEN := Color(0.55, 0.3, 1.0)   # the saw's marking sheen
@@ -100,6 +101,11 @@ var _cut_mesh: MeshInstance3D
 var _cut_n := 0
 var _skin_rows: Array = []              # per ring sample: [left, centre, right] on the skin, plane-local
 var _mat_wound: StandardMaterial3D
+var scoop_r := 0.0185                   # the circle the spoon follows, just outside the eye
+var _eye_pivot: Node3D                  # the scoop's eye rocks and lifts about its centre
+var _eye_base := Vector3.ZERO
+var _eye_k := 0.0
+var _stalk: MeshInstance3D
 var _mat_mark: StandardMaterial3D
 var _ring_theta: Array[float] = []
 var bot_slow := 1.0                     # tests and smoke looks: slow the cut bot down
@@ -338,8 +344,8 @@ func bot_input(t: float, skill: float) -> Dictionary:
 			if not down:
 				var c := cursor.move_toward(Vector2(0.012, 0.0), 0.2 * dt)
 				return {"cursor": c, "buttons": BUTTON_PRIMARY if c.length() < 0.02 and click else 0}
-			var a := atan2(cursor.y, cursor.x) + lerpf(0.1, 0.045, skill) * dt / 0.014
-			return {"cursor": Vector2(cos(a), sin(a)) * 0.014, "buttons": 0}
+			var a := atan2(cursor.y, cursor.x) + lerpf(0.1, 0.045, skill) * bot_slow * dt / scoop_r
+			return {"cursor": Vector2(cos(a), sin(a)) * scoop_r, "buttons": 0}
 		_:
 			if lift < 0.95:
 				return {"cursor": cursor.move_toward(NERVE_AT, 0.3 * dt), "buttons": BUTTON_UP}
@@ -385,7 +391,9 @@ func _build() -> void:
 	_mat_good = _unshaded(Color(0.35, 1.0, 0.55), 0.9)
 	_mat_bad = _unshaded(Color(1.0, 0.25, 0.2), 0.95)
 	# The eye (the scoop and snip draw their own; the cut leaves the body's).
-	if variant != "cut":
+	if variant == "scoop":
+		_build_scoop_eye()
+	elif variant != "cut":
 		_eye = MeshInstance3D.new()
 		var sph := SphereMesh.new()
 		sph.radius = eye_r * 1.02
@@ -420,21 +428,155 @@ func _build() -> void:
 			add_child(_cut_mesh)
 			_front = _box(Vector3(0.004, 0.002, 0.004), _mat_front)
 		"scoop":
-			# A dotted circle inside the rim to circle along; dots turn green as the turns add up.
+			# A dim dotted circle just outside the eye to circle along; dots turn green as the turns add up.
+			_mat_mark = _unshaded(Color(0.62, 0.5, 0.82), 0.6)
 			for i in 24:
-				var d := _box(Vector3(0.0028, 0.001, 0.0028), _mat_ink)
+				var d := _box(Vector3(0.0022, 0.0006, 0.0022), _mat_mark)
 				var th := TAU * float(i) / 24.0
-				d.position = plane_to_local(Vector2(cos(th), sin(th)) * 0.0155, 0.0016)
+				d.position = plane_to_local(Vector2(cos(th), sin(th)) * scoop_r, 0.0016)
 				_dots.append(d)
+			# The socket's wet dark rim: a ribbon on the skin all the way round, just outside the eye.
+			var rim_mat := StandardMaterial3D.new()
+			rim_mat.albedo_color = Color(0.13, 0.01, 0.02)
+			rim_mat.roughness = 0.05
+			rim_mat.metallic_specular = 0.9
+			rim_mat.emission_enabled = true
+			rim_mat.emission = Color(0.16, 0.0, 0.0)
+			rim_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+			var rim := MeshInstance3D.new()
+			rim.mesh = _ribbon(_skin_ring(eye_r * 1.12, 0.0016), CUT_SAMPLES)
+			rim.material_override = rim_mat
+			add_child(rim)
 		"snip":
 			_nerve_mat = _unshaded(Color(0.98, 0.9, 0.7), 0.0)
 			_nerve = _box(Vector3(0.0055, 0.0055, 1.0), _nerve_mat)
 			_target = _box(Vector3(SLICE_TOL * 1.6, 0.0008, SLICE_TOL * 1.6), _mat_good)
 			_target.position = plane_to_local(NERVE_AT, 0.002)
 			_target.visible = false
-	_tool = _make_cut_scalpel() if variant == "cut" else ItemModels.make("eye_spoon" if variant == "scoop" else "scalpel")
+	_tool = _make_cut_scalpel() if variant == "cut" else (_make_scoop_spoon() if variant == "scoop" else ItemModels.make("scalpel"))
 	add_child(_tool)
 	_set_layers(self)
+
+
+## The scoop's spoon: a slim handle and a shallow bowl, bowl down at the origin, handle up.
+func _make_scoop_spoon() -> Node3D:
+	var root := Node3D.new()
+	var steel := StandardMaterial3D.new()
+	steel.albedo_color = Color(0.9, 0.92, 0.95)
+	steel.metallic = 0.6
+	steel.roughness = 0.22
+	var bowl := MeshInstance3D.new()
+	var sph := SphereMesh.new()
+	sph.radius = 0.0075
+	sph.height = 0.015
+	sph.radial_segments = 16
+	sph.rings = 8
+	bowl.mesh = sph
+	bowl.material_override = steel
+	bowl.scale = Vector3(1.0, 0.4, 1.25)
+	bowl.position = Vector3(0, 0.0025, 0)
+	root.add_child(bowl)
+	var neck := MeshInstance3D.new()
+	var nc := CylinderMesh.new()
+	nc.top_radius = 0.0018
+	nc.bottom_radius = 0.0011
+	nc.height = 0.012
+	neck.mesh = nc
+	neck.material_override = steel
+	neck.position = Vector3(0, 0.011, 0)
+	root.add_child(neck)
+	var handle := MeshInstance3D.new()
+	var hc := CylinderMesh.new()
+	hc.top_radius = 0.0034
+	hc.bottom_radius = 0.0026
+	hc.height = 0.06
+	hc.radial_segments = 10
+	handle.mesh = hc
+	handle.material_override = steel
+	handle.position = Vector3(0, 0.047, 0)
+	root.add_child(handle)
+	return root
+
+
+## The scoop's eye is a copy of the body's own eye (same mesh and material, same place), wrapped in a pivot at
+## its centre so it can rock and lift; the body's eye is hidden while this plays. Without a body it is a sphere.
+func _build_scoop_eye() -> void:
+	_eye_pivot = Node3D.new()
+	add_child(_eye_pivot)
+	var src: MeshInstance3D = null
+	var body = ctx.get("body")
+	if body != null and is_instance_valid(body) and is_inside_tree():
+		src = body.parts.get("eye_node") as MeshInstance3D if body.get("parts") != null else null
+	if src != null and src.mesh != null:
+		var ab := src.mesh.get_aabb()
+		var center_l := to_local(src.global_transform * ab.get_center())
+		_eye_base = center_l
+		_eye_pivot.position = center_l
+		_eye = MeshInstance3D.new()
+		_eye.mesh = src.mesh
+		_eye.material_override = src.get_active_material(0)
+		_eye_pivot.add_child(_eye)
+		# put the copy exactly over the body's eye
+		_eye.global_transform = src.global_transform
+	else:
+		_eye = MeshInstance3D.new()
+		var sph := SphereMesh.new()
+		sph.radius = eye_r * 1.02
+		sph.height = eye_r * 2.04
+		sph.radial_segments = 20
+		sph.rings = 10
+		_eye.mesh = sph
+		_eye.material_override = Eyes.material(eye_kind)
+		_eye.basis = Basis(Vector3.RIGHT, deg_to_rad(90.0))
+		_eye_pivot.add_child(_eye)
+		_eye_base = plane_to_local(Vector2.ZERO, eye_r * 0.85)
+		_eye_pivot.position = _eye_base
+	var stalk_mat := StandardMaterial3D.new()
+	stalk_mat.albedo_color = Color(0.85, 0.7, 0.62)
+	stalk_mat.roughness = 0.3
+	_stalk = _box(Vector3(0.0045, 0.0045, 1.0), stalk_mat)
+	_stalk.visible = false
+
+
+## Ray-cast rows [left, centre, right] on the body's skin along a ring of radius `r` (see _sample_skin).
+func _skin_ring(r: float, hw: float) -> Array:
+	var tri: TriangleMesh = null
+	var mi: MeshInstance3D = null
+	var body = ctx.get("body")
+	if body != null and is_instance_valid(body) and is_inside_tree():
+		mi = body.find_child("Human", true, false) as MeshInstance3D
+		if mi != null and mi.mesh != null and mi.is_inside_tree():
+			tri = mi.mesh.generate_triangle_mesh()
+	var to_mesh: Transform3D = mi.global_transform.affine_inverse() if tri != null else Transform3D()
+	var rows := []
+	for i in CUT_SAMPLES + 1:
+		var c2 := _ring_pos(TAU * float(i) / float(CUT_SAMPLES), r)
+		var radial := c2.normalized()
+		var row := []
+		for off in [-hw, 0.0, hw]:
+			var q: Vector2 = c2 + radial * off
+			var lp := plane_to_local(q, 0.002)
+			if tri != null:
+				var from := to_mesh * to_global(plane_to_local(q, 0.06))
+				var dir := (to_mesh.basis * (global_transform.basis * Vector3.DOWN)).normalized()
+				var hit: Dictionary = tri.intersect_ray(from, dir)
+				if not hit.is_empty():
+					lp = to_local(mi.global_transform * (hit.position as Vector3) + (mi.global_transform.basis * (hit.normal as Vector3)).normalized() * WOUND_LIFT)
+			row.append(lp)
+		rows.append(row)
+	return rows
+
+
+func _ribbon(rows: Array, n: int) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in mini(n, rows.size() - 1):
+		var a: Array = rows[i]
+		var b: Array = rows[i + 1]
+		for v in [a[0], a[2], b[0], a[2], b[2], b[0]]:
+			st.add_vertex(v)
+	st.generate_normals()
+	return st.commit()
 
 
 ## The cut's scalpel: a slim handle and a small pointed blade, tip down at the origin, handle up, so it hangs
@@ -554,12 +696,12 @@ func _update_visuals() -> void:
 		return
 	# The tool's tip on the cursor: on the plane when lowered, hovering above it when not. The model's tip
 	# is at +X, so the handle trails to the left of the screen, tilted up.
-	if variant == "cut":
+	if variant == "cut" or variant == "scoop":
 		# Upright over the eye, leaning a little away from its centre; it turns slowly to stay that way as it
-		# follows the marking, and drops onto the eye when lowered.
+		# follows the marking (or circles the socket), and drops onto the eye when lowered.
 		if cursor.length() > 0.004:
 			_cut_yaw = lerp_angle(_cut_yaw, atan2(cursor.x, cursor.y), clampf(_dt * 2.5, 0.0, 1.0))
-		_cut_h = move_toward(_cut_h, CUT_TIP_Y if down else 0.03, _dt * 0.25)
+		_cut_h = move_toward(_cut_h, (CUT_TIP_Y if variant == "cut" else SCOOP_TIP_Y) if down else 0.03, _dt * 0.25)
 		_tool.basis = Basis(Vector3.UP, _cut_yaw) * Basis(Vector3.RIGHT, deg_to_rad(22.0))
 		_tool.position = plane_to_local(cursor, _cut_h)
 	else:
@@ -579,10 +721,26 @@ func _update_visuals() -> void:
 				_ring[i].visible = _ring_theta[i] > cut
 		"scoop":
 			var k := clampf(turns / (TAU * SCOOP_TURNS), 0.0, 1.0)
-			_eye.position = plane_to_local(Vector2.ZERO, eye_r * 0.85 + k * 0.006)
-			_eye.basis = Basis(Vector3.RIGHT, deg_to_rad(90.0 - 14.0 * k))
+			# The eye rocks toward the spoon and lifts a little more each turn on its stalk; when the spoon
+			# slips out it settles back (the turns stay).
+			_eye_k = move_toward(_eye_k, k if down else k * 0.7, _dt * 0.5)
+			var lean := cursor.normalized() if cursor.length() > 0.002 else Vector2.ZERO
+			var axis := Vector3(lean.y, 0.0, -lean.x)
+			var rock := (0.05 + 0.2 * _eye_k) if down else 0.0
+			_eye_pivot.basis = Basis(axis.normalized(), rock) if axis.length() > 0.001 else Basis()
+			_eye_pivot.position = _eye_base + Vector3(0.0, _eye_k * 0.009, 0.0)
+			# the stalk from the bottom of the socket up to the eye, stretching as it lifts
+			var sa := plane_to_local(Vector2.ZERO, -0.004)
+			var sb := _eye_pivot.position - Vector3(0.0, eye_r * 0.7, 0.0)
+			var sd := sb - sa
+			var sl := maxf(sd.length(), 0.001)
+			var sz := sd / sl
+			var sy := sz.cross(Vector3.RIGHT).normalized()
+			var sx := sy.cross(sz).normalized()
+			_stalk.transform = Transform3D(Basis(sx, sy, sz * sl), (sa + sb) * 0.5)
+			_stalk.visible = _eye_k > 0.03
 			for i in _dots.size():
-				_dots[i].material_override = _mat_good if float(i) / 24.0 < k else (_mat_bad if _flash > 0.0 else _mat_ink)
+				_dots[i].material_override = _mat_good if float(i) / 24.0 < k else (_mat_bad if _flash > 0.0 else _mat_mark)
 		"snip":
 			# Resting over the socket, pulled up on its nerve as W is held.
 			_eye.position = plane_to_local(Vector2.ZERO, eye_r * 0.9 + 0.004 + lift * 0.022)

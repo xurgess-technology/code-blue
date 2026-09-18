@@ -106,6 +106,39 @@ func _run() -> void:
 	_stand(pt + tb * Vector3(0, 0, 1.0))
 	_look_at(eye_at)
 	var sys = game.surgery_for_table(table)
+	if OS.get_cmdline_user_args().has("--scoop-only"):
+		# skip the cut with the bot, then take the scoop step by hand-paced bot
+		game.give_hand(me, "scalpel", 1)
+		me.selected = _slot("scalpel")
+		game.surgery_bot_skill = 1.0
+		game._proxy_used(game.table_interact_id(table), me)
+		await _until(func(): return int(c.get("step_index", 0)) >= 1, 60.0)
+		await _seconds(1.0)
+		game.give_hand(me, "eye_spoon", 1)
+		me.selected = _slot("eye_spoon")
+		game._proxy_used(game.table_interact_id(table), me)
+		await _until(func(): return sys.mg != null and String(sys.mg.get("variant")) == "scoop" and sys.is_local_operating(), 10.0)
+		var mg = sys.mg
+		mg.set("bot_hold", 0.0)
+		game.surgery_bot_skill = -1.0
+		await _seconds(2.5)
+		await _shot("30_spoon_raised")
+		game.surgery_bot_skill = 1.0
+		await _until(func(): return bool(mg.get("down")), 10.0)
+		await _seconds(0.5)
+		await _shot("31_spoon_dropped")
+		game.surgery_bot_skill = 0.0
+		await _until(func(): return int(mg.get("slips")) > 0, 20.0)
+		await _seconds(0.15)
+		await _shot("32_slip")
+		mg.set("bot_slow", 0.35)
+		game.surgery_bot_skill = 1.0
+		var k := 33
+		for mark in [3.0, 7.0, 11.0]:
+			await _until(func(): return not is_instance_valid(mg) or float(mg.get("turns")) > mark, 40.0)
+			await _shot("%d_turns_%.1f" % [k, mark])
+			k += 1
+		return
 	if OS.get_cmdline_user_args().has("--cut-only"):
 		game.give_hand(me, "scalpel", 1)
 		me.selected = _slot("scalpel")
