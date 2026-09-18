@@ -1,5 +1,6 @@
 extends Node
-## Grafting part one (docs/GRAFTING.md, chunk A): the eyes, the specimen vat and Eyeball Extraction.
+## Grafting (docs/GRAFTING.md): chunk A -- the eyes, the specimen vat and Eyeball Extraction -- and
+## chunk C -- the vat stands, Eyeball Grafting on a strapped surgeon and the ability it gives.
 ##
 ##   godot --headless --fixed-fps 60 --path . tools/grafttest.tscn
 ##
@@ -46,7 +47,7 @@ func _data_checks() -> void:
 	_check(Items.is_surgical("scalpel") and not Items.is_consumable("scalpel") and Items.is_surgical("eye_spoon"), "scalpel and eye spoon are surgical, reusable tools")
 	_check(Items.is_bulky("specimen_vat") and Items.slots_needed("specimen_vat") == 2, "the vat takes both hands")
 	_check(Items.is_loot("eye_hive") and Items.is_loot("eye_surgeon") and Eyes.is_eye("eye_hive"), "both eyes are sellable loot")
-	_check(Eyes.label("eye_hive", "") == "Eyeball of Hive" and Eyes.label("eye_surgeon", "Zach") == "Zach's eye", "eye labels")
+	_check(Eyes.label("eye_hive", "") == "Hive's eyeball" and Eyes.label("eye_surgeon", "Zach") == "Zach's eyeball", "eye labels")
 	_check(Eyes.spoil_factor(0.0) == 1.0 and Eyes.spoil_factor(Eyes.FRESH_SECONDS) == 1.0 and Eyes.is_spoiled_factor(Eyes.spoil_factor(Eyes.ROTTEN_SECONDS)), "an eye is fresh, then spoils")
 	var st: Array = Procedures.steps("eye_extraction")
 	_check(st.size() == 3 and st[0].item == "scalpel" and st[1].item == "eye_spoon" and st[2].item == "scalpel" and st[0].site == "eye", "extraction steps: scalpel, spoon, scalpel")
@@ -165,7 +166,7 @@ func _run() -> void:
 	var eh: int = me.selected_head()
 	me.slots[eh]["bt"] = now - 20.0
 	me.slots[eh]["v"] = 100
-	_check(vats.item_prompt(me, vat).begins_with("Put Eyeball of Hive in the vat"), "aimed at a vat with an eye: '%s'" % vats.item_prompt(me, vat))
+	_check(vats.item_prompt(me, vat).begins_with("Put Hive's eyeball in the vat"), "aimed at a vat with an eye: '%s'" % vats.item_prompt(me, vat))
 	game.pickup_item(me, vat)   # E on the vat with an eye selected
 	await _frames(2)
 	var got := Eyes.unpack(String(vat.x))
@@ -200,7 +201,7 @@ func _run() -> void:
 		if String(me.slots[i].kind) == "eye_hive":
 			eye_slot = i
 	me.selected = eye_slot
-	_check(vats.hand_prompt(me).begins_with("Put Eyeball of Hive in the vat"), "eye and vat both in hand: '%s'" % vats.hand_prompt(me))
+	_check(vats.hand_prompt(me).begins_with("Put Hive's eyeball in the vat"), "eye and vat both in hand: '%s'" % vats.hand_prompt(me))
 	vats.hand_put(me)
 	await _frames(2)
 	_check(String(me.slots[vh].get("x", "")) != "" and String(me.slots[eye_slot].kind) == "", "E aimed at nothing puts the carried eye into the carried vat")
@@ -287,6 +288,129 @@ func _run() -> void:
 	_check(in_hand >= 0 and me.slots[in_hand].has("bt") and int(me.slots[in_hand].get("v", 0)) > 0, "it is a live eye with a spoil clock and a value")
 	await _frames(3)
 	_check(body != null and bool(body.get("_flat")), "the Hive dies on the table")
+
+	await _graft_checks()
+
+
+# =========================================================================
+# GRAFTING chunk C: Eyeball Grafting on yourself, with Dr. Botsworth operating
+# =========================================================================
+
+func _graft_checks() -> void:
+	var vats: Node = game.vats
+	var grafts: Node = game.grafts
+	dev.request("clear_patient")
+	_clear_hands()
+	await _frames(3)
+	_check(vats.stands.size() == game.patient_tables.size() and vats.stands.size() >= 2,
+		"every OR table has a vat stand (%d stands, %d tables)" % [vats.stands.size(), game.patient_tables.size()])
+	var ti := game.free_patient_table()
+	var si: int = vats.stand_of_table(ti)
+	_check(si >= 0, "the free table's stand (table %d, stand %d)" % [ti, si])
+	if si < 0:
+		return
+	# ---- strapped down, with nothing on the stand
+	game.strap_in(me, ti)
+	await _frames(4)
+	_check(me.strapped() and int(game.player_table.get("index", -1)) == ti, "strapped to table %d" % ti)
+	dev.control_botsworth()
+	await _frames(4)
+	var bw = dev.possessed_player()
+	_check(bw != null, "Dr. Botsworth is here to operate")
+	if bw == null:
+		return
+	var yaw := game.table_yaw_of(ti)
+	bw.teleport(game._floor_at(game.table_position(ti) + Vector3(0, 0, 1.0).rotated(Vector3.UP, yaw)))
+	bw.bot_move = Vector2.ZERO
+	game.give_hand(bw, "scalpel", 1)
+	await _frames(3)
+	var no_vat := String(game._table_prompt(bw, ti))
+	_check(no_vat.begins_with("!No vat on the stand"), "no vat on the stand: the table says why ('%s')" % no_vat)
+
+	# ---- a vat with a spoiled Hive eye
+	var stand_at: Vector3 = vats.stands[si].position
+	var vat: Node = game._spawn_item("specimen_vat", 1, Transform3D(Basis(Vector3.UP, yaw), stand_at), WorldItem.State.LOOSE)
+	vat.x = Eyes.pack("eye_hive", "", Eyes.ROTTEN_SECONDS + 50.0, 120)
+	await _frames(3)
+	_check(vats.vat_on_stand(ti) == vat, "the vat stands on the stand beside the table")
+	var spoiled := String(game._table_prompt(bw, ti))
+	_check(spoiled.begins_with("!") and spoiled.contains("spoiled"), "a spoiled eye cannot be grafted ('%s')" % spoiled)
+	vat.x = Eyes.pack("eye_hive", "", 0.0, 120)
+	await _frames(3)
+	var offer := String(game._table_prompt(bw, ti))
+	_check(offer.begins_with("Operate: graft Hive's eyeball into"), "a fresh Hive eyeball is offered ('%s')" % offer)
+
+	# ---- the four steps
+	# The player table runs its own surgery system with its own stand-in game, so its bot skill is
+	# its own (game.surgery_bot_skill is the patient tables').
+	game.player_surgery.surgery.bot_skill = 1.0
+	if not await _graft_run(bw, ti, true):
+		return
+	_check(grafts.graft_of(me.peer_id) == "eye_hive", "the graft took: a Hive eyeball in the socket")
+	_check(game.brains.slot_of(me.peer_id, "hive_in") >= 0 and game.brains.level(me.peer_id, "hive") >= 1,
+		"it gave Hive Eyes 1 in an ability slot (slot %d, level %d)" % [game.brains.slot_of(me.peer_id, "hive_in"), game.brains.level(me.peer_id, "hive")])
+	var swapped := Eyes.unpack(String(vat.x))
+	_check(String(swapped.get("kind", "")) == "eye_surgeon" and String(swapped.get("owner", "")) == me.player_name,
+		"your own eyeball is in the vat now (%s)" % str(swapped))
+	_check(game.get_up_block(me) == "", "the graft is over: you can get up again")
+
+	# ---- swapping back takes it away
+	_clear_hands_of(bw)
+	game.give_hand(bw, "scalpel", 1)
+	bw.selected = _slot_of_for(bw, "scalpel")
+	await _frames(3)
+	var again := String(game._table_prompt(bw, ti))
+	_check(again.begins_with("Operate: graft %s's eyeball into" % me.player_name), "your own eyeball is offered back ('%s')" % again)
+	if not await _graft_run(bw, ti, false):
+		return
+	_check(grafts.graft_of(me.peer_id) == "", "swapping back takes the Hive eyeball out")
+	_check(game.brains.slot_of(me.peer_id, "hive_in") < 0, "and Hive Eyes goes with it")
+	_check(String(Eyes.unpack(String(vat.x)).get("kind", "")) == "eye_hive", "the Hive eyeball is back in the vat")
+	dev.control_botsworth()
+	await _frames(4)
+
+
+## One whole graft, Botsworth operating. `first` only changes the messages. False on a timeout.
+func _graft_run(bw, ti: int, first: bool) -> bool:
+	var tag := "graft" if first else "swap back"
+	var tools := ["scalpel", "eye_spoon", "eye_spoon", "suture_kit"]
+	var names := ["cut", "scoop", "seat", "stitch"]
+	var ps: Node = game.player_surgery
+	var sys: Node = ps.surgery
+	for i in tools.size():
+		_clear_hands_of(bw)
+		game.give_hand(bw, tools[i], 1)
+		bw.selected = _slot_of_for(bw, tools[i])
+		await _frames(3)
+		game._proxy_used(game.table_interact_id(ti), bw)
+		var began := await _until(func(): return sys.is_local_operating() and sys.mg != null and String(sys.mg.get("variant")) == names[i], 6.0)
+		_check(began, "%s: step %d plays the %s" % [tag, i + 1, names[i]])
+		if not began:
+			return false
+		var nb = sys.mg.get("no_fail")
+		if i == 0:
+			_check(bool(nb), "%s: no botching on grafts (no_fail %s)" % [tag, str(nb)])
+		var done := await _until(func(): return ps.case.is_empty() or int(ps.case.get("step_index", 0)) > i, 60.0)
+		_check(done, "%s: the %s finishes" % [tag, names[i]])
+		if not done:
+			return false
+		if i == 1:
+			# The scoop is the point of no return: the socket is open.
+			_check(game.get_up_block(me) != "", "%s: you cannot get up once your eye is out ('%s')" % [tag, game.get_up_block(me)])
+		await _seconds(0.4)
+	return true
+
+
+func _slot_of_for(p, kind: String) -> int:
+	for i in p.slots.size():
+		if String(p.slots[i].kind) == kind:
+			return i
+	return 0
+
+
+func _clear_hands_of(p) -> void:
+	for i in p.slots.size():
+		p.slots[i] = Player.empty_slot()
 
 
 func _vat_items() -> Array:

@@ -2077,7 +2077,7 @@ No graft, graft stand or Hive Eyes change yet (chunks B and C).
 # Items: "scalpel", "eye_spoon" (ITEMS, surgical, reusable), "specimen_vat" (ITEMS, bulky: two hands),
 #        "eye_hive", "eye_surgeon" (LootTable, sellable, `eye: true`).
 Eyes.spoil_factor(age) / condition(f) / is_spoiled_factor(f)   # FRESH 40 s, ROTTEN 130 s, spoiled below 0.3 (can't be grafted)
-Eyes.label(kind, owner)                                         # "Eyeball of Hive" / "Zach's eye"
+Eyes.label(kind, owner)                                         # "Hive's eyeball" / "Zach's eyeball"
 Eyes.pack(kind, owner, age, value) / unpack(x)                  # a vat's contents string
 Vats.held_vat(p) -> int                                         # head slot of a vat in p's hands, -1
 game.vats: item_used(p, item) / hand_put(p) / take_out(p, aim_id) / set_down(p, spot) / spot_free(i)
@@ -2086,7 +2086,7 @@ game.vats: item_used(p, item) / hand_put(p) / take_out(p, aim_id) / set_down(p, 
 ```
 
 - **`x`** is a new small string on `WorldItem` and on a hand slot (like `bt`, it rides pickup, drop,
-  throw, storage and the snapshot): an eye's owner ("Zach"; "" for an Eyeball of Hive), or what a vat holds.
+  throw, storage and the snapshot): a part's owner ("Zach"; "" means the Hive), or what a vat holds.
   An eye's spoil clock is `bt`, like a brain's. Going into a vat freezes the age in the vat's `x`;
   coming out rebuilds `bt`, so a vat stops the clock. `game.furnace_value` prices eyes by spoilage.
 - **Inputs.** E on a vat (bench or dropped) with an eye selected puts it in; E aimed at nothing with a
@@ -2110,6 +2110,84 @@ game.vats: item_used(p, item) / hand_put(p) / take_out(p, aim_id) / set_down(p, 
   (`Dissection.last_operator`, else on the specimen tray); the Hive dies on the table.
 - **The eye minigames** (`eye_ops.gd`, reusable by the graft): cut = the saw-style violet marking ringed round the eye, left click lowers the scalpel, trace it and the cut opens along it, too fast or off the eye slips it out (click to lower again, cut kept, no damage); scoop = spoon on the cursor, click into the socket, circle it slowly (two turns), too fast slips; snip = eye resting over the socket seen from low, hold **W** (`Minigame.BUTTON_UP`, new bit in `buttons`) to pull it up and reveal the nerve, then click the nerve. ctx knobs: `no_fail` (never botches), `eye_kind`, `eye_radius`. Only a nick of the eyeball and a missed slice botch.
 - Tests: `tools/grafttest.tscn` (headless).
+
+### Grafting part one: the vat stands and Eyeball Grafting (docs/GRAFTING.md, chunk C, 2026-09-18)
+
+`scripts/grafting/grafts.gd` (`Grafts`, `game.grafts`, child "Grafts" of Game, every machine) and
+`scripts/grafting/graft_eye.gd` (`GraftEye`, statics: the grafted eyeball on a body).
+
+**Body parts are named "X's Y"** everywhere: `Eyes.label` gives "Hive's eyeball" / "Zach's eyeball",
+from the part kind's `Eyes.NOUN` and the owner in `x`. Everything in `Eyes`, `Vats` and `Grafts`
+works on a *part kind*, never on eyes as such, so part two's trachea (docs/GRAFTING_TRACHEA.md) can
+be added through `Eyes.KINDS` / `NOUN` and `Grafts.PART_ABILITY` without a rewrite.
+
+```gdscript
+# the stands (vats.gd): one beside every patient table, built with the level on every machine
+Vats.stands            # [{position (the tray top), yaw, table: table index}], STAND_TOP 0.92
+Vats.build_stand(root) / stand_free(i) / stand_prompt(p, i) / set_down_on_stand(p, i)
+Vats.vat_on_stand(table_index) -> WorldItem / stand_of_table(ti) / nearest_stand(pos, within)
+# the graft (grafts.gd)
+game.grafts.graft_of(peer_id) -> String      # "eye_hive" or ""; snapshot field "gf"
+           table_prompt(q) / empty_table_prompt(q, ti)   # the offer and its refusals
+           make_case(q) / on_step(case, result) / finish(case) / apply(peer, kind)
+           local_lock() -> float             # -1 no graft, else how lit the eye is (the HUD tint)
+```
+
+- **The stand.** A small steel stand beside each patient table, on the first of `STAND_OFFSETS`
+  clear of the level (identical on every machine). E with a carried vat sets it down there
+  (aim id `vatstand_<i>`, armed only while you carry one); picking it back up is the ordinary
+  world-item pickup. The stand holds a vat only for as long as someone leaves it there.
+- **The case.** `Procedures.AILMENTS.eye_graft` ("Eyeball Grafting", `player_only`), four steps, all
+  `game: "eye"`, site `eye`: scalpel `cut`, eye spoon `scoop`, eye spoon `seat`, suture kit `stitch`.
+  It runs through `scripts/downed/player_surgery.gd`, which already stands in as a game for the
+  player table's surgery system; `is_graft()` is the difference. The case carries `in_kind/in_owner/
+  in_value`, `out_kind/out_owner` and flags `{sedation: 1.0, no_fail: true, eye_kind, eye_kind_in,
+  eye_radius}`, which `surgery_system._spawn_mg` copies into the minigame's ctx. **No botching.**
+- **The offer** hangs off the table's existing prompt: `_table_prompt` -> `player_surgery.operate_
+  prompt` -> `grafts.table_prompt` while somebody lies strapped there with no case. The refusals are
+  "!No vat on the stand beside the table.", "!The vat on the stand is empty.", "!X's eyeball is
+  spoiled.", "!X already has one.", "!X has two normal eyes.", "!You cannot operate on yourself." and
+  "!Hold the scalpel to start the graft."; a free table with a loaded vat on its stand says
+  "!Nobody is strapped to this table." to someone holding a scalpel or an eye spoon. The case is
+  created by the first `begin` (`player_surgery.start_graft`).
+- **The swap.** The `scoop` step's result (`eye_out`) is the moment it happens: the eye that was in
+  the socket is packed into the vat on the stand (fresh, age 0) and the eye that was in the vat is
+  now the one going in. So a graft is always a swap and never an empty socket.
+- **Committed after the scoop.** `game.get_up_block` asks `player_surgery.graft_commit_block`, which
+  refuses ("Not with your eye out.") from step 2 on. Before that the surgeon can hold E and go, which
+  clears the case.
+- **The eye minigames** gained two variants (`eye_ops.gd`): `seat` is the scoop's rules run the other
+  way (the new eye sinks into the socket as the turns add up, result `eye_seated`) and `stitch` is the
+  cut's rules run over an already-open wound (it closes behind the needle and stitch marks appear,
+  result `eye_stitched`). ctx knobs `no_fail`, `eye_kind`, `eye_kind_in`, `eye_radius`.
+- **The body.** `scripts/downed/player_body.gd` is the lying stand-in for the graft too: new site
+  `eye` (the LEFT eyeball, from `Site_eyes` on the head bone plus `EYE_SIDE`), `parts`, and
+  `set_eye(kind, out)` which the case drives per step (own eye -> empty socket -> the new one).
+  `Player.stand_in` (every machine, from `player_surgery._refresh_stand_in`) keeps the strapped
+  surgeon's own body from drawing on top of it.
+- **The eye on the body.** There is no `surgeon_graft` GLB in the game, so `GraftEye` builds that
+  look at runtime: `Human_Eye_L` is hidden and an eyeball with the item's own shader is hung on the
+  head's `BoneAttachment3D` with a ring of stitches, so it follows every clip and shows in third
+  person, on other players' screens, in the carry camera and in the Personnel mirrors.
+  `Grafts._physics_process` puts it on and takes it off from the replicated `_graft`.
+- **The glow** is the Hive eye material's `Lock`, a new `instance uniform float lock` on the eye
+  shader (0 a low pinpoint, 1 the whole ball lit). `Grafts` eases it to 1 while that player's
+  `hive_view` is on, which is already replicated, so every machine agrees.
+- **The ability.** `Grafts.PART_ABILITY` maps `eye_hive` -> `hive_in`: finishing the graft calls
+  `brains.set_level(peer, "hive_in", 1)` (the next free slot and the new-ability card), and swapping
+  back calls the new `brains.clear_ability(peer, id)`, which empties the slot, zeroes the points and
+  ends any Hive Eyes view in progress. A graft lasts the run, through death, and `grafts.on_reset()`
+  clears it on a game over with the money and the brains.
+- **Hive brains teach nothing now.** `Brains.blendable(kind)` is false for `brain_hive`; the blender
+  refuses it ("!Blender: a Hive brain teaches nothing. Sell it.") and `drink` ignores it. Echo, the
+  Discharged brains and the blender are unchanged.
+- **The first-person tell**: `scripts/grafting/graft_view.gd` (`main.graft_view`), a faint orange
+  wash down the LEFT edge, stronger as `grafts.local_lock()` rises. It is its own CanvasLayer at 52,
+  **above** the look pass's grain, vignette and teal grade (layer 50) that the HUD sits under -- a
+  faint orange graded toward teal disappears completely. Local and cosmetic, from replicated state.
+- Tests: `tools/grafttest.tscn` (the graft section: the stands, the refusals, the four steps with
+  Dr. Botsworth operating, Hive Eyes 1 in and out, and not getting up after the scoop),
+  nettest scenario `graft`.
 
 ### Ability bar (HUD, local-only, sweep 4a)
 

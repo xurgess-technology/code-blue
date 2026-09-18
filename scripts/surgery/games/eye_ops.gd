@@ -13,6 +13,11 @@ extends "res://scripts/surgery/minigame.gd"
 ##   snip   (scalpel)   The eye is out of its socket but still on its nerve, resting over the socket, seen
 ##                      from a low angle. Hold W to pull it up and the nerve shows. Then aim the scalpel
 ##                      at the nerve and LEFT CLICK to slice.
+##   seat   (eye spoon) GRAFTING chunk C, the graft only: the new eye waits over the empty socket. LEFT
+##                      CLICK inside the socket to lower it, then circle slowly: two turns settle it in.
+##                      The scoop's rules exactly, run the other way round (the eye sinks as it goes).
+##   stitch (suture kit) GRAFTING chunk C: the cut is open all the way round. Trace the ring the same way
+##                      the cut was made and it closes behind the needle, stitch by stitch.
 ##
 ## Inputs read: the cursor, BUTTON_PRIMARY (left click) and BUTTON_UP (W). Botches: only a nick of the
 ## eyeball itself (the cut lowered onto the eye) and a slice that misses the nerve; a slip never botches.
@@ -20,8 +25,10 @@ extends "res://scripts/surgery/minigame.gd"
 ## ctx knobs (all optional, so the graft can reuse this on a surgeon):
 ##   no_fail: true    never botches (grafting: mistakes cost nothing)
 ##   eye_kind         "eye_hive" | "eye_surgeon" (the eye's look); default from patient_id
+##   eye_kind_in      the eye going IN, for the graft's seat step (default: eye_kind)
 ##   eye_radius       metres, default 0.0155
-## Results: cut {"eye_cut": true}, scoop {"eye_out": true}, snip {"eye_removed": true}.
+## Results: cut {"eye_cut": true}, scoop {"eye_out": true}, snip {"eye_removed": true},
+##          seat {"eye_seated": true}, stitch {"eye_stitched": true}.
 
 const RING_GAP := 0.0145               # marking ring radius = eye radius + this
 const CUT_MAX_SPEED := 0.075           # m/s of cursor speed the scalpel tolerates while cutting
@@ -45,6 +52,7 @@ const NERVE_BASE := Vector3(0.0, -0.004, 0.012)   # the nerve end in the back of
 const SLICE_TOL := 0.014
 const MISS_BOTCH := 6.0
 const DASHES := 30
+const STITCHES := 14                   # the graft's stitch step: marks laid round the socket
 const CUT_SEGS := 72
 const CUT_SAMPLES := 96                # ring samples the incision ribbon is built from
 const WOUND_HW := 0.0019               # half width of the slit
@@ -113,6 +121,9 @@ var _nerve2: MeshInstance3D             # the upper end of the parted nerve
 var _flush: MeshInstance3D
 var _flush_mat: StandardMaterial3D
 var _mat_mark: StandardMaterial3D
+var _mat_thread: StandardMaterial3D
+var _stitches: Array[MeshInstance3D] = []
+var _stitch_theta: Array[float] = []
 var _ring_theta: Array[float] = []
 var bot_slow := 1.0                     # tests and smoke looks: slow the cut bot down
 var bot_wait := 0.0                     # ... and how long it waits before pulling the eye up
@@ -127,10 +138,12 @@ func setup(context: Dictionary) -> void:
 	variant = String(ctx.get("variant", ctx.get("step", {}).get("variant", "cut")))
 	no_fail = bool(ctx.get("no_fail", false))
 	eye_kind = String(ctx.get("eye_kind", "eye_hive" if String(ctx.get("patient_id", "hive")) == "hive" else "eye_surgeon"))
+	if variant == "seat":
+		eye_kind = String(ctx.get("eye_kind_in", eye_kind))
 	eye_r = float(ctx.get("eye_radius", eye_r))
 	ring_r = eye_r + RING_GAP
 	_build()
-	if variant == "scoop":
+	if variant == "scoop" or variant == "seat":
 		_hide_body_eye(true)
 	_update_visuals()
 
@@ -182,9 +195,9 @@ func handle_cursor(p: Vector2, buttons: int, delta: float) -> void:
 	var pressed := primary and not _prev_primary
 	_prev_primary = primary
 	match variant:
-		"cut":
+		"cut", "stitch":
 			_rules_cut(p, pressed)
-		"scoop":
+		"scoop", "seat":
 			_rules_scoop(p, pressed)
 		"snip":
 			_rules_snip(p, pressed, (buttons & BUTTON_UP) != 0, delta)
@@ -235,7 +248,7 @@ func _rules_cut(p: Vector2, pressed: bool) -> void:
 	if cut >= TAU - 0.06:
 		cut = TAU
 		progress = 1.0
-		finish({"eye_cut": true})
+		finish({"eye_stitched": true} if variant == "stitch" else {"eye_cut": true})
 
 
 func _rules_scoop(p: Vector2, pressed: bool) -> void:
@@ -263,7 +276,7 @@ func _rules_scoop(p: Vector2, pressed: bool) -> void:
 	progress = clampf(turns / (TAU * SCOOP_TURNS), 0.0, 0.99)
 	if turns >= TAU * SCOOP_TURNS:
 		progress = 1.0
-		finish({"eye_out": true})
+		finish({"eye_seated": true} if variant == "seat" else {"eye_out": true})
 
 
 func _rules_snip(p: Vector2, pressed: bool, up: bool, delta: float) -> void:
@@ -317,6 +330,10 @@ func hud_state() -> Dictionary:
 				hint = "Click to lower the spoon into the socket, then circle it slowly and lightly." if not down else "Circle the inside of the socket. Slowly."
 			"snip":
 				hint = "Hold W to pull the eye up. When the nerve shows, aim the scalpel at it and click."
+			"seat":
+				hint = "Click to lower the new eye into the socket, then circle it slowly to settle it in." if not down else "Circle slowly. It is nearly seated."
+			"stitch":
+				hint = "Click to set the needle on the cut, then trace it round. The socket closes behind you." if not down else "Trace the cut. Not too fast."
 	return {"title": String(ctx.get("step", {}).get("label", "")), "hint": hint, "progress": progress, "gauges": []}
 
 
@@ -347,7 +364,7 @@ func bot_input(t: float, skill: float) -> Dictionary:
 	_bang += 1.0
 	var click := int(_bang) % 2 == 0   # a click every other call, so the press registers
 	match variant:
-		"cut":
+		"cut", "stitch":
 			if cut >= TAU:
 				return {"cursor": cursor, "buttons": 0}
 			var front := _ring_pos(cut + 0.05, ring_r)
@@ -355,7 +372,7 @@ func bot_input(t: float, skill: float) -> Dictionary:
 				var c := cursor.move_toward(front, 0.3 * bot_slow * dt)
 				return {"cursor": c, "buttons": BUTTON_PRIMARY if c.distance_to(front) < 0.006 and click and t > bot_hold else 0}
 			return {"cursor": cursor.move_toward(front, lerpf(0.12, 0.05, skill) * bot_slow * dt), "buttons": 0}
-		"scoop":
+		"scoop", "seat":
 			if not down:
 				var c := cursor.move_toward(Vector2(0.012, 0.0), 0.2 * dt)
 				return {"cursor": c, "buttons": BUTTON_PRIMARY if c.length() < 0.02 and click else 0}
@@ -410,9 +427,11 @@ func _build() -> void:
 	_mat_good = _unshaded(Color(0.35, 1.0, 0.55), 0.9)
 	_mat_bad = _unshaded(Color(1.0, 0.25, 0.2), 0.95)
 	# The eye (the scoop and snip draw their own; the cut leaves the body's).
-	if variant == "scoop" or variant == "snip":
+	if variant == "scoop" or variant == "snip" or variant == "seat":
 		_build_scoop_eye()
-	elif variant != "cut":
+		if variant == "seat" and _eye != null:
+			_eye.material_override = Eyes.material(eye_kind)   # the eye going IN, not the body's old one
+	elif variant != "cut" and variant != "stitch":
 		_eye = MeshInstance3D.new()
 		var sph := SphereMesh.new()
 		sph.radius = eye_r * 1.02
@@ -423,7 +442,7 @@ func _build() -> void:
 		_eye.material_override = Eyes.material(eye_kind)
 		add_child(_eye)
 	match variant:
-		"cut":
+		"cut", "stitch":
 			# The marking: dashes round the ring with a hash tick across every other one, in surgical violet.
 			# A fine, dim guide line: thin dashes and short ticks. Each hides once the cut has passed it.
 			_mat_mark = _unshaded(Color(0.62, 0.5, 0.82), 0.6)
@@ -446,7 +465,17 @@ func _build() -> void:
 			_cut_mesh.top_level = false
 			add_child(_cut_mesh)
 			_front = _box(Vector3(0.004, 0.002, 0.004), _mat_front)
-		"scoop":
+			if variant == "stitch":
+				# The cut is already open all the way round; the needle closes it behind itself.
+				_mat_thread = _unshaded(Color(0.1, 0.08, 0.14), 1.0)
+				for i in STITCHES:
+					var sth := TAU * (float(i) + 0.5) / float(STITCHES)
+					var st_box := _box(Vector3(0.0016, 0.0008, 0.0085), _mat_thread)
+					_place_on_ring(st_box, sth, ring_r, 0.0022)
+					st_box.visible = false
+					_stitches.append(st_box)
+					_stitch_theta.append(sth)
+		"scoop", "seat":
 			# A dim dotted circle just outside the eye to circle along; dots turn green as the turns add up.
 			_mat_mark = _unshaded(Color(0.62, 0.5, 0.82), 0.6)
 			for i in 24:
@@ -504,7 +533,7 @@ func _build() -> void:
 			_flush.material_override = _flush_mat
 			_flush.visible = false
 			add_child(_flush)
-	_tool = _make_cut_scalpel() if (variant == "cut" or variant == "snip") else (_make_scoop_spoon() if variant == "scoop" else ItemModels.make("scalpel"))
+	_tool = _make_cut_scalpel() if (variant == "cut" or variant == "snip" or variant == "stitch") else (_make_scoop_spoon() if (variant == "scoop" or variant == "seat") else ItemModels.make("scalpel"))
 	add_child(_tool)
 	_set_layers(self)
 
@@ -728,12 +757,14 @@ func _grow_cut() -> void:
 	if n == _cut_n or _cut_mesh == null or _skin_rows.is_empty():
 		return
 	_cut_n = n
-	if n <= 0:
+	var lo := n if variant == "stitch" else 0
+	var hi := CUT_SAMPLES if variant == "stitch" else n
+	if hi <= lo:
 		_cut_mesh.mesh = null
 		return
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for i in n:
+	for i in range(lo, hi):
 		var a: Array = _skin_rows[i]
 		var b: Array = _skin_rows[i + 1]
 		for tri_v in [a[0], a[2], b[0], a[2], b[2], b[0]]:
@@ -762,7 +793,7 @@ func _update_visuals() -> void:
 		return
 	# The tool's tip on the cursor: on the plane when lowered, hovering above it when not. The model's tip
 	# is at +X, so the handle trails to the left of the screen, tilted up.
-	if variant == "cut" or variant == "scoop" or variant == "snip":
+	if variant != "":
 		# Upright over the eye, leaning a little away from its centre; it turns slowly to stay that way as it
 		# follows the marking (or circles the socket), and drops onto the eye when lowered.
 		if cursor.length() > 0.004:
@@ -771,7 +802,7 @@ func _update_visuals() -> void:
 			# hangs over the nerve; drops onto it the moment the slice starts
 			_cut_h = move_toward(_cut_h, 0.012 if _slice_t >= 0.0 else 0.04, _dt * 0.4)
 		else:
-			_cut_h = move_toward(_cut_h, (CUT_TIP_Y if variant == "cut" else SCOOP_TIP_Y) if down else 0.03, _dt * 0.25)
+			_cut_h = move_toward(_cut_h, (CUT_TIP_Y if (variant == "cut" or variant == "stitch") else SCOOP_TIP_Y) if down else 0.03, _dt * 0.25)
 		_tool.basis = Basis(Vector3.UP, _cut_yaw) * Basis(Vector3.RIGHT, deg_to_rad(22.0))
 		_tool.position = plane_to_local(cursor, _cut_h)
 	else:
@@ -780,8 +811,10 @@ func _update_visuals() -> void:
 		_tool.basis = tilt
 		_tool.position = plane_to_local(cursor, tip_y) - tilt * Vector3(TIP_X, 0.0, 0.0)
 	match variant:
-		"cut":
+		"cut", "stitch":
 			_grow_cut()
+			for i in _stitches.size():
+				_stitches[i].visible = _stitch_theta[i] <= cut
 			_front.visible = cut < TAU
 			_front.position = plane_to_local(_ring_pos(cut, ring_r), 0.003)
 			_front.material_override = _mat_bad if _flash > 0.0 else _mat_front
@@ -789,8 +822,10 @@ func _update_visuals() -> void:
 			for i in _ring.size():
 				_ring[i].material_override = col
 				_ring[i].visible = _ring_theta[i] > cut
-		"scoop":
+		"scoop", "seat":
 			var k := clampf(turns / (TAU * SCOOP_TURNS), 0.0, 1.0)
+			if variant == "seat":
+				k = 1.0 - k   # the new eye comes down into the socket instead of rising out of it
 			# The eye rocks toward the spoon and lifts a little more each turn on its stalk; when the spoon
 			# slips out it settles back (the turns stay).
 			_eye_k = move_toward(_eye_k, k if down else k * 0.7, _dt * 0.5)

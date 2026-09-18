@@ -14,7 +14,10 @@ func _ready() -> void:
 		await get_tree().create_timer(1.0).timeout
 		t += 1.0
 		var p = game.local_player()
-		if game.phase == Game.Phase.SHIFT and p != null and p.hands_empty() == false:
+		# The shift is running and the setup has had its frames to stage (a setup may leave the local
+		# player's own hands empty -- the graft has them strapped to the table).
+		if game.phase == Game.Phase.SHIFT and p != null:
+			await get_tree().create_timer(6.0).timeout
 			break
 	for i in 90:
 		await get_tree().process_frame

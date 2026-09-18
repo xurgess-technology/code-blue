@@ -117,6 +117,11 @@ func setup(g: Node) -> void:
 # spoilage and value
 # =========================================================================
 
+## GRAFTING chunk C: brains the blender takes. Hive brains are out -- Hive Eyes is a graft now.
+static func blendable(kind: String) -> bool:
+	return is_brain(kind) and kind != "brain_hive"
+
+
 static func is_brain(kind: String) -> bool:
 	return PATH_OF.has(kind)
 
@@ -262,6 +267,23 @@ func slot_of(peer_id: int, id: String) -> int:
 	return slots_for(peer_id).find(id)
 
 
+## GRAFTING chunk C, host: take an ability away again (its slot empties and its points go to 0).
+## Swapping a grafted Hive eye back out is the only thing that does this today.
+func clear_ability(peer_id: int, id: String) -> void:
+	var arr: Array = slots_for(peer_id)
+	var i := arr.find(id)
+	if i >= 0:
+		arr[i] = ""
+	var path: String = String(ABILITY_ID_TO_PATH.get(id, ""))
+	var pi := PATHS.find(path)
+	if pi >= 0 and _points.has(peer_id):
+		var pts: Array = (_points[peer_id] as Array).duplicate()
+		pts[pi] = 0.0
+		_points[peer_id] = pts
+	if id == "hive_in" and _hive.has(peer_id):
+		_end_hive(peer_id, "")
+
+
 ## Host (tests, dev, and later grafting): set the level of an ability directly, independent of
 ## how points are normally earned. `id` must be a known ability id (echo / hive_in); a level of
 ## 1 or more also grants the slot, same as reaching it through points.
@@ -329,6 +351,10 @@ func blender_prompt(p) -> String:
 	var kind := String(s.get("kind", ""))
 	if not is_brain(kind):
 		return "!Blender: bring a brain"
+	# GRAFTING chunk C: Hive Eyes comes only from the graft now (docs/GRAFTING.md). A Hive brain
+	# still sells; the blender does nothing with it.
+	if kind == "brain_hive":
+		return "!Blender: a Hive brain teaches nothing. Sell it."
 	var f := factor_of(s)
 	return "Hold E: blend and drink the %s (%s)" % [Items.display_name(kind).to_lower(), condition(f)]
 
@@ -343,7 +369,7 @@ func _tick_blending(delta: float) -> void:
 		for p in game.alive_players():
 			if not p.wants_interact or p.aim_id != "blender" or p.get("hive_view"):
 				continue
-			if not is_brain(String(p.selected_stack().kind)) or not game._within_reach(p, blender):
+			if not blendable(String(p.selected_stack().kind)) or not game._within_reach(p, blender):
 				continue
 			holding[p.peer_id] = p
 	for peer in _blend.keys():
@@ -369,8 +395,8 @@ func drink(p: Node) -> void:
 	var head: int = p.selected_head()
 	var s: Dictionary = p.slots[head]
 	var kind := String(s.kind)
-	if not is_brain(kind):
-		return
+	if not blendable(kind):
+		return   # GRAFTING chunk C: a Hive brain is not drunk any more
 	var f := factor_of(s)
 	var pts := points_for(f)
 	var path: String = PATH_OF[kind]

@@ -163,6 +163,7 @@ func _run() -> void:
 		"brains": await _sc_brains()
 		"monsters": await _sc_monsters()   # SWEEP 3 HOOK (monsters)
 		"dissection": await _sc_dissection()
+		"graft": await _sc_graft()   # GRAFTING chunk C
 		"pockets": await _sc_pockets()   # POCKETS
 		"doors": await _sc_doors()   # DOORS HOOK
 		"wall": await _sc_wall()   # terminal redesign, chunk 4
@@ -1050,6 +1051,88 @@ func _sc_two_patients():
 ## Client 1 saws the skull open and pulls the brain out; client 2, holding anesthetic, re-doses
 ## it while client 1 operates. Every client's sedation stays within 0.05 of the host's; the host
 ## sees the dose (one vial used), the brain handed over and the monster flatline.
+## GRAFTING chunk C (docs/GRAFTING.md): the host grafts a Hive eyeball into a client's surgeon on an
+## OR table, with the vat on that table's stand. The other client watches: the graft, the swapped eye
+## on the patient's body and its glow while Hive Eyes runs all have to reach it.
+func _sc_graft():
+	if role == "host":
+		if not await _start_shift_when_full():
+			return
+		var table: int = game.free_patient_table()
+		if table < 0:
+			return _end(false, "no free table for the graft")
+		var si: int = game.vats.stand_of_table(table)
+		if si < 0:
+			return _end(false, "table %d has no vat stand" % table)
+		var patient = game.players.get(_peer_of(1))
+		var op = game.local_player()
+		# The vat with a fresh Hive eyeball, on the stand beside the table.
+		var yaw: float = game.table_yaw_of(table)
+		var vat: Node = game._spawn_item("specimen_vat", 1, Transform3D(Basis(Vector3.UP, yaw), game.vats.stands[si].position), WorldItem.State.LOOSE)
+		vat.x = Eyes.pack("eye_hive", "", 0.0, 120)
+		patient.teleport(game._floor_at(game.table_position(table) + Vector3(0, 0, 1.2).rotated(Vector3.UP, yaw)))
+		await _frames(4)
+		game.strap_in(patient, table)
+		await _frames(4)
+		if not patient.strapped():
+			return _end(false, "the client's surgeon would not strap in")
+		op.teleport(game._floor_at(game.table_position(table) + Vector3(0, 0, 1.0).rotated(Vector3.UP, yaw)))
+		_send("gf", {"table": table, "patient": patient.peer_id, "vat": vat.item_id})
+		var ps: Node = game.player_surgery
+		var sys: Node = ps.surgery
+		sys.bot_skill = 1.0   # the player table's own system, with its own stand-in game
+		for step in [["scalpel", "cut"], ["eye_spoon", "scoop"], ["eye_spoon", "seat"], ["suture_kit", "stitch"]]:
+			for i in op.slots.size():
+				op.slots[i] = Player.empty_slot()
+			game.give_hand(op, String(step[0]), 1)
+			await _frames(3)
+			game._proxy_used(game.table_interact_id(table), op)
+			if not await _until(func(): return sys.mg != null and String(sys.mg.get("variant")) == String(step[1]), 30.0, "the %s step" % step[1]):
+				return
+			var want := String(step[1])
+			if not await _until(func(): return ps.case.is_empty() or String(sys.mg.get("variant")) != want or bool(sys.mg.get("done")), 120.0, "the %s to finish" % want):
+				return
+		if not await _until(func(): return game.grafts.graft_of(patient.peer_id) == "eye_hive", 30.0, "the graft to take"):
+			return
+		if game.brains.slot_of(patient.peer_id, "hive_in") < 0:
+			return _end(false, "the graft gave no Hive Eyes slot")
+		_say("grafted: %s, vat now %s" % [game.grafts.graft_of(patient.peer_id), String(vat.x)])
+		# The glow: hive_view is replicated, so the other machine must light the eye up too.
+		patient.hive_view = true
+		_send("glow", {"on": true})
+		await _wall_wait(2.0)
+		patient.hive_view = false
+		if not await _until(func(): return _count_msgs("ok") >= 2 or _count_msgs("fail") > 0, 90.0, "both clients' reports"):
+			return
+		await _finish_together("the host grafted a Hive eyeball into a client, and the other machine saw the eye and its glow")
+		return
+	if not await _wait_shift_as_client():
+		return
+	if not await _until(func(): return _count_msgs("gf") > 0, 90.0, "the graft order"):
+		return
+	var order: Dictionary = _msgs("gf")[0].data
+	var pid := int(order.patient)
+	if not await _until(func(): return game.grafts.graft_of(pid) == "eye_hive", 240.0, "the graft on this machine"):
+		return
+	var p = game.players.get(pid)
+	if p == null:
+		return _end(false, "no patient on this machine")
+	var GraftEyeScript = load("res://scripts/grafting/graft_eye.gd")
+	var human = game.grafts._human_of(p)
+	if not await _until(func(): return GraftEyeScript.node_on(game.grafts._human_of(p)) != null, 30.0, "the swapped eye on the body"):
+		return
+	var eye_l = load("res://scripts/human/human_model.gd").piece(human, "Human_Eye_L")
+	if eye_l != null and eye_l.visible:
+		return _end(false, "the patient's own left eye is still showing over the graft")
+	if not await _until(func(): return _count_msgs("glow") > 0, 120.0, "the glow order"):
+		return
+	if not await _until(func(): return float(game.grafts._lock.get(pid, 0.0)) > 0.6, 20.0, "the eye to light up while Hive Eyes runs"):
+		return
+	_say("saw the graft, the swapped eye and its glow (lock %.2f)" % float(game.grafts._lock.get(pid, 0.0)))
+	_send("ok", {})
+	await _finish_together("the graft, the eye on the body and its glow all reached this machine")
+
+
 func _sc_dissection():
 	if role == "host":
 		if not await _start_shift_when_full():

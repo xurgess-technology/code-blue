@@ -19,6 +19,10 @@ const DEFAULT_SEED := 4242
 const SETUPS := {
 	"icons": {"seed": 4242, "stage": "_icons"},
 	"items": {"seed": 1, "stage": "_items"},
+	# GRAFTING chunk C (docs/GRAFTING.md): strapped to a table with a loaded vat on its stand, as
+	# Dr. Botsworth, ready to operate. `graft_back` is the same with the graft already done.
+	"graft": {"seed": 4242, "stage": "_graft"},
+	"graft_back": {"seed": 4242, "stage": "_graft_back"},
 }
 
 
@@ -179,3 +183,79 @@ static func _items(game: Game) -> void:
 		floor_item(game, row[i], base + out * 2.0 + side * (float(i) - 2.0) * 0.55, 1, 100)
 	print("[review] items: standing among %d loot stacks; trinkets on the floor ahead, an EpiPen in hand" % best_n)
 
+
+
+## GRAFT (docs/GRAFTING.md, chunk C): you are strapped to a free OR table with a vat holding a
+## Hive's eyeball on its stand, and you are already Dr. Botsworth, standing beside you with the
+## scalpel, the eye spoon and the suture kit. Aim at the table and press E for each of the four
+## steps; F1 -> "Back to my own body" puts you back in your own head, where you hold E to get up and
+## can go and look in the Personnel mirror.
+static func _graft(game: Game) -> void:
+	await _graft_stage(game, "eye_hive", "", false)
+
+
+## GRAFT BACK: the same table and stand, but the graft has already been done -- you have the Hive
+## eyeball, and your own eyeball is the one floating in the vat, waiting to go back in.
+static func _graft_back(game: Game) -> void:
+	await _graft_stage(game, "eye_surgeon", String(game.local_player().player_name), true)
+
+
+static func _graft_stage(game: Game, vat_kind: String, owner: String, already: bool) -> void:
+	var tree := game.get_tree()
+	var p = game.local_player()
+	game.set_dev_tools(true, p)
+	# Nothing else going on: no phone call, no patient wheeled onto the table, no monsters.
+	game.loop._end_call()
+	game.loop.first_called = true
+	game.loop.extra_done = true
+	game.dev.request("no_game_over", {"on": true})
+	game.dev.request("monsters_off", {"on": true})
+	var ti: int = game.free_patient_table()
+	var si: int = game.vats.stand_of_table(ti)
+	if ti < 0 or si < 0:
+		push_warning("[review] graft setup: no free table with a vat stand")
+		return
+	var yaw: float = game.table_yaw_of(ti)
+	var tb := Basis(Vector3.UP, yaw)
+	var table: Vector3 = game.table_position(ti)
+	# The vat, already on that table's stand, with the part that goes in.
+	var vat = game._spawn_item("specimen_vat", 1, Transform3D(tb, game.vats.stands[si].position as Vector3), WorldItem.State.LOOSE)
+	vat.x = Eyes.pack(vat_kind, owner, 0.0, 120 if vat_kind == "eye_hive" else 45)
+	if already:
+		game.grafts.apply(p.peer_id, "eye_hive")   # you already wear the Hive eyeball
+	var hud = tree.get_first_node_in_group("hud")
+	if hud != null:
+		hud._card_seen["hive_in"] = true   # the new-ability card is for a first play, not a review
+	# You, strapped to that table, awake and looking up.
+	clear_hands(game)
+	p.teleport(game._floor_at(table + tb * Vector3(0.0, 0.0, 1.2)))
+	await tree.physics_frame
+	game.strap_in(p, ti)
+	await tree.physics_frame
+	# Dr. Botsworth, already yours, beside your head with the three tools.
+	game.dev.control_botsworth()
+	for i in 6:
+		await tree.physics_frame
+	var bw = game.dev.possessed_player()
+	if bw == null:
+		return
+	bw.teleport(game._floor_at(table + tb * Vector3(-0.35, 0.0, 1.0)))
+	bw.bot_move = Vector2.ZERO
+	for i in bw.slots.size():
+		bw.slots[i] = Player.empty_slot()
+	bw.take_into("scalpel", 1)
+	bw.take_into("eye_spoon", 1)
+	bw.take_into("suture_kit", 1)
+	bw.selected = 0
+	bw.flashlight_on = true
+	await tree.physics_frame
+	# Looking down at your face on the table.
+	var eye: Vector3 = bw.global_position + Vector3.UP * C.EYE_H
+	var d: Vector3 = (game.player_table_top() + tb * Vector3(-0.55, 0.0, 0.0)) - eye
+	bw._yaw = atan2(-d.x, -d.z)
+	bw.rotation.y = bw._yaw
+	bw._pitch = clampf(atan2(d.y, Vector2(d.x, d.z).length()), -1.0, 1.0)
+	bw.head.rotation.x = bw._pitch
+	bw.bot_yaw = bw._yaw
+	bw.bot_pitch = bw._pitch
+	game.say("Aim at the table and press E for each step. F1: back to your own body.", 8.0)

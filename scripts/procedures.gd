@@ -95,6 +95,21 @@ const AILMENTS := {
 			{"id": "stitch", "label": "Stitch the wound closed", "item": "suture_kit", "uses": 1, "game": "stitches", "site": "gash"},
 		],
 	},
+	# GRAFTING chunk C (docs/GRAFTING.md): Eyeball Grafting on a surgeon who strapped themselves to a
+	# table, with the vat holding the eye going in on that table's stand. `player_only` keeps it off
+	# the patient tables' roll. No botches (the case sets `no_fail`), and no anesthetic: the patient
+	# is awake, which is the joke. Steps 1-2 work on the eye coming out, 3-4 on the one going in.
+	"eye_graft": {
+		"name": "Eyeball Grafting",
+		"code": "EG",
+		"player_only": true,
+		"steps": [
+			{"id": "cut", "label": "Cut around the socket", "item": "scalpel", "uses": 0, "game": "eye", "variant": "cut", "site": "eye"},
+			{"id": "scoop", "label": "Scoop the old eye out", "item": "eye_spoon", "uses": 0, "game": "eye", "variant": "scoop", "site": "eye"},
+			{"id": "seat", "label": "Seat the new eye", "item": "eye_spoon", "uses": 0, "game": "eye", "variant": "seat", "site": "eye"},
+			{"id": "stitch", "label": "Stitch it in", "item": "suture_kit", "uses": 1, "game": "eye", "variant": "stitch", "site": "eye"},
+		],
+	},
 	# dissection (sweep 3): a strapped monster on a patient table. `monster_only` keeps it out of
 	# roll() and patient_ailments(). The saw and forceps steps play their "skull" / "brain" variants.
 	"dissection": {
