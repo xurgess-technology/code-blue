@@ -356,7 +356,7 @@ func _build() -> void:
 	right.add_child(_slider_row("sensitivity", "Mouse", 0.2, 3.0, 0.05, func(v): return "%.2fx" % v))
 	right.add_child(_slider_row("fov", "FOV", 60.0, 100.0, 1.0, func(v): return "%d°" % roundi(v)))
 	right.add_child(_choice_row("sprint_mode", "Sprint", [["toggle", "TOGGLE"], ["hold", "HOLD"]]))
-	right.add_child(_choice_row("camera", "Camera", [["first_person", "FIRST"], ["shoulder", "SHOULDER"]]))
+	right.add_child(_choice_row("camera", "Camera", [["first_person", "FIRST"], ["shoulder", "SHOULDER"], ["front", "FRONT"]]))
 	right.add_child(_choice_row("carry_camera", "Carrying", [["shoulder", "SHOULDER"], ["first_person", "FIRST"]]))   # HANDS HOOK
 	right.add_child(_section("KEYS"))   # SWEEP 4A HOOK (controls)
 	right.add_child(_rebind_row("key_crouch", "Crouch"))

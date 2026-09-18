@@ -265,6 +265,7 @@ var carry_cam: RefCounted = null
 ## camera. It lives on LightRooms.SELF, which the first-person camera only draws for the carry camera.
 var _mirror_self := false
 var _carry_body := false
+var _glow: OmniLight3D = null
 ## Test seam: true holds the shove button (charging), false lets go (the shove fires).
 var bot_charge: bool = false
 var _bot_charging := false
@@ -499,6 +500,7 @@ func _build() -> void:
 	glow.light_volumetric_fog_energy = 0.0
 	glow.shadow_enabled = false
 	head.add_child(glow)
+	_glow = glow
 
 	# HANDS HOOK: forearms and hands (the torch in the right, the stack in the left).
 	hands = HandsFP.new()
@@ -568,6 +570,11 @@ func _ready() -> void:
 		body_visual.visible = false
 		body_hands.set_active(false)   # HANDS HOOK: nobody sees it (until the carry camera shows it)
 		camera.cull_mask &= ~LightRoomsSelf.SELF   # the own body only for mirrors and the carry camera
+		# Your torch and the glow sit inside your own head: they must not light your own body when a
+		# mirror or the shoulder camera shows it (sprinting leans the head into the beam: a white
+		# shine on the back of the skull).
+		flashlight.light_cull_mask &= ~LightRoomsSelf.SELF
+		_glow.light_cull_mask &= ~LightRoomsSelf.SELF
 		name_tag.visible = false
 		hands.visible = true
 		# Settings hook: the local camera follows the field of view setting, live.

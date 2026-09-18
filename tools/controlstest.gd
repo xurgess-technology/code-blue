@@ -34,7 +34,12 @@ func _ready() -> void:
 	me = game.local_player()
 	me.bot_active = true
 	me.bot_invulnerable = true
+	# The real settings file: the checks aim from the head, so start in first person whatever the
+	# player last chose, and give their choice back afterwards.
+	var camera_was = Settings.get_value("camera")
+	Settings.set_value("camera", "first_person")
 	await _run()
+	Settings.set_value("camera", camera_was)
 	_finish()
 
 
@@ -364,10 +369,8 @@ func _rocket_boots() -> void:
 
 ## The `camera` setting on "shoulder": the carry camera's rig in ordinary play, the body shown and the
 ## first-person hands hidden, aiming still from the crosshair; back on "first_person" it lets go.
-## Uses the real settings file, so the old value goes back afterwards.
 func _shoulder_camera() -> void:
 	_say("---- over-the-shoulder camera")
-	var was = Settings.get_value("camera")
 	await _stand_up()
 	me.bot_move = Vector2.ZERO
 	me.bot_sprint = false
@@ -400,11 +403,54 @@ func _shoulder_camera() -> void:
 	await _frames(5)
 	_check(me._held_tp.visible, "the stack shows in the body's hand")
 	me.bot_pitch = 0.0
+	me.slots = me.empty_slots()
+	# "front": the same rig swings round in front and looks back at you, centred.
+	var yaw0: float = me.bot_yaw
+	Settings.set_value("camera", "front")
+	await _frames(12)
+	var mid: Vector3 = me.camera.global_position - me.head.global_position
+	var fwd: Vector3 = -me.global_basis.z
+	var mid_side: float = absf(mid.dot(me.global_basis.x))
+	var round := await _until(func(): return cc.front_view() and cc._orbit >= 1.0, 1.5)
+	_check(round, "the front setting swings the camera round in front")
+	_check(mid_side > 0.3, "and it travels round the side on the way (%.2f m out to the side)" % mid_side)
+	var rel: Vector3 = me.camera.global_position - me.head.global_position
+	_check(rel.dot(fwd) > 1.2, "it ends up in front of you (%.2f m ahead)" % rel.dot(fwd))
+	_check(absf(rel.dot(me.global_basis.x)) < 0.15, "centred on you (%.2f m off)" % rel.dot(me.global_basis.x))
+	var look: Vector3 = -me.camera.global_basis.z
+	_check(look.dot(fwd) < -0.8, "looking back at you (%.2f)" % look.dot(fwd))
+	_check(me._carry_body, "your body shows")
+	main.hud.queue_redraw()
+	await _frames(2)
+	_check(not main.hud.drawn.has("crosshair"), "no crosshair while the camera faces you")
+	# Aim is the head's: a stack straight ahead on the floor.
+	var at2: Vector3 = me.global_position + fwd * 1.2
+	var it2: Node3D = game._spawn_item("gauze", 2, Transform3D(Basis(), at2 + Vector3.UP * 0.05), WorldItem.State.LOOSE)
+	await _frames(10)
+	var d2: Vector3 = it2.global_position - me.head.global_position
+	me.bot_yaw = atan2(-d2.x, -d2.z)
+	me.bot_pitch = atan2(d2.y, Vector2(d2.x, d2.z).length())
+	var aimed2 := await _until(func(): return String(me.aim_prompt).begins_with("Take"), 1.0)
+	_check(aimed2, "facing you, aiming follows your head (%s)" % me.aim_prompt)
+	me.bot_pitch = 0.0
+	me.bot_yaw = yaw0
+	if is_instance_valid(it2):
+		game.world_items.erase(it2.item_id)
+		it2.queue_free()
+	# F5's order: first person -> shoulder -> front -> first person.
+	var ev := InputEventKey.new()
+	ev.physical_keycode = KEY_F5
+	ev.pressed = true
+	var order: Array = []
+	Settings.set_value("camera", "first_person")
+	for i in 3:
+		main._unhandled_input(ev)
+		order.append(String(Settings.get_value("camera")))
+	_check(order == ["shoulder", "front", "first_person"], "F5 cycles shoulder -> front -> first person (%s)" % str(order))
 	# Hive Eyes, surgery and the rest keep the head: going down drops back to first person.
 	Settings.set_value("camera", "first_person")
 	var off := await _until(func(): return not cc.active, 1.5)
 	_check(off and not me._carry_body and not cc.hides_hands(), "back to first person: the rig lets go")
-	Settings.set_value("camera", was)
 	me.slots = me.empty_slots()
 
 

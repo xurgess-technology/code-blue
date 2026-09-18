@@ -21,7 +21,7 @@ You and your best friends clock into the ER with one goal: save a life. The prob
 ## Players
 
 - Up to 4 players, built so more is possible. Solo works.
-- Everyone is a surgeon, first person, with your own hands visible. An over-the-shoulder view is an option (settings, or F5).
+- Everyone is a surgeon, first person, with your own hands visible. Over-the-shoulder and facing-you views are options (settings, or F5 to cycle).
 - One player hosts over ENet; friends join by address (LAN, port forward or Tailscale). **TODO**: Steam lobbies and invites via GodotSteam.
 - **0 HP means downed**, not dead: you lie on the floor, crawl, and bleed out over five minutes. A teammate carries you to the OR's player table and stitches you up with a suture kit. Bleed out and you are dead until the next shift (spectating). Everyone down or dead fails the shift.
 - **Friendly fire is a feature**: Q shoves whatever is in front of you. A shoved teammate drops everything, and the vials smash.

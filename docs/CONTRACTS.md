@@ -1504,7 +1504,8 @@ p.carry_cam                                  # scripts/camera/carry_camera.gd, l
 p.carry_cam.active / blend / offset / arm_length / hides_hands() / aim_segment(range)
 p.bot_charge                                 # test seam: true holds the shove, false lets go
 Settings "carry_camera": "shoulder" (default) | "first_person"     # carrying/dragging, when "camera" is first person
-Settings "camera": "first_person" (default) | "shoulder"           # ordinary play; F5 flips it (main.gd)
+Settings "camera": "first_person" (default) | "shoulder" | "front"  # ordinary play; F5 cycles them (main.gd)
+p.carry_cam.front_view()                     # swung round facing the player: no crosshair, aim from the head
 ```
 
 - **Socket axes** (every hand, first and third person): origin in the palm, -Z the fingers, +Y out
@@ -1545,9 +1546,15 @@ Settings "camera": "first_person" (default) | "shoulder"           # ordinary pl
   interact comes in standing still. `body_hands.lies_by_clip()` tells `Player._update_down_pose` not to
   tip the body; carried, the body is placed each frame by `Player.human_carried_pose(carrier)`: `HUMAN_CARRIED_SHOULDER` (-0.15, 1.535, 0.03)
   in the carrier's frame and yaw, mirrored (x scale -1: the clip is authored over a right shoulder), so the Carried clip's belly lands on the carrier's LEFT shoulder; corpses.gd places a carried human body the same way and a seal/monster body across the shoulders at `SHOULDER_AT` (-0.38, 1.62, 0.18), where the furnace roll-off starts. The carrier's `carry` pose wraps the LEFT arm across the legs; the right arm stays free. The first-person arms stay `fp_arms`.
-- **Opt-in shoulder camera** (2026-09-18): with the `camera` setting on "shoulder" (the settings
-  screen's Camera row, or F5 anywhere) the same rig below runs in ordinary play too, at `PLAY_ARM`
-  (0.5, 0.3, 1.35), switching to the carry/drag arms while carrying or dragging; `wants()` still
+- **Opt-in shoulder and front cameras** (2026-09-18): with the `camera` setting on "shoulder" (the
+  settings screen's Camera row, or F5 anywhere) the same rig below runs in ordinary play too, at
+  `PLAY_ARM` (0.5, 0.3, 1.35). On "front" the rig's yaw frame turns half round (`_orbit`, eased over
+  `ORBIT_TIME` 0.55 s, passing the player's right side) to `FRONT_ARM` (0, 0.1, 2.3) and `Head/FX`'s
+  basis slerps from the head's look to looking back at the upper chest (`FRONT_LOOK_DROP` below the
+  eye), so the camera travels round rather than cutting; going back to first person unwinds it as it
+  goes into the head. Facing the player (`front_view()`) the HUD skips the crosshair and
+  `aim_segment` is the head's own ray. The torch always follows the head, never the camera. Carrying
+  or dragging swing back behind to their arms; `wants()` still
   gives the head back while operating, in Hive Eyes, downed, carried, on the table or dead. The
   local held stack shows in the body's hand while the body shows (`_held_tp`). First person stays
   the default. Test: `tools/controlstest.tscn` ("over-the-shoulder camera").

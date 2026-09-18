@@ -17,7 +17,16 @@ so they're summaries rather than a line per commit.
 
 ## [Unreleased]
 
-Nothing yet. The OR is suspiciously quiet.
+### Added
+- **A camera that faces you.** F5 now cycles three views: first person, over the shoulder, and a new
+  one out in front looking back at your surgeon, centred. The camera swings round you to get there
+  instead of cutting. Facing you there's no crosshair (it would be pointing at your face), and you
+  aim where your head looks. It's in Settings -> Controls -> Camera as FRONT too.
+
+### Fixed
+- Sprinting in the shoulder view put a shiny white patch on the back of your head: your own
+  flashlight, which lives in your head, was lighting your skull as you leaned into the run. Your
+  torch no longer lights your own body.
 
 ## [0.6.0] - 2026-09-18
 

@@ -169,9 +169,12 @@ func _draw_host_info(w: float) -> void:
 
 
 func _draw_crosshair(w: float, h: float) -> void:
+	var me = game.local_player()
+	# The camera facing you (the "front" camera setting): the middle of the screen is your own face.
+	if me != null and me.carry_cam != null and me.carry_cam.front_view():
+		return
 	drawn.append("crosshair")
 	var c := Vector2(w, h) * 0.5
-	var me = game.local_player()
 	var spread: float = 9.0 if me.sprinting else (6.0 if me.moving else 4.0)
 	var usable: bool = me.aim_id != "" and not String(me.aim_prompt).begins_with("!")
 	var col := Color(1, 1, 1, 0.55) if me.aim_id == "" else Color(1.0, 0.95, 0.7, 0.9)

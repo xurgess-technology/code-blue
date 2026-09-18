@@ -3,9 +3,13 @@ extends RefCounted
 ## drags a monster (docs/HANDS_AND_FEEDBACK.md "Over-the-shoulder carry camera"). Local only: nothing
 ## new on the wire.
 ##
-## Ordinary play is first person unless the `camera` setting is "shoulder" (F5 flips it): then this
-## rig is on all the time, at PLAY_ARM, except where the game wants the head (operating, Hive Eyes,
-## downed, carried, on the table, dead). Framed the way the big third-person games do it (The Last of Us Part II,
+## Ordinary play is first person unless the `camera` setting says otherwise (F5 cycles first person
+## -> "shoulder" -> "front" -> first person): "shoulder" runs this rig all the time at PLAY_ARM;
+## "front" swings the same arm round to the front of the body (ORBIT: the camera travels round the
+## player rather than cutting) and turns it to look back at them, centred. Either way the game takes
+## the head back while operating, in Hive Eyes, downed, carried, on the table or dead, and carrying or
+## dragging swings round behind to their own arms. Facing you, the aim is the head's (the crosshair
+## would point at yourself), and the HUD hides the crosshair (front_view()). Framed the way the big third-person games do it (The Last of Us Part II,
 ## the RE4 remake, God of War): the camera sits close behind and over the RIGHT shoulder, so the
 ## carrier fills the left third of the screen and the crosshair at the centre is clear; the load
 ## rides the LEFT shoulder (game.pinned_pose -0.55 x, Player.HUMAN_CARRIED_SHOULDER mirrored,
@@ -35,6 +39,12 @@ const PIVOT := Vector3(0.0, -0.2, 0.12)
 const CARRY_ARM := Vector3(0.5, 0.34, 1.15)
 ## Ordinary play with the `camera` setting on "shoulder": the carry framing, a touch further back.
 const PLAY_ARM := Vector3(0.5, 0.3, 1.35)
+## Facing the player ("front"): centred, level with the chest, a comfortable distance out.
+const FRONT_ARM := Vector3(0.0, 0.1, 2.3)
+## Seconds for the swing round from behind to the front (or back), eased.
+const ORBIT_TIME := 0.55
+## Where the front view looks: this far below the eye (the upper chest), so the whole body frames.
+const FRONT_LOOK_DROP := 0.55
 ## Dragging: the body lies behind, so a little higher and further back, looking gently down.
 const DRAG_ARM := Vector3(0.58, 0.72, 1.5)
 ## Extra downward look while dragging, radians, so the body behind is in frame.
@@ -69,6 +79,8 @@ var _len_k := 1.0
 var _side_k := 1.0
 var _body_shown := false
 var _linger := 0.0
+## 0 behind the player .. 1 swung round in front (linear; eased where it's used).
+var _orbit := 0.0
 
 
 func _init(p: Node) -> void:
@@ -79,9 +91,27 @@ static func setting_on() -> bool:
 	return String(Settings.get_value("carry_camera")) != "first_person"
 
 
-## The `camera` setting: over the shoulder in ordinary play too.
+## The `camera` setting: over the shoulder, or facing the player, in ordinary play too.
 static func play_on() -> bool:
-	return String(Settings.get_value("camera")) == "shoulder"
+	return String(Settings.get_value("camera")) != "first_person"
+
+
+## The `camera` setting wants the view from the front (ordinary play only).
+static func front_on() -> bool:
+	return String(Settings.get_value("camera")) == "front"
+
+
+## More than half way round to the front: the crosshair means nothing, the aim is the head's.
+func front_view() -> bool:
+	return active and _orbit_e() * _blend_e() > 0.5
+
+
+func _orbit_e() -> float:
+	return _orbit * _orbit * (3.0 - 2.0 * _orbit)
+
+
+func _blend_e() -> float:
+	return blend * blend * blend * (blend * (blend * 6.0 - 15.0) + 10.0)
 
 
 func wants() -> bool:
@@ -120,10 +150,13 @@ func update(delta: float) -> void:
 	if p != null and (p.downed or not p.alive):
 		_linger = 0.0
 	var want := wants()
-	if want and (p.carrying != 0 or p.dragging_monster >= 0):
+	var loaded: bool = p.carrying != 0 or p.dragging_monster >= 0
+	var to_front: bool = want and front_on() and not loaded and _linger <= 0.0
+	if want and loaded:
 		_target_arm = CARRY_ARM if p.carrying != 0 else DRAG_ARM
 	elif want and _linger <= 0.0:
-		_target_arm = PLAY_ARM
+		_target_arm = FRONT_ARM if to_front else PLAY_ARM
+	_orbit = move_toward(_orbit, 1.0 if to_front else 0.0, delta / ORBIT_TIME)
 	if blend <= 0.0:
 		_arm = _target_arm
 	else:
@@ -131,20 +164,24 @@ func update(delta: float) -> void:
 	blend = move_toward(blend, 1.0 if want else 0.0, delta / EASE_TIME)
 	active = blend > 0.0
 	# smootherstep: no jolt as it leaves the head or as it settles over the shoulder
-	var e := blend * blend * blend * (blend * (blend * 6.0 - 15.0) + 10.0)
+	var e := _blend_e()
+	# How far round to the front, scaled by the blend so it comes back to the head's own view as the
+	# camera goes back into the head.
+	var f := _orbit_e() * e
 	var fx: Node3D = p.fx
 	var head: Node3D = p.head
 	if fx == null or head == null:
 		return
 	if not active:
-		if fx.position != Vector3.ZERO or fx.rotation.x != 0.0:
+		if fx.position != Vector3.ZERO or fx.rotation != Vector3.ZERO:
 			fx.position = Vector3.ZERO
-			fx.rotation.x = 0.0
+			fx.rotation = Vector3.ZERO
 			p.flashlight.transform = Transform3D(Basis(), FLASH_OFFSET)
 			offset = Vector3.ZERO
 			arm_length = 0.0
 		_show_body(false)
 		_last_pos = Vector3.INF
+		_orbit = 0.0
 		return
 	_tilt = (DRAG_TILT if p.dragging_monster >= 0 else 0.0) * e
 	# Keep the camera out of walls, in three legs from the head: to the pivot at the upper back, out
@@ -152,8 +189,10 @@ func update(delta: float) -> void:
 	# camera in over the head (it stays behind them); a wall behind pulls it in toward the head.
 	# Shortening is instant, growing back eases.
 	var hx: Transform3D = head.global_transform
-	var hb := Basis(Vector3.UP, (p as Node3D).global_rotation.y)   # yaw only; the pitch swings the arm
-	var sw: Vector3 = swing(_arm, head.rotation.x) * e
+	# Yaw only; the pitch swings the arm. The orbit turns the whole rig round the player (behind is +Z
+	# in this frame, so half a turn puts the arm out in front), passing by their right side.
+	var hb := Basis(Vector3.UP, (p as Node3D).global_rotation.y + PI * _orbit_e())
+	var sw: Vector3 = swing(_arm, head.rotation.x * (1.0 - f)) * e
 	var space: PhysicsDirectSpaceState3D = head.get_world_3d().direct_space_state if head.is_inside_tree() else null
 	var pivot: Vector3 = _cast(space, hx.origin, hx.origin + hb * (PIVOT * e))
 	var side_goal: Vector3 = pivot + hb * Vector3(_arm.x * e, 0.0, 0.0)
@@ -173,11 +212,21 @@ func update(delta: float) -> void:
 	offset = hx.affine_inverse() * world_cam
 	arm_length = offset.length()
 	fx.position = offset
-	fx.rotation.x = -_tilt
-	# The torch stays at the head and looks where the camera looks.
-	var cam: Camera3D = p.camera
+	# Behind: look where the head looks (tilted down while dragging). In front: look back at the
+	# player's chest. In between, a blend of the two, so the view turns as it travels round.
+	var look_behind: Basis = hx.basis * Basis(Vector3.RIGHT, -_tilt)
+	var rot: Basis = look_behind
+	if f > 0.001:
+		var aim_at: Vector3 = hx.origin + Vector3.DOWN * FRONT_LOOK_DROP
+		var to: Vector3 = aim_at - world_cam
+		if to.length() > 0.05 and absf(to.normalized().dot(Vector3.UP)) < 0.99:
+			var look_front := Basis.looking_at(to, Vector3.UP)
+			rot = Basis(look_behind.get_rotation_quaternion().slerp(look_front.get_rotation_quaternion(), f))
+	fx.global_basis = rot
+	# The torch stays at the head and looks where the head looks (tilted with the drag view), never
+	# where a camera out in front looks.
 	var flash: SpotLight3D = p.flashlight
-	flash.global_transform = Transform3D(cam.global_transform.basis, hx * FLASH_OFFSET)
+	flash.global_transform = Transform3D(look_behind, hx * FLASH_OFFSET)
 	_show_body(e > 0.08 and arm_length > HIDE_BODY_BELOW)
 
 
@@ -204,6 +253,10 @@ func hides_hands() -> bool:
 ## shoulder: the ray starts on the camera ray where it passes the head (nothing between the camera
 ## and the head counts) and reaches `range` from the head. [from, to].
 func aim_segment(range: float = C.INTERACT_RANGE) -> Array:
+	if front_view():
+		# Facing the player: aim along the head's own look, as in first person.
+		var hx: Transform3D = player.head.global_transform
+		return [hx.origin, hx.origin - hx.basis.z * range]
 	var cam: Camera3D = player.camera
 	var dir: Vector3 = -cam.global_transform.basis.z
 	var from: Vector3 = cam.global_position

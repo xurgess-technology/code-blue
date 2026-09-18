@@ -1420,6 +1420,12 @@ play at `PLAY_ARM`. carrycamtest's first-person assertion still holds (it runs o
 Known rough edges: the flashlight stays at the head, so the body seen from behind is backlit and
 dark in unlit places; the first-person-only feedback (the hands' wind-up and throw poses) shows on
 the body instead; not re-verified in multiplayer (local only, nothing on the wire).
+Later the same day: a third view, "front" (F5 cycles first person -> shoulder -> front), the rig swung
+round to face you. Facing you, your face is mostly lit by the room (your torch points away), and
+there is no crosshair: aiming is where your head points. Also fixed: your own torch lit the back of
+your own head while sprinting (the sprint lean puts the head in the beam); the local torch and head
+glow now leave the `SELF` layer out. Seen during this work and not ours: a Godot renderer error
+"BUG, indexing did not unpair geometries from light" in windowed runs, with or without that fix.
 
 ## Sprint + crouch-dive (2026-09-16)
 
