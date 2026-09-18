@@ -121,10 +121,23 @@ func _run() -> void:
 		await _seconds(0.8)
 		await _shot("21_scalpel_lowered")
 		var k := 22
-		for mark in [1.0, 2.2, 3.4, 4.6, 5.6]:
+		for mark in [1.6, 3.4, 5.6, 6.1]:
 			await _until(func(): return not is_instance_valid(mg) or float(mg.get("cut")) > mark, 20.0)
 			await _shot("%d_ring_%.1f" % [k, mark])
 			k += 1
+			if mark == 3.4:
+				# a low, side-on look at the skin (the snip's angle), from a debug camera
+				var cam := Camera3D.new()
+				add_child(cam)
+				cam.global_position = eye_at + Vector3(0.0, 0.05, 0.16)
+				cam.look_at(eye_at, Vector3.UP)
+				cam.fov = 40.0
+				cam.make_current()
+				await _seconds(0.3)
+				await _shot("%d_low_angle" % k)
+				k += 1
+				me.camera.make_current()
+				cam.queue_free()
 		return
 	var n := 8
 	for step in ["scalpel", "eye_spoon", "scalpel"]:

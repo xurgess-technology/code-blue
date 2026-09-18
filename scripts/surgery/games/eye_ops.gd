@@ -44,6 +44,10 @@ const SLICE_TOL := 0.014
 const MISS_BOTCH := 6.0
 const DASHES := 30
 const CUT_SEGS := 72
+const CUT_SAMPLES := 96                # ring samples the incision ribbon is built from
+const WOUND_HW := 0.0019               # half width of the slit
+const WOUND_LIFT := 0.0004             # sits just off the skin so it never z-fights
+const CUT_TIP_Y := 0.008               # the lowered scalpel's tip height: on the skin around the eye, in view
 const TIP_X := 0.09                    # where the item model's tip is along its X
 const INK_SHEEN := Color(0.55, 0.3, 1.0)   # the saw's marking sheen
 
@@ -92,6 +96,12 @@ var _mat_front: StandardMaterial3D
 var _mat_good: StandardMaterial3D
 var _mat_bad: StandardMaterial3D
 var _hid_body_eye := false
+var _cut_mesh: MeshInstance3D
+var _cut_n := 0
+var _skin_rows: Array = []              # per ring sample: [left, centre, right] on the skin, plane-local
+var _mat_wound: StandardMaterial3D
+var _mat_mark: StandardMaterial3D
+var _ring_theta: Array[float] = []
 var bot_slow := 1.0                     # tests and smoke looks: slow the cut bot down
 var bot_hold := 0.0                     # ... and make it hover this many seconds before lowering
 var _dt := 0.016
@@ -362,6 +372,13 @@ func _build() -> void:
 	if _built:
 		return
 	_built = true
+	_mat_wound = StandardMaterial3D.new()
+	_mat_wound.albedo_color = Color(0.42, 0.02, 0.03)
+	_mat_wound.emission_enabled = true
+	_mat_wound.emission = Color(0.35, 0.0, 0.0)
+	_mat_wound.emission_energy_multiplier = 0.7
+	_mat_wound.roughness = 0.25
+	_mat_wound.cull_mode = BaseMaterial3D.CULL_DISABLED
 	_mat_ink = _unshaded(INK_SHEEN, 0.95)
 	_mat_cut = _unshaded(Color(0.55, 0.02, 0.03), 1.0)
 	_mat_front = _unshaded(Color(1.0, 0.45, 0.4), 1.0)
@@ -381,20 +398,26 @@ func _build() -> void:
 	match variant:
 		"cut":
 			# The marking: dashes round the ring with a hash tick across every other one, in surgical violet.
+			# A fine, dim guide line: thin dashes and short ticks. Each hides once the cut has passed it.
+			_mat_mark = _unshaded(Color(0.62, 0.5, 0.82), 0.6)
 			for i in DASHES:
 				var th := TAU * (float(i) + 0.5) / float(DASHES)
-				var dash := _box(Vector3(TAU * ring_r / float(DASHES) * 0.55, 0.0008, 0.0022), _mat_ink)
+				var dash := _box(Vector3(TAU * ring_r / float(DASHES) * 0.5, 0.0006, 0.0011), _mat_mark)
 				_place_on_ring(dash, th, ring_r, 0.0016)
 				_ring.append(dash)
+				_ring_theta.append(th)
 				if i % 2 == 0:
-					var tick := _box(Vector3(0.0009, 0.0008, 0.011), _mat_ink)
+					var tick := _box(Vector3(0.0006, 0.0006, 0.0055), _mat_mark)
 					_place_on_ring(tick, th, ring_r, 0.0016)
 					_ring.append(tick)
-			for i in CUT_SEGS:
-				var seg := _box(Vector3(TAU * ring_r / float(CUT_SEGS) * 1.15, 0.0012, 0.0034), _mat_cut)
-				_place_on_ring(seg, TAU * (float(i) + 0.5) / float(CUT_SEGS), ring_r, 0.0026)
-				seg.visible = false
-				_cut_segs.append(seg)
+					_ring_theta.append(th)
+			# The incision itself: a dark red ribbon laid on the body's real skin along the ring (heights from a
+			# ray cast down onto its mesh), growing as the cut does.
+			_sample_skin()
+			_cut_mesh = MeshInstance3D.new()
+			_cut_mesh.material_override = _mat_wound
+			_cut_mesh.top_level = false
+			add_child(_cut_mesh)
 			_front = _box(Vector3(0.004, 0.002, 0.004), _mat_front)
 		"scoop":
 			# A dotted circle inside the rim to circle along; dots turn green as the turns add up.
@@ -456,6 +479,61 @@ func _make_cut_scalpel() -> Node3D:
 	return root
 
 
+## Ray-cast down onto the body's skin (its mesh at rest) at every ring sample, left / centre / right of the
+## line, and keep the hits plane-local. Without a body (tests) the ribbon lies flat on the plane.
+func _sample_skin() -> void:
+	var tri: TriangleMesh = null
+	var mi: MeshInstance3D = null
+	var body = ctx.get("body")
+	if body != null and is_instance_valid(body):
+		mi = body.find_child("Human", true, false) as MeshInstance3D
+		if mi != null and mi.mesh != null:
+			tri = mi.mesh.generate_triangle_mesh()
+	var to_mesh: Transform3D = mi.global_transform.affine_inverse() if tri != null and mi.is_inside_tree() and is_inside_tree() else Transform3D()
+	if tri != null and not (mi.is_inside_tree() and is_inside_tree()):
+		tri = null
+	for i in CUT_SAMPLES + 1:
+		var th := TAU * float(i) / float(CUT_SAMPLES)
+		var c2 := _ring_pos(th, ring_r)
+		var radial := c2.normalized()
+		var row := []
+		for off in [-WOUND_HW, 0.0, WOUND_HW]:
+			var q: Vector2 = c2 + radial * off
+			var lp := plane_to_local(q, 0.002)
+			if tri != null:
+				var from := to_mesh * to_global(plane_to_local(q, 0.06))
+				var dir := (to_mesh.basis * (global_transform.basis * Vector3.DOWN)).normalized()
+				var hit: Dictionary = tri.intersect_ray(from, dir)
+				if not hit.is_empty():
+					var gp: Vector3 = mi.global_transform * (hit.position as Vector3)
+					var gn: Vector3 = (mi.global_transform.basis * (hit.normal as Vector3)).normalized()
+					lp = to_local(gp + gn * WOUND_LIFT)
+			row.append(lp)
+		_skin_rows.append(row)
+
+
+## Rebuild the ribbon up to the cut so far, when it has grown by a sample.
+func _grow_cut() -> void:
+	var n := clampi(int(floor(cut / TAU * float(CUT_SAMPLES))), 0, CUT_SAMPLES)
+	if cut >= TAU:
+		n = CUT_SAMPLES
+	if n == _cut_n or _cut_mesh == null or _skin_rows.is_empty():
+		return
+	_cut_n = n
+	if n <= 0:
+		_cut_mesh.mesh = null
+		return
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in n:
+		var a: Array = _skin_rows[i]
+		var b: Array = _skin_rows[i + 1]
+		for tri_v in [a[0], a[2], b[0], a[2], b[2], b[0]]:
+			st.add_vertex(tri_v)
+	st.generate_normals()
+	_cut_mesh.mesh = st.commit()
+
+
 func _place_on_ring(mi: MeshInstance3D, theta: float, r: float, lift_y: float) -> void:
 	mi.position = plane_to_local(_ring_pos(theta, r), lift_y)
 	# the box's long side (its X) along the tangent, so the ring reads as a marked line
@@ -481,7 +559,7 @@ func _update_visuals() -> void:
 		# follows the marking, and drops onto the eye when lowered.
 		if cursor.length() > 0.004:
 			_cut_yaw = lerp_angle(_cut_yaw, atan2(cursor.x, cursor.y), clampf(_dt * 2.5, 0.0, 1.0))
-		_cut_h = move_toward(_cut_h, 0.002 if down else 0.03, _dt * 0.25)
+		_cut_h = move_toward(_cut_h, CUT_TIP_Y if down else 0.03, _dt * 0.25)
 		_tool.basis = Basis(Vector3.UP, _cut_yaw) * Basis(Vector3.RIGHT, deg_to_rad(22.0))
 		_tool.position = plane_to_local(cursor, _cut_h)
 	else:
@@ -491,15 +569,14 @@ func _update_visuals() -> void:
 		_tool.position = plane_to_local(cursor, tip_y) - tilt * Vector3(TIP_X, 0.0, 0.0)
 	match variant:
 		"cut":
-			var n := int(floor(cut / TAU * CUT_SEGS))
-			for i in _cut_segs.size():
-				_cut_segs[i].visible = i < n
+			_grow_cut()
 			_front.visible = cut < TAU
 			_front.position = plane_to_local(_ring_pos(cut, ring_r), 0.003)
 			_front.material_override = _mat_bad if _flash > 0.0 else _mat_front
-			var col := _mat_bad if _flash > 0.0 else _mat_ink
-			for d in _ring:
-				d.material_override = col
+			var col := _mat_bad if _flash > 0.0 else _mat_mark
+			for i in _ring.size():
+				_ring[i].material_override = col
+				_ring[i].visible = _ring_theta[i] > cut
 		"scoop":
 			var k := clampf(turns / (TAU * SCOOP_TURNS), 0.0, 1.0)
 			_eye.position = plane_to_local(Vector2.ZERO, eye_r * 0.85 + k * 0.006)
