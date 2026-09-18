@@ -102,15 +102,18 @@ func _slots() -> void:
 		me.take_into("gauze", 3)
 		me.take_into("pill_bottle", 1, 20)
 		me.selected = 0
+		# (the run starts with a scalpel and an eye spoon on these shelves: count what we add on top)
+		var base: int = game.world_items.values().filter(func(it): return String(it.container_id) == sid).size()
 		_check(shelf.interact_prompt(me).begins_with("Put") and shelf.interact_prompt(me).contains("Gauze"), "holding gauze, the shelves offer to take it ('%s')" % shelf.interact_prompt(me))
 		shelf.interact(me)
 		var on_shelf: Array = game.world_items.values().filter(func(it): return String(it.container_id) == sid)
-		_check(on_shelf.size() == 1 and on_shelf[0].kind == "gauze" and int(on_shelf[0].count) == 3 and not me.holding("gauze"),
+		var gauze: Array = on_shelf.filter(func(it): return it.kind == "gauze")
+		_check(on_shelf.size() == base + 1 and gauze.size() == 1 and int(gauze[0].count) == 3 and not me.holding("gauze"),
 			"the selected stack goes onto the shelves whole (%d stacks there)" % on_shelf.size())
 		me.selected = _slot_holding("pill_bottle")
 		shelf.interact(me)
 		on_shelf = game.world_items.values().filter(func(it): return String(it.container_id) == sid)
-		_check(on_shelf.size() == 2 and me.hands_empty(), "and loot too: any item goes on them")
+		_check(on_shelf.size() == base + 2 and me.hands_empty(), "and loot too: any item goes on them")
 		var pills = on_shelf.filter(func(it): return it.kind == "pill_bottle")[0]
 		_check(int(pills.value) == 20, "a stack keeps its value on the shelves")
 		_check(String(pills.interact_prompt(me)).begins_with("Take"), "what is on the shelves can be taken ('%s')" % pills.interact_prompt(me))
