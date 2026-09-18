@@ -185,19 +185,9 @@ func _blender() -> void:
 	me.take_into("brain_hive", 1, 150)
 	me.slots[_slot_of("brain_hive")]["bt"] = game.world_time
 	me.selected = _slot_of("brain_hive")
-	_check(b.blender.interact_prompt(me).begins_with("Hold E") and b.blender.interact_hold() > 1.0, "holding a brain: '%s'" % b.blender.interact_prompt(me))
+	_check(b.blender.interact_prompt(me).begins_with("!Blender: a Hive brain teaches nothing"), "a Hive brain is refused (Hive Eyes come from the graft now): '%s'" % b.blender.interact_prompt(me))
+	me.clear_slot(_slot_of("brain_hive"))
 	await _stand_at_blender()
-	# A short hold does nothing.
-	me.bot_interact = true
-	await _frames(40)
-	me.bot_interact = false
-	_check(me.holding("brain_hive") and b.points(me.peer_id, "hive") == 0.0 and b.blend_progress(me.peer_id) > 0.0, "a short hold blends a little and keeps the brain (progress %.2f)" % b.blend_progress(me.peer_id))
-	await _frames(40)
-	_check(b.blend_progress(me.peer_id) == 0.0, "letting go winds the blend back down")
-	me.bot_interact = true
-	var drunk := await _until(func(): return not me.holding("brain_hive"), 3.0)
-	me.bot_interact = false
-	_check(drunk and b.points(me.peer_id, "hive") == 1.0 and b.level(me.peer_id, "hive") == 1, "a full 1.5 s hold drinks it: +1.0 fresh, Hive Eyes 1 (%.2f)" % b.points(me.peer_id, "hive"))
 	# Spoiling +0.75, rotten +0.5.
 	for e in [[160.0, 0.75], [300.0, 0.5]]:
 		me.take_into("brain_discharged", 1, 350)
