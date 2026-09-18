@@ -341,7 +341,7 @@ func _bot_work() -> void:
 	dev.request("spawn_item", {"kind": "gauze", "count": 3})
 	dev.order_bot(bid, "carry", "gauze", "shelf")
 	var ok := await _until(func(): return brain.completed >= 1, 60.0)
-	_check(ok and game.shelf_count("gauze") > 0, "a bot carries gauze to the shelf (shelf %s, status '%s')" % [str(game.shelf), brain.status])
+	_check(ok and game.shelf_count("gauze") > 0 and not bot.holding("gauze"), "a bot carries gauze to the OR's storage shelves (%d there, status '%s')" % [game.shelf_count("gauze"), brain.status])
 
 	dev.request("spawn_item", {"kind": "forceps", "count": 1})
 	dev.order_bot(bid, "carry", "forceps", "player", me.peer_id)
@@ -358,7 +358,7 @@ func _bot_work() -> void:
 	var cid: int = int(game.cases[0].id) if not game.cases.is_empty() else -1
 	dev.order_bot(bid, "operate")
 	ok = await _until(func(): return int(game.case_by_id(cid).get("step_index", 0)) >= 1, 150.0)
-	_check(ok, "a bot stocks the shelf and operates the first step (status '%s')" % brain.status)
+	_check(ok, "a bot gets the step's item in hand and operates the first step (status '%s')" % brain.status)
 	_check(brain.completed >= 3 and brain.order == "stay", "the operate order completes")
 	dev.request("clear_patient")
 	await _frames(3)

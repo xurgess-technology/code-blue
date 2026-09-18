@@ -5,7 +5,7 @@ extends Node
 ##   godot --path . --resolution 1280x720 tools/dissectiontest.tscn -- --shots   # tools/dissection_shots/
 ##
 ## Headless checks, solo in a normal hospital (seed 4242) with dev mode on, clocked in with the phone
-## quiet and no roaming monsters, on the entrance building's OR patient tables and shelf: the
+## quiet and no roaming monsters, on the entrance building's OR patient tables: the
 ## procedures data (monsters never roll), a Hive strapped through the dev request, its body (sites,
 ## straps, flags), sedation wearing off and 2.5x faster while the saw bites, the local surgeon
 ## operating both steps through the real surgery system with bot_input, the brain's condition never
@@ -149,13 +149,14 @@ func _dev_mode() -> void:
 		"the table prompt shows sedation ('%s')" % game._table_prompt(me, table))
 
 	# ---- operate step 1: the skull, with the real surgery system and bot_input
-	dev.request("stock_shelf")
 	_stand_at_table(table)
+	game.hand_step_item(me, table)   # 2026-09-18: a step's tool is used from your hands
 	await _frames(2)
 	var prompt := String(game._table_prompt(me, table))
 	_check(prompt.begins_with("Operate: Saw open the skull") and prompt.contains("sedation"), "operate prompt with sedation ('%s')" % prompt)
 	game.surgery_bot_skill = 1.0
 	var sys = game.surgery_for_table(table)
+	game.hand_step_item(me, table)   # 2026-09-18: a step's tool is used from your hands
 	game._proxy_used(game.table_interact_id(table), me)
 	var began := await _until(func(): return sys.is_local_operating() and sys.mg != null, 5.0)
 	_check(began and sys.mg.get("skull") == true, "E at the table starts the skull saw (variant skull)")
@@ -181,6 +182,7 @@ func _dev_mode() -> void:
 	await _frames(3)
 	var cond_before := float(c.vitals)
 	await _seconds(0.5)
+	game.hand_step_item(me, table)   # 2026-09-18: a step's tool is used from your hands
 	game._proxy_used(game.table_interact_id(table), me)
 	var began2 := await _until(func(): return sys.is_local_operating() and sys.mg != null and sys.mg.get("_brain_game") != null, 5.0)
 	_check(began2, "E again starts the brain forceps (variant brain)")
@@ -195,7 +197,9 @@ func _dev_mode() -> void:
 	_check(absf(float(c.vitals) - cond_before) < 0.01, "the finished case keeps the condition, not the step bonus (%.1f)" % float(c.vitals))
 	await _frames(3)
 	_check(body != null and is_instance_valid(body) and bool(body.get("_flat")), "the monster flatlines on the table")
-	# Patient exits: the dead monster is a body waiting for the furnace now.
+	# Patient exits: the dead monster is a body waiting for the furnace now. Lifting it takes empty
+	# hands (the saw and forceps are still in them: tools are never used up).
+	me.slots = Player.empty_slots()
 	_check(String(game._table_prompt(me, table)).begins_with("Hold E: lift"), "table prompt after: '%s'" % game._table_prompt(me, table))
 	var model: Dictionary = OrModel.build(game)
 	var panel := {}
@@ -232,6 +236,7 @@ func _dev_mode() -> void:
 	# Operate while awake: about 1.5 every 3 s from thrashing.
 	game.surgery_bot_skill = -1.0   # hands off: only the thrashing botches
 	_stand_at_table(table)
+	game.hand_step_item(me, table)
 	sys.begin(me)
 	var began3 := await _until(func(): return sys.is_local_operating(), 3.0)
 	var v1 := float(d.vitals)
@@ -247,6 +252,7 @@ func _dev_mode() -> void:
 	_check(p2.begins_with("Re-dose The Discharged") and p2.contains("sedation"), "holding anesthetic: '%s'" % p2)
 	dx.set_sedation(did, 0.2)
 	var before: float = dx.sedation(d)
+	game.hand_step_item(me, table)   # 2026-09-18: a step's tool is used from your hands
 	game._proxy_used(game.table_interact_id(table), me)
 	await _frames(1)
 	var after: float = dx.sedation(d)
@@ -254,10 +260,12 @@ func _dev_mode() -> void:
 	_check(_vials() == 2, "one vial used (%d left)" % _vials())
 	_check(sys.operator_id == me.peer_id, "re-dosing did not interrupt the operation")
 	dx.set_sedation(did, 0.2)
+	game.hand_step_item(me, table)   # 2026-09-18: a step's tool is used from your hands
 	game._proxy_used(game.table_interact_id(table), me)
 	await _frames(1)
 	_check(absf(dx.sedation(d) - 0.56) < 0.01 and _vials() == 1, "second dose +0.36 (%.3f, %d vials)" % [dx.sedation(d), _vials()])
 	dx.set_sedation(did, 0.9)
+	game.hand_step_item(me, table)   # 2026-09-18: a step's tool is used from your hands
 	game._proxy_used(game.table_interact_id(table), me)
 	await _frames(1)
 	_check(absf(dx.sedation(d) - 1.0) < 0.003 and _vials() == 0 and int(d.doses) == 3, "third dose caps at 1.0 and the last vial is gone (%.3f, %d vials, %d doses)" % [dx.sedation(d), _vials(), int(d.get("doses", 0))])
@@ -369,13 +377,12 @@ func _shots() -> void:
 		await _seconds(0.6)
 		await _shot(String(pair[1]) + "_head")
 	# 03: the skull saw mid-step, the operator's view.
-	game.shelf["bone_saw"] = 1
-	game.shelf["forceps"] = 1
 	game.surgery_bot_skill = 0.6
 	var sys = game.surgery_for_table(t0)
 	var tp0: Vector3 = game.table_position(t0)
 	me.teleport(game._floor_at(tp0 + Vector3(0, 0, 1.0).rotated(Vector3.UP, game.table_yaw_of(t0))))
 	await _frames(2)
+	game.hand_step_item(me, t0)
 	sys.begin(me)
 	await _seconds(5.0)
 	await _shot("03_skull_saw_mid")
@@ -404,6 +411,7 @@ func _shots() -> void:
 	# 05/06: the brain forceps: the nerves, then carrying it to the tray.
 	me.teleport(game._floor_at(tp0 + Vector3(0, 0, 1.0).rotated(Vector3.UP, game.table_yaw_of(t0))))
 	await _frames(2)
+	game.hand_step_item(me, t0)
 	sys.begin(me)
 	await _until(func(): return sys.mg != null and sys.mg.get("_brain_game") != null, 5.0)
 	await _seconds(2.4)

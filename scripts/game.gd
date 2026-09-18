@@ -118,6 +118,9 @@ var loop: Node = null
 const CorpsesScript := preload("res://scripts/loop/corpses.gd")
 var corpses: Node = null
 var shelf_node: Node3D = null
+## 2026-09-18: the OR's storage shelves (containers/storage_shelf.gd), built from level_info.storage.
+## The supply shelf is gone: shelf_node stays null and `shelf` stays empty.
+var storage_nodes: Array = []
 var message: String = ""
 var message_timer: float = 0.0
 var danger: float = 0.0
@@ -149,7 +152,7 @@ var _shift_item_ids: Dictionary = {}  # host: items the spawners put in the hosp
 const PlayerScene := preload("res://scripts/player.gd")
 const MonsterScript := preload("res://scripts/monster.gd")
 const WorldItemScript := preload("res://scripts/world_item.gd")
-const ShelfScript := preload("res://scripts/supply_shelf.gd")
+const StorageShelfScript := preload("res://scripts/containers/storage_shelf.gd")
 const BodyScript := preload("res://scripts/patient_body.gd")
 const SpawnerScript := preload("res://scripts/item_spawner.gd")
 const SurgeryScript := preload("res://scripts/surgery/surgery_system.gd")
@@ -928,15 +931,19 @@ func clock_pos() -> Vector3:
 	return level_info.get("clock", Vector3.ZERO)
 
 
-## The OR supply shelf and the aimable spots for the time clock, the table and the player table.
+## The OR's storage shelves and the aimable spots for the time clock, the table and the player table.
+## 2026-09-18: no supply shelf any more. A step's tool is used from the operator's hands, and
+## whatever the team keeps in the OR sits on the storage shelves (any item, as world items).
 func _add_landmarks() -> void:
-	var sinfo: Dictionary = level_info.get("shelf", {})
-	var spos: Vector3 = sinfo.get("position", table_pos() + Vector3(2.2, 0.0, 1.4))
-	shelf_node = ShelfScript.create()
-	level.add_child(shelf_node)
-	shelf_node.global_position = spos
-	shelf_node.rotation.y = float(sinfo.get("yaw", 0.0))
-	shelf_node.show_stock(shelf)
+	storage_nodes.clear()
+	var spots: Array = level_info.get("storage", [])
+	for i in spots.size():
+		var sp: Dictionary = spots[i]
+		var node: Node3D = StorageShelfScript.create("storage_%d" % i)
+		level.add_child(node)
+		node.global_position = sp.position
+		node.rotation.y = float(sp.get("yaw", 0.0))
+		storage_nodes.append(node)
 
 	# loop: the patient tables (a second one beside the first on levels with only one) and the
 	# break-room phone, before the economy looks for free floor.
@@ -1463,28 +1470,102 @@ func _drop_hands(p: Node, violent: bool) -> void:
 		say("%s dropped the %s. It cracked: worth less now." % [p.player_name, cracked.to_lower()], 3.0)
 
 
-func shelf_place(p: Node) -> void:
+## 2026-09-18: how much of a kind the team has ready in the OR: on the storage shelves or in
+## someone's hands (the OR screen's supplies, the dispatch fax's missing list). The old supply
+## shelf's name, kept for its callers.
+func shelf_count(kind: String) -> int:
+	var n := 0
+	for it in world_items.values():
+		if is_instance_valid(it) and it.kind == kind and it.state == WorldItem.State.IN_CONTAINER \
+				and String(it.container_id).begins_with("storage_"):
+			n += int(it.count)
+	for p in players.values():
+		for s in p.slots:
+			if s.kind == kind:
+				n += int(s.count)
+	return n
+
+
+## Host: the selected stack goes onto storage shelf `ct` in spot `slot` (storage_shelf.gd picks it).
+func storage_place(p: Node, ct: Node3D, slot: int) -> void:
 	if not is_host():
 		return
 	var head: int = p.selected_head()
 	var s: Dictionary = p.slots[head]
-	if s.kind == "" or not Items.is_surgical(s.kind):
+	if s.kind == "":
 		return
-	shelf[s.kind] = int(shelf.get(s.kind, 0)) + int(s.count)
+	var it := _spawn_item(s.kind, int(s.count), ct.slot_transform(slot), WorldItem.State.IN_CONTAINER,
+			String(ct.get_meta("interact_id")), slot)
+	it.value = int(s.get("v", 0))
+	if s.has("bt"):
+		it.bt = float(s.bt)   # SWEEP 3 HOOK (brains): the spoil clock travels with it
 	p.clear_slot(head)
-	if shelf_node != null:
-		shelf_node.show_stock(shelf)
-		_sound("items_clink", shelf_node.global_position)
-	say("%s put %s on the supply shelf." % [p.player_name, Items.display_name(s.kind)], 3.0)
+	_sound("items_clink", ct.slot_transform(slot).origin)
 
 
-func shelf_count(kind: String) -> int:
-	return int(shelf.get(kind, 0))
+## Host (dev panel, tests): put `count` of `kind` on the first free storage shelf spot. False if
+## there is no room (or no storage shelves on this level).
+func stock_storage(kind: String, count: int) -> bool:
+	if not is_host():
+		return false
+	for ct in storage_nodes:
+		if not is_instance_valid(ct):
+			continue
+		var free: Array = ct.call("_free_slots")
+		if free.is_empty():
+			continue
+		var slot: int = free[0]
+		var it := _spawn_item(kind, count, ct.slot_transform(slot), WorldItem.State.IN_CONTAINER,
+				String(ct.get_meta("interact_id")), slot)
+		it.value = 0
+		return true
+	return false
 
 
-## Everything of a kind that still exists anywhere: shelf, hands, floors and containers.
+## Host (dev panel): everything off the storage shelves.
+func clear_storage() -> void:
+	if not is_host():
+		return
+	for id in world_items.keys():
+		var it = world_items[id]
+		if is_instance_valid(it) and it.state == WorldItem.State.IN_CONTAINER and String(it.container_id).begins_with("storage_"):
+			it.queue_free()
+			world_items.erase(id)
+
+
+## Host (tests, dev bots): put `count` of `kind` straight into `p`'s hands and select it. False if
+## their hands are full.
+func give_hand(p: Node, kind: String, count: int) -> bool:
+	if not is_host():
+		return false
+	var i: int = p.take_into(kind, count, 0)
+	if i < 0:
+		return false
+	p.selected = i
+	return true
+
+
+## Host (tests, dev tools): `p` holds the current step's item at table `table_index`, enough of it,
+## selected. What they carry otherwise stays (unless their hands are full).
+func hand_step_item(p: Node, table_index := -1) -> void:
+	var c := _case_for(table_index)
+	if c.is_empty():
+		return
+	var step := Procedures.step(String(c.ailment_id), int(c.step_index))
+	if step.is_empty():
+		return
+	var kind := String(step.item)
+	var need: int = maxi(1, int(step.get("uses", 0)))
+	for i in p.slots.size():
+		if String(p.slots[i].kind) == kind and int(p.slots[i].count) >= need:
+			p.selected = i
+			return
+	give_hand(p, kind, need)
+
+
+## Everything of a kind that still exists anywhere: hands, floors, shelves and containers.
 func supply_count(kind: String) -> int:
-	var n := shelf_count(kind)
+	var n := 0
 	for it in world_items.values():
 		if it.kind == kind:
 			n += it.count
@@ -1954,14 +2035,11 @@ func surgery_step_done(result: Dictionary, table_index: int = -1, operator_peer:
 	if step.is_empty():
 		return
 	var uses := int(step.uses)
-	if uses > 0:
-		var from_shelf: int = mini(shelf_count(step.item), uses)
-		shelf[step.item] = maxi(0, shelf_count(step.item) - from_shelf)
-		var remaining := uses - from_shelf
-		if remaining > 0 and operator_peer != 0:
-			var p = players.get(operator_peer)
-			if p != null and p.has_method("consume_hand"):
-				p.consume_hand(String(step.item), remaining)
+	if uses > 0 and operator_peer != 0:
+		# 2026-09-18: used from the operator's hands (surgery_system.can_begin made sure they held it).
+		var p = players.get(operator_peer)
+		if p != null and p.has_method("consume_hand"):
+			p.consume_hand(String(step.item), uses)
 	var flags: Dictionary = c.get("flags", {})
 	flags.merge(result, true)
 	c.flags = flags
@@ -2901,7 +2979,7 @@ func place_on_player_table(q: Node, table_index := -1) -> void:
 		p.look_up_from_table()
 	p.refresh_downed_visuals()
 	_sound("thud", player_table_top())
-	say("%s is on the table. A suture kit on the shelf, then stitch them up." % p.player_name, 4.0)
+	say("%s is on the table. Hold a suture kit and stitch them up." % p.player_name, 4.0)
 
 
 ## Host: the stitches operation on the player on the table (docs/SWEEP2.md: the integration wave

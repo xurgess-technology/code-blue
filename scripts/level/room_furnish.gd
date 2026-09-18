@@ -58,7 +58,8 @@ const REQUIRED := {
 	"cafeteria": ["serving_counter", "cafeteria_table", "school_chair"],
 	# The hub (scripts/level/entrance.gd, hub rebuild 2026-09-16).
 	"break_room": ["time_clock", "break_table"],
-	"or": ["or_table", "surgical_lamp", "scrub_sink"],
+	"or": ["or_table", "surgical_lamp", "lab_sink"],   # 2026-09-18: the lab wall took the scrub sinks' place
+	"or_storage": ["mop_sink"],   # 2026-09-18: the janitor's closet (the supply shelf is gone)
 	"or_lab": ["glass_cabinet"],
 	"lobby": ["reception_desk", "office_desk"],
 	"hub_pharmacy": ["med_shelf"],

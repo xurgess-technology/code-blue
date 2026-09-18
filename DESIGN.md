@@ -33,7 +33,7 @@ You and your best friends clock into the ER with one goal: save a life. The prob
 
 1. Everyone spawns in the clock-in room next to the OR. Aim at the time clock and hold E.
 2. One patient with one ailment arrives. Vitals drain the whole shift.
-3. Search the hospital for the supplies the procedure needs and put them on the OR supply shelf.
+3. Search the hospital for the supplies the procedure needs and bring them to the OR (its storage shelves hold anything you put down).
 4. Operate step by step. Each step is its own minigame.
 5. Stabilise the patient to punch out. The next shift is harder, with more monsters, and its wings are new: while the team is out in the parking lot the gates stay locked and the wings behind them are rebuilt; the entrance building never changes during a run.
 6. Lose if the patient flatlines or everyone is dead.
@@ -56,7 +56,7 @@ Ailments refer to named sites (`injection`, `gunshot`, `limb`, `limb_cut`) and e
 
 ## Surgery minigames
 
-Holding E at the table (with the step's supply on the shelf or in your own hands) moves your camera over the site and frees the mouse; the tool follows your cursor across a work plane lying on the patient. Teammates see your tool move. Mistakes cost vitals and nothing else.
+Holding E at the table (with the step's supply in your hands, selected) moves your camera over the site and frees the mouse; the tool follows your cursor across a work plane lying on the patient. Teammates see your tool move. Mistakes cost vitals and nothing else.
 
 - **Anesthetic**: draw the plunger to the dose band for this patient's weight, then hold the needle steady on the vein. Underdosing makes the patient stir and jolt your hands in later steps; overdosing costs vitals.
 - **Forceps**: steer down a winding wound channel to the bullet, grip it, and draw it back out without touching the sides. Dark deep in the wound: a teammate's flashlight helps.
@@ -78,7 +78,7 @@ All items are physical 3D objects: on shelves, in containers, in hands, on the O
 | Tourniquet | AM | no | red trauma bags (corridors, nurse stations); sometimes dropped |
 | Bone saw | AM | no | pegboards (maintenance, storage); sometimes leaning on a gurney |
 
-- **Aim and press E** for everything: take items, open and close containers, put supplies on the shelf, clock in, revive, operate.
+- **Aim and press E** for everything: take items, open and close containers, put things on the OR's storage shelves, clock in, revive, operate.
 - **Two hands.** A batch fills one hand; picking up more of the same consumable merges into it. 1, 2 or the mouse wheel switch hands; G sets the selected stack down gently.
 - **Getting hit or shoved** drops both hands; fragile stacks lose about a third, never all of it.
 - Containers stay open once opened (so the team can see what has been searched); E closes them again.

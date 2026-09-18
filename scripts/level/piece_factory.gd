@@ -1281,6 +1281,11 @@ static func _primitive(kind: String) -> ArrayMesh:
 			g.box(Vector3(0.3, 0.08, 0.3), Vector3(0.45, 0.96, -0.08), Color(0.85, 0.86, 0.84))
 			g.cyl(0.11, 0.01, Vector3(0.45, 1.005, -0.08), STEEL, "y", 14)
 			g.box(Vector3(0.1, 0.03, 0.005), Vector3(0.45, 0.96, -0.232), Color(0.3, 1.0, 0.5), 1)
+		"lab_corner":
+			_counter_body(g, 0.75, 0.92, 0.7, Color(0.84, 0.86, 0.86), Color(0.08, 0.08, 0.09))
+			g.box(Vector3(0.75, 0.3, 0.02), Vector3(0, 1.07, 0.34), Color(0.8, 0.82, 0.82))
+			for shelf_y in [1.6, 1.98]:
+				g.box(Vector3(0.75, 0.03, 0.26), Vector3(0, shelf_y, 0.23), Color(0.78, 0.8, 0.8))
 		"lab_sink":
 			_lab_counter(g, hash(kind))
 			g.box(Vector3(0.6, 0.02, 0.44), Vector3(-0.2, 0.93, -0.05), DARK_STEEL)   # the basin

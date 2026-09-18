@@ -93,14 +93,35 @@ func _slots() -> void:
 	me.take_into("pill_bottle", 1, 20)
 	me.take_into("pill_bottle", 2, 36)
 	_check(int(me.slots[0].count) == 3 and int(me.slots[0].v) == 56, "pill bottles merge and their values add (%s)" % str(me.slots[0]))
-	# The shelf only takes the selected surgical stack.
+	# 2026-09-18: the OR's storage shelves take whatever you hold, and give it back.
 	_clear()
-	me.take_into("gauze", 3)
-	me.selected = 0
-	var before := game.shelf_count("gauze")
-	game.shelf_place(me)
-	_check(game.shelf_count("gauze") == before + 3 and me.hands_empty(), "the shelf takes the selected stack out of four slots")
-	game.shelf = {}
+	_check(not game.storage_nodes.is_empty(), "the OR has storage shelves")
+	if not game.storage_nodes.is_empty():
+		var shelf: Node3D = game.storage_nodes[0]
+		var sid := String(shelf.get_meta("interact_id"))
+		me.take_into("gauze", 3)
+		me.take_into("pill_bottle", 1, 20)
+		me.selected = 0
+		_check(shelf.interact_prompt(me).begins_with("Put") and shelf.interact_prompt(me).contains("Gauze"), "holding gauze, the shelves offer to take it ('%s')" % shelf.interact_prompt(me))
+		shelf.interact(me)
+		var on_shelf: Array = game.world_items.values().filter(func(it): return String(it.container_id) == sid)
+		_check(on_shelf.size() == 1 and on_shelf[0].kind == "gauze" and int(on_shelf[0].count) == 3 and not me.holding("gauze"),
+			"the selected stack goes onto the shelves whole (%d stacks there)" % on_shelf.size())
+		me.selected = _slot_holding("pill_bottle")
+		shelf.interact(me)
+		on_shelf = game.world_items.values().filter(func(it): return String(it.container_id) == sid)
+		_check(on_shelf.size() == 2 and me.hands_empty(), "and loot too: any item goes on them")
+		var pills = on_shelf.filter(func(it): return it.kind == "pill_bottle")[0]
+		_check(int(pills.value) == 20, "a stack keeps its value on the shelves")
+		_check(String(pills.interact_prompt(me)).begins_with("Take"), "what is on the shelves can be taken ('%s')" % pills.interact_prompt(me))
+		me.selected = 0
+		_check(shelf.interact_prompt(me) == "", "empty-handed, the shelves themselves offer nothing")
+		pills.interact(me)
+		_check(me.holding("pill_bottle") and int(me.selected_stack().v) == 20, "taking it back puts it in hand with its value")
+		_check(game.shelf_count("gauze") == 3, "gauze on the shelves counts as in the OR (%d)" % game.shelf_count("gauze"))
+		shelf.set_open(false, false)
+		_check(shelf.is_open(), "the shelves never close (the game closes containers between shifts)")
+		game.clear_storage()
 	game.world_items.erase(saw.item_id)
 	saw.queue_free()
 
@@ -419,18 +440,17 @@ func _pharmacy_pills() -> void:
 	_clear()
 
 
-## A surgical item can start a step whether it's on the OR shelf or in the operating player's
-## own hands, and the finishing step draws the shelf down first, the operator's hands only for
-## the shortfall (see surgery_system.gd can_begin / game.surgery_step_done).
+## 2026-09-18: a step's item has to be in the operator's hands, selected, and the finishing step
+## uses it up from there (see surgery_system.gd can_begin / game.surgery_step_done). On the storage
+## shelves, or in another slot, is not enough.
 func _hand_supplies() -> void:
-	_say("---- surgery supplies: shelf or hands")
+	_say("---- surgery supplies: in hand")
 	_clear()
 	# Earlier checks (_loot_spawn, _pharmacy_pills) already clocked in with random cases: end that
 	# shift so this one starts clean, with only the pinned patient on a table.
 	if game.phase == Game.Phase.SHIFT:
 		game._end_shift(true, "Test: reset for the hand-supplies check.")
 		await _until(func(): return game.phase == Game.Phase.LOBBY, 20.0)
-	game.shelf.erase("anesthetic")
 	game.loop.force_first = {"patient_id": "bob", "ailment_id": "gunshot"}
 	game.begin_shift()
 	await _frames(3)
@@ -439,39 +459,40 @@ func _hand_supplies() -> void:
 	var surgery: Node = game.surgeries[table]
 	var step := Procedures.step(String(c.ailment_id), int(c.step_index))
 	_check(String(step.id) == "sedate" and String(step.item) == "anesthetic" and int(step.uses) == 1, "gunshot's first step needs one anesthetic (%s)" % str(step))
-	_check(game.shelf_count("anesthetic") == 0 and not me.holding("anesthetic"), "neither the shelf nor the bot's hands have it yet")
 	_check(surgery.can_begin(me) != "", "can_begin refuses with no anesthetic anywhere (%s)" % surgery.can_begin(me))
 
 	me.take_into("anesthetic", 1)
-	_check(me.hand_count("anesthetic") == 1, "the bot now holds one anesthetic")
-	_check(surgery.can_begin(me) == "", "can_begin accepts a hand-held anesthetic with none on the shelf")
+	me.take_into("gauze", 1)
+	me.selected = _slot_holding("gauze")
+	_check(surgery.can_begin(me).contains("Anesthetic"), "holding it in another slot is not enough (%s)" % surgery.can_begin(me))
+	me.selected = _slot_holding("anesthetic")
+	_check(surgery.can_begin(me) == "", "selected, the anesthetic in hand starts the step")
 
-	# Finish the step as if the bot had just operated: the shelf is empty, so the item comes out
-	# of the operator's hands.
 	game.surgery_step_done({}, table, me.peer_id)
 	_check(me.hand_count("anesthetic") == 0, "finishing the step spent the hand-held anesthetic")
-	_check(game.shelf_count("anesthetic") == 0, "the empty shelf is untouched")
+	_check(me.hand_count("gauze") == 1, "and nothing else")
 	c = game.case_by_id(int(c.id))
 	_check(int(c.step_index) == 1, "the case moved on to the next step")
 
-	# The next step ("extract", forceps, uses 0) needs a forceps present but never consumes it;
-	# hand-held is enough and nothing is taken from the bot.
+	# The next step ("extract", forceps, uses 0) never consumes its tool.
 	me.take_into("forceps", 1)
-	_check(surgery.can_begin(me) == "", "a hand-held forceps satisfies a 0-use step too")
+	me.selected = _slot_holding("forceps")
+	_check(surgery.can_begin(me) == "", "a held forceps satisfies a 0-use step (%s)" % surgery.can_begin(me))
 	game.surgery_step_done({}, table, me.peer_id)
-	_check(me.hand_count("forceps") == 1, "a 0-use step never consumes the item, hand or shelf")
+	_check(me.hand_count("forceps") == 1, "a 0-use step never consumes the tool")
 	c = game.case_by_id(int(c.id))
 	_check(int(c.step_index) == 2, "the case moved on again")
 
-	# Third step ("dress", gauze, uses 1): with one on the shelf AND one in hand, the shelf is
-	# drawn down first and the hand-held one is left alone.
-	me.clear_slot(me.slot_for("forceps"))
-	game.shelf["gauze"] = 1
-	me.take_into("gauze", 1)
-	_check(surgery.can_begin(me) == "", "gauze on the shelf (plus a spare in hand) satisfies the step")
+	# Third step ("dress", gauze, uses 1): gauze on the storage shelves does not count until it's held.
+	me.clear_slot(_slot_holding("forceps"))
+	me.clear_slot(_slot_holding("gauze"))
+	game.stock_storage("gauze", 1)
+	_check(surgery.can_begin(me) != "", "gauze on the storage shelves isn't in your hands (%s)" % surgery.can_begin(me))
+	game.give_hand(me, "gauze", 1)
+	_check(surgery.can_begin(me) == "", "holding it, the step starts")
 	game.surgery_step_done({}, table, me.peer_id)
-	_check(game.shelf_count("gauze") == 0, "the shelf's gauze was spent first")
-	_check(me.hand_count("gauze") == 1, "the hand-held spare gauze was left alone")
+	_check(me.hand_count("gauze") == 0 and game.shelf_count("gauze") == 1, "the held gauze was used, the one on the shelves left alone")
+	game.clear_storage()
 	game._end_shift(true, "Test: shift over.")
 	await _until(func(): return game.phase == Game.Phase.LOBBY, 20.0)
 	_clear()
@@ -590,3 +611,11 @@ func _finish() -> void:
 	for f in _failures:
 		_say("  failed: " + f)
 	get_tree().quit(0 if _failures.is_empty() else 1)
+
+
+## The slot holding `kind` (slot_for() is where one would go, a free slot for things that don't stack).
+func _slot_holding(kind: String) -> int:
+	for i in me.slots.size():
+		if String(me.slots[i].kind) == kind:
+			return i
+	return -1

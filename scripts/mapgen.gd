@@ -560,7 +560,7 @@ static func validate(gen: Dictionary) -> PackedStringArray:
 
 	# Landmarks.
 	var spots: Dictionary = gen.get("spots", {})
-	for key in ["clock", "phone", "lectern", "shelf", "or_screen", "entrance", "ambulance", "shop"]:
+	for key in ["clock", "phone", "lectern", "storage", "or_screen", "entrance", "ambulance", "shop"]:
 		if not spots.has(key):
 			problems.append("spot '%s' was never placed" % key)
 	# SWEEP 4A HOOK (pharmacy, chunk 3): the lobby space chunk 2 reserved for the pharmacy window

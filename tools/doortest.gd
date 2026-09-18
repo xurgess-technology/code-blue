@@ -641,7 +641,7 @@ func _regeneration() -> void:
 
 func _entrance_signature() -> String:
 	var info: Dictionary = game.level_info
-	var parts := [str(info.get("clock")), str(info.get("phone")), str(info.get("tables")), str(info.get("shelf")),
+	var parts := [str(info.get("clock")), str(info.get("phone")), str(info.get("tables")), str(info.get("storage")),
 		str(info.get("or_screen")), str(info.get("entrance")), str(info.get("neutral")), str(info.get("lectern"))]
 	var er: Rect2 = info.entrance_rect
 	var nr: Rect2 = info.neutral_rect

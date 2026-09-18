@@ -10,8 +10,8 @@ extends RefCounted
 ##     state: "incoming" | "on_table" | "stable" | "dead",
 ##     vitals: float 0..100, level: "ok" | "low" | "critical",
 ##     steps: [{label, item, item_name, state: "done" | "current" | "todo"}], current: int,
-##     supplies: [{kind, name, need: int, have: int, ok: bool}],   # remaining steps vs the shelf
-##     ready: bool,                                                 # the current step's item is on the shelf
+##     supplies: [{kind, name, need: int, have: int, ok: bool}],   # remaining steps vs what the OR has
+##     ready: bool,                                                 # the current step's item is in the OR
 ##     operator: String, progress: float,                           # "" when nobody operates
 ##   }]
 ## }

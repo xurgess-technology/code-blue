@@ -261,15 +261,14 @@ func _dev_room() -> void:
 	_check(game.player_surgery.patient() == dummy and game.player_surgery.patient_body != null and game.player_surgery.patient_body.has_site("gash"), "the stitches case starts with a lying body and a gash site")
 	_check(dummy.body_visual.visible == false, "the dummy's standing body hides while the lying one shows")
 	await _frames(2)
-	_check(me.aim_prompt.begins_with("!Put Suture kit") or me.aim_prompt.contains("Suture kit"), "operating needs a suture kit on the shelf ('%s')" % me.aim_prompt)
+	_check(me.aim_prompt.begins_with("!") and me.aim_prompt.contains("Suture kit"), "operating needs a suture kit in hand ('%s')" % me.aim_prompt)
 	var bleed_a: float = dummy.bleed
 	await _seconds(2.0)
 	var bled := bleed_a - dummy.bleed
 	_check(bled > 0.8 and bled < 1.2, "bleeding slows to half on the table (%.2f s in 2 s)" % bled)
-	game.shelf["suture_kit"] = 1
-	game.shelf_node.show_stock(game.shelf)
+	game.give_hand(me, "suture_kit", 1)
 	await _frames(2)
-	_check(me.aim_prompt.begins_with("Operate"), "with a kit on the shelf the table offers to operate ('%s')" % me.aim_prompt)
+	_check(me.aim_prompt.begins_with("Operate"), "holding a kit the table offers to operate ('%s')" % me.aim_prompt)
 	game.player_surgery.surgery.bot_skill = 1.0
 	me.bot_press += 1
 	ok = await _until(func(): return me.operating, 5.0)

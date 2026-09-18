@@ -127,7 +127,7 @@ state anywhere else. Opening calls `game.emit_noise(pos, 0.5, "container")` on t
 ```gdscript
 info["containers"]    = [{id, type, room_kind, wing, depth, node, position, slots}]
 info["loose_anchors"] = [{position: Vector3, yaw: float, surface: "counter"|"tray"|"gurney"|"floor", room_kind: String, wing, depth}]
-info["shelf"]         = {position: Vector3, yaw: float}   # OR supply shelf, near the tables
+info["storage"]       = [{position: Vector3, yaw: float}] # the OR's storage shelves (2026-09-18; no supply shelf)
 info["lectern"]       = {position: Vector3, yaw: float}   # in the break room
 info["lab"]           = {centrifuge, vials, microscope, analyzer, specimens, sink, blood_fridge, fume_hood:
                          {position: Vector3, yaw: float}}   # the OR's lab wall, set dressing so far
@@ -184,11 +184,17 @@ Bulky loot takes its slot and a second one, stored as `{kind: "", count: 0, of: 
 not free, but invisible to code that walks slots looking for stacks. Host authoritative,
 replicated in the snapshot. See "Inventory and money" for the helpers; do not assign slots by hand.
 
-## The OR supply shelf (main session)
+## The OR's storage shelves (2026-09-18; the supply shelf is gone)
 
-`game.shelf` is a `Dictionary` kind -> count. Pressing E on the shelf places the selected stack
-(surgical kinds only; loot is refused).
-`game.shelf_count(kind) -> int`.
+`scripts/containers/storage_shelf.gd`: open steel shelving (a container that never closes), built by
+`game._add_landmarks` at `level_info.storage` into `game.storage_nodes` (ids `storage_<i>`). Pressing E
+on it with something selected puts that stack, any item, in the free spot nearest your line of sight
+(`game.storage_place`); what sits there are ordinary world items (`IN_CONTAINER`), taken back with
+their own E. `game.shelf_count(kind) -> int` is what the OR has ready: on the storage shelves plus
+in any player's hands (the OR screen's supplies, the dispatch fax's missing list).
+Host helpers for tests and the dev panel: `game.stock_storage(kind, count)`, `game.clear_storage()`,
+`game.give_hand(p, kind, count)`, `game.hand_step_item(p, table_index)`.
+`game.shelf` / `game.shelf_node` are vestigial (always empty / null).
 
 ## Patient body (patients worker)
 
@@ -282,10 +288,9 @@ func start_case(patient_id: String, ailment_id: String) -> void   # every machin
 func clear_case() -> void
 func can_begin(player) -> String      # host: "" if this player may start the current step now, else the reason
 func begin(player) -> void            # host: this player becomes the operator
-# can_begin's supply check counts game.shelf_count(item) plus this player's own
-# Player.hand_count(item) (not other players' hands) against the step's `uses`; either or both
-# together satisfying `uses` is enough. surgery_step_done draws the shelf down first and only
-# reaches into the finishing operator's hands for the shortfall.
+# can_begin's supply check (2026-09-18): the player's selected stack must be the step's item, at
+# least `uses` of it (1 for tools). Nothing on shelves or in other slots counts.
+# surgery_step_done takes `uses` out of the finishing operator's hands.
 func end(player) -> void              # host: operator leaves (step progress is kept)
 func physics_tick(delta: float) -> void
 func net_state() -> Dictionary        # host -> clients inside the game snapshot
@@ -312,8 +317,7 @@ Game-side API the surgery system uses:
 - `game.surgery_botch(amount: float, reason: String, table_index := -1)` host: costs that case's
   vitals, says why (-1: the first patient case)
 - `game.surgery_step_done(result: Dictionary, table_index := -1, operator_peer := 0)` host: consumes
-  the step's items off the shelf first, then out of `operator_peer`'s hand slots (`Player.consume_hand`)
-  for whatever the shelf came up short (`can_begin` below already counted both as available), merges
+  the step's items out of `operator_peer`'s hand slots (`Player.consume_hand`), merges
   `result` into the case's flags, gives vitals back, advances; the last step makes the case stable
   (`game.finish_case`)
 - `game.send_operator_report(report: Dictionary)` client operator -> host. Every report carries

@@ -628,20 +628,13 @@ class Runner extends Node:
 			if ids.has(c.id):
 				_fail("%s: duplicate container id %s" % [tag, c.id])
 			ids[c.id] = true
-		for key in ["shelf", "lectern"]:
+		for key in ["storage", "lectern"]:
 			if not info.has(key):
 				_fail("%s: no %s spot" % [tag, key])
-		# Hub rebuild (2026-09-16): the supply shelf stands in the OR's storage closet, a few steps
-		# from the tables rather than beside them.
-		if info.has("shelf"):
-			var in_closet := false
-			for r in info.get("rooms", []):
-				if String(r.kind) == "or_storage" and (r.rect as Rect2).has_point(Vector2(info.shelf.position.x, info.shelf.position.z)):
-					in_closet = true
-			if not in_closet:
-				_fail("%s: the supply shelf is not in the OR's storage closet" % tag)
-			if Vector2(info.shelf.position.x - info.table.x, info.shelf.position.z - info.table.z).length() > 10.0:
-				_fail("%s: OR shelf spot is far from the table" % tag)
+		# 2026-09-18: no supply shelf; the OR's storage shelves stand in its lab bay, near the tables.
+		for sp in info.get("storage", []):
+			if Vector2(sp.position.x - info.table.x, sp.position.z - info.table.z).length() > 12.0:
+				_fail("%s: an OR storage shelf is far from the table" % tag)
 		if (info.nav_region as NavigationRegion3D).navigation_mesh.get_polygon_count() <= 0:
 			_fail("%s: navigation mesh has no polygons" % tag)
 		# DOORS: a door node in every doorway, standing in its doorway, closed, blocking it.

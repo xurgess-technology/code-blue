@@ -179,14 +179,13 @@ func can_begin(player) -> String:
 		for other in game.surgeries:
 			if other != self and int(other.operator_id) == int(player.peer_id):
 				return "You are operating at the other table."
+	# 2026-09-18: the step's item has to be in your hands, selected (and enough of it).
 	var needed: int = maxi(1, int(s.get("uses", 0)))
-	var have := int(game.shelf_count(String(s.item)))
-	if have < needed and player.has_method("hand_count"):
-		have += int(player.hand_count(String(s.item)))
-	if have < needed:
+	var held: Dictionary = player.selected_stack() if player.has_method("selected_stack") else {}
+	if String(held.get("kind", "")) != String(s.item) or int(held.get("count", 0)) < needed:
 		if needed > 1:
-			return "Bring %d %s to the shelf or your hands first." % [needed, Items.display_name(String(s.item))]
-		return "Bring %s to the shelf or your hands first." % Items.display_name(String(s.item))
+			return "Hold %d %s to do this." % [needed, Items.display_name(String(s.item))]
+		return "Hold %s to do this." % Items.display_name(String(s.item))
 	var last: float = float(_exit_times.get(player.peer_id, -99.0))
 	if float(game.world_time) - last < REBEGIN_COOLDOWN:
 		return "Stepping back from the table."

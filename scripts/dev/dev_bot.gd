@@ -7,9 +7,11 @@ extends RefCounted
 ##   follow   walk after its owner and stand nearby
 ##   stay     stand still
 ##   carry    get a stack of `item` (loose, in a container, or from a dispenser) and bring it
-##            to the shelf (`to` = "shelf") or put it in its owner's hands (`to` = "player")
-##   operate  do the current surgery step: stock the shelf first if the step's item is missing,
-##            then operate with the minigame's bot input (see the dev hook in surgery_system.gd)
+##            to the OR's storage shelves (`to` = "shelf") or put it in its owner's hands
+##            (`to` = "player")
+##   operate  do the current surgery step: get the step's item into its own hands first (a step's
+##            tool is used from the operator's hands), then operate with the minigame's bot input
+##            (see the dev hook in surgery_system.gd)
 ## A finished carry or operate bumps `completed` and the bot falls back to stay.
 
 const REACH := 1.6
@@ -35,7 +37,6 @@ var _goal := Vector3.INF
 var _press_cd := 0.0
 var _stuck := 0.0
 var _last_pos := Vector3.ZERO
-var _shelf_before := 0
 var _delivering := false
 var _op_key := ""
 var _op_table := -1
@@ -130,14 +131,15 @@ func _follow(delta: float) -> void:
 
 ## One step of fetching and delivering. Returns true once the delivery landed.
 func _carry(delta: float, kind: String, target: String) -> bool:
-	if target == "shelf" and not Items.is_surgical(kind):
+	var shelf := _storage()
+	if target == "shelf" and shelf == null:
 		target = "player"
 	var hand := _hand_with(kind)
 	if hand < 0:
 		if _delivering:
 			_delivering = false
-			if target == "shelf" and game.shelf_count(kind) > _shelf_before:
-				return true
+			if target == "shelf":
+				return true   # it left our hands at the shelves
 			if target == "player" and _gave:
 				return true
 		_fetch(delta, kind)
@@ -145,11 +147,10 @@ func _carry(delta: float, kind: String, target: String) -> bool:
 	p.selected = hand
 	if not _delivering:
 		_delivering = true
-		_shelf_before = game.shelf_count(kind)
 		_gave = false
 	if target == "shelf":
-		status = "taking %s to the shelf" % Items.display_name(kind)
-		_go_use("shelf", game.shelf_node.global_position, delta)
+		status = "taking %s to the shelves" % Items.display_name(kind)
+		_go_use(String(shelf.get_meta("interact_id")), shelf.global_position, delta)
 		return false
 	var who = _owner()
 	if who == null or not who.alive:
@@ -239,11 +240,7 @@ func _operate(delta: float) -> void:
 		_halt()
 		status = "operating: %s" % step.label
 		return
-	var need: int = maxi(1, int(step.get("uses", 0)))
-	if game.shelf_count(String(step.item)) < need:
-		# The carry helper reports each delivery; keep going until the shelf has enough.
-		if _carry(delta, String(step.item), "shelf"):
-			_delivering = false
+	if not _hold(delta, String(step.item), maxi(1, int(step.get("uses", 0)))):
 		return
 	status = "walking to the table"
 	p.set_meta("bot_skill", skill)
@@ -310,7 +307,7 @@ func _carry_downed(delta: float) -> void:
 var _was_carrying := 0
 
 
-## downed hook: stock a suture kit on the shelf, then stitch up whoever lies on the player table.
+## downed hook: get a suture kit in hand, then stitch up whoever lies on the player table.
 func _operate_player_table(delta: float) -> void:
 	var patient = game.player_surgery.patient()
 	if patient == null:
@@ -324,9 +321,7 @@ func _operate_player_table(delta: float) -> void:
 	if step.is_empty():
 		_done("stitched up %s" % patient.player_name)
 		return
-	if game.shelf_count(String(step.item)) < maxi(1, int(step.get("uses", 0))):
-		if _carry(delta, String(step.item), "shelf"):
-			_delivering = false
+	if not _hold(delta, String(step.item), maxi(1, int(step.get("uses", 0)))):
 		return
 	status = "walking to the player table"
 	p.set_meta("bot_skill", skill)
@@ -418,3 +413,22 @@ func _face(pos: Vector3) -> void:
 
 static func _flat(v: Vector3) -> Vector3:
 	return Vector3(v.x, 0.0, v.z)
+
+
+## 2026-09-18: the step's item in our own hands and selected, `need` of it; fetches it otherwise.
+## True once it is.
+func _hold(delta: float, kind: String, need: int) -> bool:
+	var hand := _hand_with(kind)
+	if hand >= 0 and int(p.slots[hand].count) >= need:
+		p.selected = hand
+		return true
+	_fetch(delta, kind)
+	return false
+
+
+## The OR's first storage shelf, or null.
+func _storage() -> Node3D:
+	for ct in game.storage_nodes:
+		if is_instance_valid(ct):
+			return ct
+	return null

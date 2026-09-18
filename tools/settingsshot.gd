@@ -150,9 +150,7 @@ func _run() -> void:
 	# 5. Operating at the widest field of view: the surgery camera keeps its own framing.
 	Settings.set_value("fov", 100.0)
 	for kind in Items.SURGICAL:
-		game.shelf[kind] = 3 if Items.is_consumable(kind) else 1
-	if game.shelf_node != null:
-		game.shelf_node.show_stock(game.shelf)
+		game.stock_storage(kind, 3 if Items.is_consumable(kind) else 1)
 	var tb := game.table_pos()
 	_look_from(tb + Vector3(0.0, 0.0, 1.2), tb + Vector3(0, 1.0, 0))
 	game.surgery.bot_skill = 0.5

@@ -706,9 +706,7 @@ func _apply_request(sender: int, action: String, a: Dictionary) -> void:
 		"stock_shelf":
 			stock_shelf()
 		"clear_shelf":
-			game.shelf = {}
-			if game.shelf_node != null:
-				game.shelf_node.show_stock(game.shelf)
+			game.clear_storage()   # 2026-09-18: the OR's storage shelves (the supply shelf is gone)
 		"phone":
 			phone_call()
 		"spawn_bot":
@@ -892,11 +890,14 @@ func set_patient(patient_id: String, ailment_id: String, dead := false) -> void:
 	game.say("%s is on the table: %s." % [Procedures.patient(patient_id).name, Procedures.ailment(ailment_id).name], 3.0)
 
 
+## 2026-09-18: one of every surgical supply (and suture kits) onto the OR's storage shelves, topped
+## up to what the shelf used to hold. Take them off to use them: a step's tool has to be in hand.
 func stock_shelf() -> void:
 	for kind in Items.SURGICAL + ["suture_kit"]:  # downed hook: suture kits too
-		game.shelf[kind] = maxi(int(game.shelf.get(kind, 0)), 6 if Items.is_consumable(kind) else 1)
-	if game.shelf_node != null:
-		game.shelf_node.show_stock(game.shelf)
+		var want: int = 6 if Items.is_consumable(kind) else 1
+		var have: int = int(game.shelf_count(kind))
+		if have < want:
+			game.stock_storage(kind, want - have)
 
 
 func phone_call() -> void:

@@ -12,7 +12,8 @@ extends Node
 ##
 ## Scenarios (see tools/nettest_run.gd for the process layout of each):
 ##   names            host + 3 clients: everyone's name arrives intact on every machine
-##   deliver          host + 2 clients: each client fetches a different supply and puts it on the shelf
+##   deliver          host + 2 clients: each client fetches a different supply and puts it on the
+##                    OR's storage shelves
 ##   surgery          host + 2 clients: client 1 operates a whole step, client 2 watches, the host sees it finish
 ##   leave_items      client 1 leaves holding supplies: they drop where it stood, nothing smashes
 ##   leave_operating  client 1 is killed mid-step: the step pauses, client 2 resumes from the saved progress
@@ -294,9 +295,8 @@ func _sc_deliver():
 		for m in _msgs("delivered"):
 			var kind: String = m.data.kind
 			if game.shelf_count(kind) < int(m.data.count):
-				return _end(false, "client says it delivered %s but the host shelf is %s" % [kind, str(game.shelf)])
-		_say("host shelf %s" % str(game.shelf))
-		await _finish_together("both deliveries on the host's shelf")
+				return _end(false, "client says it delivered %s but the host's OR has %d" % [kind, game.shelf_count(kind)])
+		await _finish_together("both deliveries on the host's storage shelves")
 		return
 	if not await _wait_shift_as_client():
 		return
@@ -312,7 +312,7 @@ func _sc_deliver():
 	if not await _until(func(): return game.shelf_count(kind) >= count, 20.0, "own delivery in the snapshot"):
 		return
 	_send("delivered", {"kind": kind, "count": count})
-	await _finish_together("delivered %d %s, visible on my shelf %s" % [count, kind, str(game.shelf)])
+	await _finish_together("delivered %d %s, %d visible in my OR" % [count, kind, game.shelf_count(kind)])
 
 
 func _sc_surgery():
@@ -505,7 +505,7 @@ func _sc_late_join():
 		await _finish_together("late joiner spectated and spawned at the next shift")
 		return
 	if index == 1:
-		if not await _until(func(): return game.phase == Game.Phase.SHIFT and _me() != null and game.shelf_node != null, 90.0, "the shift"):
+		if not await _until(func(): return game.phase == Game.Phase.SHIFT and _me() != null and not game.storage_nodes.is_empty(), 90.0, "the shift"):
 			return
 		var seed_then: int = game.seed_value
 		if not await _until(func(): return game.phase == Game.Phase.LOBBY and game.shift == 2, 150.0, "the next lobby"):
@@ -965,9 +965,9 @@ func _sc_dissection():
 		var cid: int = dx.dev_strap("hive", 0.45, table)
 		if cid < 0:
 			return _end(false, "could not strap a Hive to table %d" % table)
-		game.shelf["bone_saw"] = maxi(1, game.shelf_count("bone_saw"))
-		game.shelf["forceps"] = maxi(1, game.shelf_count("forceps"))
-		game.shelf_node.show_stock(game.shelf)
+		var dx_op = game.players.get(_peer_of(1))
+		game.give_hand(dx_op, "bone_saw", 1)   # 2026-09-18: a step's tool is used from the hands
+		game.give_hand(dx_op, "forceps", 1)
 		var doser = game.players.get(_peer_of(2))
 		doser.take_into("anesthetic", 2)
 		_send("dx", {"table": table, "case": cid, "op": _peer_of(1), "doser": _peer_of(2)})
@@ -1105,13 +1105,14 @@ func _sc_downed():
 			return
 		await _wall_wait(0.5)
 		game.knock_down_player(p1, "test")
-		game.shelf["suture_kit"] = 1
-		game.shelf_node.show_stock(game.shelf)
 		if not await _until(func(): return _count_msgs("crawled") > 0, 30.0, "client 1 to crawl"):
 			return
 		_send("downed", {"peer": downed_id, "carrier": carrier_id, "table": ti})
-		var seen := {"carry": false, "follow": false, "table": false, "op": false}
+		var seen := {"carry": false, "follow": false, "table": false, "op": false, "kit": false}
 		var watch := func():
+			# 2026-09-18: the carrier's hands were empty to lift them; once they're on the table, a kit.
+			if p1.on_table and not seen.kit:
+				seen.kit = game.give_hand(p2, "suture_kit", 1)
 			if p2.carrying == downed_id and p1.carried_by == carrier_id:
 				seen.carry = true
 				if p1.global_position.distance_to(p2.global_position) < 1.8:
@@ -1691,8 +1692,8 @@ func _sc_monsters():
 	await _finish_together("saw the Hives, one sedated (lying), hit, dragged by me and waking")
 
 
-## One frame of a simple co-op bot through the loop: clock in, answer the phone, bring what the
-## shelf lacks, operate, clock out.
+## One frame of a simple co-op bot through the loop: clock in, answer the phone, gather what the
+## case still lacks, operate holding the step's tool, clock out.
 func _shift_bot(st: Dictionary) -> void:
 	var me := _me()
 	if me == null:
@@ -1729,7 +1730,7 @@ func _shift_bot(st: Dictionary) -> void:
 		_say("patient on the table: %s/%s" % [game.case.patient_id, game.case.ailment_id])
 	if int(game.case.get("step_index", 0)) != int(st.last_step):
 		st.last_step = int(game.case.get("step_index", 0))
-		_say("step %d, vitals %.0f, shelf %s, operator %d" % [st.last_step, game.vitals, str(game.shelf), game.surgery.operator_id])
+		_say("step %d, vitals %.0f, hands %s, operator %d" % [st.last_step, game.vitals, str(me.slots.map(func(x): return x.kind)), game.surgery.operator_id])
 	if me.operating or game.surgery.is_local_operating():
 		return
 	var need := Procedures.remaining_requirements(game.case.ailment_id, int(game.case.get("step_index", 0)))
@@ -1738,20 +1739,23 @@ func _shift_bot(st: Dictionary) -> void:
 		var n: int = int(need[kind]) - game.shelf_count(kind)
 		if n > 0:
 			short[kind] = n
+	# 2026-09-18: a step's tool is used from the operator's hands. Holding it: operate.
+	var step := Procedures.step(String(game.case.ailment_id), int(game.case.get("step_index", 0)))
+	var tool := String(step.get("item", ""))
+	var uses: int = maxi(1, int(step.get("uses", 0)))
+	for i in me.slots.size():
+		if String(me.slots[i].kind) == tool and int(me.slots[i].count) >= uses:
+			if game.surgery.operator_id == 0:
+				_press_at(game.table_position(int(game.case.table)), game.table_interact_id(int(game.case.table)))
+			return
 	for i in me.slots.size():
 		var s: Dictionary = me.slots[i]
-		if s.kind != "" and short.has(s.kind):
-			me.selected = i
-			_press_at(game.shelf_node.global_position, "shelf")
-			return
-		if s.kind != "" and not short.has(s.kind):
+		if s.kind != "" and not need.has(s.kind):
 			me.selected = i
 			me.drop_count += 1   # not needed any more
 			return
 	if short.is_empty():
-		if game.surgery.operator_id == 0:
-			_press_at(game.table_position(int(game.case.table)), game.table_interact_id(int(game.case.table)))
-		return
+		return   # someone else is holding it
 	var kinds := short.keys()
 	kinds.sort()
 	var kind: String = kinds[index % kinds.size()]
@@ -1905,7 +1909,7 @@ func _wait_shift_as_client() -> bool:
 			seen.sub = true
 	var ok := await _do_until(watch, func(): return game.phase == Game.Phase.SHIFT and _me() != null and not game.case.is_empty() \
 		and String(game.case.get("state", "")) == "on_table" and game.body_for_table(int(game.case.table)) != null \
-		and game.world_items.size() > 0 and game.shelf_node != null, 120.0, "the patient on a table")
+		and game.world_items.size() > 0 and not game.storage_nodes.is_empty(), 120.0, "the patient on a table")
 	if ok:
 		_me().bot_active = true
 		_me().bot_invulnerable = true
@@ -1939,11 +1943,23 @@ func _host_clock_in_and_deliver() -> bool:
 	return true
 
 
+## 2026-09-18 (a step's tool is used from the hands; the supply shelf is gone): every client gets
+## what the live cases' current steps need. At a table, _press_at selects the right one.
 func _stock_shelf() -> void:
-	var need: Dictionary = game._live_requirements()
-	for kind in need.keys():
-		game.shelf[kind] = maxi(int(game.shelf.get(kind, 0)), int(need[kind]))
-	game.shelf_node.show_stock(game.shelf)
+	var need := {}
+	for c in game.cases:
+		if String(c.state) != "on_table":
+			continue
+		var step := Procedures.step(String(c.ailment_id), int(c.step_index))
+		if not step.is_empty():
+			need[String(step.item)] = maxi(int(need.get(String(step.item), 0)), maxi(1, int(step.get("uses", 0))))
+	for pl in game.players.values():
+		if int(pl.peer_id) == Net.my_id():
+			continue
+		for kind in need.keys():
+			var short: int = int(need[kind]) - int(pl.hand_count(kind))
+			if short > 0:
+				game.give_hand(pl, kind, short)
 
 
 func _fetch(kind: String) -> bool:
@@ -1963,8 +1979,9 @@ func _deliver(kind: String) -> bool:
 		var i := _slot_of(kind)
 		if i >= 0:
 			_me().selected = i
-		_press_at(game.shelf_node.global_position, "shelf")
-	return await _do_until(step, func(): return not _me().holding(kind), 40.0, "putting %s on the shelf" % kind)
+		var shelf: Node3D = game.storage_nodes[0]
+		_press_at(shelf.global_position + Vector3.UP * 1.0, String(shelf.get_meta("interact_id")))
+	return await _do_until(step, func(): return not _me().holding(kind), 40.0, "putting %s on the storage shelves" % kind)
 
 
 ## The peer id of the machine playing NAMES[i] (ENet peer ids are random).
@@ -2052,6 +2069,12 @@ func _throw_at(pos: Vector3, furn_basis_z: Vector3 = Vector3(0.0, 0.0, 1.0)) -> 
 ## move), look at it, and press E at most once a wall-clock second (or hold it).
 func _press_at(pos: Vector3, id: String, hold := false) -> void:
 	var me := _me()
+	# 2026-09-18: at a table, hold the current step's item (a step's tool is used from the hands).
+	var want := _step_item_for(id)
+	if want != "":
+		var si := _slot_of(want)
+		if si >= 0:
+			me.selected = si
 	var flat := Vector2(pos.x - me.global_position.x, pos.z - me.global_position.z)
 	if flat.length() > 1.7:
 		me.teleport(_stand_spot(pos))
@@ -2215,3 +2238,16 @@ func _pocket_rebuilt_here() -> bool:
 		return _end(false, "still standing in the pocket after the next shift began (%s)" % str(me.global_position))
 	_say("next shift: the same %s rebuilt here, %d doors, and I was walked out" % [have.kind, (have.doors as Array).size()])
 	return true
+
+
+## The item the current step at table `id` needs ("" for anything that is not an occupied table).
+func _step_item_for(id: String) -> String:
+	var pt: Dictionary = game.player_table
+	if id == "player_table" or (pt.has("index") and id == game.table_interact_id(int(pt.index))):
+		var pc: Dictionary = game.player_surgery.case
+		if not pc.is_empty():
+			return String(Procedures.step(String(pc.ailment_id), int(pc.step_index)).get("item", ""))
+	for c in game.cases:
+		if int(c.get("table", -1)) >= 0 and game.table_interact_id(int(c.table)) == id:
+			return String(Procedures.step(String(c.ailment_id), int(c.step_index)).get("item", ""))
+	return ""

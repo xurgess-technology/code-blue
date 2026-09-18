@@ -2,7 +2,8 @@ extends Node
 ## Headless play-through of whole shifts, the way a player would do it (sweep 2 loop): walk to
 ## the time clock and clock in, wait out the grace period, answer the break-room phone, find
 ## the supplies the case needs (opening containers on the way) while the paramedics wheel the
-## patient in, carry them to the OR shelf, operate step by step until every patient is stable,
+## patient in, gather supplies (onto the OR's storage shelves when hands are full), operate step by
+## step holding each step's tool until every patient is stable,
 ## then clock out and get paid.
 ##
 ##   godot --headless --fixed-fps 60 --path . tools/playtest.tscn -- [--god] [--seed=N] [--shifts=N]
@@ -87,10 +88,10 @@ func _ready() -> void:
 	bot.bot_active = true
 	bot.bot_invulnerable = god
 	last_hp = bot.hp
-	_say("level=%s containers=%d anchors=%d shelf=%s lectern=%s surgery=%s" % [
+	_say("level=%s containers=%d anchors=%d storage=%s lectern=%s surgery=%s" % [
 		"fallback" if game.level_info.get("fallback", false) else "generated",
 		game.level_info.get("containers", []).size(), game.level_info.get("loose_anchors", []).size(),
-		str(game.level_info.has("shelf")), str(game.level_info.has("lectern")),
+		str(game.level_info.has("storage")), str(game.level_info.has("lectern")),
 		"real" if "bot_skill" in game.surgery else "stub"])
 
 
@@ -188,7 +189,7 @@ func _log_cases() -> void:
 		var parts := []
 		for c in game.cases:
 			parts.append("%s/%s t%d %s step %d vit %.0f" % [c.patient_id, c.ailment_id, int(c.table), c.state, int(c.step_index), float(c.vitals)])
-		_say("t=%.0f cases: %s | shelf %s" % [elapsed, "; ".join(parts), str(game.shelf)])
+		_say("t=%.0f cases: %s | hands %s" % [elapsed, "; ".join(parts), str(bot.slots.map(func(x): return x.kind))])
 
 
 ## Answer the ringing phone when it is the first call, or the extra one with --extra. True while
@@ -204,15 +205,9 @@ func _handle_phone() -> bool:
 
 func _play_shift(delta: float) -> void:
 	_log_timer -= delta
-	var need: Dictionary = game._live_requirements()
-	if need.is_empty() and not bot.operating:
+	if game._live_requirements().is_empty() and not bot.operating:
 		bot.bot_move = Vector2.ZERO
 		return
-	var short := {}
-	for kind in need.keys():
-		var s: int = int(need[kind]) - game.shelf_count(kind)
-		if s > 0:
-			short[kind] = s
 
 	# Already operating: let the surgery system (and its bot input) do the work.
 	if bot.operating:
@@ -220,31 +215,49 @@ func _play_shift(delta: float) -> void:
 		bot.bot_interact = false
 		return
 
-	# Carrying something the shelf still needs: deliver it.
-	for i in bot.slots.size():
-		var s: Dictionary = bot.slots[i]
-		if s.kind != "" and short.has(s.kind):
-			bot.selected = i
-			_go_use("shelf", game.shelf_node.global_position, false)
+	var need: Dictionary = game._live_requirements()
+	var short := {}
+	for kind in need.keys():
+		var s: int = int(need[kind]) - game.shelf_count(kind)
+		if s > 0:
+			short[kind] = s
+	# 2026-09-18: a step's tool is used from the operator's hands. Holding the current step's item:
+	# operate. Everything else is already in the OR: fetch that item from wherever it sits.
+	var from_storage := false
+	for c in game.cases:
+		if String(c.state) != "on_table" or String(c.get("patient_id", "")) == "player":
+			continue
+		var step := Procedures.step(String(c.ailment_id), int(c.step_index))
+		if step.is_empty():
+			continue
+		var n: int = maxi(1, int(step.get("uses", 0)))
+		var h := _held(String(step.item), n)
+		if h >= 0:
+			bot.selected = h
+			game.surgery_bot_skill = skill
+			_go_use(game.table_interact_id(int(c.table)), game.table_position(int(c.table)), false)
 			return
-
+		if short.is_empty():
+			short = {String(step.item): n}
+			from_storage = true
+		break
 	if short.is_empty():
-		# Everything is on the shelf: operate on a patient who is on a table.
-		game.surgery_bot_skill = skill
-		for c in game.cases:
-			if String(c.state) == "on_table" and String(c.patient_id) != "player":
-				_go_use(game.table_interact_id(int(c.table)), game.table_position(int(c.table)), false)
-				return
 		bot.bot_move = Vector2.ZERO   # the patient is still on the way
 		return
-
-	# Hands full of things we do not need: set one down (the first slot holding a stack).
 	if not bot.can_take(short.keys()[0]):
+		# Hands full: drop something nobody needs, else put a needed stack on the storage shelves.
+		for i in bot.slots.size():
+			var k := String(bot.slots[i].kind)
+			if k != "" and not Items.is_loot(k) and not need.has(k):
+				bot.selected = i
+				bot.drop_count += 1
+				return
 		for i in bot.slots.size():
 			if String(bot.slots[i].kind) != "":
 				bot.selected = i
 				break
-		bot.drop_count += 1
+		var shelf: Node3D = game.storage_nodes[0]
+		_go_use(String(shelf.get_meta("interact_id")), shelf.global_position, false)
 		return
 
 	# Find the nearest stack of something still short. Keep the one already chosen while it is
@@ -259,6 +272,9 @@ func _play_shift(delta: float) -> void:
 		if best_d < 0.0:
 			break
 		if not short.has(it.kind) or _blacklist.has(it.item_id):
+			continue
+		# Gathering: what is already on the storage shelves counts as had, so leave it there.
+		if not from_storage and it.state == WorldItem.State.IN_CONTAINER and String(it.container_id).begins_with("storage_"):
 			continue
 		var d: float = it.global_position.distance_to(bot.global_position)
 		if d < best_d:
@@ -489,3 +505,11 @@ func _finish(ok: bool) -> void:
 	print("[playtest] ------------------------------------------")
 	print("[playtest] result=%s shifts_won=%d elapsed=%.0fs hits=%d" % ["PASS" if ok else "FAIL", shifts_won, elapsed, hits])
 	get_tree().quit(0 if ok else 1)
+
+
+## The slot holding at least `n` of `kind`, else -1.
+func _held(kind: String, n: int) -> int:
+	for i in bot.slots.size():
+		if String(bot.slots[i].kind) == kind and int(bot.slots[i].count) >= n:
+			return i
+	return -1

@@ -38,7 +38,7 @@ func _ready() -> void:
 		game.begin_shift()
 	await get_tree().process_frame
 
-	var shelf: Node3D = game.shelf_node
+	var shelf: Node3D = (game.storage_nodes[0] if not game.storage_nodes.is_empty() else null)
 	print("[affordanceshot] shelf at ", shelf.global_position if shelf != null else "null")
 
 	# (a) distant view of the OR, shelf visible, not aimed at anything.
@@ -55,9 +55,9 @@ func _ready() -> void:
 	bot.take_into("anesthetic", 2)
 	bot.selected = 0
 	if shelf != null:
-		var out: Vector3 = shelf.global_basis.z.normalized()
+		var out: Vector3 = -shelf.global_basis.z.normalized()   # the storage shelves face -Z
 		_look_from(shelf.global_position + out * 1.4 + Vector3(0, 0.1, 0), shelf.global_position + Vector3(0, 0.9, 0))
-	bot.bot_aim_id = "shelf"
+	bot.bot_aim_id = "storage_0"
 	await _settle_and_shot("b_shelf_aimed_highlight_on")
 
 	# (c) identical framing, no aim: the highlight should be off.

@@ -42,7 +42,7 @@ func _ready() -> void:
 		game.remove_case(int(old.id))
 	game.add_case({"patient_id": "bob", "ailment_id": "gunshot", "table": ti, "step_index": 1, "flags": {"sedation": 1.0}})
 	for kind in Items.SURGICAL:
-		game.shelf[kind] = 3 if Items.is_consumable(kind) else 1
+		game.stock_storage(kind, 3 if Items.is_consumable(kind) else 1)
 	await _frames(20)
 	var body = game.body_for_table(ti)
 	if body == null:
@@ -59,6 +59,7 @@ func _ready() -> void:
 	bot.teleport(game._floor_at(stand))
 	_face(bot, site.origin)
 	game.surgery_bot_skill = 0.9
+	game.hand_step_item(bot, ti)   # 2026-09-18: a step's tool is used from the hands
 	bot.bot_aim_id = "table"
 	bot.bot_press += 1
 	await _frames(20)

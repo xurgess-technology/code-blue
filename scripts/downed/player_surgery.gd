@@ -163,16 +163,11 @@ func surgery_step_done(result: Dictionary, operator_peer: int = 0) -> void:
 	if step.is_empty():
 		return
 	var uses := int(step.get("uses", 0))
-	if uses > 0:
-		var from_shelf: int = mini(game.shelf_count(String(step.item)), uses)
-		game.shelf[step.item] = maxi(0, game.shelf_count(String(step.item)) - from_shelf)
-		var remaining := uses - from_shelf
-		if remaining > 0 and operator_peer != 0:
-			var p = game.players.get(operator_peer)
-			if p != null and p.has_method("consume_hand"):
-				p.consume_hand(String(step.item), remaining)
-		if game.shelf_node != null:
-			game.shelf_node.show_stock(game.shelf)
+	if uses > 0 and operator_peer != 0:
+		# 2026-09-18: from the operator's hands (the supply shelf is gone).
+		var p = game.players.get(operator_peer)
+		if p != null and p.has_method("consume_hand"):
+			p.consume_hand(String(step.item), uses)
 	var flags: Dictionary = case.get("flags", {})
 	flags.merge(result, true)
 	case.flags = flags

@@ -151,8 +151,7 @@ func _run() -> void:
 	me.bot_aim_id = ""
 
 	# ---- 06-08 the stitches minigame, operated by you with a sloppy hand
-	game.shelf["suture_kit"] = 3
-	game.shelf_node.show_stock(game.shelf)
+	game.give_hand(me, "suture_kit", 3)
 	_stand(pt + side * 1.2, 0.0)
 	_look_at(pt + Vector3.UP * 0.9)
 	me.bot_aim_id = tid
@@ -254,8 +253,7 @@ func _bot_operates(bid: int, ti: int) -> void:
 		return
 	print("[downedshot] the bot's operate order did not start at table %d (status '%s'); operating by hand" % [ti, dev.brains[bid].status])
 	dev.order_bot(bid, "stay")
-	game.shelf["suture_kit"] = maxi(1, game.shelf_count("suture_kit"))
-	game.shelf_node.show_stock(game.shelf)
+	game.give_hand(bot, "suture_kit", 1)   # 2026-09-18: a step's tool is used from the hands
 	var side: Vector3 = Basis(Vector3.UP, game.table_yaw_of(ti)) * Vector3(0, 0, 1)
 	bot.teleport(game._floor_at(game.table_position(ti) + side * 1.2))
 	bot.bot_yaw = atan2(side.x, side.z)

@@ -129,6 +129,9 @@ const P := {
 	"lab_analyzer": {"size": Vector3(1.5, 2.3, 0.75), "block": true},
 	"lab_specimens": {"size": Vector3(1.5, 2.3, 0.75), "block": true},
 	"lab_sink": {"size": Vector3(1.5, 2.3, 0.75), "block": true},
+	# The square of counter where two lab runs meet in a corner (the OR, 2026-09-18). Claims no tile:
+	# the stations either side already hold them.
+	"lab_corner": {"size": Vector3(0.75, 2.3, 0.75)},
 	"blood_fridge": {"size": Vector3(1.5, 2.1, 0.75), "block": true},   # with gas cylinders beside it
 	# ---- crematorium (hub): the junk and the dead waiting their turn in the fire ------------
 	# Mounds heaped against the long walls, tallest at the wall, sloping down to the lane from the

@@ -188,13 +188,11 @@ static func build(st: S, ox: int, oy: int) -> void:
 				"size": Vector2(Defs.size(mon).x, Defs.size(mon).y), "table": i})
 	st.spots["or_screen"] = (st.spots["or_screens"] as Array)[1]
 	# An anesthesia cart in each gap between the tables, the crash cart by the west wall, the clock
-	# above it, the scrub sinks by the doors.
+	# above it.
 	for x in [8.55, 11.0]:
 		put.call("anesthesia_cart", x, 6.0 + depth.call("anesthesia_cart"), SOUTH, or_room)
 	put.call("crash_cart", 5.0 + depth.call("crash_cart"), 9.45, E, or_room)
 	put.call("wall_clock", 5.0, 8.6, E, or_room)
-	for y in [10.5, 12.5]:
-		put.call("scrub_sink", 14.0 - depth.call("scrub_sink"), y, WEST, or_room)
 	# The lab wall, across from the tables (the south wall, on your left coming in the doors): one
 	# station per tile, the fume hood at the far end and the sink by the doors. Set dressing so far;
 	# the stations' spots are recorded (spots.lab -> level_info.lab) for whatever uses them later,
@@ -209,13 +207,37 @@ static func build(st: S, ox: int, oy: int) -> void:
 		if not put.call(kind, lx, ly, N, or_room):
 			push_error("entrance: OR lab %s at (%.2f, %.2f) did not fit" % [kind, lx, ly])
 		st.spots["lab"][kind.trim_prefix("lab_")] = {"pos": Vector2(ox + lx, oy + ly), "yaw": Defs.yaw_facing(N)}
-	# The supply shelf stands in the storage closet, against its north wall.
-	st.spots["shelf"] = {"pos": Vector2(ox + 2.0, oy + 6.0 + 0.25 / Defs.TILE), "yaw": Defs.yaw_facing(SOUTH)}
-	st.blocked[st.idx(ox + 2, oy + 6)] = 1
-	# The lab's storage bay: glass supply cabinets, steel shelving.
+	# 2026-09-18: the lab wall turns the corner by the doors and runs up the east wall, where the scrub
+	# sinks used to be: three more stations, one per tile (rows 10-12), and a corner piece filling
+	# the square where the two runs meet. Set dressing, no spots.
+	for e in [["lab_analyzer", 12.5], ["lab_specimens", 11.5], ["lab_vials", 10.5]]:
+		if not put.call(e[0], 14.0 - depth.call(e[0]), e[1], WEST, or_room):
+			push_error("entrance: OR lab %s at row %.1f did not fit" % [e[0], e[1]])
+	put.call("lab_corner", 13.0 + depth.call("lab_corner") - 0.01, 13.0 - depth.call("lab_corner"), N, or_room)
+	# 2026-09-18: no supply shelf (tools are used from your hands); the closet is the janitor's. Its
+	# middle row (7) stays clear from the OR door to the west wall, where dev mode's door opens
+	# (dev_room.gd). Mop sink and shelving on the north wall, the bucket, washer and brooms on the
+	# south wall.
+	var jan := func(kind: String, x: float, y: float, face: Vector2) -> void:
+		if not put.call(kind, x, y, face, storage):
+			push_error("entrance: janitor's closet %s at (%.2f, %.2f) did not fit" % [kind, x, y])
+	jan.call("steel_shelves", 1.3, 6.0 + depth.call("steel_shelves"), SOUTH)
+	jan.call("mop_sink", 2.2, 6.0 + depth.call("mop_sink"), SOUTH)
+	jan.call("steel_shelves", 3.4, 6.0 + depth.call("steel_shelves"), SOUTH)
+	jan.call("washer", 1.45, 9.0 - depth.call("washer"), N)
+	jan.call("mop_bucket", 2.4, 8.62, N)
+	jan.call("broom", 2.95, 8.85, N)
+	jan.call("broom", 3.2, 8.85, N)
+	jan.call("wet_floor", 3.6, 8.55, N)
+	# The lab's storage bay: glass supply cabinets on its south wall and, in the back corner on its
+	# west wall, the storage shelves: anything put on them stays there (containers/storage_shelf.gd,
+	# built by game.gd at spots.storage).
 	for x in [1.55, 2.55, 3.55]:
 		put.call("glass_cabinet", x, 13.0 - depth.call("glass_cabinet"), N, lab_bay)
-	put.call("steel_shelves", 1.0 + depth.call("steel_shelves"), 10.6, E, lab_bay)
+	st.spots["storage"] = []
+	for y in [10.9, 11.95]:
+		(st.spots["storage"] as Array).append({"pos": Vector2(ox + 1.0, oy + y), "yaw": Defs.yaw_facing(E)})
+		st.blocked[st.idx(ox + 1, oy + int(y))] = 1
 
 	# ---- crematorium (x 19-28, y 6-12) and personnel (x 19-31, y 14-18) -------------------------
 	# The furnace is built into the east wall (col 29): a grated hatch over a window (rows 8-9, facing

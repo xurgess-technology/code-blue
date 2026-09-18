@@ -1263,6 +1263,12 @@ static func _fill_landmarks(gen: Dictionary, info: Dictionary) -> void:
 	info["clock"] = _w(spots.clock.pos) if spots.has("clock") else Vector3.ZERO
 	if spots.has("shelf"):
 		info["shelf"] = {"position": _w(spots.shelf.pos), "yaw": float(spots.shelf.yaw)}
+	if spots.has("storage"):
+		# 2026-09-18: the OR's storage shelves (game.storage_nodes).
+		var st: Array = []
+		for s in spots.storage:
+			st.append({"position": _w(s.pos), "yaw": float(s.yaw)})
+		info["storage"] = st
 	if spots.has("lectern"):
 		info["lectern"] = {"position": _w(spots.lectern.pos), "yaw": float(spots.lectern.yaw)}
 	if spots.has("lab"):

@@ -284,12 +284,10 @@ func _pose_monster() -> void:
 ## Stock the shelf and stand beside the table looking at the patient and the supplies.
 func _pose_surgery() -> void:
 	for kind in Items.SURGICAL:
-		game.shelf[kind] = 3 if Items.is_consumable(kind) else 1
-	if game.shelf_node != null:
-		game.shelf_node.show_stock(game.shelf)
+		game.stock_storage(kind, 3 if Items.is_consumable(kind) else 1)
 	game.vitals = 38.0
 	var tb := game.table_pos()
-	var sh: Vector3 = game.shelf_node.global_position if game.shelf_node != null else tb
+	var sh: Vector3 = (game.storage_nodes[0] if not game.storage_nodes.is_empty() else null).global_position if (game.storage_nodes[0] if not game.storage_nodes.is_empty() else null) != null else tb
 	_look_from(tb + (tb - sh).normalized() * 2.2 + Vector3(0, 0, 0.6), (tb + sh) * 0.5 + Vector3(0, 1.0, 0))
 	bot.bot_aim_id = "table"
 
@@ -373,9 +371,7 @@ func _pose_screen_door() -> void:
 
 func _pose_screen_close() -> void:
 	_ensure_shift()
-	game.shelf["anesthetic"] = 1
-	if game.shelf_node != null:
-		game.shelf_node.show_stock(game.shelf)
+	game.stock_storage("anesthetic", 1)
 	_look_at_screen(1.9, 0.0)
 
 
@@ -389,10 +385,9 @@ func _pose_screen_amputation() -> void:
 	_ensure_shift()
 	game.case.ailment_id = "amputation"
 	game.case.step_index = 1
-	game.shelf = {"tourniquet": 1, "gauze": 1}
+	game.stock_storage("tourniquet", 1)
+	game.stock_storage("gauze", 1)
 	game._apply_case_locally()
-	if game.shelf_node != null:
-		game.shelf_node.show_stock(game.shelf)
 	game.vitals = 64.0
 	_look_at_screen(4.5, -0.8)
 
@@ -473,10 +468,10 @@ func _pose_hud_holding() -> void:
 	bot.take_into("forceps", 1)
 	bot.selected = 0
 	bot.hp = maxi(1, bot.max_hp - 1)
-	var sh: Vector3 = game.shelf_node.global_position if game.shelf_node != null else game.table_pos()
-	var fwd: Vector3 = game.shelf_node.global_basis.z.normalized() if game.shelf_node != null else Vector3.BACK
+	var sh: Vector3 = (game.storage_nodes[0] if not game.storage_nodes.is_empty() else null).global_position if (game.storage_nodes[0] if not game.storage_nodes.is_empty() else null) != null else game.table_pos()
+	var fwd: Vector3 = -(game.storage_nodes[0] as Node3D).global_basis.z.normalized() if (game.storage_nodes[0] if not game.storage_nodes.is_empty() else null) != null else Vector3.BACK
 	_look_from(sh + fwd * 1.6, sh + Vector3(0, 0.9, 0))
-	bot.bot_aim_id = "shelf"
+	bot.bot_aim_id = "storage_0"
 
 
 ## SWEEP 4A HOOK (controls): the circular ability bar, small top-left and idle -- Echo ready at

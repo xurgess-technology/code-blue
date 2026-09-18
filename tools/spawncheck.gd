@@ -131,8 +131,8 @@ func _check_slots(seed: int, info: Dictionary) -> void:
 				var u: Transform3D = node.slot_transform(j)
 				if t.origin.distance_to(u.origin) < widest - 0.001 and absf(t.origin.y - u.origin.y) < 0.05:
 					_fail("seed %d: %s slots %d and %d are %.2f m apart, stacks need %.2f" % [seed, c.id, i, j, t.origin.distance_to(u.origin), widest])
-		if info.lectern.is_empty() or info.shelf.is_empty():
-			_fail("seed %d: missing shelf or lectern" % seed)
+		if info.lectern.is_empty() or info.get("storage", []).is_empty():
+			_fail("seed %d: missing storage shelves or lectern" % seed)
 
 
 func _check_plan(seed: int, ailment: String, info: Dictionary, p: Array, gen: Dictionary) -> void:

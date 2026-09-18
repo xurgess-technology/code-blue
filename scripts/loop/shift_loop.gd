@@ -731,7 +731,7 @@ static func call_lines(kind: String, cc: Dictionary, machine: bool, who: String)
 	lines.append("DISPATCH: %s. %s." % [pt.get("full_name", "Unknown"), ail.get("name", "")])
 	if blurb != "":
 		lines.append("DISPATCH: %s" % blurb)
-	lines.append("DISPATCH: Paramedics are wheeling them straight to your OR. Get the shelf stocked.")
+	lines.append("DISPATCH: Paramedics are wheeling them straight to your OR. Get what they'll need on the OR's shelves.")
 	return lines
 
 
@@ -789,7 +789,8 @@ func _any_incoming() -> bool:
 	return false
 
 
-## Items every live case still needs that are not on the shelf yet, as "Anesthetic x1" labels.
+## Items every live case still needs that the team doesn't have in the OR yet (on its shelves or in
+## hand, game.shelf_count), as "Anesthetic x1" labels.
 func missing_supplies() -> Array:
 	var need: Dictionary = game._live_requirements()
 	var out := []

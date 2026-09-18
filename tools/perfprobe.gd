@@ -204,8 +204,7 @@ func _containers() -> void:
 func _or_view() -> void:
 	await _ensure_shift()
 	for kind in Items.SURGICAL:
-		game.shelf[kind] = 3 if Items.is_consumable(kind) else 1
-	game.shelf_node.show_stock(game.shelf)
+		game.stock_storage(kind, 3 if Items.is_consumable(kind) else 1)
 	var t := game.table_pos()
 	_look(t + Vector3(0.8, 0, 3.0), t + Vector3.UP * 1.0)
 
@@ -267,8 +266,7 @@ func _operating_saw() -> void:
 	await _ensure_shift()
 	game.case = {"patient_id": "seal", "ailment_id": "amputation", "step_index": 2, "flags": {"sedation": 1.0, "tourniquet": 0.3}}
 	game._apply_case_locally()
-	game.shelf["bone_saw"] = 1
-	game.shelf_node.show_stock(game.shelf)
+	game.give_hand(bot, "bone_saw", 1)   # 2026-09-18: a step's tool is used from the hands
 	_look(game.table_pos() + Vector3(0, 0, 1.6), game.table_pos() + Vector3.UP * 1.0)
 	for i in 5:
 		await get_tree().process_frame
@@ -736,7 +734,7 @@ func _run_hitch() -> void:
 		["amputation", 1, {"sedation": 1.0}], ["amputation", 2, {"sedation": 1.0, "tourniquet": 0.4}], ["amputation", 3, {"sedation": 1.0, "tourniquet": 0.4, "amputated": true}]]
 	for st in steps:
 		for kind in Items.SURGICAL:
-			game.shelf[kind] = 4
+			game.stock_storage(kind, 4)
 		game.case = {"patient_id": "bob" if st[0] == "gunshot" else "seal", "ailment_id": st[0], "step_index": st[1], "flags": st[2]}
 		game._apply_case_locally()
 		await _watch("case switch %s/%d" % [st[0], st[1]], 20)

@@ -195,7 +195,7 @@ func _run() -> void:
 	var rows_before: PackedStringArray = (game.level_info.rows as PackedStringArray).duplicate()
 	var opened_before := 0
 	for n in get_tree().get_nodes_in_group("container"):
-		if n.has_method("is_open") and n.is_open() and String(n.get("container_type")) != "pegboard":
+		if n.has_method("is_open") and n.is_open() and not String(n.get("container_type")) in ["pegboard", "storage_shelf"]:
 			opened_before += 1
 	ok = await _do_until(func(): _go_use("clock", game.clock_pos(), true), func(): return game.phase == Game.Phase.WON, 120.0)
 	_check(ok, "holding E at the clock clocks out")
@@ -207,7 +207,7 @@ func _run() -> void:
 	_check(ok, "the paycheck screen leads to the lobby of shift 2")
 	_check(bot.holding(loot_kind), "carried loot survives into the next lobby")
 	_check(bot.global_position.distance_to(pos_at_clock) < 1.0, "nobody is moved at the next lobby")
-	_check(game.cases.is_empty() and game.shelf.is_empty(), "no cases or shelf stock between shifts")
+	_check(game.cases.is_empty(), "no cases between shifts")
 	_check(game.doors.gates_locked, "the wing gates are locked between shifts")
 
 	# Walk out and sell at the furnace (throwing), buy pills at the pharmacy.
@@ -265,7 +265,8 @@ func _run() -> void:
 	_check(old_loot < 0 or not game.world_items.has(old_loot), "last shift's untouched loot was cleared")
 	var open_containers := 0
 	for n in get_tree().get_nodes_in_group("container"):
-		if n.has_method("is_open") and n.is_open() and String(n.get("container_type")) != "pegboard":   # pegboards have no door
+		# Pegboards and the OR's storage shelves have no door.
+		if n.has_method("is_open") and n.is_open() and not String(n.get("container_type")) in ["pegboard", "storage_shelf"]:
 			open_containers += 1
 	_check(open_containers == 0 and opened_before > 0, "every container in the new wings is closed (%d open, %d were open last shift)" % [open_containers, opened_before])
 	_check(game.loop.call_kind == "first" and game.loop.call_state == "ringing", "the phone rings immediately again at the new shift's clock-in")
@@ -351,7 +352,7 @@ func _grab_loot() -> String:
 	return kind if ok else ""
 
 
-## One frame of shift work: bring what the shelf lacks, operate on whoever is on a table.
+## One frame of shift work: gather what the OR lacks, operate holding the step's item.
 func _work() -> void:
 	if bot.operating:
 		_halt()
@@ -362,26 +363,44 @@ func _work() -> void:
 		var s: int = int(need[kind]) - game.shelf_count(kind)
 		if s > 0:
 			short[kind] = s
-	for i in bot.slots.size():
-		var s: Dictionary = bot.slots[i]
-		if s.kind != "" and short.has(s.kind):
-			bot.selected = i
-			_go_use("shelf", game.shelf_node.global_position, false)
+	# 2026-09-18: a step's tool is used from the operator's hands. Holding the current step's item:
+	# operate. Everything else is already in the OR: fetch that item from wherever it sits.
+	var from_storage := false
+	for c in game.cases:
+		if String(c.state) != "on_table" or String(c.get("patient_id", "")) == "player":
+			continue
+		var step := Procedures.step(String(c.ailment_id), int(c.step_index))
+		if step.is_empty():
+			continue
+		var n: int = maxi(1, int(step.get("uses", 0)))
+		var h := _held(String(step.item), n)
+		if h >= 0:
+			bot.selected = h
+
+			_go_use(game.table_interact_id(int(c.table)), game.table_position(int(c.table)), false)
 			return
+		if short.is_empty():
+			short = {String(step.item): n}
+			from_storage = true
+		break
 	if short.is_empty():
-		for c in game.cases:
-			if String(c.state) == "on_table":
-				_go_use(game.table_interact_id(int(c.table)), game.table_position(int(c.table)), false)
-				return
 		_halt()
 		return
 	if not bot.can_take(short.keys()[0]):
+		# Hands full: drop something nobody needs, else put a needed stack on the storage shelves.
 		for i in bot.slots.size():
 			var k := String(bot.slots[i].kind)
-			if k != "" and not Items.is_loot(k):
+			if k != "" and not Items.is_loot(k) and not need.has(k):
 				bot.selected = i
 				bot.drop_count += 1
 				return
+		for i in bot.slots.size():
+			if String(bot.slots[i].kind) != "":
+				bot.selected = i
+				break
+		var shelf: Node3D = game.storage_nodes[0]
+		_go_use(String(shelf.get_meta("interact_id")), shelf.global_position, false)
+		return
 	var best: Node = null
 	var best_d := INF
 	var kept = game.world_items.get(_target_item)
@@ -391,6 +410,9 @@ func _work() -> void:
 	if best == null:
 		for it in game.world_items.values():
 			if not short.has(it.kind) or _blacklist.has(it.item_id):
+				continue
+			# Gathering: what is already on the storage shelves counts as had, so leave it there.
+			if not from_storage and it.state == WorldItem.State.IN_CONTAINER and String(it.container_id).begins_with("storage_"):
 				continue
 			var d: float = it.global_position.distance_to(bot.global_position)
 			if d < best_d:
@@ -605,3 +627,11 @@ func _check_pocket_rebuilt(old_root) -> void:
 		if c.get("node") != null and is_instance_valid(c.node) and pk.in_pocket(c.node.global_position):
 			n += 1
 	_check(n > 0, "POCKETS: the new pocket's containers are in level_info (%d)" % n)
+
+
+## The slot holding at least `n` of `kind`, else -1.
+func _held(kind: String, n: int) -> int:
+	for i in bot.slots.size():
+		if String(bot.slots[i].kind) == kind and int(bot.slots[i].count) >= n:
+			return i
+	return -1

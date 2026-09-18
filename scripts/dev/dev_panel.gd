@@ -560,14 +560,14 @@ func _refresh() -> void:
 		lines.append("%s, %s (%s, table %d, vitals %d). Step %d: %s." % [
 			Procedures.patient(c.patient_id).name, Procedures.ailment(c.ailment_id).name, String(c.state),
 			int(c.table), int(c.vitals), int(c.step_index) + 1, step.get("label", "done")])
-	(_c["case_label"] as Label).text = ("Tables empty." if lines.is_empty() else "\n".join(lines)) + "\nShelf: " + _shelf_text()
+	(_c["case_label"] as Label).text = ("Tables empty." if lines.is_empty() else "\n".join(lines)) + "\nIn the OR: " + _shelf_text()
 	_refresh_bots(dev)
 
 
 func _shelf_text() -> String:
 	var parts := []
 	for k in Items.SURGICAL:
-		var n := int(game.shelf.get(k, 0))
+		var n := int(game.shelf_count(k))   # 2026-09-18: on the storage shelves or in hand
 		if n > 0:
 			parts.append("%s %d" % [Items.display_name(k), n])
 	return "empty" if parts.is_empty() else ", ".join(parts)
