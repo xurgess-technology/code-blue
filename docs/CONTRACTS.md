@@ -649,8 +649,13 @@ SonoRig.WANDER_SPEED 0.80 / RUSH_SPEED 3.10    # rate = speed / the clip's speed
   and spread, feeling the air.
 - **Lying** (sedated, dragged, `make_lying`): the poser eases every bone back to rest, which takes
   the neck back to rest length, and brings the arms in to its sides.
-- Review: `tools/monster_lab.tscn -- --sono` walks it through every clip with the crane ramping and a
-  caption, including the ceiling case; the shots `sono_4m`, `sono_wander`, `sono_crane_0`,
+- Review: **`tools/sono_lab.tscn`** is the stage for it: a plain lit box with the Sonographer in
+  front of a fixed camera, head to toe with headroom for the craned neck, cycling every clip in
+  place with a caption naming it and the look interface's values, walking a little to each side
+  between rounds. Nothing in it waits on the hospital, a player or a warmup, so it is in frame from
+  the first frame; `-- --capture` writes what the window is actually showing at 5, 15, 30, 45 and
+  60 s. `tools/monster_lab.tscn -- --sono` still walks it through the clips in the corridor, and the
+  shots `sono_4m`, `sono_wander`, `sono_crane_0`,
   `sono_crane_half`, `sono_crane_full`, `sono_crane_ceiling`, `sono_charge`, `sono_probe`,
   `sono_rush`, `sono_wail`, `sono_search`, `sono_throat`, `sono_face` and `sono_lying` are in
   `--shots`.

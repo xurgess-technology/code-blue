@@ -162,6 +162,8 @@ func _ready() -> void:
 	# A review window opened on this scene wants to see something, and the scenarios are a headless
 	# test that draws nothing anyone can read. Show the Sonographer instead (tools/review.bat passes
 	# --review=<title>), and keep --sono for asking for it by hand.
+	if OS.get_cmdline_user_args().has("--capture"):
+		_capture_timeline()
 	if shots:
 		await _run_shots()
 	elif OS.get_cmdline_user_args().has("--sono") or _is_review():
@@ -1822,10 +1824,19 @@ func _shot_sono_review() -> void:
 # the Sonographer, up close (--sono): chunk A's review
 # =========================================================================
 
+## How far it may walk from its spot before it turns round, in metres. The watcher stands still, so
+## a clip that travels has to stay on a leash or it walks straight out of the window.
+const LEASH := 1.8
+
+
 ## The model walked through every clip, with the neck crane ramping and a caption saying which clip
 ## and what the look interface is set to. No brain: this is the model only (sono-brain builds the
 ## hunting). The watcher can walk about while it runs.
 func _run_sono() -> void:
+	# Without this the window draws through whatever camera happens to be current, which is an empty
+	# corridor: the shots path sets it, this one did not, and that is why the Sonographer "never
+	# showed up" in the review window.
+	p1.camera.current = true
 	for i in bulbs.size():
 		set_light(i, true)
 	var here := cor(21.0, -0.4)
@@ -1833,12 +1844,14 @@ func _run_sono() -> void:
 	holder.name = "SonographerHolder"
 	game.add_child(holder)
 	holder.global_position = here
-	holder.rotation.y = -PI * 0.5
+	var home_yaw := -PI * 0.5
+	holder.rotation.y = home_yaw
 	var model: Node3D = MonsterModelScript.new()
 	holder.add_child(model)
 	model.setup("sonographer")
 	# the corridor is two tiles wide, so the lane has to stay inside about +-1.4
 	place_player(cor(24.6, 0.9), here + Vector3.UP * 1.35, true)
+	p1.camera.current = true
 	var eye: Vector3 = p1.global_position + Vector3.UP * C.EYE_H
 	var to: Vector3 = (here + Vector3.UP * 1.35) - eye
 	print("[monster_lab] sono ready %.1fs after launch: watcher at %.1f,%.1f (lane %.2f), %.2f m from it" % [
@@ -1854,6 +1867,19 @@ func _run_sono() -> void:
 	cap.add_theme_color_override("font_outline_color", Color(0, 0, 0))
 	cap.add_theme_constant_override("outline_size", 6)
 	layer.add_child(cap)
+	cap.text = "SONOGRAPHER  loading..."
+	if model.sono == null:
+		# it fell back to the old rig, so the asset is missing or broken. Say so in the window rather
+		# than leaving whoever opened it looking at an empty corridor and guessing.
+		var bad := Label.new()
+		bad.position = Vector2(24, 24)
+		bad.add_theme_font_size_override("font_size", 26)
+		bad.add_theme_color_override("font_color", Color(1.0, 0.42, 0.36))
+		bad.add_theme_color_override("font_outline_color", Color(0, 0, 0))
+		bad.add_theme_constant_override("outline_size", 8)
+		bad.text = "SONOGRAPHER NOT FOUND: monster/sonographer did not build. Run --import."
+		layer.add_child(bad)
+		push_error("[monster_lab] the Sonographer's model did not build")
 
 	# say, clip, seconds, suspicion (from -> to), charge (from -> to), ears, crane_limit, speed
 	var steps := [
@@ -1896,10 +1922,45 @@ func _run_sono() -> void:
 				model.shaper.listen = ear
 				model.shaper.listen_yaw = sin(t * 2.2) * 1.1 * ear
 				model.shaper.lying = 1.0 if String(st.clip) == "lying" else 0.0
+			# It walks on a short leash in front of the watcher and turns round on the end of it, so
+			# the clips that travel (wander, rush) can never carry it out of shot: that is what made
+			# the review window look like an empty corridor.
 			var v := float(st.v)
 			if v > 0.0:
 				holder.global_position += fwd * v * dt
-				if holder.global_position.x < cor(13.0).x or holder.global_position.x > cor(31.0).x:
+				if holder.global_position.distance_to(here) > LEASH:
 					holder.rotation.y += PI
+			# and whatever happens, it stays in front of the camera
+			var seen: Vector3 = holder.global_position - p1.global_position
+			if seen.dot(-p1.camera.global_transform.basis.z) < 0.0 or seen.length() > LEASH + 4.0:
+				holder.global_position = here
+				holder.rotation.y = home_yaw
+			if not p1.camera.current:
+				p1.camera.current = true
 			cap.text = "SONOGRAPHER  %s\n  suspicion %.2f   charge %.2f   crane %.2f   crane_limit %.2f" % [
 				st.say, suspicion, charge, model.sono.crane() if model.sono != null else 0.0, limit]
+
+
+## `--capture`: write what the window is actually showing at a few moments, so a review window that
+## opens on nothing can be looked at instead of guessed at. Shots land beside the others.
+func _capture_timeline() -> void:
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(SHOT_DIR))
+	var t0 := Time.get_ticks_msec()
+	for at in [5, 15, 30, 60]:
+		while Time.get_ticks_msec() - t0 < at * 1000:
+			await get_tree().process_frame
+		await RenderingServer.frame_post_draw
+		var img := get_viewport().get_texture().get_image()
+		var path := "%s/cap_%03ds.png" % [SHOT_DIR, at]
+		var err := img.save_png(ProjectSettings.globalize_path(path))
+		var cam := get_viewport().get_camera_3d()
+		print("[monster_lab] capture at %ds: %s (err %d, %dx%d, camera %s)" % [
+			at, path, err, img.get_width(), img.get_height(), cam.name if cam != null else "NONE"])
+		var holder := game.get_node_or_null("SonographerHolder")
+		if holder == null:
+			print("[monster_lab]   no SonographerHolder in the scene")
+		else:
+			var mdl: Node3D = holder.get_child(0)
+			print("[monster_lab]   holder at %s, model visible=%s, sono=%s, watcher at %s looking %s" % [
+				holder.global_position, str(mdl.visible), str(mdl.get("sono") != null),
+				p1.global_position, str(-p1.camera.global_transform.basis.z)])
