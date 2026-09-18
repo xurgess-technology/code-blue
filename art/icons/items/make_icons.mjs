@@ -118,6 +118,19 @@ add("eye_spoon", "Eye spoon", "surgery", { body: `
 <path d="M176 118 Q186 112 198 114" fill="none" stroke="${STEEL_HI}" stroke-width="5"/>
 </g>` });
 
+add("syringe", "Syringe", "surgery", { body: `
+<g transform="translate(128 128) scale(1.05) rotate(-40) translate(-128 -128)">
+<rect x="22" y="114" width="16" height="28" rx="4" fill="${STEEL}" stroke="${O}" stroke-width="7"/>
+<rect x="36" y="124" width="40" height="8" fill="${STEEL}" stroke="${O}" stroke-width="5"/>
+<rect x="70" y="102" width="12" height="52" rx="4" fill="${STEEL}" stroke="${O}" stroke-width="7"/>
+<rect x="80" y="110" width="104" height="36" rx="8" fill="#e8f2f8" stroke="${O}" stroke-width="8"/>
+<rect x="120" y="114" width="60" height="28" rx="4" fill="${PALE}"/>
+<path d="M96 110 L96 122 M112 110 L112 122 M128 110 L128 122 M144 110 L144 122 M160 110 L160 122" stroke="#6b8290" stroke-width="3"/>
+<rect x="80" y="110" width="104" height="36" rx="8" fill="none" stroke="${O}" stroke-width="8"/>
+<path d="M184 120 L198 124 L198 132 L184 136 Z" fill="${STEEL}" stroke="${O}" stroke-width="6"/>
+<path d="M198 128 L236 128" stroke="${O}" stroke-width="9"/><path d="M198 128 L234 128" stroke="${STEEL_HI}" stroke-width="3"/>
+</g>` });
+
 // ---- Shop ----
 add("placebo_pills", "Placebo pills", "shop", { body: `
 <g stroke="${O}" stroke-width="9">

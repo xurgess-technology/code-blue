@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+<defs></defs>
+<g stroke-linejoin="round" stroke-linecap="round">
+<g transform="translate(128 128) scale(1.05) rotate(-40) translate(-128 -128)">
+<rect x="22" y="114" width="16" height="28" rx="4" fill="#b9c4c9" stroke="#1c2226" stroke-width="7"/>
+<rect x="36" y="124" width="40" height="8" fill="#b9c4c9" stroke="#1c2226" stroke-width="5"/>
+<rect x="70" y="102" width="12" height="52" rx="4" fill="#b9c4c9" stroke="#1c2226" stroke-width="7"/>
+<rect x="80" y="110" width="104" height="36" rx="8" fill="#e8f2f8" stroke="#1c2226" stroke-width="8"/>
+<rect x="120" y="114" width="60" height="28" rx="4" fill="#9cc8e8"/>
+<path d="M96 110 L96 122 M112 110 L112 122 M128 110 L128 122 M144 110 L144 122 M160 110 L160 122" stroke="#6b8290" stroke-width="3"/>
+<rect x="80" y="110" width="104" height="36" rx="8" fill="none" stroke="#1c2226" stroke-width="8"/>
+<path d="M184 120 L198 124 L198 132 L184 136 Z" fill="#b9c4c9" stroke="#1c2226" stroke-width="6"/>
+<path d="M198 128 L236 128" stroke="#1c2226" stroke-width="9"/><path d="M198 128 L234 128" stroke="#eef4f6" stroke-width="3"/>
+</g></g>
+</svg>

@@ -48,6 +48,11 @@
       "category": "surgery",
       "glow": null
     },
+    "syringe": {
+      "name": "Syringe",
+      "category": "surgery",
+      "glow": null
+    },
     "placebo_pills": {
       "name": "Placebo pills",
       "category": "shop",
