@@ -52,11 +52,11 @@ BASE = {
 VARIANTS = {
     # ---------------------------------------------------------------- players / surgeons
     'surgeon_a': dict(
-        name='surgeon_a', height=1.80, fem=0.0, girth=0.94, shoulders=1.0, age=0.35,
-        jaw=0.55, chin=0.55, brow=0.6, nose_len=0.6, nose_w=0.45, nose_bridge=0.65, lips=0.4, cheek=0.55,
+        name='surgeon_a', height=1.80, fem=0.0, girth=1.0, shoulders=1.0, age=0.35,
+        jaw=0.55, chin=0.55, brow=0.6, nose_len=0.6, nose_w=0.45, nose_bridge=0.65, lips=0.4, cheek=0.68,
         eye_w=0.5, eye_open=0.35, ears=0.5, face_seed=11,
         skin=(0.80, 0.63, 0.53), skin_red=0.55, iris=(0.20, 0.26, 0.30), hair_col=(0.05, 0.035, 0.025),
-        hair='crop', beard=0.35, cap='tie', mask=True, shoes='clog', gash=True, blood=0.45, seed=5),
+        hair='crop', beard=0.35, cap='tie', mask=False, shoes='clog', gash=False, blood=0.45, seed=5),
     'surgeon_b': dict(
         name='surgeon_b', height=1.68, fem=1.0, girth=0.93, shoulders=0.98, age=0.25,
         jaw=0.35, chin=0.45, brow=0.25, nose_len=0.45, nose_w=0.6, nose_bridge=0.35, lips=0.75, cheek=0.7,

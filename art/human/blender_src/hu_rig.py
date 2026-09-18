@@ -345,7 +345,7 @@ def idle_pose(rig, f, n=120, lean=0.0, yaw=0.0, roll=0.0, look_add=(0.0, 0.0), a
         ball = Vector((rig.ball[side].x * 1.05, rig.ball[side].y, rig.ball[side].z))
         planted(p, side, ball, 0.0, yaw=sg * 0.10)
         if arms:
-            arm_hang(p, side, swing=0.04 + 0.015 * br, abduct=0.13 + 0.01 * br, bend=0.22, wrist=0.05, twist=0.05)
+            arm_hang(p, side, swing=0.04 + 0.015 * br, abduct=0.22 + 0.01 * br, bend=0.32, wrist=0.05, twist=0.05)
             hand_relax(p, side, curl=0.30 + 0.04 * math.sin(t * math.tau * 2 + sg))
     return p
 

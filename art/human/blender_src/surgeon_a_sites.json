@@ -4,16 +4,16 @@
  "sites": {
   "limb": {
    "bone": "upperarm.R",
-   "half_up": 0.0407,
-   "half_side": 0.0408,
-   "axis_depth": 0.0407,
+   "half_up": 0.0433,
+   "half_side": 0.0434,
+   "axis_depth": 0.0433,
    "shape": 2.2,
    "infection_start": 0.177,
    "s": 0.2182,
    "origin_gltf": [
     -0.3411,
     1.3139,
-    0.0156
+    0.0182
    ],
    "x_gltf": [
     -0.731,
@@ -28,16 +28,16 @@
   },
   "limb_cut": {
    "bone": "forearm.R",
-   "half_up": 0.038,
-   "half_side": 0.0355,
-   "axis_depth": 0.038,
+   "half_up": 0.0392,
+   "half_side": 0.0366,
+   "axis_depth": 0.0392,
    "shape": 2.2,
    "infection_start": 0.0303,
    "s": 0.3648,
    "origin_gltf": [
-    -0.4452,
-    1.2169,
-    0.0228
+    -0.4451,
+    1.217,
+    0.0239
    ],
    "x_gltf": [
     -0.726,
@@ -52,15 +52,15 @@
   },
   "injection": {
    "bone": "forearm.L",
-   "half_up": 0.0397,
-   "half_side": 0.0388,
-   "axis_depth": 0.0397,
+   "half_up": 0.0409,
+   "half_side": 0.04,
+   "axis_depth": 0.0409,
    "shape": 2.2,
    "s": 0.2991,
    "origin_gltf": [
-    0.3854,
-    1.2453,
-    0.0126
+    0.3849,
+    1.2449,
+    0.0136
    ],
    "x_gltf": [
     0.73,
@@ -76,9 +76,9 @@
   "gunshot": {
    "bone": "hips",
    "origin_gltf": [
-    -0.0605,
+    -0.0644,
     1.0466,
-    0.0799
+    0.0853
    ],
    "x_gltf": [
     0.0,
@@ -86,29 +86,9 @@
     -0.0
    ],
    "y_gltf": [
-    -0.224,
-    0.076,
-    0.972
-   ]
-  },
-  "gash": {
-   "bone": "spine",
-   "half_len": 0.0961,
-   "half_gap": 0.0162,
-   "origin_gltf": [
-    -0.0306,
-    1.1225,
-    0.0856
-   ],
-   "x_gltf": [
-    0.0,
-    -1.0,
-    -0.0
-   ],
-   "y_gltf": [
-    -0.064,
-    -0.084,
-    0.994
+    -0.225,
+    0.085,
+    0.971
    ]
   },
   "eyes": {
@@ -143,14 +123,10 @@
   "vein": 0.2991
  },
  "tris": {
-  "Human": 16520,
-  "TopLower": 560,
-  "TopRolled": 704,
-  "GashSkin": 536,
-  "Cap": 760,
-  "Mask": 876
+  "Human": 15072,
+  "Cap": 760
  },
- "tris_total": 19956,
+ "tris_total": 15832,
  "clips": {
   "Idle": {
    "frames": 120,
