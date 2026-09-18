@@ -841,6 +841,19 @@ func _scenario_drag_and_lying() -> void:
 			var b: AABB = (mi as MeshInstance3D).global_transform * (mi as MeshInstance3D).get_aabb()
 			box = b if first else box.merge(b)
 			first = false
+		if first:
+			# An all-skinned model (the stylized Hive): its trunk and leg bones instead, padded a little
+			# (bone poses read outside the skeleton update leave out the poser, so the arms read A-pose).
+			for sk in copy.find_children("*", "Skeleton3D", true, false):
+				var s3 := sk as Skeleton3D
+				for bn in ["hips", "spine", "chest", "upperchest", "neck", "head", "thigh.L", "shin.L", "foot.L", "thigh.R", "shin.R", "foot.R"]:
+					var bi := s3.find_bone(bn)
+					if bi < 0:
+						continue
+					var bp: Vector3 = s3.global_transform * s3.get_bone_global_pose(bi).origin
+					var b := AABB(bp - Vector3.ONE * 0.08, Vector3.ONE * 0.16)
+					box = b if first else box.merge(b)
+					first = false
 		var head: Node3D = copy.find_child("Head", true, false)
 		var hx: float = head.global_position.x - copy.global_position.x if head != null else 0.0
 		var centre: Vector3 = box.get_center() - copy.global_position
@@ -937,6 +950,7 @@ func _run_shots() -> void:
 		["hive_face", _shot_head.bind("hive", false, 0.75, 0.45)],
 		["hive_sees_you", _shot_hive_rush],
 		["hive_group", _shot_hive_group],
+		["hive_face_lock", _shot_hive_face_lock],
 		["discharged_head", _shot_head.bind("discharged", false, 0.8, 0.2)],
 		["discharged_side", _shot_head.bind("discharged", false, 0.7, 1.35)],
 		["discharged_ears_listen", _shot_head.bind("discharged", true, 0.8, 0.5)],
@@ -1115,11 +1129,36 @@ func _shot_hive_rush() -> void:
 	var pos := cor(21.0, -0.2)
 	var w: Node = spawn("hive", pos, -PI * 0.5)
 	set_light(1, true)
+	# The player first: its head comes up to look at whoever it has seen.
+	place_player(pos + Vector3(2.0, 0, 0.25), pos + Vector3.UP * 1.45, true)
 	for f in 90:
 		await get_tree().physics_frame
 		w.apply_remote({"pos": pos, "y": -PI * 0.5 + 0.15, "md": Modes.Mode.RUSH, "mv": true, "sp": 1.8})
 	w.model.anim.speed_scale = 0.0
-	place_player(pos + Vector3(2.0, 0, 0.25), pos + Vector3.UP * 1.45, true)
+
+
+## Face to face with a Hive that has locked on: its head up and on the camera, the eyes fully lit.
+func _shot_hive_face_lock() -> void:
+	var pos := cor(21.0, -0.3)
+	var w: Node = spawn("hive", pos, -PI * 0.5)
+	set_light(1, true)
+	var eye := pos + Vector3(1.1, 0.0, 0.1)
+	place_player(eye, pos + Vector3.UP * 1.45, true)
+	for f in 60:
+		await get_tree().physics_frame
+		w.apply_remote({"pos": pos, "y": -PI * 0.5, "md": Modes.Mode.RUSH, "mv": false, "sp": 0.0})
+	w.model.anim.speed_scale = 0.0
+	var head: Node3D = w.model.find_child("Head", true, false)
+	var hp: Vector3 = head.global_position + head.global_transform.basis.y.normalized() * 0.09
+	var cam := pos + Vector3(0.95, 0.0, 0.08)
+	p1.teleport(Vector3(cam.x, hp.y + 0.03 - C.EYE_H, cam.z))
+	var dvec: Vector3 = hp - Vector3(cam.x, hp.y + 0.03, cam.z)
+	var cam_yaw := atan2(-dvec.x, -dvec.z)
+	p1.rotation.y = cam_yaw
+	p1._target_yaw = cam_yaw
+	p1._pitch = atan2(dvec.y, Vector2(dvec.x, dvec.z).length())
+	p1.head.rotation.x = p1._pitch
+	await wait(0.2)
 
 
 func _shot_hive_group() -> void:

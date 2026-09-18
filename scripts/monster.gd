@@ -38,6 +38,7 @@ const NurseBrain := preload("res://scripts/monsters/night_nurse_brain.gd")
 const HiveBrain := preload("res://scripts/monsters/hive_brain.gd")
 const Zones := preload("res://scripts/hospital_builder.gd")
 const NurseRig := preload("res://scripts/monsters/night_nurse_rig.gd")
+const HiveRig := preload("res://scripts/monsters/hive_rig.gd")
 
 var monster_id: int = 0
 var kind: String = DISCHARGED
@@ -736,6 +737,8 @@ func _update_visual(delta: float) -> void:
 	if e > 0.0:
 		# Out cold: a slow idle that reads as shallow breathing.
 		model.play("idle", 0.25, 0.4)
+		if model.hive != null:
+			model.hive.lock = 0.0
 		sh.twitch = sh.twitch.lerp(Vector3.ZERO, clampf(delta * 6.0, 0.0, 1.0))
 		return
 
@@ -745,6 +748,9 @@ func _update_visual(delta: float) -> void:
 		if _twitch_timer <= 0.0:
 			_twitch_timer = _rng.randf_range(1.0, 2.2) if mode == Mode.SEARCH else _rng.randf_range(2.5, 5.0)
 			_twitch = Vector3(_rng.randf_range(-0.15, 0.2), _rng.randf_range(-0.7, 0.7) if mode == Mode.SEARCH else _rng.randf_range(-0.25, 0.25), _rng.randf_range(-0.2, 0.2))
+		if model.hive != null:
+			_hive_visual(delta)
+			return
 		# When it has seen someone the head comes up and stays on them.
 		var want := _twitch + (Vector3(-0.3, -_twitch.y * 0.8, -_twitch.z * 0.5) if mode == Mode.RUSH else Vector3.ZERO)
 		sh.twitch = sh.twitch.lerp(want, clampf(delta * 2.5, 0.0, 1.0))
@@ -774,6 +780,55 @@ func _update_visual(delta: float) -> void:
 		model.play("walk", clampf(speed / 3.6, 0.2, 1.0), 0.25)
 	else:
 		model.play("idle", 1.4 if mode == Mode.SEARCH else 0.7, 0.3)
+
+
+## The Hive's own model (monster/hive, hive_rig.gd): which clip and how fast, the idle head lolling,
+## and the lock-on: once it has seen someone (RUSH) the head comes up out of its hang to look at them
+## and its eyes light up fully; losing them, it lets the head sink back and the eyes dim to a point.
+## Every machine: the look target is whoever is nearest in front of it, so clients need no extra state.
+func _hive_visual(delta: float) -> void:
+	var hv = model.hive
+	var locked := mode == Mode.RUSH
+	hv.lock = move_toward(hv.lock, 1.0 if locked else 0.0, delta * (3.0 if locked else 0.8))
+	if locked or hv.lock > 0.0:
+		var t := _hive_look_target()
+		if t != Vector3.INF:
+			hv.look_target = t if hv.lock < 0.05 else hv.look_target.lerp(t, clampf(delta * 8.0, 0.0, 1.0))
+		elif not locked:
+			hv.lock = 0.0
+	_twitch_timer -= delta
+	if _twitch_timer <= 0.0:
+		_twitch_timer = _rng.randf_range(1.0, 2.2) if mode == Mode.SEARCH else _rng.randf_range(2.5, 5.0)
+		_twitch = Vector3(_rng.randf_range(-0.1, 0.15), _rng.randf_range(-0.6, 0.6) if mode == Mode.SEARCH else _rng.randf_range(-0.2, 0.2), _rng.randf_range(-0.15, 0.15))
+	hv.twitch = hv.twitch.lerp(_twitch, clampf(delta * 2.5, 0.0, 1.0))
+	if lunge_t > 0.0:
+		model.play("attack", 1.0, 0.08)
+	elif moving:
+		model.play("walk", clampf(speed / HiveRig.WALK_SPEED, 0.4, 2.4), 0.3)
+	else:
+		model.play("idle", 1.0, 0.4)
+
+
+## The player the Hive's head turns to: the nearest living one within sight range in front of it,
+## aimed at their eyes. Vector3.INF when there is nobody.
+func _hive_look_target() -> Vector3:
+	if game == null or not ("players" in game):
+		return Vector3.INF
+	var best := Vector3.INF
+	var best_d := 14.0
+	var fwd := -global_transform.basis.z
+	for p in (game.players as Dictionary).values():
+		if p == null or not is_instance_valid(p) or not (p is Node3D):
+			continue
+		if "downed" in p and bool(p.downed):
+			continue
+		var eye: Vector3 = (p as Node3D).global_position + Vector3.UP * 1.6
+		var to := eye - global_position
+		var d := to.length()
+		if d < best_d and Vector3(to.x, 0.0, to.z).normalized().dot(fwd) > -0.2:
+			best_d = d
+			best = eye
+	return best
 
 
 ## The Night Nurse's own model (monster/night_nurse): which clip, how fast, and the procedural poses.

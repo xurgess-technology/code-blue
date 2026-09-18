@@ -21,7 +21,11 @@ import st_clips
 
 # triangle budget per dense part (the whole character lands near the old surgeons' ~20k)
 BUDGET = {'Head': 7200, 'Eye_L': 480, 'Eye_R': 480, 'Arm_L': 2400, 'Arm_R': 2400,
-          'Top': 3000, 'Pants': 2300, 'Shoe_L': 650, 'Shoe_R': 650, 'Belly': 1400, 'TopRolled': 800}
+          'Top': 3000, 'Pants': 2300, 'Shoe_L': 650, 'Shoe_R': 650, 'Belly': 1400, 'TopRolled': 800,
+          # the Hive: gown, bare legs in grip socks, the wristband and the fungus in its open skull
+          'Gown': 3000, 'Leg_L': 1300, 'Leg_R': 1300, 'Wristband': 120, 'Fungus': 3600}
+# parts baked into the Skin atlas; everything else shares the Cloth atlas (for the Hive that is the gown,
+# its legs and the fungus, so the head, hands and eyes keep the Skin atlas's resolution to themselves)
 SKIN_PARTS = ('Head', 'Eye_L', 'Eye_R', 'Arm_L', 'Arm_R', 'Belly')
 # parts the game shows only on the player table: they must not occlude the rest in the bake
 HIDDEN_PIECES = ('TopRolled', 'Belly')
@@ -304,7 +308,8 @@ def make_sites(c, arm):
 
 
 # ---------------------------------------------------------------- main entry
-def export(c, out_dir, variant, tex=2048, ao_samples=24):
+def export(c, out_dir, variant, tex=2048, ao_samples=24, clips=None):
+    """clips: modules with build_actions(arm, body) (default: the shared human clips and st_clips)."""
     t0 = time.time()
     scn = bpy.context.scene
     scn.render.engine = 'CYCLES'
@@ -431,8 +436,8 @@ def export(c, out_dir, variant, tex=2048, ao_samples=24):
         ho.hide_set(True)
         ho.hide_render = True
     sites = make_sites(c, arm)
-    hu_rig.build_actions(arm, c['body'])
-    st_clips.build_actions(arm, c['body'])
+    for mod in (clips if clips is not None else (hu_rig, st_clips)):
+        mod.build_actions(arm, c['body'])
     rest(arm)
     arm.name = 'Human_Rig'
     _select(pieces + sites + [arm], active=arm)

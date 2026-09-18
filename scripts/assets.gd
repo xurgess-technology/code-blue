@@ -154,6 +154,15 @@ const MODELS := {
 		"anims": {"idle": "Idle", "walk": "Walk", "run": "Walk", "attack": "Walk", "frozen": "Frozen", "static": "Frozen"},
 		"note": "Night Nurse, made for Malpractice with Blender scripts (art/night_nurse/blender_src). No third-party licence.",
 	},
+	# The Hive (2026-09-18): the stylized kit (art/stylized, variant `hive`), 1.75 m, feet at y 0,
+	# facing +Z, on the human skeleton with its own clips. Charcoal skin, the skull open with a shelf
+	# fungus in place of the brain, glowing eyes (scripts/monsters/hive_rig.gd). No root motion.
+	"monster/hive": {
+		"path": "res://assets/models/monsters/hive/hive_st.glb",
+		"scale": 1.0, "yaw": 180,
+		"anims": {"idle": "HiveIdle", "walk": "HiveWalk", "run": "HiveWalk", "attack": "HiveAttack"},
+		"note": "The Hive, made for Malpractice with Blender scripts (art/stylized). No third-party licence.",
+	},
 	# ---- patients ---------------------------------------------------------
 	# The seal patient (2026-09-14): built in-house from Python in Blender (art/seal/), authored in the
 	# PatientBody frame (nose -X, belly on y 0, its left +Z), so no fix-ups. 16k triangles, 20 bones,

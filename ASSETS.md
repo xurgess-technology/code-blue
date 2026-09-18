@@ -355,6 +355,19 @@ replaces the arm meshes through `fp_arms.make_arm()` and the rig through `rig_ma
 
 ---
 
+## The Hive (made in-house, 2026-09-18) — `assets/models/monsters/hive/`
+
+| Key | File | Source | Author | Licence | size (m) | Fix-ups |
+| --- | --- | --- | --- | --- | --- | --- |
+| `monster/hive` | `hive_st.glb` + `textures/hive_st_{Cloth,Skin}_*.png` | Built for Malpractice from Python scripts in Blender 5.2 (`art/stylized/`, variant `hive`) | Malpractice (made with Claude) | None needed: original work of this project, no third-party content | 1.75 tall | scale 1.0, yaw 180 |
+
+- The stylized kit (the players' surgeon's head, skeleton and body code) as the Hive: charcoal skin,
+  the skull broken open with a shelf fungus in place of the brain, eyes lit by
+  `shaders/hive_eye.gdshader`. Its own clips `HiveIdle`, `HiveWalk`, `HiveAttack`
+  (`art/stylized/st_hive_clips.py`); rebuild with `st_build.py -- --only=hive --export`.
+
+---
+
 ## The Night Nurse (made in-house, 2026-09-14) — `assets/models/monsters/night_nurse/`
 
 | Key | File | Source | Author | Licence | size (m) | Fix-ups |

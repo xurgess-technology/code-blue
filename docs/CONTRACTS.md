@@ -512,6 +512,35 @@ NurseRig.WALK_SPEED 1.0      # m/s at which Walk's planted foot keeps pace; rate
   lying or dissection body. `make_lying("night_nurse")` returns her rest pose if anyone asks.
 - The dev room's corpse (`dev_gun.gd monster_corpse`) shows her `Frozen` pose with `slump` 1.
 
+### The Hive's model (2026-09-18)
+
+Asset `monster/hive` (`assets/models/monsters/hive/`, built in Blender from `art/stylized/`, variant
+`hive`, see `ASSETS.md`): 1.75 m, feet at y 0, faces -Z after the registry's yaw 180, the human
+skeleton, clips `HiveIdle`, `HiveWalk` (0.85 m/s, in place), `HiveAttack` (one-shot).
+`MonsterModel.setup("hive")` builds it through `scripts/monsters/hive_rig.gd`; without the asset it
+falls back to the reshaped Kenney rig and `hive_look.gd` (unchanged).
+
+```gdscript
+model.hive                   # HivePoser (SkeletonModifier3D) or null; it is also model.shaper
+model.shaper.lying / daze / rise / stagger / twitch   # the rig_shaper inputs monster.gd and the stun window set
+model.hive.lock              # 0..1: the head comes up to look at model.hive.look_target (world), eyes fully lit
+model.play(logical, rate, blend)   # "idle" HiveIdle, "walk"/"run" HiveWalk, "attack" HiveAttack
+model.eye_offset()           # eyes in the Head node's frame, read from the GLB's Site_eyes
+HiveRig.WALK_SPEED 0.85      # rate = speed / WALK_SPEED (0.4..2.4x)
+```
+
+- A node named `Head` rides the head bone, turned so its axes are the model's at rest (+Y up, +Z the
+  face): `Monster.eye_transform`, Hive Eyes.
+- `Monster._hive_visual` (every machine, from the report): RUSH raises `lock` (0 -> 1 in a third of a
+  second, back down over a second and a bit); the look target is the nearest standing player within
+  14 m in front of it, at eye height, so clients need nothing extra replicated. The eyes
+  (`shaders/hive_eye.gdshader`) glow a pinpoint at `lock` 0 and flood orange at 1, with a small omni
+  light on the face; sedated, the eyes go back to the pinpoint.
+- Lying (sedated, dragged, `make_lying`): the poser eases every bone back to rest and brings the arms
+  in to the sides. On the OR table (`monster_builder.gd _build_st`) the body is strapped down with its
+  fungus showing; the dissection head that opens is built hidden, only to place the `skull`, `brain`
+  and `injection` sites, since the Hive has no brain (harvest waits on the grafting redesign).
+
 ## Database terminal (terminal redesign, 2026-09-16: the break room projector screen)
 
 The guide binder, the desk computer, its E prompt and `main.terminal_ui` are gone. The database is

@@ -296,8 +296,33 @@ func _check_rig_body(body, kind: String) -> void:
 		return
 	await _frames(3)
 	var skel := lying.find_children("*", "Skeleton3D", true, false)[0] as Skeleton3D
-	var rig_head := skel.get_node_or_null("Head") as Node3D
 	var heads: Array = (body as Node).find_children("HeadRoot", "", true, false)
+	if skel.get_node_or_null("HivePoser") != null:
+		# The stylized Hive (hive_rig.gd): its own head shows, fungus and all; the dissection head is
+		# built hidden, only to place the sites, and sits at the head bone.
+		var own := lying.find_child("Head", true, false) as Node3D
+		_check(own != null and own.is_visible_in_tree() and heads.size() == 1 and not (heads[0] as Node3D).is_visible_in_tree(),
+			"%s: its own head shows, the dissection head is hidden" % kind)
+		var hb := skel.find_bone("head")
+		var bone_at: Vector3 = skel.global_transform * skel.get_bone_global_pose(hb).origin
+		_check(heads.size() == 1 and (heads[0] as Node3D).global_position.distance_to(bone_at) < 0.2,
+			"%s: the dissection sites sit at its head (%.2f m)" % [kind, (heads[0] as Node3D).global_position.distance_to(bone_at) if heads.size() == 1 else -1.0])
+		for s in ["skull", "brain", "injection"]:
+			_check(body.anchors.has(s), "%s: site %s" % [kind, s])
+		var lo := Vector3.INF
+		var hi := -Vector3.INF
+		var inv := (body as Node3D).global_transform.affine_inverse()
+		# The trunk and legs (the arms read back in their rest A-pose here: the poser brings them in
+		# during the skeleton update, and bone poses read outside it are the unmodified ones).
+		for bn in ["hips", "spine", "chest", "upperchest", "neck", "head", "thigh.L", "shin.L", "foot.L", "thigh.R", "shin.R", "foot.R"]:
+			var bi := skel.find_bone(bn)
+			var p: Vector3 = inv * (skel.global_transform * skel.get_bone_global_pose(bi).origin)
+			lo = lo.min(p)
+			hi = hi.max(p)
+		_check(lo.x > -1.0 and hi.x < 1.0 and lo.z > -0.36 and hi.z < 0.36 and lo.y > -0.05 and hi.y < 0.2,
+			"%s: the body lies on the table (bones %s .. %s)" % [kind, str(lo), str(hi)])
+		return
+	var rig_head := skel.get_node_or_null("Head") as Node3D
 	_check(rig_head != null and not rig_head.visible and heads.size() == 1 and (heads[0] as Node3D).is_visible_in_tree(),
 		"%s: one head (the rig's own is hidden, the openable one shows)" % kind)
 	var want: Vector3 = RigLookScript.RIG[kind].head_bone

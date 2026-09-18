@@ -1,7 +1,8 @@
 extends Node3D
 ## The visual of one monster: the reshaped Kenney rig plus hand-built geometry, or for the Night
-## Nurse her own Blender-made model (night_nurse_rig.gd; the reshaped rig is her fallback when the
-## asset is missing). Knows nothing about behaviour; the Monster tells it what to show every frame.
+## Nurse and the Hive their own Blender-made models (night_nurse_rig.gd, hive_rig.gd; the reshaped rig
+## is the fallback when the asset is missing). Knows nothing about behaviour; the Monster tells it what
+## to show every frame.
 
 const Shaper := preload("res://scripts/monsters/rig_shaper.gd")
 const Shapes := preload("res://scripts/monsters/shapes.gd")
@@ -9,6 +10,7 @@ const DischargedLook := preload("res://scripts/monsters/discharged_look.gd")
 const NurseLook := preload("res://scripts/monsters/night_nurse_look.gd")
 const HiveLook := preload("res://scripts/monsters/hive_look.gd")
 const NurseRig := preload("res://scripts/monsters/night_nurse_rig.gd")
+const HiveRig := preload("res://scripts/monsters/hive_rig.gd")
 
 const RIG_KEY := "patient/human"
 const LOOPING := ["idle", "walk", "sprint"]
@@ -17,9 +19,12 @@ var kind := ""
 var rig: Node3D = null
 var skeleton: Skeleton3D = null
 var anim: AnimationPlayer = null
-var shaper: Shaper = null
+## The pose inputs monster.gd sets every frame: the Kenney rig's RigShaper, or the Hive's poser (same fields).
+var shaper = null
 ## The Night Nurse's model: its pose modifier (night_nurse_rig.gd), null for every other look.
 var nurse = null
+## The Hive's model: its pose modifier (hive_rig.gd), null for every other look. It is `shaper` too.
+var hive = null
 var iv: Node3D = null            ## the Discharged's IV pole, top-level
 ## Movable ears: [{node: Node3D pivot on the head, side: +1 left / -1 right, rest: outward radians}]
 var ears: Array = []
@@ -36,6 +41,9 @@ func setup(monster_kind: String) -> void:
 	kind = monster_kind
 	name = "Model"
 	if kind == "night_nurse" and NurseRig.build(self):
+		play("idle")
+		return
+	if kind == "hive" and HiveRig.build(self):
 		play("idle")
 		return
 	rig = Assets.spawn(RIG_KEY) if Assets.has(RIG_KEY) else null
@@ -104,6 +112,11 @@ static func make_lying(monster_kind: String) -> Node3D:
 		m.anim.stop()
 		m.skeleton.reset_bone_poses()
 		back = 0.1   # the dress at her shoulder blades; the flared skirt sinks into whatever she lies on
+	elif m.hive != null:
+		# Its rest pose is standing straight; no clip plays, and the poser's `lying` brings the arms in.
+		m.anim.stop()
+		m.skeleton.reset_bone_poses()
+		back = 0.13   # the gown at its shoulder blades
 	else:
 		m.play("idle", 0.0, 0.0)
 	# The model's up (+Y, feet to head) becomes -X, its front (-Z) becomes +Y.
@@ -131,7 +144,11 @@ func _make_loops() -> void:
 
 ## Where the eyes are in the frame of the node named `Head` (+Y up the head, +Z the face).
 func eye_offset() -> Vector3:
-	return NurseRig.EYE_OFFSET if nurse != null else Vector3(0.0, 0.13, 0.1)
+	if nurse != null:
+		return NurseRig.EYE_OFFSET
+	if hive != null:
+		return hive.eye_offset
+	return Vector3(0.0, 0.13, 0.1)
 
 
 func body_material(m: Material) -> void:
@@ -149,7 +166,7 @@ func play(logical: String, rate := 1.0, blend := 0.18) -> void:
 	if anim == null:
 		return
 	if logical != _logical:
-		var real := Assets.anim_name(NurseRig.KEY if nurse != null else RIG_KEY, logical)
+		var real := Assets.anim_name(_anim_key(), logical)
 		if real != "" and anim.has_animation(real):
 			anim.play(real, blend)
 			_logical = logical
@@ -161,8 +178,16 @@ func current() -> String:
 
 
 func attack_length() -> float:
-	var real := Assets.anim_name(NurseRig.KEY if nurse != null else RIG_KEY, "attack")
+	var real := Assets.anim_name(_anim_key(), "attack")
 	return anim.get_animation(real).length if anim != null and anim.has_animation(real) else 0.4
+
+
+func _anim_key() -> String:
+	if nurse != null:
+		return NurseRig.KEY
+	if hive != null:
+		return HiveRig.KEY
+	return RIG_KEY
 
 
 func add_part(node: Node3D, bone: String, offset := Transform3D.IDENTITY, tip := 0.0) -> void:

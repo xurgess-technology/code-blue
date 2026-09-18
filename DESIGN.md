@@ -198,7 +198,7 @@ exaggerated person", never chibi, never a doll.
 | Character | Style | Notes |
 |---|---|---|
 | Surgeon (players) | Stylized | Done: bald, short-sleeved scrubs, bare hands; the belly gash for the player table; a Dive clip |
-| The Hive | Stylized, in review | On the surgeon's head and kit with its hunch and dragged leg; charcoal skin, open skull with shelf fungus, orange eyes. Renders only: not exported or in the game yet |
+| The Hive | Stylized, in the game | On the surgeon's head and kit with its hunch and dragged leg; charcoal skin, open skull with shelf fungus, orange eyes (a pinpoint wandering, fully lit and the head up on you when locked on). Own clips: idle, a shamble dragging the right leg, a lunge (`art/stylized/st_hive_clips.py`, `scripts/monsters/hive_rig.gd`) |
 | Night Nurse | Blender-scripted, own look | Already exaggerated; check she sits with the rest |
 | Discharged, Bob, paramedics | Older looks | To move over |
 

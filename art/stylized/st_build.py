@@ -21,8 +21,8 @@ import bpy
 import numpy as np
 from mathutils import Vector, Matrix
 import hu_params, hu_body, hu_rig
-import st_sdf, st_char, st_clips
-for m in (st_sdf, st_char, st_clips):
+import st_sdf, st_char, st_clips, st_hive_clips
+for m in (st_sdf, st_char, st_clips, st_hive_clips):
     importlib.reload(m)
 
 ARGS = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
@@ -523,12 +523,17 @@ def anim_strips(c, frames_per=6, clips=None):
     """Every clip of the shared human set, played on this character: a row of frames per clip."""
     arm = c['arm']
     body = c['body']
-    hu_rig.build_actions(arm, body)
-    st_clips.build_actions(arm, body)
+    is_hive = c['V'].get('hive', False)
+    clip_mods = (st_hive_clips,) if is_hive else (hu_rig, st_clips)
+    for mod in clip_mods:
+        mod.build_actions(arm, body)
     scn = bpy.context.scene
     tmp = os.path.join(OUT, '_tmp')
     os.makedirs(tmp, exist_ok=True)
-    for name, (nf, loop, speed, about) in list(hu_rig.CLIPS.items()) + list(st_clips.CLIPS.items()):
+    all_clips = []
+    for mod in clip_mods:
+        all_clips += list(mod.CLIPS.items())
+    for name, (nf, loop, speed, about) in all_clips:
         if clips and name not in clips:
             continue
         act = bpy.data.actions[name]
@@ -593,8 +598,13 @@ def export_and_compare(c, name):
     out_dir = os.path.join(HERE, 'out')
     os.makedirs(out_dir, exist_ok=True)
     orig = {o.name: list(o.data.materials) for o in c['obs']}
-    res = st_export.export(c, out_dir, variant, tex=int(arg('tex', '2048')), ao_samples=int(arg('ao', '24')))
-    game_dir = os.path.normpath(os.path.join(HERE, '..', '..', 'assets', 'models', 'characters', 'human'))
+    is_hive = c['V'].get('hive', False)
+    res = st_export.export(c, out_dir, variant, tex=int(arg('tex', '2048')), ao_samples=int(arg('ao', '24')),
+                           clips=(st_hive_clips,) if is_hive else None)
+    if is_hive:
+        game_dir = os.path.normpath(os.path.join(HERE, '..', '..', 'assets', 'models', 'monsters', 'hive'))
+    else:
+        game_dir = os.path.normpath(os.path.join(HERE, '..', '..', 'assets', 'models', 'characters', 'human'))
     os.makedirs(game_dir, exist_ok=True)
     files, size = hu_glb_extern.extern(res['glb'], os.path.join(game_dir, variant + '.glb'), 'textures')
     import shutil
@@ -611,7 +621,7 @@ def export_and_compare(c, name):
     arm = c['arm']
     arm.animation_data.action = None
     rig = hu_rig.Rig(arm, c['body'])
-    pose_surgeon(rig).apply(arm)
+    (pose_hive if is_hive else pose_surgeon)(rig).apply(arm)
     bpy.context.view_layer.update()
     shots = []
     for tag, show_high in (('dense', True), ('game', False)):

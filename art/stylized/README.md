@@ -44,6 +44,9 @@ swapped for a Hive eye, stitched), `hive` (the surgeon's head and kit: charcoal 
 brain, `Fungus` a separate piece; orange eyes, whose glow is in the eye mask: R = the pinpoint, G = the whole ball,
 lit by the material's `Lock` value, 0 wandering and 1 locked on). Hive shots: `hive_front`, `hive_34`, `hive_side`,
 `hive_back`, `hive_top`, `face_hive`, `face_hive_lock`, `hive_dark(_lock)`, `hive_black(_lock)`.
+`--only=hive --export` writes `assets/models/monsters/hive/hive_st.glb` with the Hive's own clips
+(`st_hive_clips.py`: HiveIdle, HiveWalk, HiveAttack) instead of the shared human ones; `--only=hive --anim`
+renders their strips. In the game: `scripts/monsters/hive_rig.gd`.
 
 ## Game pieces (the human contract)
 

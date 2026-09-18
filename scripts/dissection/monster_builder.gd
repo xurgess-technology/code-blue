@@ -59,6 +59,14 @@ static func build(b) -> bool:
 
 	var lying: Node3D = _make_lying(id)
 	var skel: Skeleton3D = null
+	var st_poser: Node = lying.find_child("HivePoser", true, false) if lying != null else null
+	if st_poser != null:
+		_build_st(b, lying, st_poser.get_parent() as Skeleton3D, seed_v)
+		parts["rng"] = RandomNumberGenerator.new()
+		(parts["rng"] as RandomNumberGenerator).seed = seed_v
+		parts["thrash"] = {"arm_l": 0.0, "arm_l_v": 0.0, "arm_r": 0.0, "arm_r_v": 0.0, "legs": 0.0, "legs_v": 0.0,
+			"head": 0.0, "head_v": 0.0, "next": 0.5, "twitch_next": 1.0, "jaw": 0.0}
+		return true
 	if lying != null:
 		var found := lying.find_children("*", "Skeleton3D", true, false)
 		if not found.is_empty() and RigLook.has(id) and (found[0] as Skeleton3D).get_node_or_null("body-mesh") != null:
@@ -159,6 +167,75 @@ static func _build_rig(b, lying: Node3D, skel: Skeleton3D, seed_v: int) -> void:
 	parts["strap_pull"] = pull
 	var inj := lying.transform * (fit.injection as Vector3)
 	_sites(b, head, head_c, hr, hd, Transform3D(Basis(), inj + Vector3(0, 0.01, 0)), 0.24)
+
+
+## The stylized Hive (hive_rig.gd): its own body lying straight, strapped down, the fungus in its open
+## skull showing. There is no brain to take out (the fungus replaced it; harvest waits on the grafting
+## redesign), so the dissection head that opens is built but kept hidden: it only places the skull and
+## brain sites where the head is, so the saw and forceps steps still run.
+static func _build_st(b, lying: Node3D, skel: Skeleton3D, seed_v: int) -> void:
+	var id: String = b.patient_id
+	var lk := look_of(id)
+	var rig: Node3D = b.rig
+	var parts: Dictionary = b.parts
+	lying.name = "Lying"
+	rig.add_child(lying)
+	parts["lying"] = lying
+	parts["lying_home"] = lying.position
+	var poser := skel.get_node_or_null("HivePoser")
+	if poser != null:
+		(poser.get("cfg") as Dictionary)["lying_spread"] = 5.0
+	var thrash := StrapThrash.new()
+	thrash.name = "StrapThrash"
+	thrash.bones = PackedStringArray(["upperarm.L", "upperarm.R", "thigh.L", "thigh.R"])
+	thrash.skeleton_axes = true
+	skel.add_child(thrash)
+	parts["thrash_mod"] = thrash
+	# Where the bones are, on the table (the skeleton sits still in its rest pose, lying).
+	var to_rig := _chain(skel, rig)
+	var bone_at := func(n: String) -> Vector3:
+		var i := skel.find_bone(n)
+		return to_rig * skel.get_bone_global_rest(i).origin if i >= 0 else Vector3.ZERO
+	var hr: Vector3 = lk.head
+	var head_bone: Vector3 = bone_at.call("head")
+	var neck_pt: Vector3 = bone_at.call("neck")
+	var up_head := (head_bone - neck_pt).normalized()
+	var head_c := head_bone + up_head * 0.075 + Vector3(0.0, 0.01, 0.0)
+	var neck := Node3D.new()
+	neck.name = "Neck"
+	neck.position = head_bone
+	rig.add_child(neck)
+	parts["neck_home"] = head_bone
+	var head := Node3D.new()
+	head.name = "HeadRoot"
+	head.position = head_c - head_bone
+	head.visible = false
+	neck.add_child(head)
+	var hd: Dictionary = Head.build(head, hr, {"skin": lk.skin, "scalp": lk.scalp, "hair": 0.0,
+		"eyeless": false, "brain_scale": lk.brain_scale}, seed_v)
+	_head_parts(parts, head, neck, hd)
+	# Nothing of the dissection head shows: no cap to lift, no brain.
+	parts["cap"] = null
+	parts["open_skull"] = null
+	parts["brain"] = null
+	parts["jaw"] = null
+	# Straps: across the chest, the hips and wrists, the thighs, the shins (x along the body, its half
+	# width, the height of the body top there).
+	var hips: Vector3 = bone_at.call("hips")
+	var knee: Vector3 = bone_at.call("shin.L")
+	var chest: Vector3 = bone_at.call("upperchest")
+	var straps: Array = []
+	var pull := PackedFloat32Array()
+	for e in [[chest.x, 0.27, 0.24, 0.0, 0.0], [hips.x, 0.30, 0.20, 0.0, 0.0], [(hips.x + knee.x) * 0.5, 0.2, 0.15, 0.0, 0.35],
+			[knee.x + 0.2, 0.17, 0.11, 0.0, 0.6]]:
+		straps.append([float(e[0]), float(e[1]) + 0.02, float(e[2]) + 0.01])
+		pull.append_array([float(e[3]), float(e[4]), float(e[2]) + 0.01])
+	parts["straps"] = _strap_meshes(rig, straps, 0.55)
+	parts["strap_pull"] = pull
+	var ua: Vector3 = bone_at.call("upperarm.L")
+	var fa: Vector3 = bone_at.call("forearm.L")
+	var inj := ua.lerp(fa, 0.6) + Vector3(0.0, 0.06, 0.0)
+	_sites(b, head, head_c, hr, hd, Transform3D(Basis(), inj), 0.24)
 
 
 ## Rig-less fallback: the primitive body and head (a painted face).
