@@ -46,6 +46,7 @@ Nothing gets tested hard until Zach has played it.
   `-Count 2` for two co-op windows, and game flags after that (`--seed=3`).
 - **Review windows never take focus.** They open minimized and flash in the taskbar. Nothing
   opens a game window any other way while Zach might be using the machine.
+- Before opening it, the subagent has done the smoke look (Tests that make sense, below).
 - The subagent ends its turn with exactly: the window's line, one sentence on what to look at, and
   anything it's unsure of. The orchestrator relays that as is, then continues **the same subagent**
   with Zach's reply, so it keeps its context.
@@ -53,8 +54,16 @@ Nothing gets tested hard until Zach has played it.
 
 ### Tests that make sense
 
-- **While building:** it loads, it parses, and the one check that proves it works passes. No
-  screenshot loops and no full suites for something Zach hasn't seen.
+- **While building:** it loads, it parses, and the one check that proves it works passes. No full
+  suites for something Zach hasn't seen.
+- **A smoke look before every review window.** Headless checks test rules, not what's on screen,
+  so the subagent launches the game, goes through what it built once, takes a few screenshots and
+  looks at them (the new body from another camera, the screen that mentions the new thing, the
+  item in the hand). Anything obviously wrong gets fixed before Zach is asked to look. It's one
+  pass, plus one after each fix. It doesn't chase polish or tune feel and difficulty: that's Zach's
+  review. **If the thing is properly broken** (it doesn't work at all, or the same failure keeps
+  coming back), the subagent may loop until it works. The look never takes focus: use the
+  minimized review window or an offscreen render (`tools/style_lab`), never a window that pops up.
 - **After Zach's okay:** merge `main` into the branch, then run the tests for the systems it
   touched. Anything failing that isn't in docs/FAILING_TESTS.md gets fixed before merging.
 - **The full sweep** (every headless test scene, the playtest shifts, `tools/nettest_run.gd`) is
