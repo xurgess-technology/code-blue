@@ -30,7 +30,7 @@ Or open the folder as a project in the Godot editor and press F5.
 | R | Read the medical guide (while holding it or looking at it) |
 | Q | Shove |
 | Esc | Pause, or stop operating |
-| F2 / F3 / F5 / F11 | Graphics quality / FPS counter / first person or over the shoulder / fullscreen |
+| F2 / F3 / F5 / F11 | Graphics quality / FPS counter / camera (first person, over the shoulder, facing you) / fullscreen |
 
 While operating, the mouse moves the tool and the mouse buttons use it.
 

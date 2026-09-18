@@ -116,8 +116,8 @@ def skirt_weights(obj):
         blend = G.smooth01((1.20 - z) / 0.12)       # 0 above the waist: keep heat weights
         if blend <= 0:
             continue
-        leg = 0.62 * G.smooth01((1.12 - z) / 0.55)
-        side = G.smooth01(v.co.x / 0.22 + 0.5)       # 1 = left
+        leg = 0.80 * G.smooth01((1.12 - z) / 0.60)   # the hem swings with the legs, so they stay inside it
+        side = G.smooth01(v.co.x / 0.30 + 0.5)       # 1 = left; eased a little wider than the original's
         target = {'hips': 1 - leg, 'thigh.L': leg * side, 'thigh.R': leg * (1 - side)}
         cur = {idx_of[g.group]: g.weight for g in v.groups}
         names = set(cur) | set(target)
@@ -130,6 +130,28 @@ def skirt_weights(obj):
             else:
                 vg[n].remove([v.index])
 
+
+
+def hair_weights(obj):
+    """Long hair: the head carries it down to the jaw, then it hands over to the upper chest, chest and
+    spine by height, so strands lying on the body move with the body instead of swinging with the head."""
+    for g in list(obj.vertex_groups):
+        obj.vertex_groups.remove(g)
+    vg = {n: obj.vertex_groups.new(name=n) for n in ('head', 'neck', 'upperchest', 'chest', 'spine')}
+    for v in obj.data.vertices:
+        z = v.co.z
+        w = {'head': G.smooth01((z - 1.93) / 0.10)}
+        rest = 1.0 - w['head']
+        w['neck'] = rest * 0.35 * G.smooth01((z - 1.80) / 0.08)
+        rest -= w['neck']
+        up = G.smooth01((z - 1.50) / 0.18)
+        w['upperchest'] = rest * up
+        low = G.smooth01((z - 1.30) / 0.16)
+        w['chest'] = rest * (1 - up) * low
+        w['spine'] = rest * (1 - up) * (1 - low)
+        for n, val in w.items():
+            if val > 1e-4:
+                vg[n].add([v.index], val, 'REPLACE')
 
 # ------------------------------------------------------------------ posing
 class Poser:

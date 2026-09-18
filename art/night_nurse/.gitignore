@@ -3,5 +3,5 @@ __pycache__/
 *.err
 *.blend1
 renders/_cell.png
-# nn_build.py exports this, then nn_glb_extern.py writes the game copy under assets/models/monsters/night_nurse/
+# nn_build.py --export writes this, then the game copy under assets/models/monsters/night_nurse/
 night_nurse_embedded.glb

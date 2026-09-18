@@ -21,7 +21,7 @@ You and your best friends clock into the ER with one goal: save a life. The prob
 ## Players
 
 - Up to 4 players, built so more is possible. Solo works.
-- Everyone is a surgeon, first person, with your own hands visible. An over-the-shoulder view is an option (settings, or F5).
+- Everyone is a surgeon, first person, with your own hands visible. Over-the-shoulder and facing-you views are options (settings, or F5 to cycle).
 - One player hosts over ENet; friends join by address (LAN, port forward or Tailscale). **TODO**: Steam lobbies and invites via GodotSteam.
 - **0 HP means downed**, not dead: you lie on the floor, crawl, and bleed out over five minutes. A teammate carries you to the OR's player table and stitches you up with a suture kit. Bleed out and you are dead until the next shift (spectating). Everyone down or dead fails the shift.
 - **Friendly fire is a feature**: Q shoves whatever is in front of you. A shoved teammate drops everything, and the vials smash.
@@ -122,7 +122,7 @@ Each monster runs on one sense, so players learn them in order: eyes, then ears,
 | --- | --- | --- |
 | **The Hive** | Eyes | A shambling patient, common near the start of every wing. Sees you and lumbers slowly after you; break line of sight and it loses interest within a few seconds. Deaf. Weak: the easy fight that teaches the saw and the capture loop. Hives share a hive mind (that is why they forget you so fast). **Look (2026-09-18):** charcoal-grey skin; the skull is broken open and the brain is gone, replaced by a pale shelf fungus that bulges out of the break and roots into the scalp; orange eyes, a soft pinpoint while it wanders and the whole eyeball lit up once it locks on to someone. With no brain, its harvest waits on the grafting redesign. |
 | **The Discharged** | Ears | Eyeless and a head taller than a surgeon, with clear ears on the large side of normal that swivel toward sounds. Drags a rattling IV pole. Hunts by sound: the rattle stops, the ears turn, then it rushes the noise. A shove stuns it. Has a brain. |
-| **The Night Nurse** | Being watched | Moves only while nobody is looking at it with light on it. A shove does nothing, and neither do the saw or the needle: she is the one you run from. No brain. |
+| **The Night Nurse** | Being watched | Moves only while nobody is looking at it with light on it. A shove does nothing, and neither do the saw or the needle: she is the one you run from. No brain. If she gets a hand on you she takes no hearts: in a snap she has you by the throat with both hands and straightens to her full height, holding you up to her face. Your view is locked on it, straight on, until her head snaps over to one side, cocked, considering you; then she drops you, downed, and is gone, somewhere far off in the dark. About two seconds, and nothing anyone can do. |
 
 Surgery is the worst case: the monitors and the bone saw call the Discharged, and every surgeon's eyes are on the table instead of the door.
 
@@ -192,7 +192,8 @@ exaggerated person", never chibi, never a doll.
 - Easy: props, furniture, machines and tools; anything built from simple shapes; grimy materials;
   monsters (off is the point); stiff clothing; wet, glowing organic things like the Growths.
 - Take care: faces up close, hands, bare joints that bend (elbows, shoulders under raised arms).
-- Avoid: realistic faces and skin, loose draping cloth, hair beyond painted brows and short crops.
+- Avoid: realistic faces and skin, loose draping cloth, fine wispy hair. Hair is fine where the
+  character calls for it, built chunky: a solid shell, a bun, thick strands. (Surgeons are bald.)
 
 **Status.**
 
@@ -200,7 +201,7 @@ exaggerated person", never chibi, never a doll.
 |---|---|---|
 | Surgeon (players) | Stylized | Done: bald, short-sleeved scrubs, bare hands; the belly gash for the player table; a Dive clip |
 | The Hive | Stylized, in the game | On the surgeon's head and kit with its hunch and dragged leg; charcoal skin, open skull with shelf fungus, orange eyes (a pinpoint wandering, fully lit and the head up on you when locked on). Own clips: idle, a shamble dragging the right leg, a lunge (`art/stylized/st_hive_clips.py`, `scripts/monsters/hive_rig.gd`) |
-| Night Nurse | Blender-scripted, own look | Already exaggerated; check she sits with the rest |
+| Night Nurse | Stylized | Done: soft figurine face under the mask, long chunky hair, detailed painted grime and blood (`art/night_nurse/`); the first model is in `deprecated/` |
 | Discharged, Bob, paramedics | Older looks | To move over |
 
 How the models are built and rebuilt: `art/stylized/README.md`.
@@ -215,4 +216,3 @@ How the models are built and rebuilt: `art/stylized/README.md`.
 
 - Which name?
 - Should the database terminal's "where to look" get less reliable on later shifts (entries going missing)?
-- Should the Night Nurse drag a player away instead of hitting them?

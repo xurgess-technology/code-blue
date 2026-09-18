@@ -16,6 +16,7 @@ const PlayerScript := preload("res://scripts/player.gd")
 const Percept := preload("res://scripts/perception.gd")
 const Modes := preload("res://scripts/monsters/modes.gd")
 const NurseRig := preload("res://scripts/monsters/night_nurse_rig.gd")
+const NurseGrab := preload("res://scripts/monsters/nurse_grab.gd")
 const SHOT_DIR := "res://tools/monster_shots"
 
 ## The stand-in game: exactly the surface monsters and Perception use.
@@ -26,6 +27,8 @@ class LabGame extends Node3D:
 	var host := true
 	var noises: Array = []
 	var hits: Array = []
+	var grabs: Array = []   # the Night Nurse's grabs: {time, peer}
+	var drops: Array = []   # and her letting go: {time, peer}
 	var said: Array = []
 	var combat: Node = null   # a LabCombat while a drag scenario runs
 
@@ -61,6 +64,35 @@ class LabGame extends Node3D:
 
 	func say(text: String, _seconds: float = 3.0) -> void:
 		said.append(text)
+
+	## The Night Nurse's grab, as game.gd runs it minus the hands and operations the lab has none of.
+	func nurse_grab(m: Node, p: Node) -> bool:
+		if not p.alive or p.downed or p.invuln > 0.0 or int(p.held_by) >= 0 or int(m.grab_peer) != 0:
+			return false
+		p.held_by = int(m.monster_id)
+		p.held_from = p.global_position
+		m.start_grab(p)
+		grabs.append({"time": world_time, "peer": p.peer_id})
+		return true
+
+	func nurse_drop(_m: Node, p: Node) -> void:
+		if p == null or int(p.held_by) < 0:
+			return
+		p.held_by = -1
+		p.teleport(p.held_from)
+		p.hp = 0
+		p.downed = true
+		drops.append({"time": world_time, "peer": p.peer_id})
+
+	func pinned_pose(p: Node) -> Transform3D:
+		if int(p.held_by) >= 0:
+			for m in get_tree().get_nodes_in_group("monster"):
+				if int(m.monster_id) == int(p.held_by):
+					return m.grab_victim_pose(p)
+		return p.global_transform
+
+	func bleed_rate(_p: Node) -> float:
+		return 1.0
 
 
 ## Stand-in for game.combat: the drag pin and drop_dragged.
@@ -487,19 +519,50 @@ func _scenario_contact() -> void:
 	check("then it recovers", d.mode != Modes.Mode.STUNNED)
 	await clear_monsters()
 
-	# The Nurse from behind: 2 hearts.
+	# The Nurse from behind: no hearts. She grabs them by the neck, lifts them to her face, her head
+	# snaps over, she drops them downed and is gone (nurse_grab.gd).
 	place_player(cor(14.0), cor(30.0) + Vector3.UP * 1.5, true)
 	p1.invuln = 0.0
 	var n: Node = spawn("night_nurse", cor(9.0), -PI * 0.5)
 	for i in 4 * 60:
 		await get_tree().physics_frame
-		if not game.hits.is_empty():
+		if not game.grabs.is_empty():
 			break
-	check("the Night Nurse reaches an unaware player and hits for 2", game.hits.size() == 1 and game.hits[0].damage == 2 and p1.hp == 1, "hits=%s" % [game.hits])
-	check("after the hit it retreats and is calm", n.mode == Modes.Mode.RETREAT and n.calm > 0.0)
-	p1.invuln = 0.0
-	await wait(1.5)
-	check("no second hit while calm", game.hits.size() == 1, "hits=%d" % game.hits.size())
+	check("the Night Nurse reaches an unaware player and grabs them, no hearts", game.grabs.size() == 1 and game.hits.is_empty() and p1.held_by == n.monster_id and p1.hp == p1.max_hp,
+		"grabs=%s hits=%s hp=%d" % [game.grabs, game.hits, p1.hp])
+	var taken_at: Vector3 = p1.held_from
+	var grabbed_at: Vector3 = n.global_position
+	await wait(NurseGrab.LIFT + 0.1)
+	var to_her: Vector3 = n.global_position - p1.global_position
+	to_her.y = 0.0
+	var facing: float = (-p1.global_transform.basis.z).dot(to_her.normalized())
+	check("she lifts them by the neck: %.2f m off the floor, facing her (%.2f)" % [p1.global_position.y - taken_at.y, facing],
+		p1.global_position.y - taken_at.y > 0.25 and facing > 0.9)
+	var grip_ok: bool = n.model.nurse == null or n.model.nurse.grip_world != Vector3.ZERO
+	if n.model.nurse != null:
+		var gw: Vector3 = n.model.nurse.grip_world
+		var neck: Vector3 = p1.global_position + Vector3.UP * (C.EYE_H - NurseGrab.NECK_BELOW_EYES)
+		var wr: Array = n.model.nurse.grab_wrists
+		check("her wrists close on the neck (right %.2f m, left %.2f m from it; %.2f m apart)" % [wr[0].distance_to(neck), wr[1].distance_to(neck), wr[0].distance_to(wr[1])],
+			wr[0].distance_to(neck) < 0.16 and wr[1].distance_to(neck) < 0.16, "grip %s neck %s wrists %s shoulder.R %s" % [gw, neck, wr, n.model.nurse.bone_world("upperarm.R")])
+	check("her arm is out (grab %.2f) and the grip is posed" % (n.model.nurse.grab if n.model.nurse != null else -1.0),
+		grip_ok and (n.model.nurse == null or n.model.nurse.grab > 0.95))
+	check("in the light, watched, she holds on anyway", not n.observed and n.grab_peer == p1.peer_id and p1.held_by == n.monster_id)
+	await wait(NurseGrab.SNAP_AT + NurseGrab.SNAP + 0.05 - n.grab_t)
+	check("at %.2f s her head has snapped over (cock %.2f)" % [n.grab_t, n.model.nurse.cock if n.model.nurse != null else -1.0],
+		n.model.nurse == null or n.model.nurse.cock > 0.9)
+	for i in 3 * 60:
+		await get_tree().physics_frame
+		if not game.drops.is_empty():
+			break
+	var held_for: float = float(game.drops[0].time) - float(game.grabs[0].time) if not game.drops.is_empty() else -1.0
+	check("after %.2f s she lets go: downed, back on the spot she took them from" % held_for,
+		absf(held_for - NurseGrab.DROP_AT) < 0.1 and p1.downed and p1.held_by == -1 and p1.global_position.distance_to(taken_at) < 0.05)
+	await get_tree().physics_frame
+	check("and she is gone: %.1f m away, calm" % n.global_position.distance_to(grabbed_at),
+		n.global_position.distance_to(grabbed_at) > 12.0 and n.calm > 0.0 and n.grab_peer == 0)
+	p1.downed = false
+	p1.hp = p1.max_hp
 	var pos: Vector3 = n.global_position
 	n.shoved(Vector3.RIGHT)
 	await get_tree().physics_frame
@@ -555,6 +618,18 @@ func _scenario_client() -> void:
 	client_n.apply_remote(host_n.report())
 	await get_tree().physics_frame
 	check("client nurse freezes its clip when the host says observed", host_n.observed and client_n.model.anim.speed_scale == 0.0)
+	# The grab: the host's `gp` starts the client's own copy of the timeline.
+	game.nurse_grab(host_n, p1)
+	client_n.apply_remote(host_n.report())
+	await wait(0.25)
+	check("client nurse plays the grab from `gp` (t %.2f, grab %.2f)" % [client_n.grab_t, client_n.model.nurse.grab],
+		client_n.grab_peer == p1.peer_id and client_n.grab_t > 0.2 and client_n.model.nurse.grab > 0.95)
+	host_n.end_grab()
+	p1.held_by = -1
+	p1.teleport(p1.held_from)
+	client_n.apply_remote(host_n.report())
+	await get_tree().physics_frame
+	check("and lets go when `gp` clears", client_n.grab_peer == 0 and client_n.model.nurse.grab == 0.0)
 	game.emit_noise(cor(24.0), 0.8, "footstep")
 	for i in 30:
 		await get_tree().physics_frame
@@ -945,6 +1020,12 @@ func _run_shots() -> void:
 		["nurse_lunge", _shot_nurse_lunge],
 		["nurse_face", _shot_head.bind("night_nurse", false, 0.9, 0.35)],
 		["nurse_corpse", _shot_nurse_corpse],
+		["nurse_grab_stare", _shot_nurse_grab.bind(0.7, false)],
+		["nurse_grab_cocked", _shot_nurse_grab.bind(1.6, false)],
+		["nurse_grab_side", _shot_nurse_grab.bind(0.7, true)],
+		["nurse_grab_side_cocked", _shot_nurse_grab.bind(1.6, true)],
+		["nurse_grab_hands", _shot_nurse_grab.bind(0.7, true, Vector3(0.62, 1.95, 1.0), Vector3(0.62, 1.85, 0.0))],
+		["nurse_grab_hands_back", _shot_nurse_grab.bind(0.7, true, Vector3(-0.35, 2.35, -0.6), Vector3(0.62, 1.85, 0.0))],
 		["hive_4m", _shot_hive.bind(4.0, false)],
 		["hive_1_5m", _shot_hive.bind(1.5, false)],
 		["hive_face", _shot_head.bind("hive", false, 0.75, 0.45)],
@@ -963,6 +1044,8 @@ func _run_shots() -> void:
 			continue
 		await clear_monsters()
 		set_all_lights(false)
+		p1.camera.current = true
+		p1.held_by = -1
 		await s[1].call()
 		await wait(1.2)
 		await RenderingServer.frame_post_draw
@@ -1096,6 +1179,31 @@ func _shot_nurse_lunge() -> void:
 		if is_instance_valid(n):
 			_pose(n, pos, -PI * 0.5 - 0.45, Modes.Mode.WANDER, true, 3.4, {"lg": true})
 	await wait(0.3)
+
+
+## The grab (nurse_grab.gd), held at `t` seconds in: from the held surgeon's own eyes (the camera
+## locked on her face, as Player._held_look drives it), or `side`: a teammate's view of it.
+func _shot_nurse_grab(t: float, side: bool, cam_at := Vector3(1.0, 1.55, 2.6), cam_to := Vector3(0.5, 1.55, 0.0)) -> void:
+	var pos := cor(20.0, 0.0)
+	var n: Node = spawn("night_nurse", pos, -PI * 0.5)
+	set_light(1, true)
+	place_player(pos + Vector3(0.95, 0.0, 0.0), pos + Vector3.UP * 2.0, true)
+	_pose(n, pos, -PI * 0.5, Modes.Mode.STALK, false, 0.0, {"gp": p1.peer_id})
+	p1.held_from = p1.global_position
+	p1.held_by = n.monster_id
+	if side:
+		var cam := Camera3D.new()
+		add_child(cam)
+		cam.global_position = pos + cam_at
+		cam.look_at(pos + cam_to)
+		cam.current = true
+		p1.body_visual.visible = true
+	_shot_tick = func():
+		if is_instance_valid(n):
+			n.grab_t = t
+			p1._held_look(1.0 / 60.0)
+			p1.head.rotation.x = p1._pitch
+	await wait(0.4)
 
 
 func _shot_nurse_corpse() -> void:

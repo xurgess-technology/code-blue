@@ -237,6 +237,14 @@ var carried_by: int = 0
 var carrying: int = 0
 var on_table: bool = false
 var carry_hold: float = 0.0
+## The Night Nurse's grab (scripts/monsters/nurse_grab.gd): the monster id of the Nurse holding this
+## player up by the neck (-1 nobody), and where they stood when she took them (host authoritative,
+## report key `nh`; held_from is recorded on every machine). Held, the body hangs from her grip
+## (game.pinned_pose), the camera is locked on her face, and nothing can be done or done to them.
+var held_by: int = -1
+var held_from := Vector3.ZERO
+var _held_seen := -1
+var _held_cracked := false
 ## The aim target teammates hold E on to pick this player up (layer on only while downed).
 var downed_aim: Area3D
 
@@ -257,6 +265,7 @@ const LightRoomsSelf := preload("res://scripts/level/light_rooms.gd")
 const BodyHandsScript := preload("res://scripts/hands/body_hands.gd")
 const HumanModel := preload("res://scripts/human/human_model.gd")   # HUMAN HOOK
 const CarryCameraScript := preload("res://scripts/camera/carry_camera.gd")
+const NurseGrabScript := preload("res://scripts/monsters/nurse_grab.gd")
 const Grips := preload("res://scripts/hands/grips.gd")
 const FogRingScript := preload("res://scripts/level/fog_ring.gd")   # SWEEP 4A HOOK (fog lot, chunk 2)
 var body_hands: RefCounted = null
@@ -265,6 +274,7 @@ var carry_cam: RefCounted = null
 ## camera. It lives on LightRooms.SELF, which the first-person camera only draws for the carry camera.
 var _mirror_self := false
 var _carry_body := false
+var _glow: OmniLight3D = null
 ## Test seam: true holds the shove button (charging), false lets go (the shove fires).
 var bot_charge: bool = false
 var _bot_charging := false
@@ -499,6 +509,7 @@ func _build() -> void:
 	glow.light_volumetric_fog_energy = 0.0
 	glow.shadow_enabled = false
 	head.add_child(glow)
+	_glow = glow
 
 	# HANDS HOOK: forearms and hands (the torch in the right, the stack in the left).
 	hands = HandsFP.new()
@@ -568,6 +579,11 @@ func _ready() -> void:
 		body_visual.visible = false
 		body_hands.set_active(false)   # HANDS HOOK: nobody sees it (until the carry camera shows it)
 		camera.cull_mask &= ~LightRoomsSelf.SELF   # the own body only for mirrors and the carry camera
+		# Your torch and the glow sit inside your own head: they must not light your own body when a
+		# mirror or the shoulder camera shows it (sprinting leans the head into the beam: a white
+		# shine on the back of the skull).
+		flashlight.light_cull_mask &= ~LightRoomsSelf.SELF
+		_glow.light_cull_mask &= ~LightRoomsSelf.SELF
 		name_tag.visible = false
 		hands.visible = true
 		# Settings hook: the local camera follows the field of view setting, live.
@@ -662,7 +678,7 @@ func _input(event: InputEvent) -> void:
 
 func _physics_process(delta: float) -> void:
 	# Downed hook: carried or on the table, the body goes where the carrier or the table puts it.
-	if carried_by != 0 or on_table:
+	if carried_by != 0 or on_table or held_by >= 0:
 		_pinned_step(delta)
 	# DEV HOOK: the host drives dev room bots as if they were its own players.
 	elif is_local or (is_bot and game != null and game.is_host()):
@@ -1184,6 +1200,8 @@ func _pinned_step(delta: float) -> void:
 		elif Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and not dev_input_held and Input.is_action_just_pressed("interact") and (game == null or not game.paused):
 			interact_count += 1
 		wants_interact = false
+		if held_by >= 0:
+			_held_look(delta)
 		rotation.y = _yaw
 		head.rotation.x = _pitch
 		_update_aim()
@@ -1194,12 +1212,49 @@ func _pinned_step(delta: float) -> void:
 		head.rotation.x = lerpf(head.rotation.x, _pitch, clampf(delta * 12.0, 0.0, 1.0))
 
 
+## The Nurse who holds this player (every machine's copy of her), or null.
+func grabber() -> Node:
+	if held_by < 0 or game == null:
+		return null
+	var ms = game.get("monsters")
+	var m = ms.get(held_by) if ms is Dictionary else null
+	if m == null:
+		for n in get_tree().get_nodes_in_group("monster"):
+			if int(n.monster_id) == held_by:
+				m = n
+				break
+	return m if m != null and is_instance_valid(m) else null
+
+
+## Held by the Night Nurse, the local view is hers: it whips onto her face and stays there, whatever
+## the mouse does. A jolt when she takes hold, another when her head snaps.
+func _held_look(delta: float) -> void:
+	var m := grabber()
+	if m == null:
+		return
+	if _held_seen != held_by:
+		_held_seen = held_by
+		_held_cracked = false
+		if fx.has_method("add_shake"):
+			fx.add_shake(1.2, 0.35)
+	if not _held_cracked and float(m.grab_t) >= NurseGrabScript.SNAP_AT:
+		_held_cracked = true
+		if fx.has_method("add_shake"):
+			fx.add_shake(0.7, 0.2)
+	var to: Vector3 = m.eye_transform().origin - head.global_position
+	if to.length() < 0.05:
+		return
+	var k := clampf(delta * 22.0, 0.0, 1.0)
+	_yaw = lerp_angle(_yaw, atan2(-to.x, -to.z), k)
+	_pitch = lerpf(_pitch, atan2(to.y, Vector2(to.x, to.z).length()), k)
+
+
 ## Host-side: turn the shove/drop counters into actual events, exactly once each.
 func _consume_actions() -> void:
 	if game == null:
 		return
 	# Downed hook: a downed player only calls for help; a carrier only puts down or places.
-	var busy := downed or carrying != 0 or dragging_monster >= 0 or hive_view   # SWEEP 3 HOOK (combat: dragging; brains: helpless in Hive Eyes)
+	var busy := downed or carrying != 0 or dragging_monster >= 0 or hive_view or held_by >= 0   # SWEEP 3 HOOK (combat: dragging; brains: helpless in Hive Eyes); the Nurse's grab
 	# SWEEP 3 HOOK: item use and the brain ability (the systems decide what a busy player may do).
 	if use_count != _use_seen:
 		_use_seen = use_count
@@ -1208,7 +1263,7 @@ func _consume_actions() -> void:
 	for i in ability_slot_press.size():
 		if int(ability_slot_press[i]) != int(_ability_slot_seen[i]):
 			_ability_slot_seen[i] = ability_slot_press[i]
-			if alive and not downed:
+			if alive and not downed and held_by < 0:
 				game.player_ability_slot(self, i)
 	if shove_count != _shove_seen:
 		_shove_seen = shove_count
@@ -1216,7 +1271,7 @@ func _consume_actions() -> void:
 			game.player_shoved(self)
 	if faceplant_count != _faceplant_seen:
 		_faceplant_seen = faceplant_count
-		if alive and not downed:
+		if alive and not downed and held_by < 0:
 			game.player_faceplanted(self)   # ROCKET BOOTS
 	if drop_count != _drop_seen:
 		_drop_seen = drop_count
@@ -1224,8 +1279,8 @@ func _consume_actions() -> void:
 			game.drop_selected(self, drop_charge)   # SWEEP 4A HOOK (pharmacy, chunk 3): charged throw
 	if interact_count != _interact_seen:
 		_interact_seen = interact_count
-		if hive_view:
-			pass   # SWEEP 3 HOOK (brains)
+		if hive_view or held_by >= 0:
+			pass   # SWEEP 3 HOOK (brains); held by the Nurse, nobody is coming in time
 		elif alive and downed:
 			game.downed_call_out(self)
 		elif alive and carrying != 0:
@@ -1875,6 +1930,7 @@ func _clear_downed() -> void:
 	carrying = 0
 	on_table = false
 	carry_hold = 0.0
+	held_by = -1
 
 
 ## Host: the hit lands. At 0 HP the game downs the player (game.damage_player); nobody dies of a hit.
@@ -1912,7 +1968,7 @@ func refresh_downed_visuals() -> void:
 		body_visual.visible = false   # the lying PlayerBody on the table stands in
 		name_tag.visible = false
 	if is_local:
-		hands.visible = alive and not downed and (game == null or not game.dev_on() or not game.dev.has_gun(peer_id))
+		hands.visible = alive and not downed and held_by < 0 and (game == null or not game.dev_on() or not game.dev.has_gun(peer_id))
 
 
 ## Knocked down (dev stun) or downed you see the floor; everyone else sees you lying on it. Carried,
@@ -1948,7 +2004,7 @@ func _update_down_pose(delta: float) -> void:
 		if not is_equal_approx(head.position.y, eye):
 			# Hitting the floor out of a dive drops the view fast; everything else eases.
 			var eye_rate := 14.0 if diving else 6.0
-			head.position.y = eye if carried_by != 0 or on_table else move_toward(head.position.y, eye, delta * eye_rate)
+			head.position.y = eye if carried_by != 0 or on_table or held_by >= 0 else move_toward(head.position.y, eye, delta * eye_rate)
 		# Carried, your view hangs back over the carrier's shoulder instead of inside their head.
 		var back := 1.0 if carried_by != 0 else 0.0
 		if not is_equal_approx(head.position.z, back):
@@ -2005,7 +2061,7 @@ func apply_remote_state(s: Array) -> void:
 	if s.size() < 9:
 		return
 	var bits := int(s[3])
-	if alive and carried_by == 0 and not on_table:   # downed hook: pinned bodies follow the host
+	if alive and carried_by == 0 and not on_table and held_by < 0:   # downed hook: pinned bodies follow the host
 		_target_pos = s[0]
 		global_position = s[0]
 	_target_yaw = float(s[1])
@@ -2052,6 +2108,7 @@ func report_full() -> Dictionary:
 		"hp": hp, "al": alive, "iv": invuln > 0.0, "sl": slots.duplicate(true), "sel": selected,
 		# downed hook
 		"dn": downed, "bl": snappedf(bleed, 1.0), "cb": carried_by, "ca": carrying, "ot": on_table,
+		"nh": held_by,   # the Night Nurse's grab
 		"ch": snappedf(carry_hold, 0.1),
 		"dm": dragging_monster,   # SWEEP 3 HOOK (combat)
 		"hv": hive_view,   # SWEEP 3 HOOK (brains)
@@ -2086,18 +2143,24 @@ func apply_remote_full(s: Dictionary) -> void:
 			dead_time = 0.0
 			_set_visible_alive(false)
 	# Downed hook: the host's downed state. The bleed clock runs locally between corrections.
-	var was := [downed, carried_by, carrying, on_table, alive]
+	var was := [downed, carried_by, carrying, on_table, alive, held_by]
 	downed = bool(s.get("dn", false))
 	carried_by = int(s.get("cb", 0))
 	carrying = int(s.get("ca", 0))
 	on_table = bool(s.get("ot", false))
 	carry_hold = float(s.get("ch", 0.0))
+	var nh := int(s.get("nh", -1))
+	if nh >= 0 and held_by < 0:
+		held_from = global_position   # where she took them: the lift starts here on this machine
+	elif nh < 0 and held_by >= 0 and is_local:
+		teleport(held_from)   # she let go: I own my position, so I drop back onto that spot myself
+	held_by = nh
 	dragging_monster = int(s.get("dm", -1))   # SWEEP 3 HOOK (combat)
 	hive_view = bool(s.get("hv", false))   # SWEEP 3 HOOK (brains)
 	var host_bleed := float(s.get("bl", 0.0))
 	if not downed or absf(host_bleed - bleed) > 1.5:
 		bleed = host_bleed
-	if was != [downed, carried_by, carrying, on_table, alive] or not _downed_seen:
+	if was != [downed, carried_by, carrying, on_table, alive, held_by] or not _downed_seen:
 		_downed_seen = true
 		if on_table and not bool(was[3]) and is_local:
 			look_up_from_table()

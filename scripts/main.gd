@@ -419,7 +419,7 @@ func _set_mouse(captured: bool) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	# F2 cycles graphics quality, F3 toggles the frame counter, F5 flips the camera. Work anywhere,
+	# F2 cycles graphics quality, F3 toggles the frame counter, F5 cycles the camera. Work anywhere,
 	# even on the menu.
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.physical_keycode == KEY_F2:
@@ -432,10 +432,12 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 		if event.physical_keycode == KEY_F5:
-			# The camera setting: first person <-> over the shoulder (scripts/camera/carry_camera.gd).
-			var shoulder: bool = Settings.get_value("camera") == "shoulder"
-			Settings.set_value("camera", "first_person" if shoulder else "shoulder")
-			game.say("Camera: %s" % ("first person" if shoulder else "over the shoulder"), 2.0)
+			# The camera setting: first person -> over the shoulder -> facing you -> first person
+			# (scripts/camera/carry_camera.gd swings the camera between them).
+			var modes: PackedStringArray = Settings.CAMERA_MODES
+			var next: String = modes[(modes.find(String(Settings.get_value("camera"))) + 1) % modes.size()]
+			Settings.set_value("camera", next)
+			game.say("Camera: %s" % {"first_person": "first person", "shoulder": "over the shoulder", "front": "facing you"}[next], 2.0)
 			get_viewport().set_input_as_handled()
 			return
 

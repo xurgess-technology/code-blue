@@ -494,7 +494,7 @@ it through `scripts/monsters/night_nurse_rig.gd`; without the asset she falls ba
 Kenney rig and `night_nurse_look.gd` (unchanged).
 
 ```gdscript
-model.nurse                  # NursePoser (SkeletonModifier3D) or null; lunge, recoil, slump (0..1)
+model.nurse                  # NursePoser (SkeletonModifier3D) or null; lunge, recoil, slump, sit, hold, grab, cock
 model.rig / skeleton / anim  # the GLB's root, Skeleton3D and AnimationPlayer (the lab and tests read anim)
 model.play(logical, rate, blend)   # "idle" Idle, "walk"/"run"/"attack" Walk, "frozen"/"static" Frozen
 model.hand_point(left)       # the hand.L / hand.R bone, world
@@ -511,6 +511,56 @@ NurseRig.WALK_SPEED 1.0      # m/s at which Walk's planted foot keeps pace; rate
 - She never lies down, is never dragged, sedated or strapped (sweep 3 locked design), so she has no
   lying or dissection body. `make_lying("night_nurse")` returns her rest pose if anyone asks.
 - The dev room's corpse (`dev_gun.gd monster_corpse`) shows her `Frozen` pose with `slump` 1.
+
+### The Night Nurse's grab (2026-09-18)
+
+Her contact takes no hearts: she grabs. One timeline (`scripts/monsters/nurse_grab.gd`) every machine
+plays from `Monster.grab_t`, which each machine counts itself from the moment the host's `gp` names a
+victim:
+
+| t (s) | what happens |
+|---|---|
+| 0 .. `REACH` 0.08 | both her hands snap round the victim's throat; she straightens to her full height (legs, hips, spine, neck straight), elbows bowed out |
+| 0 .. `LIFT` 0.24 | the victim comes up off the spot they stood on, to her face (overshoots, settles) |
+| .. `SNAP_AT` 1.1 | her head faces them straight on; the victim's camera is locked on her face |
+| `SNAP_AT` + `SNAP` 0.07 | her head snaps over to one side, cocked (`dissection_crack`, a camera jolt) |
+| `DROP_AT` 2.0 | she lets go: the victim drops, downed, where they were taken; she vanishes |
+
+```gdscript
+# Monster (scripts/monster.gd)
+m.grab_peer: int            # peer id she holds, 0 nobody; host authoritative, report key "gp"
+m.grab_t: float             # seconds into the grab; every machine counts it (reset when gp changes)
+m.start_grab(p) / m.end_grab()      # host (game.nurse_grab / the brain)
+m.grab_victim_pose(p) -> Transform3D   # where the held victim hangs: from her grip, facing her
+# Player (scripts/player.gd)
+p.held_by: int              # the Nurse's monster id, -1 nobody; report_full "nh"; pinned to game.pinned_pose
+p.held_from: Vector3        # where she took them (recorded on every machine); they drop back onto it
+p.grabber() -> Node         # that Nurse, on this machine
+# Game (scripts/game.gd)
+game.nurse_grab(m, p) -> bool   # host: Monster.try_contact calls it for her instead of monster_hit_player;
+                                # refuses the downed, held, carried, tabled, invulnerable and god mode
+game.nurse_drop(m, p)           # host, at DROP_AT: teleport to held_from, knock_down_player "monster:night_nurse"
+# The pose (night_nurse_rig.gd, on top of the frozen clip)
+model.nurse.grab / cock     # 0..1 from NurseGrab.reach(t) / cock(t)
+model.nurse.grip_world      # the throat she holds (world), recorded inside the modifier; ZERO when not
+model.nurse.grab_wrists     # [right, left] wrists (world), for the lab
+# The victim's body (body_poser.gd, generic human rigs)
+poser.dangle / dangle_t     # hanging: arms limp at the sides, legs limp and kicking weakly, head back
+```
+
+- While she holds someone her brain ignores being watched (`observed` stays false) and she does not
+  move; the clip stops dead (`anim.speed_scale 0`) and the pose does everything.
+- The victim can do nothing (every action is refused, E does not call for help, the first-person hands
+  hide); nothing else can hurt them (`monster_hit_player` skips the held); Hive Eyes ends; whatever they
+  held drops and whoever they carried falls, as a hit would.
+- She vanishes (`NurseBrain._vanish`) to a random navigation point at least `VANISH_MIN` 22 m from every
+  living surgeon and out of everyone's light (the farthest candidate if none qualifies), calm for
+  `VANISH_CALM` 5 s. Clients snap monsters that jump more than 6 m, so she is simply gone.
+- `kill_monster` on a Nurse mid-grab drops her victim, unhurt, where they were taken.
+- Tests: `tools/monster_lab.tscn` scenario 3 (the grab, the lift, the wrists on the neck, held while
+  watched, the head snap, the drop, the vanish) and scenario 6 (a client copy plays it from `gp`); shots
+  `nurse_grab_stare`, `nurse_grab_cocked` (the victim's view), `nurse_grab_side`,
+  `nurse_grab_side_cocked`, `nurse_grab_hands`, `nurse_grab_hands_back`.
 
 ### The Hive's model (2026-09-18)
 
@@ -1346,6 +1396,7 @@ p.carried_by: int         # carrier's peer id, 0 = nobody; the body is pinned to
 p.carrying: int           # carried player's peer id; carrier moves at CARRY_SPEED_K, cannot shove, drop or use things
 p.on_table: bool          # lying on the player table, pinned there, looking up
 p.carry_hold: float       # seconds this player has held E on a downed teammate (HUD "LIFTING")
+p.held_by: int            # held up by the Night Nurse (her monster id, -1 nobody; "nh"), see "The Night Nurse's grab"
 p.downed_aim              # Area3D "DownedAim", interact_id "pl_<peer id>", on C.L_INTERACT only while lying free
 p.refresh_downed_visuals() / p.look_up_from_table()
 
@@ -1533,7 +1584,8 @@ p.carry_cam                                  # scripts/camera/carry_camera.gd, l
 p.carry_cam.active / blend / offset / arm_length / hides_hands() / aim_segment(range)
 p.bot_charge                                 # test seam: true holds the shove, false lets go
 Settings "carry_camera": "shoulder" (default) | "first_person"     # carrying/dragging, when "camera" is first person
-Settings "camera": "first_person" (default) | "shoulder"           # ordinary play; F5 flips it (main.gd)
+Settings "camera": "first_person" (default) | "shoulder" | "front"  # ordinary play; F5 cycles them (main.gd)
+p.carry_cam.front_view()                     # swung round facing the player: no crosshair, aim from the head
 ```
 
 - **Socket axes** (every hand, first and third person): origin in the palm, -Z the fingers, +Y out
@@ -1574,9 +1626,15 @@ Settings "camera": "first_person" (default) | "shoulder"           # ordinary pl
   interact comes in standing still. `body_hands.lies_by_clip()` tells `Player._update_down_pose` not to
   tip the body; carried, the body is placed each frame by `Player.human_carried_pose(carrier)`: `HUMAN_CARRIED_SHOULDER` (-0.15, 1.535, 0.03)
   in the carrier's frame and yaw, mirrored (x scale -1: the clip is authored over a right shoulder), so the Carried clip's belly lands on the carrier's LEFT shoulder; corpses.gd places a carried human body the same way and a seal/monster body across the shoulders at `SHOULDER_AT` (-0.38, 1.62, 0.18), where the furnace roll-off starts. The carrier's `carry` pose wraps the LEFT arm across the legs; the right arm stays free. The first-person arms stay `fp_arms`.
-- **Opt-in shoulder camera** (2026-09-18): with the `camera` setting on "shoulder" (the settings
-  screen's Camera row, or F5 anywhere) the same rig below runs in ordinary play too, at `PLAY_ARM`
-  (0.5, 0.3, 1.35), switching to the carry/drag arms while carrying or dragging; `wants()` still
+- **Opt-in shoulder and front cameras** (2026-09-18): with the `camera` setting on "shoulder" (the
+  settings screen's Camera row, or F5 anywhere) the same rig below runs in ordinary play too, at
+  `PLAY_ARM` (0.5, 0.3, 1.35). On "front" the rig's yaw frame turns half round (`_orbit`, eased over
+  `ORBIT_TIME` 0.55 s, passing the player's right side) to `FRONT_ARM` (0, 0.1, 2.3) and `Head/FX`'s
+  basis slerps from the head's look to looking back at the upper chest (`FRONT_LOOK_DROP` below the
+  eye), so the camera travels round rather than cutting; going back to first person unwinds it as it
+  goes into the head. Facing the player (`front_view()`) the HUD skips the crosshair and
+  `aim_segment` is the head's own ray. The torch always follows the head, never the camera. Carrying
+  or dragging swing back behind to their arms; `wants()` still
   gives the head back while operating, in Hive Eyes, downed, carried, on the table or dead. The
   local held stack shows in the body's hand while the body shows (`_held_tp`). First person stays
   the default. Test: `tools/controlstest.tscn` ("over-the-shoulder camera").

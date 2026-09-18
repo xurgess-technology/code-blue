@@ -2532,13 +2532,50 @@ func _update_danger() -> void:
 
 ## Host only. A monster connected with a surgeon.
 func monster_hit_player(m: Node, p: Node) -> void:
-	if not is_host() or not p.alive or p.downed or p.invuln > 0.0:
+	if not is_host() or not p.alive or p.downed or p.invuln > 0.0 or int(p.held_by) >= 0:
 		return
 	if dev_on() and dev.is_god(p):
 		return  # DEV HOOK: god mode
 	var knock: Vector3 = (p.global_position - m.global_position).normalized() * m.knockback
 	damage_player(p, m.damage, "monster:%s" % m.kind, knock)
 	m.recoil_after_hit()
+
+
+## Host only. The Night Nurse got her hand on a surgeon (scripts/monsters/nurse_grab.gd): no hearts,
+## she has them by the neck. They drop what they hold and stop whatever they were doing; for
+## NurseGrab.DROP_AT seconds they hang from her grip staring into her face, then nurse_drop downs
+## them. False when they cannot be taken (already down, held, carried, tabled, invulnerable, god mode).
+func nurse_grab(m: Node, p: Node) -> bool:
+	if not is_host() or p == null or not is_instance_valid(p) or not p.alive or p.downed or p.invuln > 0.0:
+		return false
+	if int(p.held_by) >= 0 or p.carried_by != 0 or p.on_table or int(m.grab_peer) != 0:
+		return false
+	if dev_on() and dev.is_god(p):
+		return false  # DEV HOOK: god mode
+	if combat != null and combat.has_method("cancel_windup"):
+		combat.cancel_windup(p, "hit")
+	_end_operations(p)
+	_drop_hands(p, true)
+	if p.carrying != 0:
+		drop_carried(p)
+	if combat != null:
+		combat.drop_dragged(p)
+	p.held_by = int(m.monster_id)
+	p.held_from = p.global_position
+	p.refresh_downed_visuals()
+	m.start_grab(p)
+	_sound("monsters_grab", p.global_position + Vector3.UP * C.EYE_H)
+	return true
+
+
+## Host only. She lets go (at NurseGrab.DROP_AT, or because she is gone): the surgeon drops on the
+## spot she took them from, downed. `p` may be null (they left mid-grab).
+func nurse_drop(_m: Node, p: Node) -> void:
+	if not is_host() or p == null or not is_instance_valid(p) or int(p.held_by) < 0:
+		return
+	p.held_by = -1
+	p.teleport(p.held_from)
+	knock_down_player(p, "monster:night_nurse")
 
 
 ## Host only. Every hurt a player takes goes through here (monsters, the dev gun). `source` is
@@ -2580,6 +2617,10 @@ func kill_monster(m: Node) -> void:
 	if not is_host() or m == null or not is_instance_valid(m) or not monsters.has(m.monster_id):
 		return
 	monsters.erase(m.monster_id)
+	for q in players.values():
+		if int(q.held_by) == int(m.monster_id):
+			q.held_by = -1   # the Nurse is gone mid-grab: whoever she held drops, unhurt
+			q.teleport(q.held_from)
 	if combat != null:
 		combat.on_monster_removed(m)   # SWEEP 3 HOOK
 	var data := {"kind": m.kind, "pos": m.global_position, "y": m.rotation.y}
@@ -3038,6 +3079,11 @@ func start_player_surgery(p: Node) -> void:
 
 ## Where a carried or tabled player's body goes (every machine, every frame).
 func pinned_pose(p: Node) -> Transform3D:
+	if int(p.held_by) >= 0:
+		var nm = monsters.get(int(p.held_by))
+		if nm != null and is_instance_valid(nm):
+			return nm.grab_victim_pose(p)
+		return p.global_transform
 	if p.on_table:
 		var b := Basis(Vector3.UP, player_table_yaw())
 		return Transform3D(b, player_table_top() + b * Vector3(-0.8, 0.0, 0.0))

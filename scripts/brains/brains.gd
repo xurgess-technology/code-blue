@@ -506,7 +506,7 @@ func _tick_hive() -> void:
 			_end_hive(peer, "The Hive is gone. You snap back into your body.")
 		elif m.has_method("is_sedated") and m.is_sedated():
 			_end_hive(peer, "The Hive goes under. You are back in your body.")
-		elif not p.alive or p.downed or int(p.hp) < int(_hive_hp.get(peer, p.hp)) or float(p.stun) > 0.0 or p.carried_by != 0:
+		elif not p.alive or p.downed or int(p.hp) < int(_hive_hp.get(peer, p.hp)) or float(p.stun) > 0.0 or p.carried_by != 0 or int(p.held_by) >= 0:
 			_end_hive(peer, "Something hits you. You snap back into your body.")
 		elif float(game.world_time) >= float(_hive[peer][1]):
 			_end_hive(peer, "")

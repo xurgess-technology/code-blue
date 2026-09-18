@@ -11,7 +11,11 @@ extends RefCounted
 ##   stalking    it looks ahead along its path; if the next stretch would put it in
 ##               someone's light, it holds where it is (in the dark, just outside the beam)
 ##               for up to STALK_PATIENCE seconds. It also lingers in doorways it passes.
-##   contact     2 hearts; then it backs off and stays calm briefly. Shoves do nothing.
+##   contact     no hearts: she grabs (nurse_grab.gd, game.nurse_grab). The surgeon hangs by the
+##               neck from her hand for NurseGrab.DROP_AT seconds, staring into her face while her
+##               head snaps over; then she drops them downed and is gone, somewhere far off and out
+##               of everyone's light, calm for NurseGrab.VANISH_CALM. Watching her changes nothing
+##               while she holds someone. Shoves do nothing.
 ##
 ## Cost: observation is evaluated OBSERVE_NEAR times a second when a player is within
 ## NEAR_RANGE, OBSERVE_FAR otherwise, staggered per nurse; never per frame.
@@ -22,6 +26,7 @@ extends RefCounted
 ## points; neither ever touches a player. `speed` replaces SPEED for every walk.
 
 const M := preload("res://scripts/monsters/modes.gd")
+const NurseGrab := preload("res://scripts/monsters/nurse_grab.gd")
 const Percept := preload("res://scripts/perception.gd")
 
 const SPEED := 3.4
@@ -68,6 +73,9 @@ func body_points(at: Vector3) -> Array:
 
 func think(delta: float) -> void:
 	var g: Node = m.game
+	if m.grab_peer != 0:
+		_grabbing()
+		return
 	m.calm = maxf(0.0, m.calm - delta)
 	observe_timer -= delta
 	var target: Node = m.nearest_player()
@@ -209,6 +217,55 @@ func _at_new_door() -> bool:
 		return false
 	_last_door = t
 	return true
+
+
+## Holding someone: stand still (being watched does not matter now), then let go and vanish.
+func _grabbing() -> void:
+	m.observed = false
+	m.moving = false
+	m.speed = 0.0
+	m.velocity = Vector3.ZERO
+	m.mode = M.Mode.STALK
+	m.state = M.State.CHASE
+	if m.grab_t < NurseGrab.DROP_AT:
+		return
+	var p: Node = m.game.players.get(m.grab_peer)
+	m.end_grab()
+	if m.game.has_method("nurse_drop"):
+		m.game.nurse_drop(m, p)
+	_vanish()
+
+
+## Gone: somewhere at least VANISH_MIN from every living surgeon and out of everyone's light
+## (the farthest candidate if none qualifies). Clients snap monsters that jump more than 6 m.
+func _vanish() -> void:
+	var g: Node = m.game
+	var best := m.global_position
+	var best_d := -1.0
+	for i in 24:
+		var spot: Vector3 = m.random_nav_point(m.global_position, NurseGrab.VANISH_MIN, 400.0)
+		var nearest := 1e9
+		for q in g.alive_players():
+			nearest = minf(nearest, spot.distance_to(q.global_position))
+		if nearest < NurseGrab.VANISH_MIN or Percept.observed_any(g, body_points(spot)):
+			if nearest > best_d:
+				best_d = nearest
+				best = spot
+			continue
+		best = spot
+		break
+	m.global_position = best
+	m.velocity = Vector3.ZERO
+	m.stop()
+	m.observed = false
+	m.calm = NurseGrab.VANISH_CALM
+	m.mode = M.Mode.IDLE
+	m.state = M.State.WANDER
+	stalk_time = 0.0
+	hold_timer = 0.0
+	linger = 0.0
+	retreat_timer = 0.0
+	ahead_blocked = false
 
 
 func shoved(_dir: Vector3) -> void:
