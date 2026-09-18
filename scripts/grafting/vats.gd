@@ -68,7 +68,7 @@ static func build_model(root: Node3D) -> void:
 	if _glass_mat == null:
 		_glass_mat = _mat(Color(0.8, 0.9, 0.92, 0.22), 0.05)
 		_glass_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		_fluid_mat = _mat(Color(0.75, 0.82, 0.5, 0.55), 0.25)
+		_fluid_mat = _mat(Color(0.78, 0.85, 0.55, 0.28), 0.25)
 		_fluid_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	var steel := _mat(Color(0.5, 0.52, 0.55), 0.35, 0.6)
 	var parts := [
@@ -92,6 +92,7 @@ static func build_model(root: Node3D) -> void:
 	var content := Node3D.new()
 	content.name = "Content"
 	content.position = Vector3(0, 0.08, 0)
+	content.scale = Vector3.ONE * 1.5   # a bigger eye reads through the fluid
 	root.add_child(content)
 	for k in Eyes.KINDS:
 		var holder := Node3D.new()

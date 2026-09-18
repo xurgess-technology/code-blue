@@ -101,7 +101,7 @@ func ailment_for(c: Dictionary, p) -> String:
 			return "eye_extraction"
 		"bone_saw":
 			return "dissection"
-	return cur
+	return "eye_extraction"   # empty-handed (or anything else): the Hive's default plan is its eye
 
 
 ## Host: before an operation starts, the case takes the ailment p's tool asks for (ailment_for).
@@ -319,7 +319,7 @@ func table_prompt(p, table_index: int) -> String:
 	if p != null and String(c.patient_id) == "hive" and int(c.step_index) == 0:
 		var held_kind := String(p.selected_stack().get("kind", ""))
 		if held_kind != "scalpel" and held_kind != "bone_saw":
-			return "!Hold the bone saw to dissect, or the scalpel to take an eye (%s)" % sed_txt
+			return "!Hold the scalpel to take its eye, or the bone saw to open the skull (%s)" % sed_txt
 	var step := Procedures.step(ailment_for(c, p), int(c.step_index))
 	var sys = game.surgery_for_table(table_index)
 	if step.is_empty() or sys == null:

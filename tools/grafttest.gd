@@ -142,6 +142,9 @@ func _run() -> void:
 			placed = v
 	_check(placed != null and Eyes.unpack(String(placed.x)).get("kind", "") == "eye_hive" and Vats.held_vat(me) < 0, "set down on a free bench spot with the eye still inside")
 	_check(not vats.spot_free(3), "that spot is taken now")
+	await _seconds(0.4)
+	var shown = placed.find_child("VatEye_eye_hive", true, false) if placed != null else null
+	_check(shown != null and (shown as Node3D).visible and (shown as Node3D).is_visible_in_tree(), "the eye shows floating in the vat")
 	_clear_hands()
 
 	# ---- Eyeball Extraction on a strapped Hive
@@ -160,7 +163,7 @@ func _run() -> void:
 	me.bot_move = Vector2.ZERO
 	_clear_hands()
 	var p0 := String(game._table_prompt(me, table))
-	_check(p0.begins_with("!Hold the bone saw") and p0.contains("scalpel"), "empty-handed at a fresh Hive the prompt says what to hold ('%s')" % p0)
+	_check(p0.begins_with("!Hold the scalpel") and p0.contains("bone saw"), "empty-handed at a fresh Hive the prompt says what to hold ('%s')" % p0)
 	game.give_hand(me, "bone_saw", 1)
 	var p1 := String(game._table_prompt(me, table))
 	_check(p1.begins_with("Operate: Saw open the skull"), "the bone saw offers dissection ('%s')" % p1)
@@ -169,6 +172,10 @@ func _run() -> void:
 	var kinds := []
 	for pn in panels:
 		if String(pn.get("patient_id", "")) == "hive":
+			_check(String(pn.steps[0].label) == "Cut around the eye" and String(pn.ailment_name).begins_with("Eyeball Extraction") and bool(pn.eye),
+				"the wall monitor leads with Eyeball Extraction for a fresh Hive, not the brain ('%s': '%s')" % [String(pn.ailment_name), String(pn.steps[0].label)])
+			var d0: String = game.dissection.ailment_for(_monster_case("hive"), me)
+			_check(d0 == "eye_extraction", "empty-handed, a fresh Hive's plan is extraction (%s)" % d0)
 			for sp in pn.supplies:
 				kinds.append(String(sp.kind))
 	_check(not panels.is_empty() and (kinds.has("scalpel") and kinds.has("eye_spoon") and kinds.has("bone_saw")), "the OR screen lists both plans' tools for a fresh Hive (%s)" % str(kinds))

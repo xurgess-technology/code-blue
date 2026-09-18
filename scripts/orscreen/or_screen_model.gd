@@ -80,20 +80,24 @@ static func _panel(game: Object, c: Dictionary, order: int, shelf_left: Dictiona
 	var vitals := clampf(float(c.get("vitals", game.get("vitals") if game.get("vitals") != null else 100.0)), 0.0, 100.0)
 	if state == "dead":
 		vitals = 0.0
-	var ail := ProceduresDB.ailment(ailment_id)
-	var steps := ProceduresDB.steps(ailment_id)
+	# GRAFTING part one: a strapped Hive that hasn't started can go either way (the tool in hand picks;
+	# Dissection.ailment_for). The screen leads with Eyeball Extraction, the default plan, and lists the
+	# saw and forceps too.
+	var fresh_hive := patient_id == "hive" and ailment_id == "dissection" and int(c.get("step_index", 0)) == 0 and state == "on_table"
+	var shown_id := "eye_extraction" if fresh_hive else ailment_id
+	var ail := ProceduresDB.ailment(shown_id)
+	var steps := ProceduresDB.steps(shown_id)
 	var cur := clampi(int(c.get("step_index", 0)), 0, steps.size())
 	if state == "stable":
 		cur = steps.size()
-	# GRAFTING part one: a strapped Hive that hasn't started can go either way (the tool in hand picks).
-	var fresh_hive := patient_id == "hive" and ailment_id == "dissection" and cur == 0 and state == "on_table"
 	var p := {
 		"id": int(c.get("id", order)),
 		"table": int(c.get("table", order)),
 		"patient_id": patient_id,
 		"patient_name": _patient_name(game, c),
 		"ailment_id": ailment_id,
-		"ailment_name": "Dissection / Eye extraction" if fresh_hive else String(ail.get("name", ailment_id.capitalize())),
+		"ailment_name": String(ail.get("name", ailment_id.capitalize())) + (" (or dissection)" if fresh_hive else ""),
+		"eye": shown_id == "eye_extraction",
 		"code": String(ail.get("code", "")),
 		"state": state,
 		"vitals": vitals,
@@ -121,9 +125,9 @@ static func _panel(game: Object, c: Dictionary, order: int, shelf_left: Dictiona
 		})
 	# Supplies for the steps still to come, against what the shelf can still spare for this case.
 	if state == "on_table" or state == "incoming":
-		var need := ProceduresDB.remaining_requirements(ailment_id, cur)
+		var need := ProceduresDB.remaining_requirements(shown_id, cur)
 		if fresh_hive:
-			need.merge(ProceduresDB.remaining_requirements("eye_extraction", 0), true)
+			need.merge(ProceduresDB.remaining_requirements("dissection", 0), true)
 		var kinds := []
 		for kind in ItemsDB.SURGICAL:
 			if need.has(kind):
