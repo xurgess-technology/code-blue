@@ -3,8 +3,9 @@ extends RefCounted
 ## drags a monster (docs/HANDS_AND_FEEDBACK.md "Over-the-shoulder carry camera"). Local only: nothing
 ## new on the wire.
 ##
-## Ordinary play is always first person, locked -- this camera only ever engages for the
-## carry/drag states below. Framed the way the big third-person games do it (The Last of Us Part II,
+## Ordinary play is first person unless the `camera` setting is "shoulder" (F5 flips it): then this
+## rig is on all the time, at PLAY_ARM, except where the game wants the head (operating, Hive Eyes,
+## downed, carried, on the table, dead). Framed the way the big third-person games do it (The Last of Us Part II,
 ## the RE4 remake, God of War): the camera sits close behind and over the RIGHT shoulder, so the
 ## carrier fills the left third of the screen and the crosshair at the centre is clear; the load
 ## rides the LEFT shoulder (game.pinned_pose -0.55 x, Player.HUMAN_CARRIED_SHOULDER mirrored,
@@ -24,13 +25,16 @@ extends RefCounted
 ## not. The flashlight stays at the head, pointed where the camera looks.
 ## After a body goes into the furnace the camera lingers over the shoulder for LINGER_SECONDS so the
 ## carrier sees it roll off into the fire (linger(), corpses.gd).
-## Setting `carry_camera`: "shoulder" (default) or "first_person".
+## Setting `carry_camera`: "shoulder" (default) or "first_person", for the carry/drag states when
+## the `camera` setting is first person.
 
 const EASE_TIME := 0.4
 ## Yaw-frame offsets (x right, y up, z back). PIVOT is from the eye; the arms are from the pivot.
 const PIVOT := Vector3(0.0, -0.2, 0.12)
 ## Carrying: close over the right shoulder. At level pitch the camera sits (0.5, 0.14, 1.27) from the eye.
 const CARRY_ARM := Vector3(0.5, 0.34, 1.15)
+## Ordinary play with the `camera` setting on "shoulder": the carry framing, a touch further back.
+const PLAY_ARM := Vector3(0.5, 0.3, 1.35)
 ## Dragging: the body lies behind, so a little higher and further back, looking gently down.
 const DRAG_ARM := Vector3(0.58, 0.72, 1.5)
 ## Extra downward look while dragging, radians, so the body behind is in frame.
@@ -75,12 +79,19 @@ static func setting_on() -> bool:
 	return String(Settings.get_value("carry_camera")) != "first_person"
 
 
+## The `camera` setting: over the shoulder in ordinary play too.
+static func play_on() -> bool:
+	return String(Settings.get_value("camera")) == "shoulder"
+
+
 func wants() -> bool:
 	var p = player
 	if p == null or not p.alive or p.downed or p.operating or p.hive_view or p.carried_by != 0 or p.on_table:
 		return false
 	if p.game == null or p.game.phase == p.game.Phase.MENU:
 		return false
+	if play_on():
+		return true
 	if not setting_on():
 		return false
 	return p.carrying != 0 or p.dragging_monster >= 0 or _linger > 0.0
@@ -111,6 +122,8 @@ func update(delta: float) -> void:
 	var want := wants()
 	if want and (p.carrying != 0 or p.dragging_monster >= 0):
 		_target_arm = CARRY_ARM if p.carrying != 0 else DRAG_ARM
+	elif want and _linger <= 0.0:
+		_target_arm = PLAY_ARM
 	if blend <= 0.0:
 		_arm = _target_arm
 	else:

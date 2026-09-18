@@ -45,6 +45,7 @@ func _run() -> void:
 	await _stances()
 	await _sprint_dive()
 	await _rocket_boots()
+	await _shoulder_camera()
 
 
 # =========================================================================
@@ -359,6 +360,52 @@ func _rocket_boots() -> void:
 	game.reset_money()
 	_check(not me.boots, "a new run takes the boots off")
 	await _stand_up()
+
+
+## The `camera` setting on "shoulder": the carry camera's rig in ordinary play, the body shown and the
+## first-person hands hidden, aiming still from the crosshair; back on "first_person" it lets go.
+## Uses the real settings file, so the old value goes back afterwards.
+func _shoulder_camera() -> void:
+	_say("---- over-the-shoulder camera")
+	var was = Settings.get_value("camera")
+	await _stand_up()
+	me.bot_move = Vector2.ZERO
+	me.bot_sprint = false
+	me.slots = me.empty_slots()
+	Settings.set_value("camera", "first_person")
+	await _frames(40)
+	var cc = me.carry_cam
+	_check(cc != null and not cc.active, "first person: the shoulder rig is off")
+	Settings.set_value("camera", "shoulder")
+	var on := await _until(func(): return cc.blend >= 1.0, 1.5)
+	_check(on and cc.active, "the setting puts the camera over the shoulder in ordinary play")
+	_check(cc.arm_length > 0.8, "the camera sits behind the head (%.2f m)" % cc.arm_length)
+	_check(me._carry_body and me.body_visual.visible, "your own body shows")
+	_check(cc.hides_hands(), "and the first-person hands hide")
+	# Aiming still goes where the crosshair points: a stack on the floor ahead can be taken.
+	var at: Vector3 = me.global_position + (-me.global_basis.z) * 1.2
+	var it: Node3D = game._spawn_item("gauze", 2, Transform3D(Basis(), at + Vector3.UP * 0.05), WorldItem.State.LOOSE)
+	await _frames(20)
+	# Steer the crosshair (the camera's ray, not the head's) onto it; the camera moves as you turn.
+	for i in 12:
+		var d: Vector3 = it.global_position - me.camera.global_position
+		me.bot_yaw = atan2(-d.x, -d.z)
+		me.bot_pitch = atan2(d.y, Vector2(d.x, d.z).length())
+		await _frames(3)
+	var aimed := await _until(func(): return String(me.aim_prompt).begins_with("Take"), 1.0)
+	_check(aimed, "aiming over the shoulder still finds the stack (%s)" % me.aim_prompt)
+	me.bot_press += 1
+	var took := await _until(func(): return me.holding("gauze"), 1.0)
+	_check(took, "and E takes it")
+	await _frames(5)
+	_check(me._held_tp.visible, "the stack shows in the body's hand")
+	me.bot_pitch = 0.0
+	# Hive Eyes, surgery and the rest keep the head: going down drops back to first person.
+	Settings.set_value("camera", "first_person")
+	var off := await _until(func(): return not cc.active, 1.5)
+	_check(off and not me._carry_body and not cc.hides_hands(), "back to first person: the rig lets go")
+	Settings.set_value("camera", was)
+	me.slots = me.empty_slots()
 
 
 ## Stand, face north on the spine, and sprint.

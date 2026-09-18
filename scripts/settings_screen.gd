@@ -254,7 +254,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		var k: int = event.physical_keycode
-		if k == KEY_F2 or k == KEY_F3 or k == KEY_F11:
+		if k == KEY_F2 or k == KEY_F3 or k == KEY_F5 or k == KEY_F11:
 			return   # the global shortcuts still work, and the page follows them
 	if event is InputEventKey or event is InputEventMouseButton:
 		get_viewport().set_input_as_handled()
@@ -356,6 +356,7 @@ func _build() -> void:
 	right.add_child(_slider_row("sensitivity", "Mouse", 0.2, 3.0, 0.05, func(v): return "%.2fx" % v))
 	right.add_child(_slider_row("fov", "FOV", 60.0, 100.0, 1.0, func(v): return "%d°" % roundi(v)))
 	right.add_child(_choice_row("sprint_mode", "Sprint", [["toggle", "TOGGLE"], ["hold", "HOLD"]]))
+	right.add_child(_choice_row("camera", "Camera", [["first_person", "FIRST"], ["shoulder", "SHOULDER"]]))
 	right.add_child(_choice_row("carry_camera", "Carrying", [["shoulder", "SHOULDER"], ["first_person", "FIRST"]]))   # HANDS HOOK
 	right.add_child(_section("KEYS"))   # SWEEP 4A HOOK (controls)
 	right.add_child(_rebind_row("key_crouch", "Crouch"))
@@ -364,7 +365,7 @@ func _build() -> void:
 	right.add_child(_rebind_row("key_scan", "Scan"))
 
 	_sheet.add_child(_rule())
-	_sheet.add_child(_ink("Changes apply right away.  F2 cycles graphics, F11 toggles fullscreen.", 14, Fax.INK_FAINT))
+	_sheet.add_child(_ink("Changes apply right away.  F2 cycles graphics, F5 the camera, F11 fullscreen.", 14, Fax.INK_FAINT))
 	var space := Control.new()
 	space.custom_minimum_size.y = 6
 	space.mouse_filter = Control.MOUSE_FILTER_IGNORE

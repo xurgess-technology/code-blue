@@ -1664,7 +1664,7 @@ func _process(_delta: float) -> void:
 				holder.add_child(_held_model(String(s.kind), int(s.count), holder == _held_fp))
 		# The flashlight hand hides nothing; the held stack sits in the other hand.
 		_held_fp.visible = is_local
-		_held_tp.visible = not is_local or _mirror_self
+		_held_tp.visible = not is_local or _mirror_self or _carry_body
 		if is_local:
 			_put_on_self_layer(_held_tp)
 		if is_local:
@@ -1711,7 +1711,7 @@ func _refresh_self_body() -> void:
 				(mi as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	if body_hands != null:
 		body_hands.set_active(show)
-	_held_tp.visible = _mirror_self
+	_held_tp.visible = _mirror_self or _carry_body   # over the shoulder: the stack in the body's hand
 	if _carry_body:
 		camera.cull_mask |= LightRoomsSelf.SELF
 	else:

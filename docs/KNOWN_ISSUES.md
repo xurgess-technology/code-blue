@@ -1413,6 +1413,14 @@ now that the default case doesn't exist. `tools/carrycamtest.gd` and `tools/sett
 their `default_camera`-specific checks removed; `carrycamtest.gd` now asserts ordinary play is
 locked first person (`blend 0.0`, hands visible) instead of exercising a setting toggle.
 
+**Back as an opt-in (2026-09-18, user request):** a settings option to toggle the over-the-shoulder
+view freely. Unlike the reverted default, first person stays the default: the `camera` key
+("first_person" | "shoulder", settings row "Camera", F5 flips it) turns the carry rig on in ordinary
+play at `PLAY_ARM`. carrycamtest's first-person assertion still holds (it runs on the default).
+Known rough edges: the flashlight stays at the head, so the body seen from behind is backlit and
+dark in unlit places; the first-person-only feedback (the hands' wind-up and throw poses) shows on
+the body instead; not re-verified in multiplayer (local only, nothing on the wire).
+
 ## Sprint + crouch-dive (2026-09-16)
 
 Added a "sprint + crouch-dive" move to `scripts/player.gd`'s `_local_step`: pressing crouch while

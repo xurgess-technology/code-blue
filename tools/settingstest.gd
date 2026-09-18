@@ -87,6 +87,8 @@ func _run() -> void:
 	_check(Settings.get_value("carry_camera") == "shoulder", "bad carry camera mode falls back to shoulder")
 	Settings.set_value("sprint_mode", "banana")
 	_check(Settings.get_value("sprint_mode") == "toggle", "bad sprint mode falls back to toggle")
+	Settings.set_value("camera", "banana")
+	_check(Settings.get_value("camera") == "first_person", "bad camera mode falls back to first person")
 	Settings.set_value("quality", 7)
 	_check(Settings.get_value("quality") == 2, "quality clamps to 2")
 
@@ -104,6 +106,7 @@ func _run() -> void:
 	Settings.set_value("fov", 95.0)
 	Settings.set_value("quality", 0)
 	Settings.set_value("carry_camera", "first_person")   # HANDS HOOK
+	Settings.set_value("camera", "shoulder")
 	Settings.set_value("sprint_mode", "hold")
 	Settings.set_value("key_crouch", KEY_C)   # SWEEP 4A HOOK (controls)
 	Settings.set_value("key_jump", KEY_J)
@@ -202,6 +205,10 @@ func _run() -> void:
 	_check(Settings.get_value("carry_camera") == "first_person", "carry camera buttons write the setting")
 	Settings.set_value("carry_camera", "shoulder")
 	_check((ui._choices["carry_camera"]["shoulder"] as Button).button_pressed, "the screen follows the carry camera setting")
+	(ui._choices["camera"]["first_person"] as Button).button_pressed = true
+	_check(Settings.get_value("camera") == "first_person", "camera buttons write the setting")
+	Settings.set_value("camera", "shoulder")
+	_check((ui._choices["camera"]["shoulder"] as Button).button_pressed, "the screen follows the camera setting")
 	(ui._choices["sprint_mode"]["hold"] as Button).button_pressed = true
 	_check(Settings.get_value("sprint_mode") == "hold", "sprint mode buttons write the setting")
 	Settings.set_value("sprint_mode", "toggle")

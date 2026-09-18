@@ -1503,7 +1503,8 @@ p.body_hands.set_active(on) / has_rig()
 p.carry_cam                                  # scripts/camera/carry_camera.gd, local player only (else null)
 p.carry_cam.active / blend / offset / arm_length / hides_hands() / aim_segment(range)
 p.bot_charge                                 # test seam: true holds the shove, false lets go
-Settings "carry_camera": "shoulder" (default) | "first_person"     # carrying/dragging only; ordinary play is always first person
+Settings "carry_camera": "shoulder" (default) | "first_person"     # carrying/dragging, when "camera" is first person
+Settings "camera": "first_person" (default) | "shoulder"           # ordinary play; F5 flips it (main.gd)
 ```
 
 - **Socket axes** (every hand, first and third person): origin in the palm, -Z the fingers, +Y out
@@ -1544,6 +1545,12 @@ Settings "carry_camera": "shoulder" (default) | "first_person"     # carrying/dr
   interact comes in standing still. `body_hands.lies_by_clip()` tells `Player._update_down_pose` not to
   tip the body; carried, the body is placed each frame by `Player.human_carried_pose(carrier)`: `HUMAN_CARRIED_SHOULDER` (-0.15, 1.535, 0.03)
   in the carrier's frame and yaw, mirrored (x scale -1: the clip is authored over a right shoulder), so the Carried clip's belly lands on the carrier's LEFT shoulder; corpses.gd places a carried human body the same way and a seal/monster body across the shoulders at `SHOULDER_AT` (-0.38, 1.62, 0.18), where the furnace roll-off starts. The carrier's `carry` pose wraps the LEFT arm across the legs; the right arm stays free. The first-person arms stay `fp_arms`.
+- **Opt-in shoulder camera** (2026-09-18): with the `camera` setting on "shoulder" (the settings
+  screen's Camera row, or F5 anywhere) the same rig below runs in ordinary play too, at `PLAY_ARM`
+  (0.5, 0.3, 1.35), switching to the carry/drag arms while carrying or dragging; `wants()` still
+  gives the head back while operating, in Hive Eyes, downed, carried, on the table or dead. The
+  local held stack shows in the body's hand while the body shows (`_held_tp`). First person stays
+  the default. Test: `tools/controlstest.tscn` ("over-the-shoulder camera").
 - **Carry camera** (`scripts/camera/carry_camera.gd`): while the local player carries a downed player
   or a body, or drags a monster (setting "shoulder"), `Head/FX` eases (0.4 s, smootherstep) over the
   RIGHT shoulder (the load rides the left), framed like a flagship third-person game: the carrier on
