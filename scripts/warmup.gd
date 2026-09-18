@@ -83,6 +83,7 @@ static func run(game: Node, progress: Callable = Callable(), ready_to_draw: Call
 		x += 0.2
 	_inert(shelf)
 	_report(progress, "items", Items.ITEMS.size())
+	ItemIcons.preload_all()   # ICONS: every item and ability icon loaded, and the greyscale ones (spoiled, used up) made
 	EconomyScript.warm(shelf)
 	preload("res://scripts/rocket_boots.gd").warm(shelf)   # ROCKET BOOTS: the heel pods and the flame
 	ExteriorScript.warm(shelf)   # the front: concrete, window glass, sign letters

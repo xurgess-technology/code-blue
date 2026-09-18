@@ -1379,11 +1379,39 @@ OrScreenModel.build(game) -> Dictionary # scripts/orscreen/or_screen_model.gd, p
 - Cost: the SubViewport renders only on request, at 12 Hz within 7 m and 5 Hz beyond, and never
   while the glass is out of the live camera's view or past 22 m. Its OmniLight (`Glow`, energy
   0.16, green / amber / red from the worst case) re-tints at 4 Hz. Registered in `Warmup`.
-- HUD (`scripts/hud.gd`): only the slot bar, crosshair + interact prompt + hold progress, the
+- HUD (`scripts/hud.gd`): only the icon item bar, crosshair + interact prompt + hold progress, the
   player's hearts (+ stamina while not full), messages and the dead banner, the money readout, the
   first-seconds controls line, the lobby host address and the pause / end overlays. `hud.drawn`
   lists the element ids the last frame drew. Anything new about the case, the steps or supplies
   belongs on the monitor, not the HUD.
+- The icon item bar (2026-09-18, docs/ITEMS_AND_ICONS.md chunk C; `scripts/hud.gd` `_draw_hands`, icons
+  from `scripts/item_icons.gd`): four square slots (one per hand slot, `C.CARRY_CAP`) bottom centre,
+  each the kind's bare icon on a dark rounded square with its category border, the key number in a
+  corner and a live `xN` badge on stacks; no prices. The selected slot is lifted and outlined; a bulky
+  stack whose two slots touch is ONE wide slot (a pair that wraps round the bar stays two squares with a
+  bracket). The layout is pure: `Hud.bar_units(w, h, slots, selected_head, alt_t)` returns
+  `[{slot, rect, wide, ghost, sel, keys, other}]` (tools/hudtest.gd reads it); `hud.slots_drawn` lists
+  "slot" / "wide" per unit drawn. The held item's name shows above the bar for 2 s when what you hold
+  changes (`item_name` in `hud.drawn`). Pickup pop: a new item or a bigger count in a slot flies its icon
+  from the crosshair into that slot in 0.3 s (`pickup_pop`). Alt shrinks the row to small squares and the
+  ability bar grows into the bar as before (the ability circles now sit just under that small row).
+  Body parts spoil visibly: a ring drains round the slot and the icon greys (a spoiled part stays grey).
+  Eyes read `game.vats.eye_factor`, brains `game.brains.factor_of`, any other kind the numbers in its
+  stack: `fresh` (0..1) and `spoiled` (bool). A used-up trinket is a stack with `used: true`: greyed with
+  a crack (nothing sets it yet; the trinkets chunk does). A kind with no icon draws a plain slot with its
+  first letters in its category colour.
+- `ItemIcons` (`scripts/item_icons.gd`): `bare(kind)` / `framed(kind)` / `grey(kind)` /
+  `ability(id)` -> Texture2D or null, `border(kind)`, `category(kind)`, `is_trinket(kind)`,
+  `kind_named(display_name)`. `ALIAS` maps kinds whose art is filed under another name (`eye_hive` ->
+  `hive_eyeball`). Icons are imported with mipmaps, so draw them on a CanvasItem with
+  `texture_filter = TEXTURE_FILTER_LINEAR_WITH_MIPMAPS` (the HUD, the OR monitor canvas and the
+  database do). `Warmup` calls `ItemIcons.preload_all()`.
+- Icons elsewhere: the ability bar draws `art/icons/hive_eyes.svg` / `echolocation.svg` in its round
+  slots with a glow in the ability's colour (steady ready, stronger in use, dim on cooldown; the radial
+  sweep stays; an ability with no icon keeps its glyph). The database's item and procedure pages show
+  the framed icon(s) beside the turntable and the item grids put it on each card. The OR monitor shows
+  the item a step needs (and each supply row) as its framed icon, and the table's "Hold X to do this."
+  prompt shows X's icon beside it.
 - Surgery HUD (`scripts/surgery/surgery_hud.gd`): the operator sees one slim strip, step n/N and
   title, the patient's vitals as a number (`case.vitals` of the system's own case when it has
   one), the one-line hint and "Esc / E: step away". Gauges and the progress bar are gone;
@@ -2296,3 +2324,14 @@ shift 2), nettest scenario `doors`, devtest door checks, `tools/perfprobe.tscn -
   nothing, 2 hearts).
 - Not in this sweep: networked physics beyond dropped items, the cart, two-person steps,
   voice chat, classes, progression, cosmetics.
+
+## Review setups (2026-09-18)
+
+`scripts/review_setups.gd` (`ReviewSetups`): `--setup=<name>` after `--` (tools/review.ps1 passes it on;
+`--seed=N` overrides the setup's seed) makes a review window skip the title menu: `main._launch` calls
+`main._boot_setup`, which starts a solo host session on the setup's seed, `game.begin_shift()`s, waits
+45 frames, then runs `ReviewSetups.stage(name, game)`. A setup is one entry in `SETUPS`
+(`{"seed": 4242, "stage": "_name"}`) and one static function that stages things with the helpers
+`place`, `clear_hands`, `give` (a stack, with extra stack keys like `bt`, `used`, `x`), `give_abilities`
+and `floor_item`. An unknown name is logged with the known ones and the menu opens as usual. Setups so
+far: `icons`.

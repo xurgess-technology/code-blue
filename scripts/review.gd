@@ -37,3 +37,21 @@ func _ready() -> void:
 	DisplayServer.window_set_title(text)
 	# tools/review.ps1 opens it minimized so it never grabs focus; flash the taskbar instead.
 	DisplayServer.window_request_attention()
+	# Diagnostics: what the window really does (frames drawn, camera, window state), every 3 s.
+	var last_frames := 0
+	var shown := false
+	while true:
+		await get_tree().create_timer(3.0, true, false, true).timeout
+		var fd := Engine.get_frames_drawn()
+		var cam := get_viewport().get_camera_3d()
+		var fax = null
+		for m in get_tree().root.get_children():
+			for c in m.get_children():
+				if c.get_script() != null and String(c.get_script().resource_path).ends_with("shift_fax.gd"):
+					fax = c
+		print("[review] frames_drawn=%d (+%d) mode=%d visible_cam=%s paused=%s fax=%s" % [fd, fd - last_frames, DisplayServer.window_get_mode(),
+			str(cam.get_path()) if cam != null else "NONE", str(get_tree().paused), str(fax._state) if fax != null else "-"])
+		if fd - last_frames > 5 and not shown:
+			shown = true
+			print("[review] first frame shown")
+		last_frames = fd
