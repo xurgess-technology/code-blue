@@ -2324,3 +2324,14 @@ shift 2), nettest scenario `doors`, devtest door checks, `tools/perfprobe.tscn -
   nothing, 2 hearts).
 - Not in this sweep: networked physics beyond dropped items, the cart, two-person steps,
   voice chat, classes, progression, cosmetics.
+
+## Review setups (2026-09-18)
+
+`scripts/review_setups.gd` (`ReviewSetups`): `--setup=<name>` after `--` (tools/review.ps1 passes it on;
+`--seed=N` overrides the setup's seed) makes a review window skip the title menu: `main._launch` calls
+`main._boot_setup`, which starts a solo host session on the setup's seed, `game.begin_shift()`s, waits
+45 frames, then runs `ReviewSetups.stage(name, game)`. A setup is one entry in `SETUPS`
+(`{"seed": 4242, "stage": "_name"}`) and one static function that stages things with the helpers
+`place`, `clear_hands`, `give` (a stack, with extra stack keys like `bt`, `used`, `x`), `give_abilities`
+and `floor_item`. An unknown name is logged with the known ones and the menu opens as usual. Setups so
+far: `icons`.

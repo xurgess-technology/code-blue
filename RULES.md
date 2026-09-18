@@ -53,6 +53,13 @@ Nothing gets tested hard until Zach has played it.
   `tools\review.bat 2 "HIVE: does the lunge read?"`. The window's title and a yellow bar at the top
   of the screen say `SYSTEM: what to do`, short. Add `-Scene res://...` to start in a lab scene,
   `-Count 2` for two co-op windows, and game flags after that (`--seed=3`).
+- **A review window drops Zach straight into the thing to test.** No home screen, no lobby, no
+  getting ready: it opens in a shift (or a dev-room spot) with the items in hand, the monster or
+  patient staged and the player where the action is. Each task adds its own named setup in
+  `scripts/review_setups.gd` and opens with `--setup=<name>` after `--`. If setting up needs
+  clicks, it isn't ready to be a review. To add one: an entry in `SETUPS` and a static function that
+  stages things with the helpers there (`place`, `give`, `give_abilities`, `floor_item`); then
+  `toolseview.bat 4 "ICONS: pick things up" --setup=icons`.
 - **Review windows never take focus.** They open minimized and flash in the taskbar. Nothing
   opens a game window any other way while Zach might be using the machine.
 - Before opening it, the subagent has done the smoke look (Tests that make sense, below).
