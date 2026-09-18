@@ -158,6 +158,9 @@ var bot_invulnerable: bool = false
 var bot_pitch: float = 0.0
 ## When set, the bot "looks at" this interactable instead of raycasting.
 var bot_aim_id: String = ""
+## DEV HOOK (scripts/dev/free_cam.gd): the dev free camera has the keyboard and mouse, so the
+## local surgeon stands still and does not look around.
+var dev_input_held: bool = false
 ## Bump to press E once on whatever the bot aims at.
 var bot_press: int = 0
 ## Bump to use the held item once (left mouse) / the brain ability once (R).
@@ -565,7 +568,7 @@ func _make_body() -> Node3D:
 func _input(event: InputEvent) -> void:
 	if not is_local or not alive:
 		return
-	if hive_view:
+	if hive_view or dev_input_held:
 		return   # SWEEP 3 HOOK (brains): the mouse is not yours while you look through a Walk-In
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		# Settings hook: "sensitivity" multiplies the base look speed.
@@ -602,7 +605,7 @@ func _local_step(delta: float) -> void:
 	# The mouse is only free while a menu, the terminal or the surgery view has it,
 	# and then the surgeon stands still.
 	var can_move: bool = alive and (g == null or not g.paused) and stun <= 0.0 \
-		and (bot_active or Input.mouse_mode == Input.MOUSE_MODE_CAPTURED)
+		and (bot_active or (Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and not dev_input_held))
 
 	var input_dir := Vector2.ZERO
 	var want_sprint := false
@@ -1060,7 +1063,7 @@ func _pinned_step(delta: float) -> void:
 			if bot_press != _bot_press_seen:
 				_bot_press_seen = bot_press
 				interact_count += 1
-		elif Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and Input.is_action_just_pressed("interact") and (game == null or not game.paused):
+		elif Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and not dev_input_held and Input.is_action_just_pressed("interact") and (game == null or not game.paused):
 			interact_count += 1
 		wants_interact = false
 		rotation.y = _yaw

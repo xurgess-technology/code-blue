@@ -446,6 +446,7 @@ at the origin, running along +X, floor at y 0); nothing else changes.
 | `char/human_surgeon_a` | `surgeon_a.glb` + `textures/surgeon_a_*.png` | Built for Malpractice from Python scripts in Blender 5.2 (`art/human/blender_src/`) | Malpractice (made with Claude) | None needed: original work of this project, no third-party content | 1.80 tall | scale 1.0, yaw 180 |
 | `char/human_surgeon_b` | `surgeon_b.glb` + `textures/surgeon_b_*.png` | same | same | same | 1.68 tall | scale 1.0, yaw 180 |
 | `char/human_surgeon_c` | `surgeon_c.glb` + `textures/surgeon_c_*.png` | same | same | same | 1.75 tall | scale 1.0, yaw 180 |
+| `char/human_surgeon_st` | `surgeon_st.glb` + `textures/surgeon_st_*.png` | Built for Malpractice from Python scripts in Blender 5.2 (`art/stylized/`); the players' body | same | same | 1.80 tall | scale 1.0, yaw 180 |
 | `patient/human_bob` | `bob.glb` + `textures/bob_*.png` | same | same | same | 1.75 tall | scale 1.0, yaw 180 |
 | `crew/human_paramedic_a` | `paramedic_a.glb` + `textures/paramedic_a_*.png` | same | same | same | 1.83 tall | scale 1.0, yaw 180 |
 | `crew/human_paramedic_b` | `paramedic_b.glb` + `textures/paramedic_b_*.png` | same | same | same | 1.70 tall | scale 1.0, yaw 180 |

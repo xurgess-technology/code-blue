@@ -226,6 +226,7 @@ func _run_solo() -> void:
 	_check(me.global_position.z > o.z + 18.5, "noclip walks through the room's south wall (z=%.1f)" % (me.global_position.z - o.z))
 	dev.request("noclip", {"on": false})
 	_stand(o + Vector3(12.0, 0, 15.0))
+	await _free_cam()
 
 	dev.request("time_scale", {"v": 0.5})
 	await _frames(2)
@@ -476,6 +477,25 @@ func _doors_hooks() -> void:
 
 
 ## inventory (sweep 2): the room's loot dispensers, the money panel, the hospital's furnace.
+## The panel's Free camera: the view leaves your eyes, main keeps it, P swaps who has the input.
+func _free_cam() -> void:
+	var fc = main.dev_panel.free_cam
+	var box: CheckBox = main.dev_panel._c["free_cam"]
+	var eye: Vector3 = me.camera.global_position
+	box.button_pressed = true
+	await _frames(3)
+	_check(fc.is_on() and fc.current and fc.global_position.distance_to(eye) < 0.5, "the Free camera box takes the view from your eyes")
+	_check(me.dev_input_held and me.body_visual.visible, "flying, the surgeon stands still and shows")
+	fc.swap()
+	await _frames(2)
+	_check(not fc.flying and not me.dev_input_held and fc.current, "P hands the surgeon back; the view stays on the free camera")
+	fc.swap()
+	_check(fc.flying and me.dev_input_held, "and P again flies the camera")
+	box.button_pressed = false
+	await _frames(2)
+	_check(not fc.is_on() and me.camera.current and not me.dev_input_held and not me.body_visual.visible, "unticking it puts you back behind your eyes")
+
+
 func _loot_and_money() -> void:
 	me.slots = Player.empty_slots()
 	me.selected = 0

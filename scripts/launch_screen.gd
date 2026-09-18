@@ -166,7 +166,7 @@ func _queue_chart() -> void:
 		["Pulse found. Pupils reactive to light.", "text", true],
 		["Instruments counted: %d of %d. None left inside." % [items, items], "text", true],
 		["Pharmacy stocked. Furnace lit.", "text", true],
-		["%d surgeons on call. Nobody picked up." % HumanModelScript.SURGEONS.size(), "text", true],
+		["%d surgeon%s on call. Nobody picked up." % [HumanModelScript.SURGEONS.size(), "" if HumanModelScript.SURGEONS.size() == 1 else "s"], "text", true],
 		["Charts pulled for %d patients." % Procedures.human_patients().size(), "text", true],
 		["Wards report movement. Doors locked.", "text", true],
 		["Procedures rehearsed: %d." % Procedures.AILMENTS.size(), "text", true],
