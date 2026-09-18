@@ -1,7 +1,8 @@
 shader_type spatial;
-// The Sonographer's light (scripts/monsters/sonographer_rig.gd, scripts/monsters/sono_cart.gd): the
-// windpipe rings behind the thin skin of its throat, and the cable that runs from the back of its
-// neck to the cart. One shader does both.
+// The Sonographer's light (scripts/monsters/sonographer_rig.gd): the windpipe rings behind the thin
+// skin of its throat, the three runs of cable up its right arm, and the probe grown into that hand.
+// One shader does all of them, and the charge lights them in turn, so it reads as running out to the
+// wand.
 //
 //   level   0..1  the steady glow: faint while it is suspicious, bright while it charges an echo
 //   pulse   0..1  a band of light travelling along the piece; `pulse_at` is where the band is now,

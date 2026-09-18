@@ -54,7 +54,7 @@ everything twice, at rest and with `set_crane` at full).
 Sono shots: `sono_front`, `sono_side`, `sono_34`, `sono_back`, `sono_throat(_charge)`, `sono_dark(_charge)`,
 `face_sono`; `set_charge(0..1)` lights the windpipe for the charge shots.
 `--only=sonographer --export` writes `assets/models/monsters/sonographer/sonographer_st.glb` with its own clips
-(`st_sono_clips.py`). In the game: `scripts/monsters/sonographer_rig.gd` and `scripts/monsters/sono_cart.gd`.
+(`st_sono_clips.py`). In the game: `scripts/monsters/sonographer_rig.gd`.
 
 `--only=hive --export` writes `assets/models/monsters/hive/hive_st.glb` with the Hive's own clips
 (`st_hive_clips.py`: HiveIdle, HiveWalk, HiveAttack) instead of the shared human ones; `--only=hive --anim`
