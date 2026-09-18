@@ -8,6 +8,9 @@ grafting design that used to be here was dropped on 2026-09-18; grafting starts 
 - **Hives see through you.** Hives share a hive mind, so a surgeon with a grafted Hive eye is
   part of it. Now and then the Hives see what that surgeon sees, and come to where they're looking.
   This is the price of the graft. (Zach, 2026-09-18.)
+- **The Sonographer's throat as a graft part.** A grafted surgeon gets the ping: the same wedge,
+  their own throat glowing as they charge it. It replaces today's Echo ability. (Zach, 2026-09-18;
+  the monster itself is `docs/SONOGRAPHER.md`.)
 - **A solo surgical robot** at an OR table, so a solo player can be grafted. For now another player
   has to operate (Dr. Botsworth covers testing through the dev panel).
 - A new level system, to replace brain points and one-graft-one-level alike.
