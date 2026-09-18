@@ -5,6 +5,17 @@ patch per thing we did that day. How to add to it: [RULES.md](RULES.md#changelog
 
 **2026-09-18 (0.6.x)**
 
+- **0.6.13**: GRAFTING!!! YOU CAN NOW HAVE A HIVE EYE!!!!!!
+    - Added: Every OR table has a vat stand. Strap a surgeon down, put a vat with a Hive's eyeball on the stand, and a teammate swaps it in for one of their eyes: scalpel, eye spoon, eye spoon, stitches. The patient is awake for all of it.
+    - Added: A grafted surgeon has one normal eye and one glowing orange Hive eye, on their own body, in the mirrors and on other players' screens, and gets Hive Eyes. Swap back and it's gone.
+    - Changed: Hive Eyes only comes from the graft now. The Hive brain no longer teaches it at the blender.
+- **0.6.12**: Less to loot
+    - Removed: Thirteen kinds of loot (stethoscope, wedding ring, coffee maker and friends).
+    - Added: EpiPen and a new pulse oximeter. Trinkets, the loot that also does something, are rarer: three to five a shift.
+    - Changed: Radiology and the other rooms that lost loot get some back, and a shift pays about the same.
+- **0.6.11**: Icons for everything 🖼️
+    - Added: The item bar is icons now: four slots, a name that flashes when you switch, bulky things take two, and a spoiling part drains around its slot.
+    - Added: Icons in the ability bar, the database and the OR screen, and picked-up items fly into their slot.
 - **0.6.10**: Eyeball Extraction 👁️
     - Added: Take a strapped Hive's eye out with a scalpel and an eye spoon: trace the cut and watch it open on the skin, circle the socket with the spoon, lift the eye on its nerve and slice it.
     - Added: Specimen vats on the lab wall. Put an eye in one to keep it from spoiling, carry it, set it on a lab bench. Eyes spoil outside a vat and sell at the furnace.
