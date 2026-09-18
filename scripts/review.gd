@@ -15,7 +15,7 @@ func _ready() -> void:
 		return
 	layer = 128
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	print("[review] %s" % text)
+	print("[review] %s (saves in %s)" % [text, OS.get_user_data_dir()])
 	var panel := PanelContainer.new()
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var box := StyleBoxFlat.new()

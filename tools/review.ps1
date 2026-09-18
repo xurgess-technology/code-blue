@@ -40,7 +40,13 @@ for ($i = 1; $i -le $Count; $i++) {
     if ($Scene) { $a += $Scene }
     $a += @("--", "`"--review=$title`"", "--no-steam")
     foreach ($g in $GameArgs) { $a += "`"$g`"" }
-    # Minimized, so it never steals focus: it waits in the taskbar, flashing, until Zach opens it.
-    Start-Process -FilePath $GodotGui -ArgumentList $a -WorkingDirectory $p -WindowStyle Minimized | Out-Null
-    Write-Host "Opened: $title  (log: $log)"
+    # Minimized and never activated (SW_SHOWMINNOACTIVE): it waits in the taskbar, flashing, until
+    # Zach opens it, and doesn't take keyboard focus. Start-Process's "Minimized" still activates the
+    # window, and a child of this shell may take the foreground, so WMI starts it instead.
+    $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]7 }
+    $cmd = "`"$GodotGui`" " + ($a -join " ")
+    $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+        CommandLine = $cmd; CurrentDirectory = $p; ProcessStartupInformation = $startup }
+    if ($r.ReturnValue -ne 0) { Write-Error "Couldn't start Godot (WMI code $($r.ReturnValue))."; exit 1 }
+    Write-Host "Opened: $title  (pid $($r.ProcessId), log: $log)"
 }
