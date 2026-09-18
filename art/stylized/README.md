@@ -1,5 +1,7 @@
 # Stylized characters
 
+The art style itself (what it is, why, the rules) is in [DESIGN.md, "Art style: characters and models"](../../DESIGN.md#art-style-characters-and-models).
+
 The players' surgeon (`assets/models/characters/human/surgeon_st.glb`, key `char/human_surgeon_st`) and the
 start of the Hive, in one stylized look, built entirely from Python in Blender 5.2 (headless). No
 downloaded or generated models. Replaces the realistic `art/human` surgeons for players (2026-09-18).

@@ -146,6 +146,64 @@ Shift 1 has Hives and one Discharged; the Night Nurse joins from shift 2; more o
 - R.E.P.O.-adjacent: chunky low-poly, harsh pools of light, volumetric haze, a sickly teal grade with warm flashlight light. Film grain, vignette and damage effects.
 - Generated soundtrack in three phase-locked layers (dread, hunt, critical) plus positional sound effects, all synthesized offline into WAVs.
 
+## Art style: characters and models
+
+Decided 2026-09-18. Every character and monster from here on is built to this style. The first one
+is the players' surgeon (`art/stylized/`, key `char/human_surgeon_st`).
+
+**The look: stylized people, not realistic ones.** Near-normal proportions, big simple soft forms,
+no pores, wrinkles or anatomy lines. Faces are figurine faces: short and full, a small nose, small
+ears pressed to the head, painted brows, a mouth line, big clear eyes. Clothes are stiff and chunky
+with thick hems. Grime, blood and wear go in the paint, not the shapes. Aim for "a slightly
+exaggerated person", never chibi, never a doll.
+
+**Why this look:**
+- **We can make it well, and keep making it.** Every model is generated from Python scripts in
+  Blender; nobody on the team sculpts. Realistic humans (the first surgeons, `art/human/`) kept
+  landing in the uncanny valley, because small errors in a realistic face read as wrong. Simple
+  shapes leave far less to get subtly wrong, so the same scripts turn out consistent characters.
+- **It keeps the tone.** Chaos and laughing, until it isn't; bloody, not grim. Pulling a stylized
+  friend's eye out is gross and funny; pulling a realistic one's is grim.
+- **It serves grafting.** A graft is a normal body with something wrong attached. A clean, simple
+  body makes the graft the most detailed thing on screen, so it reads instantly, from across a
+  dark room, and the OR close-up of a graft site holds up.
+- **It reads in the dark.** Fog, a flashlight cone and film grain eat surface detail. Silhouette,
+  posture and colour are what survive, and simple forms have strong silhouettes.
+- **The horror comes from elsewhere.** Monsters, darkness, sound and behaviour carry the fear, not
+  realistic skin. The Night Nurse shows stylized can be terrifying: she's scary because she's
+  exaggerated.
+
+**The rules for every model:**
+1. **Separable parts.** Eyes are their own objects in sockets cut to the eyeball. Arms, legs and
+   heads are separate pieces on one shared skeleton, with named attach points (sites). A graft is
+   a part swap or an add-on at a site, never new art per combination.
+2. **One kit.** Players, patients and monsters share the same head, hand and limb code and the same
+   skeleton; a new character is mostly new numbers (proportions, colours, wear, posture), which
+   keeps them looking like one game and lets every body use the same clips.
+3. **Posture tells them apart.** In the dark you tell a teammate from a Hive by silhouette and
+   motion first (upright vs. hunched and dragging), colour second.
+4. **Game budget.** About 20k triangles per character, two texture atlases (skin, cloth) baked from
+   the detailed sculpt, colour masks for the player tint and the surgery sites.
+5. **Reviewed from pictures.** Every model goes through front, side and face renders, then shots in
+   the game's own lighting (`tools/style_lab`), before it replaces anything.
+
+**What's easy and what's hard in this style** (so new things are designed to it):
+- Easy: props, furniture, machines and tools; anything built from simple shapes; grimy materials;
+  monsters (off is the point); stiff clothing; wet, glowing organic things like the Growths.
+- Take care: faces up close, hands, bare joints that bend (elbows, shoulders under raised arms).
+- Avoid: realistic faces and skin, loose draping cloth, hair beyond painted brows and short crops.
+
+**Status.**
+
+| Character | Style | Notes |
+|---|---|---|
+| Surgeon (players) | Stylized | Done: bald, short-sleeved scrubs, bare hands; the belly gash for the player table; a Dive clip |
+| The Hive | First pass (as `walk_in` in the scripts) | Next: onto the surgeon's head and kit, keeping its hunch and dragged leg |
+| Night Nurse | Blender-scripted, own look | Already exaggerated; check she sits with the rest |
+| Discharged, Bob, paramedics | Older looks | To move over |
+
+How the models are built and rebuilt: `art/stylized/README.md`.
+
 ## Technical shape
 
 - Godot 4.7, GDScript. `docs/CONTRACTS.md` describes how the systems fit together.
