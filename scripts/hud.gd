@@ -25,6 +25,8 @@ var drawn: PackedStringArray = []
 var _t: float = 0.0
 var _font: Font
 var _stamina_show: float = 0.0
+## ROCKET BOOTS: the fuel bar under stamina, only while wearing a pair and it isn't full.
+var _fuel_show: float = 0.0
 ## SWEEP 4A HOOK (controls): the ability bar (Alt) and the scanner ring, both local-only.
 ## 0 = Alt not held (abilities small top-left, items at full size); 1 = Alt held (abilities fill
 ## the bar, items shrink to a small top-left row). ~0.12 s each way per docs/SWEEP4A.md.
@@ -56,6 +58,8 @@ func _process(delta: float) -> void:
 	var me = game.local_player() if game != null else null
 	var tired: bool = me != null and me.stamina < 0.995
 	_stamina_show = clampf(_stamina_show + (delta * 4.0 if tired else -delta * 1.5), 0.0, 1.0)
+	var fuel_low: bool = me != null and me.boots and (me.fuel < 0.995 or me.rocketing)
+	_fuel_show = clampf(_fuel_show + (delta * 4.0 if fuel_low else -delta * 1.5), 0.0, 1.0)
 	var alt_held: bool = Input.is_action_pressed("ability_alt")
 	_alt_t = move_toward(_alt_t, 1.0 if alt_held else 0.0, delta / 0.12)
 	# SWEEP 4A HOOK: the first time an ability lands in a slot, a short card for it.
@@ -140,6 +144,14 @@ func _draw_health(_h: float, me) -> void:
 		draw_rect(Rect2(x, y + 22, bw, 4), Color(0, 0, 0, 0.55 * _stamina_show))
 		var sc := Color("e0a020") if me.stamina < 0.25 else Color("7ad0c0")
 		draw_rect(Rect2(x, y + 22, bw * clampf(me.stamina, 0.0, 1.0), 4), Color(sc, 0.9 * _stamina_show))
+	if _fuel_show > 0.01:
+		drawn.append("fuel")   # ROCKET BOOTS
+		var fw := n * step - 8.0
+		draw_rect(Rect2(x, y + 29, fw, 4), Color(0, 0, 0, 0.55 * _fuel_show))
+		var fc := Color("ff5a1e") if me.fuel < 0.25 else Color("ff9a2e")
+		if me.rocketing:
+			fc = fc.lerp(Color("ffe08a"), 0.4 + 0.4 * sin(_t * 30.0))
+		draw_rect(Rect2(x, y + 29, fw * clampf(me.fuel, 0.0, 1.0), 4), Color(fc, 0.95 * _fuel_show))
 
 
 func _heart(at: Vector2, col: Color, k := 1.0) -> void:

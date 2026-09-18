@@ -124,6 +124,42 @@ const DIVE_SPRINT_GRACE := 0.2
 ## Stamina (0..1) spent per dive; stamina also doesn't recover mid-dive. About five back-to-back
 ## dives from a full bar.
 const DIVE_STAMINA_COST := 0.2
+## ROCKET BOOTS (bought at the pharmacy, game._put_on): keep crouch held through a sprint-dive and
+## the boots light, driving you straight along the dive's heading, level, on a second bar, `fuel`.
+## Letting go, running dry or going down ends the burn and the dive falls and lands as usual. Flying
+## head first into something solid is a faceplant: the burn stops, you bounce back and fall, and
+## the host takes a heart (faceplant_count, game.player_faceplanted). `boots` is host authoritative
+## (report_full "bt"); the burn is client-owned movement like the dive, replicated as report bit
+## 256 / report_full "rk" for the flame. Fuel is local, like stamina.
+var boots: bool = false
+var fuel: float = 1.0
+var rocketing: bool = false
+var _remote_rocket: bool = false
+## This dive already burned (one burn per dive: letting go can't be undone mid-air).
+var _rocket_used: bool = false
+## The boots lit on this dive: the capsule stays flat (prone height) until the dive is over.
+var _rocket_lit: bool = false
+var _rocket_hold_t: float = 0.0
+var faceplant_count: int = 0
+var _faceplant_seen: int = 0
+## Test seam: holding crouch, for a bot (the human reads the crouch key).
+var bot_rocket_hold: bool = false
+var _rocket_fx: RefCounted = null
+## Seconds of burn in a full tank, and seconds to refill an empty one (on the ground, not burning).
+const FUEL_BURN_TIME := 1.5
+const FUEL_REFILL_TIME := 6.0
+## Crouch has to stay down this long after the dive fires: a tap is still just a dive.
+const ROCKET_IGNITE_HOLD := 0.12
+const ROCKET_MIN_FUEL := 0.05
+const ROCKET_SPEED := 12.5
+## How fast the burn levels the flight off (vertical speed toward 0, m/s per second).
+const ROCKET_LEVEL_RATE := 30.0
+## A contact is head on when its normal is this close to straight against the heading.
+const FACEPLANT_DOT := -0.55
+const FACEPLANT_BOUNCE := 3.0
+const RocketBootsScript := preload("res://scripts/rocket_boots.gd")
+## Eye height (above the feet) while flying flat out.
+const ROCKET_EYE_H := 0.55
 ## Local-only cosmetic scan progress (0..1) and the monster id it is aimed at, for the HUD ring.
 ## Not replicated: every machine computes its own from its own aim, same as aim_id/aim_prompt.
 var scan_progress: float = 0.0
@@ -301,6 +337,38 @@ var game: Node = null
 ## SPRINT-DIVE HOOK: in the air in a dive: this machine's own dive, or the replicated bit for others.
 func dive_in_air() -> bool:
 	return (diving and _dive_airborne) or _remote_dive_air
+
+
+## ROCKET BOOTS: the boots are burning: this machine's own burn, or the replicated bit for others.
+func rocket_burning() -> bool:
+	return rocketing or _remote_rocket
+
+
+## ROCKET BOOTS: host. Taking a pair from the pickup drawer (game._put_on). Starts on a full tank.
+func put_on_boots() -> void:
+	boots = true
+	fuel = 1.0
+
+
+## ROCKET BOOTS: after the move, anything solid met head on ends the burn: bounce back, drop, and
+## tell the host (faceplant_count) so it takes the heart. Floors, ceilings and glancing scrapes
+## along a wall don't count.
+func _check_faceplant() -> void:
+	for i in get_slide_collision_count():
+		var n := get_slide_collision(i).get_normal()
+		if absf(n.y) < 0.6 and n.dot(_dive_dir) < FACEPLANT_DOT:
+			rocketing = false
+			var back := Vector3(n.x, 0.0, n.z).normalized()
+			_dive_dir = Vector3.ZERO   # no more push toward the wall: just fall
+			velocity.x = back.x * FACEPLANT_BOUNCE
+			velocity.z = back.z * FACEPLANT_BOUNCE
+			faceplant_count += 1
+			if fx.has_method("add_shake"):
+				fx.add_shake(1.0, 0.45)
+			if fx.has_method("impact"):
+				fx.impact(-global_transform.basis.z, true)
+			Audio.play("thud", global_position, 2.0, 0.1)
+			return
 
 
 static func new_player(id: int, display_name: String, local: bool) -> CharacterBody3D:
@@ -623,6 +691,7 @@ func _local_step(delta: float) -> void:
 	var input_dir := Vector2.ZERO
 	var want_sprint := false
 	var crouch_pressed := false
+	var crouch_held := false   # ROCKET BOOTS
 	if can_move and bot_active:
 		input_dir = bot_move
 		wants_interact = bot_interact
@@ -661,6 +730,7 @@ func _local_step(delta: float) -> void:
 		if bot_crouch_press != _bot_crouch_press_seen:
 			_bot_crouch_press_seen = bot_crouch_press
 			crouch_pressed = true
+		crouch_held = bot_rocket_hold
 		scan_holding = bot_scan and not hive_view and not downed and not diving
 		laser_held = scan_holding and bot_laser_hold
 		if bot_laser_click != _bot_laser_click_seen:
@@ -698,6 +768,7 @@ func _local_step(delta: float) -> void:
 		if Input.is_action_just_pressed("sprint") and want_sprint and not diving:
 			_stance_want = STAND
 		crouch_pressed = Input.is_action_just_pressed("crouch")
+		crouch_held = Input.is_action_pressed("crouch")
 		scan_holding = Input.is_action_pressed("scan") and not hive_view and not downed and not diving
 	else:
 		wants_interact = false
@@ -797,6 +868,9 @@ func _local_step(delta: float) -> void:
 		dive_hop = true
 		_dive_launch_y = global_position.y
 		_dive_peak_y = global_position.y
+		_rocket_used = false   # ROCKET BOOTS: a fresh dive can light them again
+		_rocket_lit = false
+		_rocket_hold_t = 0.0
 		# Instant burst, not a ramp-up: the acceleration-chase below would otherwise take several
 		# frames to catch up to sprint*MULT, which reads as a slow speed-up rather than a lunge.
 		velocity.x = dir.x * C.SPRINT_SPEED * DIVE_SPEED_MULT
@@ -809,12 +883,30 @@ func _local_step(delta: float) -> void:
 	if diving:
 		# Airborne: full launch speed, no decay. The slide-out clock only starts on touchdown.
 		if _dive_airborne:
-			if is_on_floor() and velocity.y <= 0.0 and not dive_hop:
+			if is_on_floor() and velocity.y <= 0.0 and not dive_hop and not rocketing:
 				_dive_airborne = false
 		else:
 			_dive_t += delta
 			if _dive_t >= DIVE_DURATION:
 				diving = false
+	# ROCKET BOOTS: crouch still held a moment after the dive fired lights the boots, once per dive;
+	# letting go first leaves it an ordinary dive. The burn lasts while crouch is held and there is
+	# fuel; fuel only comes back on the ground, between dives.
+	if diving and _dive_airborne and boots and not _rocket_used:
+		if crouch_held and can_move and not downed:
+			_rocket_hold_t += delta
+			if _rocket_hold_t >= ROCKET_IGNITE_HOLD and fuel >= ROCKET_MIN_FUEL:
+				rocketing = true
+				_rocket_used = true
+				_rocket_lit = true
+		else:
+			_rocket_used = true
+	if rocketing:
+		fuel = maxf(0.0, fuel - delta / FUEL_BURN_TIME)
+		if not crouch_held or fuel <= 0.0 or downed or not can_move or not diving:
+			rocketing = false
+	elif boots and not diving and is_on_floor():
+		fuel = minf(1.0, fuel + delta / FUEL_REFILL_TIME)
 
 	# SWEEP 4A HOOK (controls): crouch is client-owned. Standing back up is refused under a low
 	# ceiling (a raycast from the crouched head to the standing head height); until there is room
@@ -834,6 +926,8 @@ func _local_step(delta: float) -> void:
 		# speed over DIVE_DURATION, so the dive reads as a lunge-then-slide rather than a teleport.
 		var dive_k: float = 1.0 if _dive_airborne else 1.0 - clampf(_dive_t / DIVE_DURATION, 0.0, 1.0)
 		speed = lerpf(C.PRONE_SPEED, C.SPRINT_SPEED * DIVE_SPEED_MULT, dive_k)
+		if rocketing:
+			speed = ROCKET_SPEED   # ROCKET BOOTS
 	elif prone:
 		speed = C.PRONE_SPEED
 	elif crouching:
@@ -848,11 +942,17 @@ func _local_step(delta: float) -> void:
 	var a: float = ACCEL if is_on_floor() else AIR_ACCEL
 	velocity.x = move_toward(velocity.x, target.x, a * delta * maxf(1.0, _knock.length()))
 	velocity.z = move_toward(velocity.z, target.z, a * delta * maxf(1.0, _knock.length()))
+	if rocketing:
+		# ROCKET BOOTS: thrust, not a lunge: full speed along the heading at once, no air drag.
+		velocity.x = target.x
+		velocity.z = target.z
 	# SWEEP 4A HOOK (controls): a small grounded jump. Nothing floaty: gravity below still applies.
 	var want_jump: bool = is_on_floor() and not downed and not crouching and carrying == 0 and dragging_monster < 0 and not winding \
 			and ((can_move and not bot_active and Input.is_action_just_pressed("jump")) or (bot_active and _bot_jump_fire))
 	_bot_jump_fire = false
-	if not is_on_floor():
+	if rocketing:
+		velocity.y = move_toward(velocity.y, 0.0, ROCKET_LEVEL_RATE * delta)   # ROCKET BOOTS: level flight
+	elif not is_on_floor():
 		velocity.y -= (DIVE_GRAVITY if diving and _dive_airborne else 18.0) * delta
 	else:
 		velocity.y = minf(velocity.y, 0.0) + _knock.y
@@ -876,7 +976,9 @@ func _local_step(delta: float) -> void:
 		_op_anchor = Vector3.INF
 	if diving and _dive_airborne:
 		_dive_peak_y = maxf(_dive_peak_y, global_position.y)
-	if diving and _dive_airborne and was_air and is_on_floor():
+	if rocketing:
+		_check_faceplant()
+	if diving and _dive_airborne and was_air and is_on_floor() and not rocketing:
 		# Touchdown: hit the floor prone, with a thud.
 		_dive_airborne = false
 		if fx.has_method("land"):
@@ -979,7 +1081,8 @@ func _local_step(delta: float) -> void:
 	if fx.has_method("set_motion"):
 		fx.set_motion(clampf(Vector2(velocity.x, velocity.z).length() / C.SPRINT_SPEED, 0.0, 1.0), sprinting, is_on_floor())
 	if fx.has_method("set_fov_kick"):
-		fx.set_fov_kick(0.5 if sprinting or (diving and _dive_airborne) else 0.0)
+		# ROCKET BOOTS: the burn kicks it all the way out.
+		fx.set_fov_kick(1.0 if rocketing else (0.5 if sprinting or (diving and _dive_airborne) else 0.0))
 	if fx.has_method("set_breathing") and game != null:
 		fx.set_breathing(game.danger)
 
@@ -1012,6 +1115,8 @@ func _apply_crouch(delta: float, authoritative: bool = true) -> void:
 		prone = want == PRONE
 	if _capsule != null:
 		var target_h: float = C.PRONE_HEIGHT if prone else (C.CROUCH_HEIGHT if crouching else C.PLAYER_HEIGHT)
+		if authoritative and diving and _rocket_lit:
+			target_h = C.PRONE_HEIGHT   # ROCKET BOOTS: flying flat out, clear of door lintels
 		_capsule.height = target_h
 		_coll_shape.position.y = target_h * 0.5
 
@@ -1109,6 +1214,10 @@ func _consume_actions() -> void:
 		_shove_seen = shove_count
 		if alive and not busy:
 			game.player_shoved(self)
+	if faceplant_count != _faceplant_seen:
+		_faceplant_seen = faceplant_count
+		if alive and not downed:
+			game.player_faceplanted(self)   # ROCKET BOOTS
 	if drop_count != _drop_seen:
 		_drop_seen = drop_count
 		if alive and not busy:
@@ -1409,6 +1518,8 @@ func bulky_pair() -> Array:
 
 
 func can_take(kind: String) -> bool:
+	if Items.is_worn(kind):
+		return not boots   # ROCKET BOOTS: worn, not held
 	return slot_for(kind) >= 0
 
 
@@ -1536,6 +1647,11 @@ func _tick_warm(delta: float) -> void:
 func _process(_delta: float) -> void:
 	if is_local:
 		_tick_warm(_delta)
+	# ROCKET BOOTS: the boots on the feet and the flame while they burn.
+	if _rocket_fx == null and boots:
+		_rocket_fx = RocketBootsScript.new(self, body_visual)
+	if _rocket_fx != null:
+		_rocket_fx.update(_delta, boots, rocket_burning() and alive)
 	_update_down_pose(_delta)  # DEV HOOK
 	var s: Dictionary = selected_stack()
 	var key := "%s:%d" % [s.kind, s.count]
@@ -1548,7 +1664,7 @@ func _process(_delta: float) -> void:
 				holder.add_child(_held_model(String(s.kind), int(s.count), holder == _held_fp))
 		# The flashlight hand hides nothing; the held stack sits in the other hand.
 		_held_fp.visible = is_local
-		_held_tp.visible = not is_local or _mirror_self
+		_held_tp.visible = not is_local or _mirror_self or _carry_body
 		if is_local:
 			_put_on_self_layer(_held_tp)
 		if is_local:
@@ -1595,7 +1711,7 @@ func _refresh_self_body() -> void:
 				(mi as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	if body_hands != null:
 		body_hands.set_active(show)
-	_held_tp.visible = _mirror_self
+	_held_tp.visible = _mirror_self or _carry_body   # over the shoulder: the stack in the body's hand
 	if _carry_body:
 		camera.cull_mask |= LightRoomsSelf.SELF
 	else:
@@ -1718,6 +1834,10 @@ func revive_full() -> void:
 	scan_holding = false
 	diving = false   # SPRINT-DIVE HOOK
 	_dive_airborne = false
+	rocketing = false   # ROCKET BOOTS (the boots themselves stay on)
+	_rocket_used = false
+	_rocket_lit = false
+	fuel = 1.0
 	_sprint_toggle = false
 	_sprint_grace = 0.0
 	_clear_downed()
@@ -1811,6 +1931,8 @@ func _update_down_pose(delta: float) -> void:
 			eye = 0.28
 		elif carried_by != 0:
 			eye = 0.3
+		elif diving and _dive_airborne and _rocket_lit:
+			eye = ROCKET_EYE_H   # ROCKET BOOTS: flat out, low over the floor
 		elif diving and _dive_airborne:
 			# Rising: stay at full height. Falling: sink toward prone eye height in step with the fall.
 			var fall01 := 0.0
@@ -1866,15 +1988,17 @@ func _update_down_pose(delta: float) -> void:
 ## Client -> host, 20 Hz: everything about my own surgeon. A positional array rather than a
 ## dictionary: no key strings on the wire, about a third of the size.
 ##   [position, yaw, pitch, flag bits (1 light, 2 sprint, 4 moving, 8 holding E, 16 crouching,
-##    32 scan-holding, 64 prone, 128 in the air in a dive), shove count, drop count, aim id, interact count, selected hand, use count,
-##    ability slot 1..4 press counts]
+##    32 scan-holding, 64 prone, 128 in the air in a dive, 256 rocket boots burning), shove count, drop count, aim id,
+##    interact count, selected hand, use count, ability slot 1..4 press counts, drop charge, throw wind-up, faceplant count]
 func report_state() -> Array:
 	var bits := (1 if flashlight_on else 0) | (2 if sprinting else 0) | (4 if moving else 0) | (8 if wants_interact else 0) \
-		| (16 if crouching else 0) | (32 if scan_holding else 0) | (64 if prone else 0) | (128 if dive_in_air() else 0)
+		| (16 if crouching else 0) | (32 if scan_holding else 0) | (64 if prone else 0) | (128 if dive_in_air() else 0) \
+		| (256 if rocketing else 0)
 	return [global_position, rotation.y, head.rotation.x, bits, shove_count, drop_count, aim_id, interact_count, selected, use_count,
 		ability_slot_press[0], ability_slot_press[1], ability_slot_press[2], ability_slot_press[3],
 		snappedf(drop_charge, 0.02),   # SWEEP 4A HOOK (pharmacy, chunk 3)
-		snappedf(throw_wind, 0.02)]   # THROW HOOK
+		snappedf(throw_wind, 0.02),   # THROW HOOK
+		faceplant_count]   # ROCKET BOOTS
 
 
 func apply_remote_state(s: Array) -> void:
@@ -1896,6 +2020,7 @@ func apply_remote_state(s: Array) -> void:
 	scan_holding = bits & 32 != 0
 	prone = bits & 64 != 0
 	_remote_dive_air = bits & 128 != 0   # SPRINT-DIVE HOOK
+	_remote_rocket = bits & 256 != 0   # ROCKET BOOTS
 	shove_count = int(s[4])
 	drop_count = int(s[5])
 	aim_id = String(s[6])
@@ -1911,6 +2036,8 @@ func apply_remote_state(s: Array) -> void:
 		drop_charge = float(s[14])
 	if s.size() >= 16:   # THROW HOOK: the live wind-up
 		throw_wind = float(s[15])
+	if s.size() >= 17:   # ROCKET BOOTS
+		faceplant_count = int(s[16])
 	_consume_actions()
 
 
@@ -1931,6 +2058,7 @@ func report_full() -> Dictionary:
 		"cr": crouching,   # SWEEP 4A HOOK (controls)
 		"pr": prone,
 		"da": dive_in_air(),   # SPRINT-DIVE HOOK
+		"bt": boots, "rk": rocket_burning(),   # ROCKET BOOTS
 		"sh": scan_holding,   # terminal redesign, chunk 4: everyone sees everyone's laser
 		"tw": snappedf(throw_wind, 0.02),   # THROW HOOK: everyone sees the wind-up
 	}
@@ -1975,6 +2103,7 @@ func apply_remote_full(s: Dictionary) -> void:
 			look_up_from_table()
 		refresh_downed_visuals()
 	operating = s.op
+	boots = bool(s.get("bt", false))   # ROCKET BOOTS: the host decides who wears a pair
 	if is_local:
 		return
 	_target_pos = s.p
@@ -1986,5 +2115,6 @@ func apply_remote_full(s: Dictionary) -> void:
 	scan_holding = bool(s.get("sh", false))   # terminal redesign, chunk 4
 	prone = bool(s.get("pr", false))
 	_remote_dive_air = bool(s.get("da", false))   # SPRINT-DIVE HOOK
+	_remote_rocket = bool(s.get("rk", false))   # ROCKET BOOTS
 	throw_wind = float(s.get("tw", 0.0))   # THROW HOOK
 	moving = s.mv

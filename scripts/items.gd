@@ -111,6 +111,23 @@ const ITEMS := {
 		"where": "Only sold at the pharmacy window. Never turns up loose in the wings.",
 		"handling": "Consumable, 10 to a bottle. Use to swallow one; charge a throw to lob a single pill.",
 	},
+	# ROCKET BOOTS: the first real thing the pharmacy sells. `wear` means taking it puts it on (it
+	# never goes in a hand): player.boots, and the sprint-dive becomes a rocket dive while crouch
+	# is held (player.gd "ROCKET BOOTS"). Only ever bought, like the pills.
+	"rocket_boots": {
+		"name": "Rocket boots",
+		"short": "Rocket boots",
+		"surgical": false,
+		"consumable": false,
+		"wear": true,
+		"batch": [1, 1],
+		"fragile": false,
+		"found": {},
+		"loose_surfaces": [],
+		"real_use": "Surplus clogs with a thruster bolted to each heel. Not FDA approved.",
+		"where": "Only sold at the pharmacy window.",
+		"handling": "Worn, not carried: taking a pair puts them on. Hold crouch through a sprint-dive to burn fuel and fly straight ahead. Walls hurt.",
+	},
 }
 
 ## Tabs the database terminal shows as locked, so it is obvious the pool will grow.
@@ -157,6 +174,11 @@ static func is_surgical(kind: String) -> bool:
 ## Sellable loot: gold tint, goes in the sell bin, never on the shelf.
 static func is_loot(kind: String) -> bool:
 	return LootTable.has(kind)
+
+
+## ROCKET BOOTS: taking it puts it on instead of filling a hand.
+static func is_worn(kind: String) -> bool:
+	return def(kind).get("wear", false)
 
 
 ## Takes two hand slots.

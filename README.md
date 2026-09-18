@@ -2,7 +2,7 @@
 
 A co-op first-person horror game set in a dark, half-abandoned hospital. Clock in with your friends, search the wards for the supplies a dying patient needs, stock the OR shelf, and operate, while something blind listens for your footsteps and something tall waits for you to look away.
 
-Built with Godot 4.7 (GDScript). See [DESIGN.md](DESIGN.md) for the game design and [docs/CONTRACTS.md](docs/CONTRACTS.md) for how the systems fit together.
+Built with Godot 4.7 (GDScript). See [DESIGN.md](DESIGN.md) for the game design, [docs/CONTRACTS.md](docs/CONTRACTS.md) for how the systems fit together, and [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
 
 **Working on this with an agent?** Start with [CLAUDE.md](CLAUDE.md). Tests already failing on `main` are in [docs/FAILING_TESTS.md](docs/FAILING_TESTS.md).
 
@@ -30,7 +30,7 @@ Or open the folder as a project in the Godot editor and press F5.
 | R | Read the medical guide (while holding it or looking at it) |
 | Q | Shove |
 | Esc | Pause, or stop operating |
-| F2 / F3 / F11 | Graphics quality / FPS counter / fullscreen |
+| F2 / F3 / F5 / F11 | Graphics quality / FPS counter / first person or over the shoulder / fullscreen |
 
 While operating, the mouse moves the tool and the mouse buttons use it.
 

@@ -1014,7 +1014,30 @@ game.furnace_sell(kind, count, value, at)   # host; the furnace calls this once 
 game.furnace_can_sell(kind) -> bool  # loot (incl. brains) and placebo_pills; nothing else
 game.furnace_value(kind, slot) -> int  # brains: spoiled value; placebo_pills: 0; else slot.v
 game.PILL_PRICE / game.PILL_COUNT    # $15, 10 pills a bottle
+game.ROCKET_BOOTS_PRICE              # $100 a pair (catalog line "rocket_boots", count 1)
+game.player_faceplanted(p)           # host; a rocket dive hit a wall head on: damage_player(p, 1, "faceplant")
 ```
+
+- **Rocket boots** (`Items.is_worn(kind)`, def key `wear`): the one worn item. Taking a pair
+  (`game.pickup_item`, `game.give_hand`, the dev dispenser) calls `player.put_on_boots()` instead of
+  filling a hand, prompt "Put on Rocket boots", refused ("!Already wearing rocket boots") while
+  `player.boots`. A stack of several loses one pair per taker. `boots` is host authoritative
+  (report_full `"bt"`), survives death and respawn, and `game.reset_money()` (a new run) clears it.
+  The furnace doesn't take them (not sellable: they bounce back out).
+- **The rocket dive** (player.gd "ROCKET BOOTS", client-owned movement like the dive): crouch still
+  held `ROCKET_IGNITE_HOLD` after a sprint-dive fires lights the boots once per dive (a tap stays a
+  plain dive). While lit (`rocketing`, report bit 256 / report_full `"rk"`, `rocket_burning()`): flat
+  `ROCKET_SPEED` along the dive's locked heading, vertical speed eased to 0 (level flight), the
+  capsule at prone height until the dive ends, eye `ROCKET_EYE_H`, `fuel` (0..1, local like stamina)
+  drains over `FUEL_BURN_TIME`. It ends on letting go, running dry, going down or losing control;
+  the dive then falls and lands as usual. Fuel refills over `FUEL_REFILL_TIME` on the ground, not
+  diving. A slide collision after the move with a near-horizontal normal against the heading
+  (`FACEPLANT_DOT`) is a faceplant: burn over, bounced back, heading cleared (it just falls), and
+  `faceplant_count` (report_state index 16) bumps; the host's `_consume_actions` calls
+  `game.player_faceplanted` (skipped while invulnerable or in god mode). The look is
+  `scripts/rocket_boots.gd` (heel pods on `foot.L`/`foot.R`, top-level flames and a glow trailing
+  the travel direction, cue `rocket_burn`); HUD element `"fuel"` under stamina while wearing a pair
+  and it isn't full. Test: `tools/controlstest.tscn` ("rocket boots").
 
 - **The pharmacy** (`scripts/economy/economy_props.gd`, hub rebuild chunk 3): a wall of steel bars
   across the pharmacy (width 13.5 m in the hub, 3 m in the dev room) with a pickup drawer through a
@@ -1509,7 +1532,8 @@ p.body_hands.set_active(on) / has_rig()
 p.carry_cam                                  # scripts/camera/carry_camera.gd, local player only (else null)
 p.carry_cam.active / blend / offset / arm_length / hides_hands() / aim_segment(range)
 p.bot_charge                                 # test seam: true holds the shove, false lets go
-Settings "carry_camera": "shoulder" (default) | "first_person"     # carrying/dragging only; ordinary play is always first person
+Settings "carry_camera": "shoulder" (default) | "first_person"     # carrying/dragging, when "camera" is first person
+Settings "camera": "first_person" (default) | "shoulder"           # ordinary play; F5 flips it (main.gd)
 ```
 
 - **Socket axes** (every hand, first and third person): origin in the palm, -Z the fingers, +Y out
@@ -1550,6 +1574,12 @@ Settings "carry_camera": "shoulder" (default) | "first_person"     # carrying/dr
   interact comes in standing still. `body_hands.lies_by_clip()` tells `Player._update_down_pose` not to
   tip the body; carried, the body is placed each frame by `Player.human_carried_pose(carrier)`: `HUMAN_CARRIED_SHOULDER` (-0.15, 1.535, 0.03)
   in the carrier's frame and yaw, mirrored (x scale -1: the clip is authored over a right shoulder), so the Carried clip's belly lands on the carrier's LEFT shoulder; corpses.gd places a carried human body the same way and a seal/monster body across the shoulders at `SHOULDER_AT` (-0.38, 1.62, 0.18), where the furnace roll-off starts. The carrier's `carry` pose wraps the LEFT arm across the legs; the right arm stays free. The first-person arms stay `fp_arms`.
+- **Opt-in shoulder camera** (2026-09-18): with the `camera` setting on "shoulder" (the settings
+  screen's Camera row, or F5 anywhere) the same rig below runs in ordinary play too, at `PLAY_ARM`
+  (0.5, 0.3, 1.35), switching to the carry/drag arms while carrying or dragging; `wants()` still
+  gives the head back while operating, in Hive Eyes, downed, carried, on the table or dead. The
+  local held stack shows in the body's hand while the body shows (`_held_tp`). First person stays
+  the default. Test: `tools/controlstest.tscn` ("over-the-shoulder camera").
 - **Carry camera** (`scripts/camera/carry_camera.gd`): while the local player carries a downed player
   or a body, or drags a monster (setting "shoulder"), `Head/FX` eases (0.4 s, smootherstep) over the
   RIGHT shoulder (the load rides the left), framed like a flagship third-person game: the carrier on

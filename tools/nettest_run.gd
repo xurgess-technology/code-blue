@@ -58,6 +58,8 @@ const SCENARIOS := [
 	{"name": "doors", "scenario": "doors", "clients": 2, "timeout": 400, "start_after": {2: "[marker] doors_open"}},
 	# Terminal redesign, chunk 4: the break room screen shared, sign-in with a client's own database.
 	{"name": "wall", "scenario": "wall", "clients": 2, "timeout": 300},
+	# ROCKET BOOTS: boots on a client, its burn seen by another, its faceplant hurting on the host.
+	{"name": "rocket_boots", "scenario": "rocket_boots", "clients": 2, "timeout": 240},
 ]
 ## Not part of the default run: bandwidth measurements (4 players, no lag, --stats). `bandwidth`
 ## is Bob's gunshot (seed 4242, the case the pre-delta numbers were taken on); `bandwidth_amp`
