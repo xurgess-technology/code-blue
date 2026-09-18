@@ -1,11 +1,11 @@
 @echo off
 setlocal
-rem Export Code Blue the way it ships on Steam: an .exe plus a .pck of pre-imported assets,
+rem Export Malpractice the way it ships on Steam: an .exe plus a .pck of pre-imported assets,
 rem written to builds\windows\. No import step when you play it, and the shader baker runs here
 rem so the first launch compiles less.
 rem
 rem   build.bat          release build (what players get), then launches it
-rem   build.bat debug    debug build with CodeBlue.console.exe for the engine log, then launches it
+rem   build.bat debug    debug build with Malpractice.console.exe for the engine log, then launches it
 rem   build.bat nolaunch release build only (add "debug" too for a debug build)
 cd /d "%~dp0"
 
@@ -44,28 +44,28 @@ set "OUT=builds\windows"
 if exist "%OUT%" rmdir /s /q "%OUT%"
 mkdir "%OUT%"
 
-title Code Blue build
+title Malpractice build
 echo Exporting a %MODE% build to %OUT% ...
 echo.
 rem Not --headless: the shader baker needs a real GPU to pre-compile shaders into the .pck,
 rem so a Godot window flashes up for the ~30 seconds this takes. A windowed editor run re-saves
 rem project.godot in its own format on the way out, so it is put back untouched afterwards.
 copy /y project.godot "%TEMP%\codeblue_project.godot.bak" >nul
-"%GODOT%" --path . --export-%MODE% "Windows Desktop" "%OUT%\CodeBlue.exe"
+"%GODOT%" --path . --export-%MODE% "Windows Desktop" "%OUT%\Malpractice.exe"
 set EXPORT_RC=%ERRORLEVEL%
 copy /y "%TEMP%\codeblue_project.godot.bak" project.godot >nul
 if not "%EXPORT_RC%"=="0" goto failed
-if not exist "%OUT%\CodeBlue.exe" goto failed
-if not exist "%OUT%\CodeBlue.pck" goto failed
+if not exist "%OUT%\Malpractice.exe" goto failed
+if not exist "%OUT%\Malpractice.pck" goto failed
 
 echo.
-echo Built %OUT%\CodeBlue.exe
+echo Built %OUT%\Malpractice.exe
 if "%LAUNCH%"=="0" exit /b 0
 
 if "%MODE%"=="debug" (
-  "%OUT%\CodeBlue.console.exe"
+  "%OUT%\Malpractice.console.exe"
 ) else (
-  start "" "%OUT%\CodeBlue.exe"
+  start "" "%OUT%\Malpractice.exe"
 )
 exit /b 0
 

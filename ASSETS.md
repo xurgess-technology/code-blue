@@ -359,7 +359,7 @@ replaces the arm meshes through `fp_arms.make_arm()` and the rig through `rig_ma
 
 | Key | File | Source | Author | Licence | size (m) | Fix-ups |
 | --- | --- | --- | --- | --- | --- | --- |
-| `monster/night_nurse` | `night_nurse.glb` + `textures/NN_{Cloth,Skin}_{albedo,normal,roughness}.png` | Built for Code Blue from Python scripts in Blender 5.2 (`art/night_nurse/blender_src/`) | Code Blue (made with Claude) | None needed: original work of this project, no third-party content | 0.53 × **2.30** × 0.44 | scale 1.0, yaw 180 |
+| `monster/night_nurse` | `night_nurse.glb` + `textures/NN_{Cloth,Skin}_{albedo,normal,roughness}.png` | Built for Malpractice from Python scripts in Blender 5.2 (`art/night_nurse/blender_src/`) | Malpractice (made with Claude) | None needed: original work of this project, no third-party content | 0.53 × **2.30** × 0.44 | scale 1.0, yaw 180 |
 
 - **Not downloaded, not made by an AI image or mesh service.** Every vertex, UV, weight,
   keyframe and texel comes from `nn_geometry.py`, `nn_materials.py`, `nn_rig.py` and `nn_build.py`
@@ -424,7 +424,7 @@ at the origin, running along +X, floor at y 0); nothing else changes.
 
 | Key | File | Source | Author | Licence | size (m) | Fix-ups |
 | --- | --- | --- | --- | --- | --- | --- |
-| `patient/seal` | `seal.glb` + `textures/Seal_{Coat,Detail}_{albedo,normal,roughness}.png`, `textures/Seal_Infect.png`, `seal_skin.gdshader` | Built for Code Blue from Python scripts in Blender 5.2 (`art/seal/blender_src/`) | Code Blue (made with Claude) | None needed: original work of this project, no third-party content | 1.84 long, 0.37 high, 0.97 across the fore flippers | none (authored in the PatientBody frame) |
+| `patient/seal` | `seal.glb` + `textures/Seal_{Coat,Detail}_{albedo,normal,roughness}.png`, `textures/Seal_Infect.png`, `seal_skin.gdshader` | Built for Malpractice from Python scripts in Blender 5.2 (`art/seal/blender_src/`) | Malpractice (made with Claude) | None needed: original work of this project, no third-party content | 1.84 long, 0.37 high, 0.97 across the fore flippers | none (authored in the PatientBody frame) |
 
 - **Not downloaded, not made by an AI image or mesh service.** Every vertex, UV, weight, keyframe and
   texel comes from `seal_geometry.py`, `seal_materials.py`, `seal_rig.py` and `seal_build.py`
@@ -443,7 +443,7 @@ at the origin, running along +X, floor at y 0); nothing else changes.
 
 | Key | File | Source | Author | Licence | size (m) | Fix-ups |
 | --- | --- | --- | --- | --- | --- | --- |
-| `char/human_surgeon_a` | `surgeon_a.glb` + `textures/surgeon_a_*.png` | Built for Code Blue from Python scripts in Blender 5.2 (`art/human/blender_src/`) | Code Blue (made with Claude) | None needed: original work of this project, no third-party content | 1.80 tall | scale 1.0, yaw 180 |
+| `char/human_surgeon_a` | `surgeon_a.glb` + `textures/surgeon_a_*.png` | Built for Malpractice from Python scripts in Blender 5.2 (`art/human/blender_src/`) | Malpractice (made with Claude) | None needed: original work of this project, no third-party content | 1.80 tall | scale 1.0, yaw 180 |
 | `char/human_surgeon_b` | `surgeon_b.glb` + `textures/surgeon_b_*.png` | same | same | same | 1.68 tall | scale 1.0, yaw 180 |
 | `char/human_surgeon_c` | `surgeon_c.glb` + `textures/surgeon_c_*.png` | same | same | same | 1.75 tall | scale 1.0, yaw 180 |
 | `patient/human_bob` | `bob.glb` + `textures/bob_*.png` | same | same | same | 1.75 tall | scale 1.0, yaw 180 |

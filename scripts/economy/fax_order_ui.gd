@@ -29,7 +29,7 @@ const BOTTOM_PAD := 22.0
 const PAGE_MARGIN := 30.0
 ## Opening, the form starts feeding once the rising machine is this far up.
 const FEED_AFTER_RISE := 0.3
-const MACHINE_LABEL := "PHARMACY ORDER FAX  /  COUNTY GENERAL"
+const MACHINE_LABEL := "PHARMACY ORDER FAX  /  DOE GENERAL"
 
 var game: Node = null
 var _open := false
@@ -251,7 +251,7 @@ func _build_sheet() -> void:
 
 	var dt := Time.get_datetime_dict_from_system()
 	_sheet.add_child(_ink(">> FAX  %04d-%02d-%02d  %02d:%02d  PAGE 1 OF 1" % [dt.year, dt.month, dt.day, dt.hour, dt.minute], 16, Fax.INK_FAINT))
-	_sheet.add_child(_ink("TO:    COUNTY GENERAL PHARMACY", Fax.FONT_SIZE))
+	_sheet.add_child(_ink("TO:    DOE GENERAL PHARMACY", Fax.FONT_SIZE))
 	_sheet.add_child(_ink("FROM:  NIGHT SHIFT, OPERATING ROOM", Fax.FONT_SIZE))
 	_sheet.add_child(_rule())
 	_sheet.add_child(_ink("PLEASE SUPPLY  (TICK, THEN HOW MANY)", 15, Fax.INK_FAINT))
@@ -595,7 +595,7 @@ func _start_reply() -> void:
 	_reply_lines = [
 		[">> FAX  %04d-%02d-%02d  %02d:%02d  PAGE 1 OF 1" % [dt.year, dt.month, dt.day, dt.hour, dt.minute], 16, Fax.INK_FAINT],
 		["TO:    NIGHT SHIFT, OPERATING ROOM", Fax.FONT_SIZE, Fax.INK],
-		["FROM:  COUNTY GENERAL PHARMACY", Fax.FONT_SIZE, Fax.INK],
+		["FROM:  DOE GENERAL PHARMACY", Fax.FONT_SIZE, Fax.INK],
 		["RE:    3,141,592,653 PLACEBO PILLS", Fax.FONT_SIZE, Fax.INK],
 		["@rule"],
 		["ORDER VOIDED. NO CHARGE.", Fax.FONT_SIZE, Fax.INK],

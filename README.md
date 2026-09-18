@@ -1,4 +1,4 @@
-# Code Blue
+# Malpractice
 
 A co-op first-person horror game set in a dark, half-abandoned hospital. Clock in with your friends, search the wards for the supplies a dying patient needs, stock the OR shelf, and operate, while something blind listens for your footsteps and something tall waits for you to look away.
 
