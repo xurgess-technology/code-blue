@@ -1277,6 +1277,16 @@ static func _fill_landmarks(gen: Dictionary, info: Dictionary) -> void:
 		for k in spots.lab:
 			lab[k] = {"position": _w(spots.lab[k].pos), "yaw": float(spots.lab[k].yaw)}
 		info["lab"] = lab
+	if spots.has("vat_benches"):
+		# GRAFTING part one: where a specimen vat can stand on the lab wall (three per vat bench), the bench's
+		# own frame: x along the counter, z toward the wall behind it.
+		var vs: Array = []
+		for bch in spots.vat_benches:
+			var base := _w(bch.pos)
+			var rot := Basis(Vector3.UP, float(bch.yaw))
+			for lx in [-0.5, 0.0, 0.5]:
+				vs.append({"position": base + rot * Vector3(lx, 0.925, 0.0), "yaw": float(bch.yaw)})
+		info["vat_spots"] = vs
 	if spots.has("personnel"):
 		# The personnel room's stations (entrance.gd), in world space, for whatever brings them to life.
 		var pr: Dictionary = spots.personnel

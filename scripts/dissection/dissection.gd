@@ -33,6 +33,7 @@ const SHRIEK_EVERY := Vector2(3.5, 6.5)
 const REMOVE_AFTER := 6.0
 const FLAG_STEP := 0.05
 const BRAIN_KINDS := {"hive": "brain_hive", "discharged": "brain_discharged"}
+const LootTable := preload("res://scripts/economy/loot_table.gd")
 ## Fallback when the brains system has no spawn_brain: a plain loot item worth this much at quality 1.
 const FALLBACK_KIND := "sample_rack"
 const FALLBACK_VALUE := {"hive": 150, "discharged": 350}
@@ -52,6 +53,10 @@ var _rng := RandomNumberGenerator.new()
 
 ## Tests: the last brain handed over {kind, quality, pos, node}.
 var last_brain: Dictionary = {}
+## GRAFTING part one: the peer who was operating when the last case finished (set by game.finish_case),
+## who gets the extracted eye in their hand; tests read last_eye {kind, quality, node, peer}.
+var last_operator := 0
+var last_eye: Dictionary = {}
 
 
 func setup(g: Node) -> void:
@@ -79,6 +84,35 @@ func sedation(c: Dictionary) -> float:
 		return float(_sed[id])
 	var flags = c.get("flags", {})
 	return float(flags.get("sedation", 1.0)) if flags is Dictionary else 1.0
+
+
+## GRAFTING part one: what a strapped Hive would be given by what p holds, before its first step: the
+## scalpel makes it Eyeball Extraction, the bone saw Dissection. Anything else keeps what it has.
+func ailment_for(c: Dictionary, p) -> String:
+	var cur := String(c.get("ailment_id", ""))
+	if String(c.get("patient_id", "")) != "hive" or int(c.get("step_index", 0)) != 0:
+		return cur
+	if cur != "dissection" and cur != "eye_extraction":
+		return cur
+	if p == null or not p.has_method("selected_stack"):
+		return cur
+	match String(p.selected_stack().get("kind", "")):
+		"scalpel":
+			return "eye_extraction"
+		"bone_saw":
+			return "dissection"
+	return cur
+
+
+## Host: before an operation starts, the case takes the ailment p's tool asks for (ailment_for).
+func _pick_ailment(p, c: Dictionary) -> void:
+	var a := ailment_for(c, p)
+	if a != String(c.get("ailment_id", "")):
+		var sys = game.surgery_for_table(int(c.get("table", -1)))
+		if sys != null and int(sys.operator_id) != 0:
+			return
+		c["ailment_id"] = a
+		game._apply_cases_locally()
 
 
 ## 0 asleep .. "stirring" .. "awake".
@@ -282,7 +316,11 @@ func table_prompt(p, table_index: int) -> String:
 	if p != null and _anesthetic_slot(p) >= 0:
 		var next := minf(1.0, s + dose_amount(int(c.get("doses", 0)))) - s
 		return "Re-dose %s (%s, +%d%%)" % [pname, sed_txt, roundi(next * 100.0)]
-	var step := Procedures.step(String(c.ailment_id), int(c.step_index))
+	if p != null and String(c.patient_id) == "hive" and int(c.step_index) == 0:
+		var held_kind := String(p.selected_stack().get("kind", ""))
+		if held_kind != "scalpel" and held_kind != "bone_saw":
+			return "!Hold the bone saw to dissect, or the scalpel to take an eye (%s)" % sed_txt
+	var step := Procedures.step(ailment_for(c, p), int(c.step_index))
 	var sys = game.surgery_for_table(table_index)
 	if step.is_empty() or sys == null:
 		return ""
@@ -301,6 +339,7 @@ func table_used(p, table_index: int) -> bool:
 	if c.is_empty() or not owns_case(c) or String(c.get("state", "")) != "on_table":
 		return false
 	if _anesthetic_slot(p) < 0:
+		_pick_ailment(p, c)   # GRAFTING part one: the scalpel means Eyeball Extraction
 		return false
 	redose(p, table_index)
 	return true
@@ -361,6 +400,9 @@ func on_case_finished(c: Dictionary, won: bool) -> void:
 	var at: Vector3 = game.table_position(table)
 	var pname := String(Procedures.patient(String(c.patient_id)).get("name", "The monster"))
 	_remove_at[id] = float(game.world_time) + REMOVE_AFTER
+	if String(c.get("ailment_id", "")) == "eye_extraction":
+		_finish_eye(c, won, table, at, pname)
+		return
 	if not won:
 		game._sound("flatline", at)
 		game.say("The brain is ruined. %s died on the table." % pname, 5.0)
@@ -376,6 +418,44 @@ func on_case_finished(c: Dictionary, won: bool) -> void:
 	game._broadcast("dx_flatline", {"tb": table})
 	game._sound("flatline", at)
 	game.say("Brain out, condition %d%%. %s is dead. Get the brain to the dumpster before it spoils." % [roundi(cond), pname], 5.0)
+
+
+## Host, GRAFTING part one: an Eyeball Extraction case is over. Won: the Hive's eye comes out in the
+## operator's hand (else lies by the head) and the Hive dies on the table like a dissection. Lost: the
+## eye burst.
+func _finish_eye(c: Dictionary, won: bool, table: int, at: Vector3, pname: String) -> void:
+	var id := int(c.get("id", -1))
+	if not won:
+		game._sound("flatline", at)
+		game.say("The eye burst. %s died on the table." % pname, 5.0)
+		return
+	var cond := minf(float(c.get("vitals", 100.0)), float(_cond.get(id, float(c.get("vitals", 100.0)))))
+	c["vitals"] = cond
+	var quality := clampf(cond / 100.0, 0.0, 1.0)
+	var value := maxi(1, roundi(float(_base_value("eye_hive")) * quality))
+	var who = game.players.get(last_operator) if last_operator != 0 else null
+	var node: Node = null
+	var given := false
+	if who != null and is_instance_valid(who) and who.alive:
+		var i: int = who.take_into("eye_hive", 1, value)
+		if i >= 0:
+			who.selected = i
+			who.slots[i]["bt"] = float(game.world_time)
+			given = true
+	if not given:
+		var pos := _brain_spot(table)
+		node = game._spawn_item("eye_hive", 1, Transform3D(Basis(Vector3.UP, randf() * TAU), pos), WorldItem.State.LOOSE)
+		node.value = value
+		node.bt = float(game.world_time)
+	last_eye = {"kind": "eye_hive", "quality": quality, "node": node, "peer": last_operator}
+	_fx_flatline(table)
+	game._broadcast("dx_flatline", {"tb": table})
+	game._sound("flatline", at)
+	game.say("Eye out, condition %d%%. %s is dead. Put it in a vat before it spoils." % [roundi(cond), pname], 5.0)
+
+
+func _base_value(kind: String) -> int:
+	return int(LootTable.LOOT.get(kind, {}).get("value", [0, 0])[0])
 
 
 ## Host: hands a brain over at pos through the brains system, or a plain loot item.

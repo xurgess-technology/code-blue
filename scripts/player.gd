@@ -50,6 +50,9 @@ var _aim_highlighted: Node = null
 ## Counters the host watches so each press fires exactly once.
 var shove_count: int = 0
 var drop_count: int = 0
+## GRAFTING part one: presses of the vat key (take the eye out of a vat), client-owned like drop_count.
+var vat_count: int = 0
+var _vat_seen: int = 0
 ## SWEEP 4A HOOK (pharmacy, chunk 3): 0..1 charge the drop key had when it last fired
 ## (client-owned, sent alongside drop_count so the host reads them together). A quick tap
 ## reports ~0 (the old gentle toss); holding the key ramps it up to 1 by DROP_CHARGE_FULL.
@@ -1037,6 +1040,8 @@ func _local_step(delta: float) -> void:
 		# SWEEP 4A HOOK (pharmacy, chunk 3): hold the drop key to charge a throw, release to fire
 		# it; a quick tap still reports ~0 charge, the old gentle drop. Client-owned charge timer.
 		# SPRINT-DIVE HOOK: no starting a drop charge mid-dive either.
+		if Input.is_action_just_pressed("vat_take") and not diving and not winding:
+			vat_count += 1   # GRAFTING part one: the host decides whether there is a vat to reach into
 		if Input.is_action_just_pressed("drop") and selected_stack().kind != "" and dragging_monster < 0 and not winding and not diving:
 			_drop_holding = true
 			_drop_hold_t = 0.0
@@ -1273,6 +1278,10 @@ func _consume_actions() -> void:
 		_faceplant_seen = faceplant_count
 		if alive and not downed and held_by < 0:
 			game.player_faceplanted(self)   # ROCKET BOOTS
+	if vat_count != _vat_seen:
+		_vat_seen = vat_count
+		if alive and not busy and game.get("vats") != null:
+			game.vats.take_out(self, aim_id)   # GRAFTING part one
 	if drop_count != _drop_seen:
 		_drop_seen = drop_count
 		if alive and not busy:
@@ -1298,6 +1307,13 @@ func _consume_actions() -> void:
 ## Find what the camera points at and what it would let this player do.
 func _update_aim() -> void:
 	_update_aim_core()
+	# GRAFTING part one: aimed at nothing with a vat and an eye both in hand, E puts the eye in.
+	if aim_id == "" and alive and not downed and game != null and game.get("vats") != null:
+		var vp: String = game.vats.hand_prompt(self)
+		if vp != "":
+			aim_id = "vat_hand"
+			aim_prompt = vp
+			aim_hold = 0.0
 	# HANDS HOOK: holding the needle and aiming at a monster in its stun window: "Jab it" (a few Hz).
 	if aim_prompt == "" and alive and not downed and game != null and game.combat != null and game.combat.has_method("jab_prompt") \
 			and String(selected_stack().kind) == "anesthetic":
@@ -2054,7 +2070,8 @@ func report_state() -> Array:
 		ability_slot_press[0], ability_slot_press[1], ability_slot_press[2], ability_slot_press[3],
 		snappedf(drop_charge, 0.02),   # SWEEP 4A HOOK (pharmacy, chunk 3)
 		snappedf(throw_wind, 0.02),   # THROW HOOK
-		faceplant_count]   # ROCKET BOOTS
+		faceplant_count,   # ROCKET BOOTS
+		vat_count]   # GRAFTING part one
 
 
 func apply_remote_state(s: Array) -> void:
@@ -2094,6 +2111,8 @@ func apply_remote_state(s: Array) -> void:
 		throw_wind = float(s[15])
 	if s.size() >= 17:   # ROCKET BOOTS
 		faceplant_count = int(s[16])
+	if s.size() >= 18:   # GRAFTING part one: the vat key
+		vat_count = int(s[17])
 	_consume_actions()
 
 

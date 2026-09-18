@@ -1967,6 +1967,48 @@ game.brains.dev_request(sender, action, args)   # "br_spawn_brain" {kind, qualit
   unlocking tiers, persistence across a wipe and a reload, a second peer's scan landing in the
   host's database, the guide binder and `read` action being gone).
 
+### Grafting part one: eyes, vats and Eyeball Extraction (docs/GRAFTING.md, chunk A, 2026-09-18)
+
+`scripts/grafting/eyes.gd` (`Eyes`, statics) and `vats.gd` (`Vats`, `game.vats`, child "Vats" of Game).
+No graft, graft stand or Hive Eyes change yet (chunks B and C).
+
+```gdscript
+# Items: "scalpel", "eye_spoon" (ITEMS, surgical, reusable), "specimen_vat" (ITEMS, bulky: two hands),
+#        "eye_hive", "eye_surgeon" (LootTable, sellable, `eye: true`).
+Eyes.spoil_factor(age) / condition(f) / is_spoiled_factor(f)   # FRESH 40 s, ROTTEN 130 s, spoiled below 0.3 (can't be grafted)
+Eyes.label(kind, owner)                                         # "Hive eye" / "Zach's eye"
+Eyes.pack(kind, owner, age, value) / unpack(x)                  # a vat's contents string
+Vats.held_vat(p) -> int                                         # head slot of a vat in p's hands, -1
+game.vats: item_used(p, item) / hand_put(p) / take_out(p, aim_id) / set_down(p, spot) / spot_free(i)
+           eye_age(stack_or_item) / eye_factor(...) / eye_value(stack)   # value now, for the furnace
+           spots (level_info.vat_spots, six: three per vat bench), on_level_built(info)
+```
+
+- **`x`** is a new small string on `WorldItem` and on a hand slot (like `bt`, it rides pickup, drop,
+  throw, storage and the snapshot): an eye's owner ("Zach"; "" for a Hive eye), or what a vat holds.
+  An eye's spoil clock is `bt`, like a brain's. Going into a vat freezes the age in the vat's `x`;
+  coming out rebuilds `bt`, so a vat stops the clock. `game.furnace_value` prices eyes by spoilage.
+- **Inputs.** E on a vat (bench or dropped) with an eye selected puts it in; E aimed at nothing with a
+  vat and an eye in hand does the same (aim id `vat_hand`). **V** (`vat_take`, its own input action,
+  `Player.vat_count`, last element of the report array) takes the eye back out of the aimed vat, else
+  the vat in your hands. E on a free bench spot (`Vats.Marker`, only aimable while you carry a vat)
+  sets a carried vat down there.
+- **The lab wall.** Two of the entrance OR's east-run lab stations are `lab_vat_bench` pieces (three
+  vat spots each on the counter; shelves of jars, mostly heads, over them). `entrance.gd` records
+  `spots.vat_benches`, `hospital_builder` turns them into `level_info.vat_spots`. On level build the
+  host stands three empty vats on the first three spots and stocks a scalpel and an eye spoon on the
+  OR's storage shelves (neither is in `_shift_item_ids`, so they last the run; a new run resets).
+- **Eyeball Extraction** is the ailment `eye_extraction` (monster-only; steps scalpel "cut", eye spoon
+  "scoop", scalpel "snip", all `game: "eye"` = `surgery/games/eye_ops.gd`, site `eye` on the Hive's left
+  eyeball). A strapped Hive stays `dissection` until its first step: `Dissection.ailment_for(case, p)`
+  gives `eye_extraction` when p holds the scalpel, `dissection` for the bone saw (host: `_pick_ailment`
+  in `table_used`; `SurgerySystem._step_for` for the prompt everywhere). The body keeps its key across
+  the switch. Results `eye_cut`, `eye_out` (the socket empties), `eye_removed` (the Hive flatlines);
+  sedation, stirring and thrash botches are unchanged and vitals are the eye's condition: at 0 the
+  eye bursts. The last step puts an `eye_hive` (value 120 x condition) in the operator's hand
+  (`Dissection.last_operator`, else on the specimen tray); the Hive dies on the table.
+- Tests: `tools/grafttest.tscn` (headless).
+
 ### Ability bar (HUD, local-only, sweep 4a)
 
 `scripts/hud.gd` `_draw_ability_bar`: 4 slots always shown small top-left of the item bar; holding

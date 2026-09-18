@@ -134,6 +134,16 @@ const LOOT := {
 		"name": "Discharged brain", "short": "Discharged brains", "value": [350, 350], "tier": 3, "fragile": true,
 		"brain": true, "rooms": {}, "surfaces": [], "containers": {},
 	},
+	# GRAFTING part one (scripts/grafting/eyes.gd): taken out of a strapped Hive, or a surgeon's own
+	# eye swapped out; never found. They spoil like brains outside a vat (Eyes.spoil_factor).
+	"eye_hive": {
+		"name": "Hive eye", "short": "Hive eyes", "value": [120, 120], "tier": 3,
+		"eye": true, "rooms": {}, "surfaces": [], "containers": {},
+	},
+	"eye_surgeon": {
+		"name": "Surgeon's eye", "short": "Surgeon's eyes", "value": [45, 45], "tier": 3,
+		"eye": true, "rooms": {}, "surfaces": [], "containers": {},
+	},
 }
 
 ## Weight multiplier by tier on the surface (depth 0); deeper rooms lift the rare tiers.

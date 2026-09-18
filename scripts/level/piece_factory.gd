@@ -655,6 +655,39 @@ static func _counter_body(g: Geo, w: float, h: float, d: float, body: Color, top
 		g.box(Vector3(0.1, 0.018, 0.02), Vector3(x, h - 0.2, -d * 0.5), CHROME)
 
 
+## GRAFTING part one: a jar of fluid on a shelf with something floating in it, `i` picks what: mostly
+## heads (a surgeon's, a Hive's), now and then an eye or a brain. Origin is the jar's base.
+static func _specimen_jar(g: Geo, base: Vector3, i: int, rng: RandomNumberGenerator) -> void:
+	var fluid: Color = [Color(0.85, 0.8, 0.45, 0.35), Color(0.6, 0.8, 0.7, 0.35), Color(0.8, 0.7, 0.55, 0.35)][rng.randi() % 3]
+	g.cyl(0.072, 0.27, base + Vector3(0, 0.135, 0), fluid, "y", 14, 2)
+	g.cyl(0.076, 0.03, base + Vector3(0, 0.285, 0), DARK_STEEL, "y", 14)
+	g.cyl(0.078, 0.012, base + Vector3(0, 0.006, 0), DARK_STEEL, "y", 14)
+	var c := base + Vector3(0, 0.13, 0)
+	var what := i % 8
+	var ry := rng.randf() * TAU
+	if what == 3:
+		# A loose eyeball, and its stub of nerve.
+		g.blob(Vector3(0.05, 0.05, 0.05), c, Color(0.92, 0.9, 0.86), Basis.IDENTITY, 0.0, 8, 5)
+		g.cyl(0.012, 0.03, c + Vector3(0, 0.0, 0.04), Color(0.8, 0.62, 0.58), "z", 6)
+		g.cyl(0.014, 0.008, c + Vector3(0, 0.0, -0.023), Color(0.2, 0.4, 0.6), "z", 8)
+	elif what == 6:
+		g.blob(Vector3(0.11, 0.08, 0.1), c, Color(0.78, 0.55, 0.55), Basis(Vector3.UP, ry), 0.2, 8, 5)
+	else:
+		# A head: bare, bald, the face turned a little toward the room.
+		var hive := what % 2 == 1
+		var skin: Color = Color(0.55, 0.6, 0.45) if hive else [Color(0.86, 0.68, 0.56), Color(0.62, 0.46, 0.36), Color(0.93, 0.78, 0.66)][rng.randi() % 3]
+		var face := Basis(Vector3.UP, rng.randf_range(-0.6, 0.6))
+		g.blob(Vector3(0.105, 0.125, 0.105), c, skin, face, 0.1, 10, 6)
+		for ex in [-0.024, 0.024]:
+			var ep: Vector3 = c + face * Vector3(ex, 0.012, -0.046)
+			if hive:
+				g.cyl(0.011, 0.006, ep, Color(1.0, 0.5, 0.1), "z", 8, 1)
+			else:
+				g.cyl(0.011, 0.006, ep, Color(0.93, 0.93, 0.9), "z", 8)
+				g.cyl(0.005, 0.007, ep + face * Vector3(0, 0, -0.001), Color(0.2, 0.35, 0.55), "z", 6)
+		g.blob(Vector3(0.018, 0.024, 0.02), c + face * Vector3(0, -0.006, -0.055), skin.darkened(0.08), face, 0.0, 6, 4)   # the nose
+
+
 static func _primitive(kind: String) -> ArrayMesh:
 	var g := Geo.new()
 	var s := Defs.size(kind)
@@ -1281,6 +1314,23 @@ static func _primitive(kind: String) -> ArrayMesh:
 			g.box(Vector3(0.3, 0.08, 0.3), Vector3(0.45, 0.96, -0.08), Color(0.85, 0.86, 0.84))
 			g.cyl(0.11, 0.01, Vector3(0.45, 1.005, -0.08), STEEL, "y", 14)
 			g.box(Vector3(0.1, 0.03, 0.005), Vector3(0.45, 0.96, -0.232), Color(0.3, 1.0, 0.5), 1)
+		"lab_vat_bench":
+			# GRAFTING part one: three round marks on the counter where a specimen vat stands (the vats
+			# are items, scripts/grafting/vats.gd), and two shelves of jars over it, mostly heads.
+			_counter_body(g, 1.5, 0.92, 0.7, Color(0.84, 0.86, 0.86), Color(0.08, 0.08, 0.09))
+			g.box(Vector3(1.5, 0.3, 0.02), Vector3(0, 1.07, 0.34), Color(0.8, 0.82, 0.82))
+			for vx in [-0.5, 0.0, 0.5]:
+				g.cyl(0.085, 0.004, Vector3(vx, 0.927, 0.0), Color(0.6, 0.66, 0.68), "y", 18)
+			var jar_rng := RandomNumberGenerator.new()
+			jar_rng.seed = hash(kind) + int(s.x * 100.0)
+			var jar_i := 0
+			for shelf_y in [1.6, 1.98]:
+				g.box(Vector3(1.44, 0.03, 0.26), Vector3(0, shelf_y, 0.23), Color(0.78, 0.8, 0.8))
+				for sx in [-0.66, 0.66]:
+					g.box(Vector3(0.02, 0.12, 0.2), Vector3(sx, shelf_y - 0.07, 0.25), DARK_STEEL)
+				for jx in [-0.53, -0.18, 0.18, 0.53]:
+					_specimen_jar(g, Vector3(jx, shelf_y + 0.015, 0.22), jar_i, jar_rng)
+					jar_i += 1
 		"lab_corner":
 			_counter_body(g, 0.75, 0.92, 0.7, Color(0.84, 0.86, 0.86), Color(0.08, 0.08, 0.09))
 			g.box(Vector3(0.75, 0.3, 0.02), Vector3(0, 1.07, 0.34), Color(0.8, 0.82, 0.82))
