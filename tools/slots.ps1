@@ -53,7 +53,8 @@ function Slot-Branch([string]$path) {
 }
 
 function Slot-Dirty([string]$path) {
-    return [bool](git -C $path status --porcelain 2>$null)
+    # override.cfg is the slot's own (gitignored on main; untracked on commits from before that).
+    return [bool](git -C $path status --porcelain 2>$null | Where-Object { $_ -ne "?? override.cfg" })
 }
 
 function Show-Status {
@@ -79,7 +80,12 @@ switch ($Command) {
         New-Item -ItemType Directory -Force $SlotsDir | Out-Null
         for ($i = 1; $i -le $Count; $i++) {
             $p = SlotPath $i
-            if (Test-Path $p) { Ensure-UserDir $p $i; continue }
+            if (Test-Path $p) {
+                Ensure-UserDir $p $i
+                # An idle, clean slot follows main.
+                if (-not (Slot-Branch $p) -and -not (Slot-Dirty $p)) { git -C $p switch --quiet --detach main }
+                continue
+            }
             Write-Host "Making wt-$i"
             git -C $Main worktree add --no-checkout --detach $p main
             if ($LASTEXITCODE -ne 0) { exit 1 }
