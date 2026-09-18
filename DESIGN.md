@@ -1,6 +1,6 @@
-# Code Blue (working title) — Design
+# Malpractice (working title) — Design
 
-Last updated 2026-09-15 (Sweep 4A: the ability bar, the database terminal, the fog lot, the pharmacy and crematorium, placebo pills, no gold bars). Items marked **TODO** are wanted but not built yet. Items marked **IDEA** are proposals waiting for a yes.
+Last updated 2026-09-17 (Sweep 4A: the ability bar, the database terminal, the fog lot, the pharmacy and crematorium, placebo pills, no gold bars). Items marked **TODO** are wanted but not built yet. Items marked **IDEA** are proposals waiting for a yes.
 
 ## Vision
 
@@ -12,11 +12,11 @@ You and your best friends clock into the ER with one goal: save a life. The prob
 
 **Rating**: bloody, not grim.
 
-## Names (undecided)
+## Names (picked 2026-09-17)
 
-- **Malpractice** — the joke is that you are terrible at this. Fits the friendly-fire chaos best. *(recommended)*
-- **Skeleton Crew** — night-shift staffing pun plus horror. *(runner-up)*
-- **Code Blue**, **Graveyard Shift**, **Bedside Manor**, **Do No Harm**, **On Call**, **Stat!**
+- **The game is Malpractice** — the joke is that you are terrible at this. Working title: a Steam game already carries that exact name, so this gets revisited before any public release (**Gross Malpractice** is the fallback, and it was clear on Steam and itch.io).
+- **The hospital is St. Doe's General Hospital**, shortened to **Doe General** on faxes and signage. "Code blue" survives in-world as the hospital's own alarm code.
+- Dropped: Skeleton Crew, Code Blue, Graveyard Shift, Bedside Manor, Do No Harm, On Call, Stat!
 
 ## Players
 

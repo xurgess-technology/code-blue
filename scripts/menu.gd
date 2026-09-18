@@ -46,6 +46,8 @@ var _title_ink := Fax.STAMP_INK
 var _base_scroll := 0.0
 ## 0 = the sheet still inside the printer, 1 = standing at rest out of the slot.
 var _feed := Fax.Motion.new(1.0)
+## The title stamp comes down once the sheet has stopped feeding (armed in feed_in).
+var _stamp := Fax.Stamp.new()
 ## 0 = at rest (or wherever the feed left it), 1 = gone off the top of the screen.
 var _lift := Fax.Motion.new(0.0)
 var _lift_from := 0.0   # how far below rest the sheet was when it started ejecting
@@ -101,7 +103,7 @@ func _build() -> void:
 	var dt := Time.get_datetime_dict_from_system()
 	_header = _ink(_header_text(2), 16, Fax.INK_FAINT)
 	_sheet.add_child(_header)
-	_sheet.add_child(_ink("COUNTY GENERAL  /  NIGHT SHIFT SIGN-IN", Fax.FONT_SIZE, Fax.INK))
+	_sheet.add_child(_ink("DOE GENERAL  /  NIGHT SHIFT SIGN-IN", Fax.FONT_SIZE, Fax.INK))
 
 	_title = Control.new()
 	_title.custom_minimum_size.y = 110
@@ -317,10 +319,13 @@ func feed_in(scroll_px := 0.0, _speed := 0.0, page := 2) -> void:
 	_lift.snap(0.0)
 	if Fax.headless():
 		_feed.snap(1.0)
+		_stamp.settled()
 		return
 	_base_scroll = scroll_px
 	_feed.snap(0.0)
 	_feed.go(1.0, Fax.FEED_SECONDS, true)
+	# The sheet stops, then the stamp comes down on it.
+	_stamp.arm(Fax.FEED_SECONDS + Fax.Stamp.DELAY)
 	_feed_tick = 0.0
 	_layout()
 
@@ -338,6 +343,12 @@ func hold_in_printer() -> void:
 
 func is_feeding() -> bool:
 	return _feed.moving()
+
+
+## The title stamp has not landed and settled yet: the sheet is fed, but the page isn't finished
+## (screenshot tools wait for this as well as is_feeding()).
+func is_stamping() -> bool:
+	return _stamp.moving()
 
 
 ## Another page is coming (settings, the shift assignment): this one accelerates up and out of the top
@@ -397,6 +408,10 @@ func _process(delta: float) -> void:
 	if not visible:
 		return
 	var dt := Fax.ui_dt(delta)
+	if _stamp.moving():
+		if _stamp.step(dt):
+			Fax.sfx("print_stamp", -6.0, 0.03)
+		_title.queue_redraw()
 	if is_ejecting():
 		_lift.step(dt)
 		_layout()
@@ -437,7 +452,9 @@ func _draw_over() -> void:
 
 
 func _draw_title() -> void:
-	Fax.draw_stamp(_title, _font, "CODE BLUE", _title.size * 0.5, 56, 0.0, _title_ink, 1.0, -0.05)
+	if _stamp.hidden():
+		return   # the sheet is still feeding: bare paper where the title will land
+	Fax.draw_stamp(_title, _font, "MALPRACTICE", _title.size * 0.5, 56, _stamp.punch(), _title_ink, 1.0, 0.05)
 
 
 # -- state -----------------------------------------------------------------------------------

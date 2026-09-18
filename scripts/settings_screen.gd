@@ -41,7 +41,7 @@ const PAGE_MARGIN := 30.0
 ## Motions and their timings are the shared ones in scripts/fax_printer.gd (Fax.FEED_SECONDS etc.).
 ## Pausing, the page starts feeding once the rising printer is this far up.
 const FEED_AFTER_RISE := 0.3
-const MACHINE_LABEL := "COUNTY GENERAL  /  STAFF SETTINGS"
+const MACHINE_LABEL := "DOE GENERAL  /  STAFF SETTINGS"
 
 ## key -> {slider, label, fmt: Callable}
 var _sliders: Dictionary = {}

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// tools/gen_audio.mjs — offline synthesiser for Code Blue's sound and music.
+// tools/gen_audio.mjs — offline synthesiser for Malpractice's sound and music.
 //
 // The browser build (code-blue/src/audio.ts + music.ts) synthesised everything live
 // with WebAudio. Godot has no equivalent, so this script ports the *character* of
@@ -441,6 +441,44 @@ const SFX_BUILDERS = {
     b.noise(0.004, { dur: 0.09, vol: 0.25, freq: 380, type: 'lowpass', rnd });
     return t;
   },
+  // The database projector's carousel advancing one slide: the motor nudges, the tray indexes with a
+  // hard plastic clack, the slide drops into the gate with a softer knock, the housing rings a little.
+  db_clack: () => {
+    const rnd = rngFor('db_clack');
+    const t = sfxTrack(0.5), b = new Bus(t, null, 0);
+    b.noise(0, { dur: 0.05, vol: 0.06, freq: 320, q: 0.8, attack: 0.01, rnd });
+    b.noise(0.05, { dur: 0.012, vol: 0.45, freq: 2600, q: 1.2, attack: 0.0004, rnd });
+    b.tone(0.05, { freq: 190, end: 90, type: 'square', dur: 0.06, vol: 0.2, attack: 0.001, filter: 1800 });
+    b.noise(0.1, { dur: 0.03, vol: 0.2, freq: 900, q: 1, attack: 0.001, rnd });
+    b.tone(0.1, { freq: 120, end: 62, type: 'sine', dur: 0.14, vol: 0.28, attack: 0.001 });
+    b.tone(0.105, { freq: 1450, type: 'sine', dur: 0.1, vol: 0.05, attack: 0.002, release: 0.06 });
+    return t;
+  },
+  // The projector's lamp coming on: the switch, a relay tick, the bulb catching with a low thunk and
+  // the fan spinning up underneath.
+  db_bulb: () => {
+    const rnd = rngFor('db_bulb');
+    const t = sfxTrack(1.2), b = new Bus(t, null, 0);
+    b.noise(0, { dur: 0.01, vol: 0.35, freq: 3000, q: 1.5, attack: 0.0004, rnd });
+    b.noise(0.09, { dur: 0.008, vol: 0.2, freq: 1800, q: 2, attack: 0.0004, rnd });
+    b.tone(0.1, { freq: 70, end: 52, type: 'sine', dur: 0.22, vol: 0.3, attack: 0.002 });
+    b.tone(0.1, { freq: 60, type: 'sawtooth', dur: 0.12, vol: 0.03, attack: 0.001, filter: 700 });
+    b.tone(0.15, { freq: 40, end: 118, type: 'triangle', dur: 0.9, vol: 0.06, attack: 0.08, release: 0.3 });
+    b.noise(0.15, { dur: 0.9, vol: 0.05, freq: 300, endFreq: 1100, q: 0.7, attack: 0.2, rnd });
+    return t;
+  },
+  // A slide jamming in the gate: the carousel tries, catches, grinds and tries again.
+  db_jam: () => {
+    const rnd = rngFor('db_jam');
+    const t = sfxTrack(0.7), b = new Bus(t, null, 0);
+    b.noise(0, { dur: 0.012, vol: 0.3, freq: 2400, q: 1.2, attack: 0.0004, rnd });
+    b.tone(0, { freq: 160, end: 110, type: 'square', dur: 0.05, vol: 0.12, attack: 0.001, filter: 1500 });
+    b.noise(0.05, { dur: 0.22, vol: 0.12, freq: 1400, endFreq: 900, q: 3, attack: 0.01, rnd });
+    b.tone(0.05, { freq: 95, end: 88, type: 'sawtooth', dur: 0.22, vol: 0.05, attack: 0.01, filter: 900 });
+    b.noise(0.3, { dur: 0.01, vol: 0.22, freq: 2200, q: 1.2, attack: 0.0004, rnd });
+    b.tone(0.3, { freq: 150, end: 100, type: 'square', dur: 0.04, vol: 0.1, attack: 0.001, filter: 1500 });
+    return t;
+  },
   // A fax machine connecting: calling tones, the answer tone, the negotiation warble, line hiss.
   fax_connect: () => {
     const rnd = rngFor('fax_connect');
@@ -613,6 +651,36 @@ function buildAmbience() {
 }
 
 /** Run a filter over a periodic buffer repeatedly so its state converges; in place. */
+/** The database projector's cooling fan: motor hum, the blades chopping air, a thin bearing whine.
+ *  Every frequency is snapped to whole cycles per loop and the noise is crossfaded, so it loops. */
+const FAN_SECONDS = 4;
+function buildProjectorFan() {
+  const n = FAN_SECONDS * SR;
+  const t = new Track(FAN_SECONDS, 1, true);
+  const snap = (f) => Math.max(1, Math.round(f * FAN_SECONDS)) / FAN_SECONDS;
+  const motor = new Float32Array(n);
+  for (const [f, type, vol] of [[snap(118), 'sine', 0.5], [snap(236), 'sine', 0.18], [snap(59), 'triangle', 0.22]]) {
+    let p = 0; const dt = f / SR;
+    for (let i = 0; i < n; i++) { motor[i] += osc(type, p, dt) * vol; p += dt; if (p >= 1) p -= 1; }
+  }
+  periodicFilter(motor, () => makeBiquad('lowpass', 420, 0.7), 2);
+  const air = new Float32Array(n);
+  for (let i = 0; i < n; i++) air[i] = NOISE[(i * 3) % NOISE_LEN];
+  const xf = Math.round(0.4 * SR);
+  for (let i = 0; i < xf; i++) {
+    const k = i / xf;
+    air[i] = air[i] * k + NOISE[((n + i) * 3) % NOISE_LEN] * (1 - k);
+  }
+  periodicFilter(air, () => makeBiquad('bandpass', 950, 0.6), 2);
+  const chop = snap(23.5);
+  for (let i = 0; i < n; i++) air[i] *= 0.7 + 0.3 * Math.sin(TAU * chop * (i / SR));
+  const whine = snap(2140);
+  for (let i = 0; i < n; i++) {
+    t.ch[0][i] += motor[i] * 0.09 + air[i] * 0.12 + Math.sin(TAU * whine * (i / SR)) * 0.004;
+  }
+  return t;
+}
+
 function periodicFilter(arr, make, passes) {
   const f = make();
   let out = null;
@@ -858,7 +926,7 @@ function buildSting(kind) {
 
 function main() {
   for (const d of [OUT_SFX, OUT_MUS]) if (!DRY_RUN) fs.mkdirSync(d, { recursive: true });
-  console.log(`Code Blue audio generator — ${DRY_RUN ? 'DRY RUN (nothing written)' : 'writing to ' + path.relative(process.cwd(), path.join(ROOT, 'audio'))}`);
+  console.log(`Malpractice audio generator — ${DRY_RUN ? 'DRY RUN (nothing written)' : 'writing to ' + path.relative(process.cwd(), path.join(ROOT, 'audio'))}`);
   console.log('\nSFX (mono, 44100 Hz, normalised to -3 dBFS, trimmed):');
 
   for (let v = 1; v <= 4; v++) emitFile(OUT_SFX, `step_0${v}.wav`, trim(build_step(v, false)), SFX_TARGET_DB);
@@ -871,6 +939,7 @@ function main() {
 
   console.log('\nAmbience (mono, seamless loop):');
   emitFile(OUT_SFX, 'ambience.wav', buildAmbience(), -6);
+  emitFile(OUT_SFX, 'db_fan.wav', buildProjectorFan(), -9);
 
   console.log('\nMusic stems (stereo, 60.00 s seamless loop, shared gain so the three layer coherently):');
   const stems = { dread: buildDread(), hunt: buildHunt(), critical: buildCritical() };

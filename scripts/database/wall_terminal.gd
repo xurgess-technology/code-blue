@@ -15,8 +15,9 @@ extends Node3D
 ##   set_on(on)                       the projector on or off: off, no picture, no light, no clicks
 ##   projector_position() -> Vector3  the projector hung from the ceiling (its E aim target, game.gd)
 ##
-## Chunk 1: the screen, the pointer and clicking, with a placeholder drill-down (home cards and an
-## empty page per section). The real cards, sign-in and multiplayer come in the next chunks.
+## The picture is a slide, not a computer screen (projector redesign, chunk 1: the look): a warm lamp,
+## ivory film in a black mount, near-black type, dust and a fiber in the gate, and a clack as the
+## carousel indexes to the next slide. wall_terminal_ui.gd draws the slide and says when one changes.
 
 const OrScreen := preload("res://scripts/orscreen/or_screen.gd")
 const UIScript := preload("res://scripts/database/wall_terminal_ui.gd")
@@ -38,14 +39,21 @@ const PROJECTION_SHADER := """
 shader_type spatial;
 render_mode unshaded, cull_back, shadows_disabled, fog_disabled;
 uniform sampler2D screen_tex : source_color, filter_linear, repeat_disable;
-uniform vec3 fabric : source_color = vec3(0.11, 0.12, 0.115);
-uniform float gain = 1.3;
+uniform vec3 fabric : source_color = vec3(0.045, 0.045, 0.043);
+uniform float gain = 1.35;
+// 0 = lamp cold, 1 = fully up: the bulb comes on over a moment rather than snapping.
+uniform float warm = 1.0;
+// A slide projector's lamp: warm, a hot spot in the middle, and the slow unsteadiness of a bulb and
+// a fan rather than a scanning phosphor screen.
 void fragment() {
 	vec3 c = texture(screen_tex, UV).rgb;
 	vec2 d = UV - 0.5;
-	float hot = 1.0 - 0.6 * dot(d, d);
-	float flick = 0.975 + 0.025 * sin(TIME * 53.0) * sin(TIME * 7.3);
-	ALBEDO = (fabric + c * gain) * hot * flick;
+	float hot = 1.0 - 0.75 * dot(d, d);
+	float flick = 0.985 + 0.012 * sin(TIME * 7.7) + 0.006 * sin(TIME * 23.1);
+	vec3 lamp = vec3(1.0, 0.955, 0.88);
+	// A slide has real blacks: pull the toe down so type stays type instead of grey.
+	c = pow(c, vec3(1.35));
+	ALBEDO = (fabric + c * gain * lamp) * hot * flick * warm;
 }
 """
 
@@ -60,6 +68,18 @@ var _lens_on: Material
 var _lens_off: StandardMaterial3D
 var _beam: MeshInstance3D
 var _glow: OmniLight3D
+## The slide tray on top of the projector: it turns one slot each time a slide changes.
+var _carousel: Node3D
+var _carousel_to := 0.0
+## The cooling fan: a loop that runs while the lamp is on.
+var _fan: AudioStreamPlayer3D
+## Seconds into the lamp warming up, < 0 when it is simply on or off.
+var _warm_t := -1.0
+var _screen_mat: ShaderMaterial
+
+## Slots round the tray, and how long the bulb takes to come up.
+const SLOTS := 40
+const WARM_SECONDS := 0.9
 
 
 static func make() -> Node3D:
@@ -81,6 +101,8 @@ func _build() -> void:
 	ui = UIScript.new()
 	ui.name = "UI"
 	ui.size = Vector2(TEX)
+	ui.advanced.connect(_on_advanced)
+	ui.jammed.connect(_on_jammed)
 	viewport.add_child(ui)
 
 	# Everything on the wall hangs off a front pivot turned to face the room (-Z): a QuadMesh shows its
@@ -143,6 +165,7 @@ func _build() -> void:
 	mat.shader = sh
 	mat.set_shader_parameter("screen_tex", viewport.get_texture())
 	glass.material_override = mat
+	_screen_mat = mat
 	glass.position = Vector3(0, 0, 0.012)
 	glass.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	front.add_child(glass)
@@ -154,6 +177,45 @@ func _build() -> void:
 	_projector = body
 	_box(front, Vector3(0.04, 3.0 - PROJECTOR_Y - 0.07, 0.04), Vector3(0, (py + 0.07 + (3.0 - CENTRE_Y)) * 0.5, THROW + 0.18), dark)
 	_box(front, Vector3(0.2, 0.02, 0.2), Vector3(0, 3.0 - CENTRE_Y - 0.01, THROW + 0.18), dark)
+	_carousel = Node3D.new()
+	_carousel.name = "Carousel"
+	_carousel.position = Vector3(-0.02, py + 0.075 + 0.03, THROW + 0.2)
+	front.add_child(_carousel)
+	var tray_mat := StandardMaterial3D.new()
+	tray_mat.albedo_color = Color(0.16, 0.15, 0.14)
+	tray_mat.roughness = 0.6
+	var tray := MeshInstance3D.new()
+	var tm := CylinderMesh.new()
+	tm.top_radius = 0.2
+	tm.bottom_radius = 0.2
+	tm.height = 0.05
+	tm.radial_segments = 32
+	tray.mesh = tm
+	tray.material_override = tray_mat
+	_carousel.add_child(tray)
+	var slide_mat := StandardMaterial3D.new()
+	slide_mat.albedo_color = Color(0.82, 0.8, 0.74)
+	slide_mat.roughness = 0.9
+	var slot_mesh := BoxMesh.new()
+	slot_mesh.size = Vector3(0.004, 0.05, 0.05)
+	for i in SLOTS:
+		var a := TAU * float(i) / float(SLOTS)
+		var sl := MeshInstance3D.new()
+		sl.mesh = slot_mesh
+		sl.material_override = slide_mat
+		sl.position = Vector3(cos(a) * 0.16, 0.035, sin(a) * 0.16)
+		sl.rotation.y = -a
+		_carousel.add_child(sl)
+	var hub := MeshInstance3D.new()
+	var hm := CylinderMesh.new()
+	hm.top_radius = 0.045
+	hm.bottom_radius = 0.045
+	hm.height = 0.07
+	hub.mesh = hm
+	hub.material_override = dark
+	hub.position.y = 0.02
+	_carousel.add_child(hub)
+
 	var lens := MeshInstance3D.new()
 	var lm := CylinderMesh.new()
 	lm.top_radius = 0.045
@@ -162,9 +224,9 @@ func _build() -> void:
 	lm.radial_segments = 12
 	lens.mesh = lm
 	var lmat := StandardMaterial3D.new()
-	lmat.albedo_color = Color(0.8, 0.95, 0.9)
+	lmat.albedo_color = Color(1.0, 0.97, 0.9)
 	lmat.emission_enabled = true
-	lmat.emission = Color(0.7, 1.0, 0.85)
+	lmat.emission = Color(1.0, 0.93, 0.78)
 	lmat.emission_energy_multiplier = 3.0
 	lens.material_override = lmat
 	_lens = lens
@@ -186,7 +248,7 @@ func _build() -> void:
 	cm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 	cm.cull_mode = BaseMaterial3D.CULL_DISABLED
 	cm.vertex_color_use_as_albedo = true
-	cm.albedo_color = Color(0.75, 0.95, 0.85, 1.0)
+	cm.albedo_color = Color(1.0, 0.94, 0.8, 1.0)
 	cone.material_override = cm
 	cone.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	front.add_child(cone)
@@ -194,7 +256,7 @@ func _build() -> void:
 
 	var glow := OmniLight3D.new()
 	glow.name = "Glow"
-	glow.light_color = Color(0.55, 1.0, 0.7)
+	glow.light_color = Color(1.0, 0.92, 0.78)
 	glow.light_energy = 1.1
 	glow.omni_range = 6.0
 	glow.omni_attenuation = 1.4
@@ -202,6 +264,8 @@ func _build() -> void:
 	glow.position = Vector3(0, 0, 0.7)
 	front.add_child(glow)
 	_glow = glow
+
+	_start_fan()
 
 	set_meta("collider_size", Vector3(SIZE.x + 0.14, SIZE.y + 0.14, 0.12))
 	set_meta("collider_y", CENTRE_Y)
@@ -228,8 +292,8 @@ static func _beam_mesh(lens: Vector3, size: Vector2) -> ArrayMesh:
 	var corners := [Vector3(-hx, -hy, 0.02), Vector3(hx, -hy, 0.02), Vector3(hx, hy, 0.02), Vector3(-hx, hy, 0.02)]
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var near := Color(0.07, 0.09, 0.08, 1.0)
-	var far := Color(0.012, 0.016, 0.014, 1.0)
+	var near := Color(0.095, 0.085, 0.065, 1.0)
+	var far := Color(0.018, 0.016, 0.012, 1.0)
 	for i in 4:
 		st.set_color(near)
 		st.add_vertex(lens)
@@ -240,12 +304,63 @@ static func _beam_mesh(lens: Vector3, size: Vector2) -> ArrayMesh:
 	return st.commit()
 
 
+## The fan: a seamless loop off the projector body (skipped headless, and if the file is missing).
+func _start_fan() -> void:
+	const CUE := "res://audio/sfx/db_fan.wav"
+	if DisplayServer.get_name() == "headless" or not ResourceLoader.exists(CUE):
+		return
+	var res = load(CUE)
+	if not (res is AudioStreamWAV):
+		return
+	var stream := (res as AudioStreamWAV).duplicate() as AudioStreamWAV
+	var frames := stream.data.size() / ((2 if stream.format == AudioStreamWAV.FORMAT_16_BITS else 1) * (2 if stream.stereo else 1))
+	stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	stream.loop_begin = 0
+	stream.loop_end = frames
+	_fan = AudioStreamPlayer3D.new()
+	_fan.name = "Fan"
+	_fan.stream = stream
+	_fan.bus = "SFX" if AudioServer.get_bus_index("SFX") >= 0 else "Master"
+	_fan.volume_db = -16.0
+	_fan.unit_size = 1.4
+	_fan.max_distance = 9.0
+	_projector.add_child(_fan)
+	_fan.autoplay = on
+
+
+func _process(delta: float) -> void:
+	# The tray turning to its next slot: quick, and done before the slide lands.
+	if _carousel != null and not is_equal_approx(_carousel.rotation.y, _carousel_to):
+		_carousel.rotation.y = move_toward(_carousel.rotation.y, _carousel_to, delta * TAU / float(SLOTS) * 14.0)
+	# The bulb catching: it stutters, then comes up.
+	if _warm_t >= 0.0 and _screen_mat != null:
+		_warm_t += delta
+		var k := clampf(_warm_t / WARM_SECONDS, 0.0, 1.0)
+		var stutter := 0.35 if _warm_t > 0.12 and _warm_t < 0.2 else 1.0
+		_screen_mat.set_shader_parameter("warm", k * k * stutter)
+		_glow.light_energy = 1.1 * k * stutter
+		if k >= 1.0:
+			_warm_t = -1.0
+			_screen_mat.set_shader_parameter("warm", 1.0)
+			_glow.light_energy = 1.1
+
+
 ## The projector on or off. Off: the bare screen, no light cone, a dark lens, the viewport idle and
-## nothing to click.
+## nothing to click. On: the switch and the bulb catching (db_bulb), the picture warming up, the fan.
 func set_on(value: bool) -> void:
 	if value == on:
 		return
 	on = value
+	if _fan != null:
+		if value:
+			_fan.play()
+		else:
+			_fan.stop()
+	if value and is_inside_tree():
+		Audio.play("db_bulb", _projector, -6.0, 0.02)
+		_warm_t = 0.0
+		if _screen_mat != null:
+			_screen_mat.set_shader_parameter("warm", 0.0)
 	glass.visible = value
 	_beam.visible = value
 	_glow.visible = value
@@ -253,6 +368,19 @@ func set_on(value: bool) -> void:
 	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS if value else SubViewport.UPDATE_DISABLED
 	if not value:
 		clear_pointer()
+
+
+## A slide change: the carousel indexes round up at the projector, not down at the screen.
+func _on_advanced() -> void:
+	_carousel_to += TAU / float(SLOTS)
+	if on and _projector != null and is_inside_tree():
+		Audio.play("db_clack", _projector, -4.0, 0.04)
+
+
+## A slide caught in the gate (wall_terminal_ui.gd): the carousel grinds instead of clacking.
+func _on_jammed() -> void:
+	if on and _projector != null and is_inside_tree():
+		Audio.play("db_jam", _projector, -5.0, 0.03)
 
 
 func projector_position() -> Vector3:

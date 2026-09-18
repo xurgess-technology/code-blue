@@ -1,6 +1,6 @@
 @echo off
 setlocal
-rem Double-click to play Code Blue.
+rem Double-click to play Malpractice.
 rem This window stays open alongside the game and shows the engine log.
 cd /d "%~dp0"
 
@@ -19,8 +19,8 @@ if not exist "%GODOT%" (
   exit /b 1
 )
 
-title Code Blue
-echo Starting Code Blue from %CD%
+title Malpractice
+echo Starting Malpractice from %CD%
 echo Using %GODOT%
 echo.
 rem .godot/ (the import cache: which scripts declare a global class_name, which assets are

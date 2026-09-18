@@ -14,14 +14,53 @@ extends SubViewportContainer
 ##   pick(local) -> Node3D                  the model under a point in the viewer (null: none)
 ##   set_hover(model)                       show that model's "preview_label" over it (null: none)
 
-const TURN_SPEED := 0.45
-const GAP := 0.12
+## A specimen is photographed from four sides; the carousel steps between them.
+const ANGLES := 4
+
+## The plate, printed rather than lit. The specimen keeps its own tones, part-desaturated and a touch
+## darker, and gets an inked outline where it ends -- which is the only reason a white gauze pack or a
+## steel saw reads at all against ivory paper. Alpha is left alone, so there is no panel behind it.
+const INK_SHADER := """
+shader_type canvas_item;
+uniform float ink_width = 1.6;
+void fragment() {
+	vec4 c = texture(TEXTURE, UV);
+	float l = dot(c.rgb, vec3(0.299, 0.587, 0.114));
+	vec3 printed = mix(c.rgb, vec3(l), 0.35) * 0.82;
+	// How much specimen is just outside this pixel: that edge is where the ink goes.
+	float near = 0.0;
+	vec2 o = TEXTURE_PIXEL_SIZE * ink_width;
+	near = max(near, texture(TEXTURE, UV + vec2(o.x, 0.0)).a);
+	near = max(near, texture(TEXTURE, UV - vec2(o.x, 0.0)).a);
+	near = max(near, texture(TEXTURE, UV + vec2(0.0, o.y)).a);
+	near = max(near, texture(TEXTURE, UV - vec2(0.0, o.y)).a);
+	near = max(near, texture(TEXTURE, UV + o).a);
+	near = max(near, texture(TEXTURE, UV - o).a);
+	near = max(near, texture(TEXTURE, UV + vec2(o.x, -o.y)).a);
+	near = max(near, texture(TEXTURE, UV + vec2(-o.x, o.y)).a);
+	float edge = clamp(near - c.a, 0.0, 1.0);
+	COLOR = vec4(mix(printed, vec3(0.07, 0.07, 0.08), edge), max(c.a, edge));
+}
+"""
+const GAP := 0.2
+## A tray of tools is drawn like a catalogue plate, not to scale: real sizes are compressed by this
+## power, so an anesthetic vial beside a bone saw is small but still a thing you can see. 1.0 would be
+## true scale, 0.0 would make everything the same size.
+const SIZE_EXP := 0.4
+## However far a model has to be blown up to reach that, it stops here (and nothing is shrunk).
+const SIZE_MAX := 8.0
 const PITCH_DEG := 22.0
-const GREEN := Color(0.45, 1.0, 0.55)
+## Looking down on a tray of instruments, nearly overhead.
+const TRAY_PITCH_DEG := 62.0
+## The specimen sits on the slide, lit warm, on a pale disc: no phosphor glow any more.
+const LAMP := Color(1.0, 0.94, 0.84)
 
 var _vp: SubViewport
 var _cam: Camera3D
 var _pivot: Node3D
+var _angle := 0
+## This set is a tray of instruments (laid out in a column, shot from above).
+var _tray := false
 var _floor: MeshInstance3D
 var _key := ""
 var _hover: Node3D = null
@@ -32,6 +71,12 @@ static var _black: StandardMaterial3D = null
 func _init() -> void:
 	stretch = true
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# Everything the viewport renders goes through the ink pass on its way onto the slide.
+	var sh := Shader.new()
+	sh.code = INK_SHADER
+	var m := ShaderMaterial.new()
+	m.shader = sh
+	material = m
 	_vp = SubViewport.new()
 	_vp.own_world_3d = true
 	_vp.transparent_bg = true
@@ -42,7 +87,7 @@ func _init() -> void:
 	var env := Environment.new()
 	env.background_mode = Environment.BG_CLEAR_COLOR
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.55, 0.62, 0.58)
+	env.ambient_light_color = Color(0.72, 0.70, 0.66)
 	env.ambient_light_energy = 0.7
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	var we := WorldEnvironment.new()
@@ -58,7 +103,7 @@ func _init() -> void:
 	var rim := DirectionalLight3D.new()
 	rim.rotation_degrees = Vector3(-15.0, 200.0, 0.0)
 	rim.light_energy = 1.1
-	rim.light_color = GREEN
+	rim.light_color = Color(0.86, 0.90, 0.95)
 	_vp.add_child(rim)
 
 	_pivot = Node3D.new()
@@ -68,7 +113,8 @@ func _init() -> void:
 	_vp.add_child(_cam)
 	_cam.current = true
 
-	# A dim turntable disc under the models.
+	# The pale disc the specimen stands on: the ink pass (INK_SHADER) darkens it with everything else,
+	# so it reads as the shaded ground of a printed plate.
 	_floor = MeshInstance3D.new()
 	var disc := CylinderMesh.new()
 	disc.top_radius = 1.0
@@ -77,18 +123,23 @@ func _init() -> void:
 	disc.radial_segments = 40
 	_floor.mesh = disc
 	var fm := StandardMaterial3D.new()
-	fm.albedo_color = Color(0.05, 0.12, 0.08)
-	fm.emission_enabled = true
-	fm.emission = Color(0.1, 0.35, 0.16)
-	fm.emission_energy_multiplier = 0.4
+	fm.albedo_color = Color(0.72, 0.70, 0.64)
+	fm.roughness = 0.95
 	_floor.material_override = fm
 	_pivot.add_child(_floor)
 	_floor.visible = false
 
 
-func _process(delta: float) -> void:
-	if is_visible_in_tree():
-		_pivot.rotate_y(delta * TURN_SPEED)
+## Which of the four sides is facing us.
+func angle() -> int:
+	return _angle
+
+
+## Face the specimen's nth side. There is no easing: the slide changes, it does not spin.
+func set_angle(n: int) -> void:
+	_angle = posmod(n, ANGLES)
+	if _pivot != null:
+		_pivot.rotation.y = float(_angle) * TAU / float(ANGLES)
 
 
 ## What is showing, so a page can skip rebuilding the same models every frame.
@@ -108,7 +159,7 @@ func clear() -> void:
 func show_models(key: String, models: Array, silhouette := false) -> void:
 	clear()
 	_key = key
-	_pivot.rotation = Vector3.ZERO
+	_pivot.rotation.y = float(_angle) * TAU / float(ANGLES)
 	if models.is_empty():
 		return
 	# Each model sits on the floor, centred on the turntable.
@@ -125,9 +176,14 @@ func show_models(key: String, models: Array, silhouette := false) -> void:
 		# A skinned rig's mesh bounds are its rest pose, not what stands there: models can say.
 		boxes.append(m.get_meta("preview_bounds") if m.has_meta("preview_bounds") else _bounds(holder))
 		holder.set_meta("box", boxes[-1])
-	# Several models share the turntable in a small grid (a row of tools spins as a wide circle and
-	# ends up tiny), one cell each, cells as big as the largest footprint.
-	var cols := ceili(sqrt(float(models.size())))
+	# A set of instruments is laid out as a tray and shot from above: one column down the plate, which
+	# is a tall window, so each tool gets as much width as it can have. Anything with something big in
+	# it (a monster, a patient) stays in the old grid, seen from eye level.
+	var big := 0.0
+	for bb in boxes:
+		big = maxf(big, maxf(maxf((bb as AABB).size.x, (bb as AABB).size.y), (bb as AABB).size.z))
+	_tray = models.size() > 1 and big < 0.9
+	var cols := 1 if _tray else ceili(sqrt(float(models.size())))
 	var rows := ceili(float(models.size()) / float(cols))
 	var cell := Vector2.ZERO
 	for bb in boxes:
@@ -148,35 +204,25 @@ func show_models(key: String, models: Array, silhouette := false) -> void:
 		if silhouette:
 			_blacken(holder)
 		if models[i].has_meta("preview_label"):
-			var tag := Label3D.new()
-			tag.name = "Tag"
-			tag.text = String(models[i].get_meta("preview_label")).to_upper()
-			tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-			tag.fixed_size = true
-			tag.pixel_size = 0.0012
-			tag.font_size = 40
-			tag.outline_size = 10
-			tag.modulate = Color(0.75, 1.0, 0.8)
-			tag.outline_modulate = Color(0.0, 0.08, 0.03)
-			tag.no_depth_test = true
-			tag.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM   # sits above the model
-			tag.position = Vector3(b.get_center().x, b.end.y + 0.06, b.get_center().z)
-			tag.visible = false
-			holder.add_child(tag)
-	# The disc under everything, and a camera far enough back to fit it all while it turns.
-	var radius := maxf(Vector2(all.size.x, all.size.z).length() * 0.5, 0.05)
+			# The name is typed on the slide by wall_terminal_ui.gd, not stood up in the world: in here
+			# the ink pass would outline its glyphs like part of the specimen.
+			holder.set_meta("label", String(models[i].get_meta("preview_label")).to_upper())
+	# The disc (kept for its size, not drawn) and the reach the camera has to fit. The specimen is shot
+	# from four square-on sides now, not spun, so that is the wider of its two footprints -- not the
+	# diagonal of the circle it used to sweep, which pushed the camera back and left everything tiny.
+	var radius := maxf(maxf(all.size.x, all.size.z) * 0.5, 0.05)
 	_floor.scale = Vector3(radius * 1.15, 1.0, radius * 1.15)
 	_floor.position = Vector3(0, -0.012, 0)
-	_floor.visible = true
+	_floor.visible = false   # the slide's own vignette is the ground now
 	# Looking down a little; far enough back that the turntable's whole width (it turns) fits the
 	# narrower horizontal field and the models' height fits the vertical one.
 	var height := all.size.y
 	var aspect := size.x / maxf(size.y, 1.0)
 	var half_v := tan(deg_to_rad(_cam.fov * 0.5))
 	var half_h := half_v * aspect
-	var pitch := deg_to_rad(PITCH_DEG)
+	var pitch := deg_to_rad(TRAY_PITCH_DEG if _tray else PITCH_DEG)
 	var fit_v := (height * 0.5 * cos(pitch) + radius * sin(pitch)) / half_v
-	var fit_h := radius * 1.12 / half_h
+	var fit_h := radius * 1.06 / half_h
 	var dist := maxf(fit_v, fit_h) + radius * cos(pitch)
 	var centre := Vector3(0.0, height * 0.5, 0.0)
 	_cam.position = centre + Vector3(0.0, sin(pitch), cos(pitch)) * dist
@@ -217,14 +263,22 @@ func screen_rect(holder: Node3D) -> Rect2:
 
 
 func set_hover(model: Node3D) -> void:
-	if model == _hover:
-		return
-	for m in [_hover, model]:
-		if m != null and is_instance_valid(m) and m.get_parent() != null:
-			var tag: Node3D = m.get_parent().get_node_or_null("Tag")
-			if tag != null:
-				tag.visible = m == model
 	_hover = model
+
+
+## The name of whatever the laser is over ("" for nothing), and where it is on the screen: the slide
+## types it there itself.
+func hover_label() -> String:
+	if _hover == null or not is_instance_valid(_hover) or _hover.get_parent() == null:
+		return ""
+	var holder: Node = _hover.get_parent()
+	return String(holder.get_meta("label")) if holder.has_meta("label") else ""
+
+
+func hover_rect() -> Rect2:
+	if _hover == null or not is_instance_valid(_hover) or _hover.get_parent() == null:
+		return Rect2()
+	return screen_rect(_hover.get_parent())
 
 
 ## The visual bounds of everything under `root`, in `root`'s parent space (the pivot).
@@ -249,7 +303,7 @@ func _bounds(root: Node3D) -> AABB:
 static func _blacken(root: Node) -> void:
 	if _black == null:
 		_black = StandardMaterial3D.new()
-		_black.albedo_color = Color(0.015, 0.02, 0.018)
+		_black.albedo_color = Color(0.02, 0.02, 0.025)
 		_black.roughness = 1.0
 		_black.metallic_specular = 0.0
 	for gi in root.find_children("*", "GeometryInstance3D", true, false):

@@ -1,5 +1,5 @@
 extends Node
-## The `Audio` autoload: every sound in Code Blue goes through here.
+## The `Audio` autoload: every sound in Malpractice goes through here.
 ##
 ## All of it is baked offline by `tools/gen_audio.mjs` into `audio/sfx/*.wav` and
 ## `audio/music/*.wav` (the browser build synthesised it live with WebAudio; Godot

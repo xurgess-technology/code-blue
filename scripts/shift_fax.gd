@@ -222,7 +222,7 @@ func _fill_page(mode: String, surgeon: String) -> void:
 			staffing = "REPORTING AS BACKUP"
 	_lines = [
 		[">> FAX  %04d-%02d-%02d  %02d:%02d  PAGE %d" % [dt.year, dt.month, dt.day, dt.hour, dt.minute, _page], "dim"],
-		["COUNTY GENERAL  /  SHIFT ASSIGNMENT", "text"],
+		["DOE GENERAL  /  SHIFT ASSIGNMENT", "text"],
 		["", "rule"],
 		["SURGEON ........ %s" % (surgeon if surgeon != "" else "ON CALL"), "text"],
 		["STAFFING ....... %s" % staffing, "text"],

@@ -1,4 +1,4 @@
-# Code Blue: system contracts for the content sweep
+# Malpractice: system contracts for the content sweep
 
 This is the agreement between the systems being built in parallel. If a contract here is wrong
 or missing something, do not silently change it: tell the main session (SendMessage to

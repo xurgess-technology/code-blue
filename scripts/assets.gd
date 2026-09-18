@@ -103,32 +103,32 @@ const MODELS := {
 	"char/human_surgeon_a": {
 		"path": "res://assets/models/characters/human/surgeon_a.glb", "scale": 1.0, "yaw": 180,
 		"anims": {"idle": "Idle", "walk": "Jog", "run": "Sprint"},
-		"note": "Player surgeon A, made for Code Blue with Blender scripts (art/human/blender_src). No third-party licence.",
+		"note": "Player surgeon A, made for Malpractice with Blender scripts (art/human/blender_src). No third-party licence.",
 	},
 	"char/human_surgeon_b": {
 		"path": "res://assets/models/characters/human/surgeon_b.glb", "scale": 1.0, "yaw": 180,
 		"anims": {"idle": "Idle", "walk": "Jog", "run": "Sprint"},
-		"note": "Player surgeon B, made for Code Blue with Blender scripts (art/human/blender_src). No third-party licence.",
+		"note": "Player surgeon B, made for Malpractice with Blender scripts (art/human/blender_src). No third-party licence.",
 	},
 	"char/human_surgeon_c": {
 		"path": "res://assets/models/characters/human/surgeon_c.glb", "scale": 1.0, "yaw": 180,
 		"anims": {"idle": "Idle", "walk": "Jog", "run": "Sprint"},
-		"note": "Player surgeon C, made for Code Blue with Blender scripts (art/human/blender_src). No third-party licence.",
+		"note": "Player surgeon C, made for Malpractice with Blender scripts (art/human/blender_src). No third-party licence.",
 	},
 	"patient/human_bob": {
 		"path": "res://assets/models/characters/human/bob.glb", "scale": 1.0, "yaw": 180,
 		"anims": {"idle": "Lying"},
-		"note": "Bob the patient, made for Code Blue with Blender scripts (art/human/blender_src). No third-party licence.",
+		"note": "Bob the patient, made for Malpractice with Blender scripts (art/human/blender_src). No third-party licence.",
 	},
 	"crew/human_paramedic_a": {
 		"path": "res://assets/models/characters/human/paramedic_a.glb", "scale": 1.0, "yaw": 180,
 		"anims": {"idle": "Idle", "walk": "Walk", "push": "Push"},
-		"note": "Paramedic A, made for Code Blue with Blender scripts (art/human/blender_src). No third-party licence.",
+		"note": "Paramedic A, made for Malpractice with Blender scripts (art/human/blender_src). No third-party licence.",
 	},
 	"crew/human_paramedic_b": {
 		"path": "res://assets/models/characters/human/paramedic_b.glb", "scale": 1.0, "yaw": 180,
 		"anims": {"idle": "Idle", "walk": "Walk", "push": "Push"},
-		"note": "Paramedic B, made for Code Blue with Blender scripts (art/human/blender_src). No third-party licence.",
+		"note": "Paramedic B, made for Malpractice with Blender scripts (art/human/blender_src). No third-party licence.",
 	},
 
 	# ---- monsters ---------------------------------------------------------
@@ -145,7 +145,7 @@ const MODELS := {
 		"path": "res://assets/models/monsters/night_nurse/night_nurse.glb",
 		"scale": 1.0, "yaw": 180,
 		"anims": {"idle": "Idle", "walk": "Walk", "run": "Walk", "attack": "Walk", "frozen": "Frozen", "static": "Frozen"},
-		"note": "Night Nurse, made for Code Blue with Blender scripts (art/night_nurse/blender_src). No third-party licence.",
+		"note": "Night Nurse, made for Malpractice with Blender scripts (art/night_nurse/blender_src). No third-party licence.",
 	},
 	# ---- patients ---------------------------------------------------------
 	# The seal patient (2026-09-14): built in-house from Python in Blender (art/seal/), authored in the
@@ -155,7 +155,7 @@ const MODELS := {
 		"path": "res://assets/models/patients/seal/seal.glb",
 		"scale": 1.0, "yaw": 0,
 		"anims": {"idle": "Idle", "stir": "Stir", "fidget": "Fidget", "twitch": "Twitch", "dead": "Flatline"},
-		"note": "Harbor seal patient, made for Code Blue with Blender scripts (art/seal/blender_src). No third-party licence.",
+		"note": "Harbor seal patient, made for Malpractice with Blender scripts (art/seal/blender_src). No third-party licence.",
 	},
 	"monster/lurker": {
 		"path": "res://assets/models/monsters/lurker.gltf",

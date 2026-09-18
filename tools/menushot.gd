@@ -19,7 +19,7 @@ func _ready() -> void:
 	if _main.launching:
 		await _main.launched
 	var menu: Menu = _main.menu
-	while menu.is_feeding():
+	while menu.is_feeding() or menu.is_stamping():
 		await get_tree().process_frame
 	await _shot("rest")
 
