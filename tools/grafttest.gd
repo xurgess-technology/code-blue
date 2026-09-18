@@ -46,7 +46,7 @@ func _data_checks() -> void:
 	_check(Items.is_surgical("scalpel") and not Items.is_consumable("scalpel") and Items.is_surgical("eye_spoon"), "scalpel and eye spoon are surgical, reusable tools")
 	_check(Items.is_bulky("specimen_vat") and Items.slots_needed("specimen_vat") == 2, "the vat takes both hands")
 	_check(Items.is_loot("eye_hive") and Items.is_loot("eye_surgeon") and Eyes.is_eye("eye_hive"), "both eyes are sellable loot")
-	_check(Eyes.label("eye_hive", "") == "Hive eye" and Eyes.label("eye_surgeon", "Zach") == "Zach's eye", "eye labels")
+	_check(Eyes.label("eye_hive", "") == "Eyeball of Hive" and Eyes.label("eye_surgeon", "Zach") == "Zach's eye", "eye labels")
 	_check(Eyes.spoil_factor(0.0) == 1.0 and Eyes.spoil_factor(Eyes.FRESH_SECONDS) == 1.0 and Eyes.is_spoiled_factor(Eyes.spoil_factor(Eyes.ROTTEN_SECONDS)), "an eye is fresh, then spoils")
 	var st: Array = Procedures.steps("eye_extraction")
 	_check(st.size() == 3 and st[0].item == "scalpel" and st[1].item == "eye_spoon" and st[2].item == "scalpel" and st[0].site == "eye", "extraction steps: scalpel, spoon, scalpel")
@@ -117,8 +117,11 @@ func _minigame_checks() -> void:
 	for i in 200:
 		sn.handle_cursor(Vector2(0.0, 0.004), 4, 1.0 / 60.0)   # W held
 	_check(sn.lift > 0.95, "holding W pulls the eye up (%.2f)" % sn.lift)
-	sn.handle_cursor(Vector2(0.0, 0.004), 5, 1.0 / 60.0)
-	_check(sd[0], "then a click on the nerve slices it")
+	sn.handle_cursor(Vector2(0.0, 0.008), 5, 1.0 / 60.0)
+	_check(not sd[0] and sn._slice_t >= 0.0, "a click on the nerve starts the slice")
+	for i in 60:
+		sn.handle_cursor(Vector2(0.0, 0.008), 0, 1.0 / 60.0)
+	_check(sd[0], "and the nerve parts, then the step finishes")
 	sn.free()
 
 
@@ -162,7 +165,7 @@ func _run() -> void:
 	var eh: int = me.selected_head()
 	me.slots[eh]["bt"] = now - 20.0
 	me.slots[eh]["v"] = 100
-	_check(vats.item_prompt(me, vat).begins_with("Put Hive eye in the vat"), "aimed at a vat with an eye: '%s'" % vats.item_prompt(me, vat))
+	_check(vats.item_prompt(me, vat).begins_with("Put Eyeball of Hive in the vat"), "aimed at a vat with an eye: '%s'" % vats.item_prompt(me, vat))
 	game.pickup_item(me, vat)   # E on the vat with an eye selected
 	await _frames(2)
 	var got := Eyes.unpack(String(vat.x))
@@ -197,7 +200,7 @@ func _run() -> void:
 		if String(me.slots[i].kind) == "eye_hive":
 			eye_slot = i
 	me.selected = eye_slot
-	_check(vats.hand_prompt(me).begins_with("Put Hive eye in the vat"), "eye and vat both in hand: '%s'" % vats.hand_prompt(me))
+	_check(vats.hand_prompt(me).begins_with("Put Eyeball of Hive in the vat"), "eye and vat both in hand: '%s'" % vats.hand_prompt(me))
 	vats.hand_put(me)
 	await _frames(2)
 	_check(String(me.slots[vh].get("x", "")) != "" and String(me.slots[eye_slot].kind) == "", "E aimed at nothing puts the carried eye into the carried vat")

@@ -39,7 +39,9 @@ const LIFT_UP_SECONDS := 2.4
 const LIFT_DOWN_SECONDS := 1.5
 const REVEAL_FROM := 0.35
 const SLICE_READY := 0.8
-const NERVE_AT := Vector2(0.0, 0.004)
+const NERVE_AT := Vector2(0.0, 0.008)   # where on the plane the nerve middle is (the cursor aims here)
+const SLICE_TIME := 0.8                 # the slice plays out (blade drops, nerve parts, flush) before it finishes
+const NERVE_BASE := Vector3(0.0, -0.004, 0.012)   # the nerve end in the back of the socket
 const SLICE_TOL := 0.014
 const MISS_BOTCH := 6.0
 const DASHES := 30
@@ -106,9 +108,14 @@ var _eye_pivot: Node3D                  # the scoop's eye rocks and lifts about 
 var _eye_base := Vector3.ZERO
 var _eye_k := 0.0
 var _stalk: MeshInstance3D
+var _slice_t := -1.0                    # >= 0 while the slice plays out (replicated)
+var _nerve2: MeshInstance3D             # the upper end of the parted nerve
+var _flush: MeshInstance3D
+var _flush_mat: StandardMaterial3D
 var _mat_mark: StandardMaterial3D
 var _ring_theta: Array[float] = []
 var bot_slow := 1.0                     # tests and smoke looks: slow the cut bot down
+var bot_wait := 0.0                     # ... and how long it waits before pulling the eye up
 var bot_hold := 0.0                     # ... and make it hover this many seconds before lowering
 var _dt := 0.016
 var _cut_yaw := 0.0                     # the cut scalpel's heading, eased round as it follows the marking
@@ -147,7 +154,7 @@ func plane_extent() -> Vector2:
 func camera_pose() -> Dictionary:
 	if variant == "snip":
 		# Low and from the side: the eye rests over the socket and rises off it.
-		return {"height": 0.11, "back": 0.19, "fov": 46.0}
+		return {"height": 0.13, "back": 0.17, "fov": 42.0}
 	return {"height": 0.3, "back": 0.06, "fov": 48.0}
 
 
@@ -260,6 +267,14 @@ func _rules_scoop(p: Vector2, pressed: bool) -> void:
 
 
 func _rules_snip(p: Vector2, pressed: bool, up: bool, delta: float) -> void:
+	if _slice_t >= 0.0:
+		# the slice plays out, then the step is done
+		_slice_t += delta
+		progress = clampf(_slice_t / SLICE_TIME, 0.0, 0.99)
+		if _slice_t >= SLICE_TIME:
+			progress = 1.0
+			finish({"eye_removed": true})
+		return
 	if up:
 		lift = minf(1.0, lift + delta / LIFT_UP_SECONDS)
 	else:
@@ -271,8 +286,7 @@ func _rules_snip(p: Vector2, pressed: bool, up: bool, delta: float) -> void:
 		_hint = "Pull the eye up first: hold W."
 		_hint_t = 2.0
 	elif p.distance_to(NERVE_AT) <= SLICE_TOL:
-		progress = 1.0
-		finish({"eye_removed": true})
+		_slice_t = 0.0
 	else:
 		slips += 1
 		_flash = 0.5
@@ -308,7 +322,7 @@ func hud_state() -> Dictionary:
 
 func net_state() -> Dictionary:
 	return {"d": down, "c": snappedf(cut, 0.01), "u": snappedf(turns, 0.02), "l": snappedf(lift, 0.01), "s": slips,
-		"cur": cursor, "t": snappedf(_t, 0.05), "p": snappedf(progress, 0.001)}
+		"cur": cursor, "t": snappedf(_t, 0.05), "p": snappedf(progress, 0.001), "sl": snappedf(_slice_t, 0.02)}
 
 
 func apply_net_state(s: Dictionary) -> void:
@@ -319,6 +333,7 @@ func apply_net_state(s: Dictionary) -> void:
 	slips = int(s.get("s", slips))
 	cursor = s.get("cur", cursor)
 	_t = float(s.get("t", _t))
+	_slice_t = float(s.get("sl", _slice_t))
 	progress = float(s.get("p", progress))
 
 
@@ -347,9 +362,13 @@ func bot_input(t: float, skill: float) -> Dictionary:
 			var a := atan2(cursor.y, cursor.x) + lerpf(0.1, 0.045, skill) * bot_slow * dt / scoop_r
 			return {"cursor": Vector2(cos(a), sin(a)) * scoop_r, "buttons": 0}
 		_:
+			if _slice_t >= 0.0:
+				return {"cursor": NERVE_AT, "buttons": 0}
+			if t < bot_wait:
+				return {"cursor": cursor.move_toward(NERVE_AT, 0.3 * dt), "buttons": 0}
 			if lift < 0.95:
 				return {"cursor": cursor.move_toward(NERVE_AT, 0.3 * dt), "buttons": BUTTON_UP}
-			return {"cursor": NERVE_AT, "buttons": (BUTTON_PRIMARY | BUTTON_UP) if click else BUTTON_UP}
+			return {"cursor": NERVE_AT, "buttons": (BUTTON_PRIMARY | BUTTON_UP) if (click and t > bot_hold) else BUTTON_UP}
 
 
 # ---------------------------------------------------------------------------- visuals
@@ -391,7 +410,7 @@ func _build() -> void:
 	_mat_good = _unshaded(Color(0.35, 1.0, 0.55), 0.9)
 	_mat_bad = _unshaded(Color(1.0, 0.25, 0.2), 0.95)
 	# The eye (the scoop and snip draw their own; the cut leaves the body's).
-	if variant == "scoop":
+	if variant == "scoop" or variant == "snip":
 		_build_scoop_eye()
 	elif variant != "cut":
 		_eye = MeshInstance3D.new()
@@ -448,12 +467,44 @@ func _build() -> void:
 			rim.material_override = rim_mat
 			add_child(rim)
 		"snip":
-			_nerve_mat = _unshaded(Color(0.98, 0.9, 0.7), 0.0)
-			_nerve = _box(Vector3(0.0055, 0.0055, 1.0), _nerve_mat)
-			_target = _box(Vector3(SLICE_TOL * 1.6, 0.0008, SLICE_TOL * 1.6), _mat_good)
-			_target.position = plane_to_local(NERVE_AT, 0.002)
+			# The socket is empty: its wet rim on the skin. The eye rests over it on a pale nerve (two pieces
+			# once sliced), and a small red flush blooms where the blade parts it.
+			_add_rim()
+			_nerve_mat = StandardMaterial3D.new()
+			_nerve_mat.albedo_color = Color(0.9, 0.78, 0.66)
+			_nerve_mat.roughness = 0.3
+			_nerve_mat.emission_enabled = true
+			_nerve_mat.emission = Color(0.5, 0.4, 0.3)
+			_nerve_mat.emission_energy_multiplier = 0.0
+			_nerve = _box(Vector3(1.0, 1.0, 1.0), _nerve_mat)
+			_nerve2 = _box(Vector3(1.0, 1.0, 1.0), _nerve_mat)
+			_nerve2.visible = false
+			# the slice target: a thin ring of dots on the plane under the nerve, lit when it can be cut
+			_target = MeshInstance3D.new()
+			add_child(_target)
+			for i in 16:
+				var th := TAU * float(i) / 16.0
+				var dot := MeshInstance3D.new()
+				var dm := BoxMesh.new()
+				dm.size = Vector3(0.0018, 0.0008, 0.0018)
+				dot.mesh = dm
+				dot.material_override = _mat_good
+				dot.position = plane_to_local(NERVE_AT + Vector2(cos(th), sin(th)) * SLICE_TOL, 0.002)
+				_target.add_child(dot)
 			_target.visible = false
-	_tool = _make_cut_scalpel() if variant == "cut" else (_make_scoop_spoon() if variant == "scoop" else ItemModels.make("scalpel"))
+			_flush_mat = StandardMaterial3D.new()
+			_flush_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			_flush_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			_flush_mat.albedo_color = Color(0.75, 0.02, 0.03, 0.0)
+			_flush = MeshInstance3D.new()
+			var fs := SphereMesh.new()
+			fs.radius = 0.003
+			fs.height = 0.006
+			_flush.mesh = fs
+			_flush.material_override = _flush_mat
+			_flush.visible = false
+			add_child(_flush)
+	_tool = _make_cut_scalpel() if (variant == "cut" or variant == "snip") else (_make_scoop_spoon() if variant == "scoop" else ItemModels.make("scalpel"))
 	add_child(_tool)
 	_set_layers(self)
 
@@ -536,6 +587,21 @@ func _build_scoop_eye() -> void:
 	stalk_mat.roughness = 0.3
 	_stalk = _box(Vector3(0.0045, 0.0045, 1.0), stalk_mat)
 	_stalk.visible = false
+
+
+## The empty socket wet dark rim, laid on the skin (as the scoop has).
+func _add_rim() -> void:
+	var rim_mat := StandardMaterial3D.new()
+	rim_mat.albedo_color = Color(0.13, 0.01, 0.02)
+	rim_mat.roughness = 0.05
+	rim_mat.metallic_specular = 0.9
+	rim_mat.emission_enabled = true
+	rim_mat.emission = Color(0.16, 0.0, 0.0)
+	rim_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var rim := MeshInstance3D.new()
+	rim.mesh = _ribbon(_skin_ring(eye_r * 1.12, 0.0016), CUT_SAMPLES)
+	rim.material_override = rim_mat
+	add_child(rim)
 
 
 ## Ray-cast rows [left, centre, right] on the body's skin along a ring of radius `r` (see _sample_skin).
@@ -696,12 +762,16 @@ func _update_visuals() -> void:
 		return
 	# The tool's tip on the cursor: on the plane when lowered, hovering above it when not. The model's tip
 	# is at +X, so the handle trails to the left of the screen, tilted up.
-	if variant == "cut" or variant == "scoop":
+	if variant == "cut" or variant == "scoop" or variant == "snip":
 		# Upright over the eye, leaning a little away from its centre; it turns slowly to stay that way as it
 		# follows the marking (or circles the socket), and drops onto the eye when lowered.
 		if cursor.length() > 0.004:
 			_cut_yaw = lerp_angle(_cut_yaw, atan2(cursor.x, cursor.y), clampf(_dt * 2.5, 0.0, 1.0))
-		_cut_h = move_toward(_cut_h, (CUT_TIP_Y if variant == "cut" else SCOOP_TIP_Y) if down else 0.03, _dt * 0.25)
+		if variant == "snip":
+			# hangs over the nerve; drops onto it the moment the slice starts
+			_cut_h = move_toward(_cut_h, 0.012 if _slice_t >= 0.0 else 0.04, _dt * 0.4)
+		else:
+			_cut_h = move_toward(_cut_h, (CUT_TIP_Y if variant == "cut" else SCOOP_TIP_Y) if down else 0.03, _dt * 0.25)
 		_tool.basis = Basis(Vector3.UP, _cut_yaw) * Basis(Vector3.RIGHT, deg_to_rad(22.0))
 		_tool.position = plane_to_local(cursor, _cut_h)
 	else:
@@ -742,19 +812,48 @@ func _update_visuals() -> void:
 			for i in _dots.size():
 				_dots[i].material_override = _mat_good if float(i) / 24.0 < k else (_mat_bad if _flash > 0.0 else _mat_mark)
 		"snip":
-			# Resting over the socket, pulled up on its nerve as W is held.
-			_eye.position = plane_to_local(Vector2.ZERO, eye_r * 0.9 + 0.004 + lift * 0.022)
-			_eye.basis = Basis(Vector3.RIGHT, deg_to_rad(90.0 - 30.0 * lift))
-			var a := plane_to_local(NERVE_AT, 0.001)
-			var b := _eye.position + Vector3(0.0, -eye_r * 0.5, eye_r * 0.6)
+			var slicing := _slice_t >= 0.0
+			var sp := clampf(_slice_t / SLICE_TIME, 0.0, 1.0) if slicing else 0.0
+			var ready := lift >= SLICE_READY and not slicing
+			# The eye rests over the socket and rises on its nerve as W is held (a slight tremble when taut);
+			# once the nerve is parted it settles back down.
+			var rise := lift * (1.0 - 0.6 * sp)
+			var tremble := sin(_t * 47.0) * 0.0003 * clampf((lift - 0.7) / 0.3, 0.0, 1.0) * (1.0 - sp)
+			_eye_pivot.position = _eye_base + Vector3(tremble, 0.003 + rise * 0.036, 0.0)
+			_eye_pivot.basis = Basis(Vector3.RIGHT, rise * 0.6)
+			var a := NERVE_BASE
+			var b := _eye_pivot.position + Vector3(0.0, -eye_r * 0.7, eye_r * 0.7)
 			var d := b - a
 			var len := maxf(d.length(), 0.001)
 			var z := d / len
 			var y := z.cross(Vector3.RIGHT).normalized()
 			var x := y.cross(z).normalized()
-			_nerve.transform = Transform3D(Basis(x, y, z * len), (a + b) * 0.5)
-			var reveal := clampf((lift - REVEAL_FROM) / 0.4, 0.0, 1.0)
-			_nerve_mat.albedo_color.a = reveal
-			_nerve.visible = reveal > 0.02
-			_target.visible = lift >= SLICE_READY
-			_target.material_override = _mat_bad if _flash > 0.0 else _mat_good
+			# stretching thins it; the whole thing is only shown once the eye is clear of the socket
+			var thick := lerpf(0.0065, 0.003, lift)
+			var reveal := clampf((lift - 0.08) / 0.3, 0.0, 1.0)
+			_nerve_mat.emission_energy_multiplier = (0.9 + 0.3 * sin(_t * 8.0)) if ready else 0.0
+			if not slicing:
+				_nerve.transform = Transform3D(Basis(x * thick, y * thick, z * len), (a + b) * 0.5)
+				_nerve.visible = reveal > 0.02
+				_nerve2.visible = false
+			else:
+				# two ends parting and recoiling from the middle
+				var mid := (a + b) * 0.5
+				var gap := 0.002 + sp * 0.007
+				var lo_end := mid - z * gap
+				var up_start := mid + z * gap
+				var lo_b := a.lerp(lo_end, 1.0 - 0.55 * sp)
+				var up_a := b.lerp(up_start, 1.0 - 0.55 * sp)
+				var ll := maxf(lo_b.distance_to(a), 0.001)
+				var ul := maxf(up_a.distance_to(b), 0.001)
+				_nerve.transform = Transform3D(Basis(x * thick, y * thick, z * ll), (a + lo_b) * 0.5)
+				_nerve2.transform = Transform3D(Basis(x * thick, y * thick, z * ul), (b + up_a) * 0.5)
+				_nerve.visible = true
+				_nerve2.visible = true
+				_flush.visible = true
+				_flush.position = mid
+				_flush.scale = Vector3.ONE * (0.6 + sp * 1.2)
+				_flush_mat.albedo_color.a = 0.5 * (1.0 - sp)
+			_target.visible = ready
+			for dot in _target.get_children():
+				(dot as MeshInstance3D).material_override = _mat_bad if _flash > 0.0 else _mat_good

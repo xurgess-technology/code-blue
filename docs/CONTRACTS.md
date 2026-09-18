@@ -1976,7 +1976,7 @@ No graft, graft stand or Hive Eyes change yet (chunks B and C).
 # Items: "scalpel", "eye_spoon" (ITEMS, surgical, reusable), "specimen_vat" (ITEMS, bulky: two hands),
 #        "eye_hive", "eye_surgeon" (LootTable, sellable, `eye: true`).
 Eyes.spoil_factor(age) / condition(f) / is_spoiled_factor(f)   # FRESH 40 s, ROTTEN 130 s, spoiled below 0.3 (can't be grafted)
-Eyes.label(kind, owner)                                         # "Hive eye" / "Zach's eye"
+Eyes.label(kind, owner)                                         # "Eyeball of Hive" / "Zach's eye"
 Eyes.pack(kind, owner, age, value) / unpack(x)                  # a vat's contents string
 Vats.held_vat(p) -> int                                         # head slot of a vat in p's hands, -1
 game.vats: item_used(p, item) / hand_put(p) / take_out(p, aim_id) / set_down(p, spot) / spot_free(i)
@@ -1985,7 +1985,7 @@ game.vats: item_used(p, item) / hand_put(p) / take_out(p, aim_id) / set_down(p, 
 ```
 
 - **`x`** is a new small string on `WorldItem` and on a hand slot (like `bt`, it rides pickup, drop,
-  throw, storage and the snapshot): an eye's owner ("Zach"; "" for a Hive eye), or what a vat holds.
+  throw, storage and the snapshot): an eye's owner ("Zach"; "" for an Eyeball of Hive), or what a vat holds.
   An eye's spoil clock is `bt`, like a brain's. Going into a vat freezes the age in the vat's `x`;
   coming out rebuilds `bt`, so a vat stops the clock. `game.furnace_value` prices eyes by spoilage.
 - **Inputs.** E on a vat (bench or dropped) with an eye selected puts it in; E aimed at nothing with a

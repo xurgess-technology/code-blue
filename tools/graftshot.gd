@@ -106,6 +106,47 @@ func _run() -> void:
 	_stand(pt + tb * Vector3(0, 0, 1.0))
 	_look_at(eye_at)
 	var sys = game.surgery_for_table(table)
+	if OS.get_cmdline_user_args().has("--snip-only"):
+		game.give_hand(me, "scalpel", 1)
+		me.selected = _slot("scalpel")
+		game.surgery_bot_skill = 1.0
+		game._proxy_used(game.table_interact_id(table), me)
+		await _until(func(): return int(c.get("step_index", 0)) >= 1, 60.0)
+		await _seconds(1.0)
+		game.give_hand(me, "eye_spoon", 1)
+		me.selected = _slot("eye_spoon")
+		game._proxy_used(game.table_interact_id(table), me)
+		await _until(func(): return int(c.get("step_index", 0)) >= 2, 60.0)
+		await _seconds(1.5)
+		game.give_hand(me, "scalpel", 1)
+		me.selected = _slot("scalpel")
+		game._proxy_used(game.table_interact_id(table), me)
+		await _until(func(): return sys.mg != null and String(sys.mg.get("variant")) == "snip" and sys.is_local_operating(), 10.0)
+		var mg = sys.mg
+		mg.set("bot_hold", 9999.0)
+		mg.set("bot_wait", 4.0)
+		game.surgery_bot_skill = 1.0
+		await _seconds(2.5)
+		await _shot("40_snip_rest_or_start")
+		var k := 41
+		for mark in [0.35, 0.7, 0.98]:
+			await _until(func(): return not is_instance_valid(mg) or float(mg.get("lift")) > mark, 10.0)
+			await _shot("%d_snip_lift_%.2f" % [k, mark])
+			k += 1
+		await _seconds(1.0)
+		await _shot("%d_snip_ready" % k)
+		k += 1
+		game.surgery_bot_skill = -1.0
+		mg.set("lift", 1.0)
+		Engine.time_scale = 0.08
+		mg.handle_cursor(Vector2(0.0, 0.008), 1, 0.016)   # left click on the nerve
+		mg.handle_cursor(Vector2(0.0, 0.008), 0, 0.016)
+		for mark in [0.15, 0.4, 0.65]:
+			await _until(func(): return not is_instance_valid(mg) or float(mg.get("_slice_t")) > mark, 5.0)
+			await _shot("%d_snip_slice_%.2f" % [k, mark])
+			k += 1
+		Engine.time_scale = 1.0
+		return
 	if OS.get_cmdline_user_args().has("--scoop-only"):
 		# skip the cut with the bot, then take the scoop step by hand-paced bot
 		game.give_hand(me, "scalpel", 1)

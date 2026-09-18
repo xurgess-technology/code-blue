@@ -5,7 +5,7 @@ extends RefCounted
 ## (loot_table.gd) that SPOIL outside a vat: over about a minute or two the eye clouds over and
 ## dulls, and a spoiled eye can't be grafted. A vat stops the clock (vats.gd).
 ##
-## An eye's owner rides in the stack's/item's `x` string ("" for a Hive eye); the spoil clock is
+## An eye's owner rides in the stack's/item's `x` string ("" for an Eyeball of Hive); the spoil clock is
 ## `bt` (world time it came out), exactly like a brain's.
 
 const KINDS := ["eye_hive", "eye_surgeon"]
@@ -21,6 +21,11 @@ render_mode cull_back;
 
 uniform vec3 iris : source_color = vec3(0.25, 0.42, 0.62);
 uniform float glow = 0.0;
+uniform vec3 sclera_col : source_color = vec3(0.93, 0.90, 0.88);
+uniform vec3 pupil_col : source_color = vec3(0.02, 0.02, 0.02);
+uniform float pupil_glow = 0.0;
+uniform float pupil_r = 0.30;
+uniform float ring_r = 0.62;
 instance uniform float rot = 0.0;
 varying vec3 obj;
 
@@ -29,12 +34,12 @@ void vertex() { obj = VERTEX; }
 void fragment() {
 	vec3 d = normalize(obj);
 	float a = acos(clamp(-d.z, -1.0, 1.0));            // angle away from the front (-Z)
-	float pupil = smoothstep(0.30, 0.26, a);
-	float ring = smoothstep(0.62, 0.55, a);
+	float pupil = smoothstep(pupil_r, pupil_r - 0.04, a);
+	float ring = smoothstep(ring_r, ring_r - 0.07, a);
 	float vein = 0.5 + 0.5 * sin(d.x * 40.0 + d.y * 25.0) * sin(d.y * 31.0 - d.x * 12.0);
-	vec3 sclera = mix(vec3(0.93, 0.90, 0.88), vec3(0.85, 0.5, 0.48), vein * 0.25);
+	vec3 sclera = mix(sclera_col, sclera_col * vec3(0.9, 0.6, 0.6), vein * 0.25);
 	vec3 col = mix(sclera, iris * (0.75 + 0.35 * vein), ring);
-	col = mix(col, vec3(0.02), pupil);
+	col = mix(col, pupil_col, pupil);
 	// Spoiled: milky grey-yellow cloud spreads over everything and dulls it.
 	float r = smoothstep(0.0, 1.0, rot);
 	vec3 cloud = vec3(0.62, 0.62, 0.55);
@@ -42,7 +47,7 @@ void fragment() {
 	ALBEDO = col;
 	ROUGHNESS = mix(0.12, 0.8, r);
 	SPECULAR = mix(0.9, 0.2, r);
-	EMISSION = iris * glow * (1.0 - r) * ring * (1.0 - pupil);
+	EMISSION = iris * glow * (1.0 - r) * ring * (1.0 - pupil) + pupil_col * pupil_glow * pupil * (1.0 - r);
 }
 """
 
@@ -78,10 +83,10 @@ static func rot_of(f: float) -> float:
 	return clampf(1.0 - (f - MIN_FACTOR) / (1.0 - MIN_FACTOR), 0.0, 1.0)
 
 
-## "Hive eye" / "Zach's eye".
+## "Eyeball of Hive" / "Zach's eye".
 static func label(kind: String, owner: String) -> String:
 	if kind == "eye_hive":
-		return "Hive eye"
+		return "Eyeball of Hive"
 	var o := owner.strip_edges()
 	return "%s's eye" % (o if o != "" else "A surgeon")
 
@@ -114,8 +119,15 @@ static func material(kind: String) -> ShaderMaterial:
 	m.resource_name = kind
 	m.shader = _shader
 	if kind == "eye_hive":
-		m.set_shader_parameter("iris", Color(1.0, 0.5, 0.1))
-		m.set_shader_parameter("glow", 1.4)
+		# The Hive's eye as the model has it (art/stylized/README.md): a dark ball, a lit orange-red iris and a bright
+		# pinpoint in the middle. The body's eye, the minigames' copy of it, the item and the vat all read this.
+		m.set_shader_parameter("iris", Color(1.0, 0.32, 0.05))
+		m.set_shader_parameter("ring_r", 0.5)
+		m.set_shader_parameter("sclera_col", Color(0.07, 0.02, 0.02))
+		m.set_shader_parameter("pupil_col", Color(1.0, 0.85, 0.45))
+		m.set_shader_parameter("pupil_glow", 1.6)
+		m.set_shader_parameter("pupil_r", 0.16)
+		m.set_shader_parameter("glow", 1.2)
 	else:
 		m.set_shader_parameter("iris", Color(0.25, 0.42, 0.62))
 	_mats[kind] = m
