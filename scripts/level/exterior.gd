@@ -19,6 +19,8 @@ extends RefCounted
 const LightRooms := preload("res://scripts/level/light_rooms.gd")
 
 const FLOOR_H := 3.0
+## The upper storeys' underside, above the ground floor's ceiling (see _building).
+const CEILING_CLEAR := 0.12
 ## Storeys above the ground floor: the block over the entrance building, and either side of it.
 const CENTRE_STOREYS := 4
 const SIDE_STOREYS := 2
@@ -107,8 +109,11 @@ static func _building(root: Node3D, lot: Rect2, er: Rect2, front: float, seed: i
 		var top: float = m[2]
 		if b - a < 0.5:
 			continue
-		var h := top - FLOOR_H
-		_box(root, Vector3(b - a, h, DEPTH), Vector3((a + b) * 0.5, FLOOR_H + h * 0.5, front - DEPTH * 0.5), _concrete())
+		# The underside stands a little above the ground floor's ceiling (3 m): level with it, the two
+		# z-fought and the lobby's ceiling flickered. The band at the floor line covers the gap outside.
+		var bottom := FLOOR_H + CEILING_CLEAR
+		var h := top - bottom
+		_box(root, Vector3(b - a, h, DEPTH), Vector3((a + b) * 0.5, bottom + h * 0.5, front - DEPTH * 0.5), _concrete())
 		# The cornice along the top, proud of the wall.
 		_box(root, Vector3(b - a + 0.3, 0.45, 0.5), Vector3((a + b) * 0.5, top + 0.1, front + 0.1), _band())
 		# A band at each floor line, and a row of windows on each storey above the ground floor.
