@@ -23,7 +23,10 @@ $Main = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 if ($Slot -eq "main") {
     $p = $Main
 } elseif ($Slot -match '^[1-4]$') {
-    $p = Join-Path (Split-Path $Main -Parent) "Malpractice-slots\wt-$Slot"
+    # Run from inside a slot, $Main is already ...\Malpractice-slots\wt-N: don't add the folder twice.
+    $Up = Split-Path $Main -Parent
+    $SlotsDir = if ((Split-Path $Up -Leaf) -eq "Malpractice-slots") { $Up } else { Join-Path $Up "Malpractice-slots" }
+    $p = Join-Path $SlotsDir "wt-$Slot"
 } else {
     $p = $Slot
 }
