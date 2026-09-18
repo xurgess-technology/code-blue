@@ -70,7 +70,6 @@ spans, not body widths.
 | Key | File | Original | Source | Author | Licence | size (m) | Fix-ups |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `char/surgeon` | `surgeon.glb` | `character-male-a.glb` | Kenney Mini Characters | Kenney | CC0 1.0 | 2.06 × **1.80** × 0.91 | scale 2.687, yaw 180, colormap embedded |
-| `char/surgeon_b` | `surgeon_b.glb` | `character-female-a.glb` | Kenney Mini Characters | Kenney | CC0 1.0 | 2.54 × **1.79** × 1.15 | scale 2.308, yaw 180, colormap embedded |
 
 Animated: 32 clips each — `idle`, `walk`, `sprint`, `attack-melee-right/left`,
 `attack-kick-right/left`, `pick-up`, `interact-right/left`, `die`, `crouch`,
@@ -80,10 +79,6 @@ Animated: 32 clips each — `idle`, `walk`, `sprint`, `attack-melee-right/left`,
 
 | Key | File | Original | Source | Author | Licence | size (m) | Fix-ups |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `monster/nurse` | `nurse.glb` | `character-zombie.glb` | Kenney Graveyard Kit 5.0 | Kenney | CC0 1.0 | 1.93 × **1.96** × 0.82 | scale 2.376, yaw 180, y −0.052, colormap embedded |
-| `monster/lurker` | `lurker.gltf` | `Crab.gltf` | Quaternius Cute Monsters | Quaternius | CC0 1.0 | 1.47 × **0.90** × 0.81 | scale 0.573, yaw 180, y +0.017 |
-| `monster/orderly` | `orderly.gltf` | `Big/glTF/Yeti.gltf` | Quaternius Ultimate Monsters | Quaternius | CC0 1.0 | 4.27 × **2.60** × 1.35 | scale 0.919, yaw 180, y +0.010 |
-| `monster/cthulhu` | `cthulhu.gltf` | `Cthulhu.gltf` | Quaternius Cute Monsters | Quaternius | CC0 1.0 | 3.29 × **1.61** × 1.53 | scale 1.026, yaw 180, y +0.058 |
 
 - **Nurse** — the zombie shares the Kenney character rig exactly, so it uses the
   same animation names as the surgeons. Scaled a touch taller than a player so
@@ -104,9 +99,6 @@ Animated: 32 clips each — `idle`, `walk`, `sprint`, `attack-melee-right/left`,
 | Key | File | Original | Source | Author | Licence | size (m) | Fix-ups |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `patient/human` | `patient_human.glb` | `character-male-c.glb` | Kenney Mini Characters | Kenney | CC0 1.0 | 1.75 × **1.81** × 1.05 | scale 2.278, yaw 180, colormap embedded |
-| `patient/ghost` | `patient_ghost.glb` | `character-ghost.glb` | Kenney Graveyard Kit 5.0 | Kenney | CC0 1.0 | 1.84 × **1.55** × 1.14 | scale 2.338, yaw 180, colormap embedded |
-| `patient/wolf` | `patient_wolf.gltf` | `Wolf.gltf` | Quaternius Ultimate Animated Animals | Quaternius | CC0 1.0 | 0.52 × **1.30** × 2.69 | scale 0.485, yaw 180, y +0.005 |
-| `patient/bull` | `bull.gltf` | `Bull.gltf` | Quaternius Ultimate Animated Animals | Quaternius | CC0 1.0 | 1.20 × **2.20** × 3.86 | scale 0.479, yaw 180, y +0.027 |
 
 - **Ghost** is a rigged sheet ghost on the Kenney character skeleton, so it
   animates with the same clip names as everything else Kenney. It hovers 0.26 m
@@ -131,7 +123,6 @@ All static (no AnimationPlayer).
 | `prop/bin` | `bin.glb` | `trashcan.glb` | Kenney Furniture Kit | Kenney | CC0 1.0 | 0.34 × 0.70 × 0.38 | scale 1.628, yaw 180 |
 | `prop/locker` | `locker.glb` | "Closet" | Poly Pizza <https://poly.pizza/m/BHEVb1DIuH> | Quaternius | CC0 1.0 | 1.04 × 2.00 × 0.58 | scale 0.671, yaw 180, y +0.007 |
 | `prop/screen` | `screen.glb` | `computerScreen.glb` | Kenney Furniture Kit | Kenney | CC0 1.0 | 0.61 × 0.46 × 0.16 | scale 1.552, yaw 180, x +0.303, z −0.078 |
-| `prop/desk` | `desk.glb` | `desk.glb` | Kenney Furniture Kit | Kenney | CC0 1.0 | 1.45 × 0.76 × 0.77 | scale 1.974, yaw 180, x +0.700, z −0.365 |
 | `prop/chair` | `chair.glb` | `chairDesk.glb` | Kenney Furniture Kit | Kenney | CC0 1.0 | 0.55 × 1.00 × 0.52 | scale 1.640, yaw 180, x +0.271, z −0.254 |
 | `prop/curtain` | `curtain.glb` | "Curtains Double" | Poly Pizza <https://poly.pizza/m/kkeII96j9N> | Quaternius | CC0 1.0 | 1.92 × 2.40 × 0.26 | scale 0.553, yaw 180, x +0.022, y +0.003, z −0.069 |
 | `prop/table_op` | `table_op.glb` | `table.glb` | Kenney Space Station Kit | Kenney | CC0 1.0 | 2.00 × 0.73 × 1.09 | scale 1.820, yaw 180, colormap embedded |
@@ -207,11 +198,9 @@ every entry carries `yaw: 180` (glTF front is +Z). Sizes are after scaling.
 | `hosp/plant` | `kenney_furniture/pottedPlant.glb` | Kenney Furniture Kit | 0.42 × 1.31 × 0.48 | plants |
 | `hosp/plant_small` | `kenney_furniture/plantSmall1.glb` | Kenney Furniture Kit | 0.18 × 0.27 × 0.18 | on desks |
 | `hosp/tv` | `kenney_furniture/televisionModern.glb` | Kenney Furniture Kit | 1.30 × 0.86 × 0.24 | wall TVs |
-| `hosp/keyboard` | `kenney_furniture/computerKeyboard.glb` | Kenney Furniture Kit | 0.54 × 0.05 × 0.22 | desks, consoles |
 | `hosp/laptop` | `kenney_furniture/laptop.glb` | Kenney Furniture Kit | 0.50 × 0.31 × 0.46 | lab islands |
 | `hosp/cabinet_tall` | `kenney_furniture/bookcaseClosedDoors.glb` | Kenney Furniture Kit | 0.84 × 1.78 × 0.53 | storage cabinets |
 | `hosp/bookcase` | `kenney_furniture/bookcaseOpen.glb` | Kenney Furniture Kit | 0.84 × 1.85 × 0.53 | offices |
-| `hosp/bench` | `kenney_furniture/bench.glb` | Kenney Furniture Kit | 0.76 × 0.89 × 0.38 | registered; benches are primitives (the model is too short) |
 | `hosp/washer` | `kenney_furniture/washer.glb` | Kenney Furniture Kit | 0.78 × 0.94 × 0.78 | registered, not placed yet |
 | `hosp/doormat` | `kenney_furniture/rugDoormat.glb` | Kenney Furniture Kit | 1.50 × 0.04 × 0.83 | lobby |
 | `hosp/radio` | `kenney_furniture/radio.glb` | Kenney Furniture Kit | 0.50 × 0.37 × 0.16 | break room counter |
@@ -544,13 +533,13 @@ should ever touch these paths.
 
 ```gdscript
 # Swap a placeholder primitive for a real model.
-var body := Assets.spawn("monster/orderly")
+var body := Assets.spawn("patient/human")
 if body == null:
     body = _placeholder_capsule()      # keep whatever you had
 add_child(body)
 
 # Drive its animations without knowing what the pack calls them.
-Assets.play(body, "monster/orderly", "walk")
+Assets.play(body, "patient/human", "walk")
 
 # Materials.
 $Floor.material_override = Assets.material("mat/floor")
@@ -565,3 +554,22 @@ Godot_v4.7.2-stable_win64_console.exe --headless --path . --script assets/_selfc
 
 The self-check instantiates every key, prints its path, measured bounds and
 animation list, and exits non-zero if anything regressed.
+
+## Retired (2026-09-18)
+
+Registered once but used by nothing, so moved out of `assets/` to `deprecated/unused_models/` (same
+folder layout under it; Godot ignores `deprecated/`). Their licences are unchanged; the rows as they were:
+
+| Key | File | Source | Author / pack | Licence |
+| --- | --- | --- | --- | --- |
+| `char/surgeon_b` | `surgeon_b.glb` | `character-female-a.glb` | Kenney Mini Characters / Kenney | CC0 1.0 |
+| `monster/nurse` | `nurse.glb` | `character-zombie.glb` | Kenney Graveyard Kit 5.0 / Kenney | CC0 1.0 |
+| `monster/lurker` | `lurker.gltf` | `Crab.gltf` | Quaternius Cute Monsters / Quaternius | CC0 1.0 |
+| `monster/orderly` | `orderly.gltf` | `Big/glTF/Yeti.gltf` | Quaternius Ultimate Monsters / Quaternius | CC0 1.0 |
+| `monster/cthulhu` | `cthulhu.gltf` | `Cthulhu.gltf` | Quaternius Cute Monsters / Quaternius | CC0 1.0 |
+| `patient/ghost` | `patient_ghost.glb` | `character-ghost.glb` | Kenney Graveyard Kit 5.0 / Kenney | CC0 1.0 |
+| `patient/wolf` | `patient_wolf.gltf` | `Wolf.gltf` | Quaternius Ultimate Animated Animals / Quaternius | CC0 1.0 |
+| `patient/bull` | `bull.gltf` | `Bull.gltf` | Quaternius Ultimate Animated Animals / Quaternius | CC0 1.0 |
+| `prop/desk` | `desk.glb` | `desk.glb` | Kenney Furniture Kit / Kenney | CC0 1.0 |
+| `hosp/keyboard` | `kenney_furniture/computerKeyboard.glb` | Kenney Furniture Kit | Kenney Furniture Kit | CC0 1.0 |
+| `hosp/bench` | `kenney_furniture/bench.glb` | Kenney Furniture Kit | Kenney Furniture Kit | CC0 1.0 |

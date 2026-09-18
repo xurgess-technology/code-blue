@@ -10,10 +10,10 @@ builds/
 tools/*_shots/
 
 # Web prototype build output
-prototype-web/node_modules/
-prototype-web/dist/
-prototype-web/release/
-prototype-web/tmp/
+deprecated/prototype-web/node_modules/
+deprecated/prototype-web/dist/
+deprecated/prototype-web/release/
+deprecated/prototype-web/tmp/
 
 # OS
 Thumbs.db

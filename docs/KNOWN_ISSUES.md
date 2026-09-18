@@ -1655,7 +1655,7 @@ Rebuilt around that:
 - **`build.bat`** exports the Windows build players get: `builds\windows\Malpractice.exe` + `Malpractice.pck`
   (+ the GodotSteam and `steam_api64.dll` libraries), no import step. `build.bat debug` adds
   `Malpractice.console.exe` for the engine log; `nolaunch` skips starting it. Preset: `export_presets.cfg`
-  ("Windows Desktop"; `tools/`, `docs/`, `prototype-web/` left out). Needs the 4.7.2 export templates
+  ("Windows Desktop"; `tools/`, `docs/`, `deprecated/` left out). Needs the 4.7.2 export templates
   in `%APPDATA%\Godot\export_templates\4.7.2.stable\` (only the Windows x86_64 ones are installed on
   Zach's machine; Linux/Steam Deck would need the rest of the .tpz).
 - **Shader baker is on** (`shader_baker/enabled` in the preset *options*) and only runs when the export

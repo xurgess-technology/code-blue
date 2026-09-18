@@ -92,12 +92,6 @@ const MODELS := {
 		"anims": _KENNEY_CHAR_ANIMS,
 		"note": "Kenney Mini Characters, character-male-a. Authored 0.67 m, scaled to 1.80 m.",
 	},
-	"char/surgeon_b": {
-		"path": "res://assets/models/characters/surgeon_b.glb",
-		"scale": 2.308, "yaw": 180,
-		"anims": _KENNEY_CHAR_ANIMS,
-		"note": "Kenney Mini Characters, character-female-a. Second surgeon body.",
-	},
 	# HUMAN HOOK (2026-09-14): the Blender-built humans (art/human/), made in-house. Authored facing +Z,
 	# feet at y 0, 1 unit = 1 m; scripts/human/human_model.gd dresses them (tint, masks, pieces).
 	"char/human_surgeon_a": {
@@ -139,15 +133,9 @@ const MODELS := {
 	},
 
 	# ---- monsters ---------------------------------------------------------
-	"monster/nurse": {
-		"path": "res://assets/models/monsters/nurse.glb",
-		"scale": 2.376, "yaw": 180, "y": -0.052,
-		"anims": _KENNEY_CHAR_ANIMS,
-		"note": "Kenney Graveyard Kit zombie, scaled slightly over human height.",
-	},
-	# The Night Nurse (2026-09-14): built in-house from Python in Blender (art/night_nurse/), 2.30 m
-	# to the top of her cap, feet at y 0, authored facing +Z like every glTF here. 19k triangles, 53
-	# bones, textures as separate VRAM-compressed PNGs beside it. No root motion.
+	# The Night Nurse (2026-09-14; the stylized model since 2026-09-18): built in-house from Python in
+	# Blender (art/night_nurse/), 2.30 m, feet at y 0, authored facing +Z like every glTF here. 27k
+	# triangles, 53 bones, textures as separate VRAM-compressed PNGs beside it. No root motion.
 	"monster/night_nurse": {
 		"path": "res://assets/models/monsters/night_nurse/night_nurse.glb",
 		"scale": 1.0, "yaw": 180,
@@ -173,30 +161,6 @@ const MODELS := {
 		"anims": {"idle": "Idle", "stir": "Stir", "fidget": "Fidget", "twitch": "Twitch", "dead": "Flatline"},
 		"note": "Harbor seal patient, made for Malpractice with Blender scripts (art/seal/blender_src). No third-party licence.",
 	},
-	"monster/lurker": {
-		"path": "res://assets/models/monsters/lurker.gltf",
-		"scale": 0.573, "yaw": 180, "y": 0.017,
-		"anims": {
-			"idle": "Idle", "walk": "Walk", "run": "Walk",
-			"attack": "Bite_Front", "die": "Death", "hit": "HitRecieve",
-		},
-		"note": "Quaternius Cute Monsters crab: low, wide, many-legged. Closest CC0 Lurker.",
-	},
-	"monster/orderly": {
-		"path": "res://assets/models/monsters/orderly.gltf",
-		"scale": 0.919, "yaw": 180, "y": 0.010,
-		"anims": {
-			"idle": "Idle", "walk": "Walk", "run": "Run",
-			"attack": "Punch", "die": "Death", "hit": "HitReact",
-		},
-		"note": "Quaternius Ultimate Monsters yeti, scaled to ~2.6 m.",
-	},
-	"monster/cthulhu": {
-		"path": "res://assets/models/monsters/cthulhu.gltf",
-		"scale": 1.026, "yaw": 180, "y": 0.058,
-		"anims": {"idle": "Flying", "walk": "Flying", "attack": "Bite_Front", "die": "Death"},
-		"note": "Quaternius Cute Monsters cthulhu. Spare monster, not wired to a game role.",
-	},
 
 	# ---- patients ---------------------------------------------------------
 	"patient/human": {
@@ -204,30 +168,6 @@ const MODELS := {
 		"scale": 2.278, "yaw": 180,
 		"anims": _KENNEY_CHAR_ANIMS,
 		"note": "Kenney Mini Characters, character-male-c. Lay it on the table with 'die' or 'static'.",
-	},
-	"patient/ghost": {
-		"path": "res://assets/models/patients/patient_ghost.glb",
-		"scale": 2.338, "yaw": 180, "floats": true,
-		"anims": _KENNEY_CHAR_ANIMS,
-		"note": "Kenney Graveyard Kit sheet ghost, same rig as the surgeons. Hovers 0.26 m off the floor by design — it has no feet.",
-	},
-	"patient/wolf": {
-		"path": "res://assets/models/patients/patient_wolf.gltf",
-		"scale": 0.485, "yaw": 180, "y": 0.005,
-		"anims": {
-			"idle": "Idle", "walk": "Walk", "run": "Gallop",
-			"attack": "Attack", "die": "Death", "hit": "Idle_HitReact1",
-		},
-		"note": "Quaternius Ultimate Animated Animals wolf. Stands in for the werewolf.",
-	},
-	"patient/bull": {
-		"path": "res://assets/models/patients/bull.gltf",
-		"scale": 0.479, "yaw": 180, "y": 0.027,
-		"anims": {
-			"idle": "Idle", "walk": "Walk", "run": "Gallop",
-			"attack": "Attack_Headbutt", "die": "Death", "hit": "Idle_HitReact1",
-		},
-		"note": "Quaternius bull. Largest CC0 quadruped found — the elephant's understudy.",
 	},
 	# "patient/elephant" is deliberately absent: no CC0 elephant exists in the
 	# vetted sources. Callers get null and fall back; see ASSETS.md.
@@ -272,11 +212,6 @@ const MODELS := {
 		"path": "res://assets/models/props/screen.glb",
 		"scale": 1.552, "yaw": 180, "x": 0.303, "z": -0.078,
 		"note": "Kenney Furniture Kit computerScreen — vitals monitor.",
-	},
-	"prop/desk": {
-		"path": "res://assets/models/props/desk.glb",
-		"scale": 1.974, "yaw": 180, "x": 0.700, "z": -0.365,
-		"note": "Kenney Furniture Kit desk.",
 	},
 	"prop/chair": {
 		"path": "res://assets/models/props/chair.glb",
@@ -367,10 +302,6 @@ const MODELS := {
 		"path": "res://assets/models/hospital/kenney_furniture/televisionModern.glb", "scale": 1.900, "yaw": 180, "x": -0.000, "y": -0.000, "z": -0.000,
 		"note": "Kenney Furniture Kit televisionModern: wall TV. Size 1.30 x 0.86 x 0.24 m.",
 	},
-	"hosp/keyboard": {
-		"path": "res://assets/models/hospital/kenney_furniture/computerKeyboard.glb", "scale": 1.900, "yaw": 180, "x": 0.268, "y": -0.000, "z": -0.112,
-		"note": "Kenney Furniture Kit computerKeyboard. Size 0.54 x 0.05 x 0.22 m.",
-	},
 	"hosp/laptop": {
 		"path": "res://assets/models/hospital/kenney_furniture/laptop.glb", "scale": 1.900, "yaw": 180, "x": 0.251, "y": -0.000, "z": -0.228,
 		"note": "Kenney Furniture Kit laptop. Size 0.50 x 0.31 x 0.46 m.",
@@ -382,10 +313,6 @@ const MODELS := {
 	"hosp/bookcase": {
 		"path": "res://assets/models/hospital/kenney_furniture/bookcaseOpen.glb", "scale": 2.100, "yaw": 180, "x": 0.420, "y": -0.000, "z": -0.263,
 		"note": "Kenney Furniture Kit bookcaseOpen. Size 0.84 x 1.85 x 0.53 m.",
-	},
-	"hosp/bench": {
-		"path": "res://assets/models/hospital/kenney_furniture/bench.glb", "scale": 1.900, "yaw": 180, "x": 0.380, "y": -0.000, "z": -0.190,
-		"note": "Kenney Furniture Kit bench. Size 0.76 x 0.89 x 0.38 m.",
 	},
 	"hosp/washer": {
 		"path": "res://assets/models/hospital/kenney_furniture/washer.glb", "scale": 2.000, "yaw": 180, "x": 0.390, "y": -0.000, "z": -0.310,
@@ -682,7 +609,6 @@ const ALIASES := {
 	"bin": "prop/bin",
 	"locker": "prop/locker",
 	"screen": "prop/screen",
-	"desk": "prop/desk",
 	"chair": "prop/chair",
 	"curtain": "prop/curtain",
 	"floor": "mat/floor",

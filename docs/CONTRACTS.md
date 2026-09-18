@@ -967,7 +967,7 @@ knocked down, no movement; a `"stun"` event plus the dev snapshot block), `nocli
 - Interactables: `dev_disp_<item kind>` dispensers (endless stacks) and `dev_disp_dev_gun`.
 - World changes from the panel or tests: `game.dev.request(action, args)`; the host applies,
   a client sends. Shots: `game.dev.fire(shooter, from, dir, "kill" | "knock")`.
-- Sounds `dev_zap`, `dev_thump`, `dev_defib` from `tools/gen_audio_dev.mjs`.
+- Sounds `dev_zap`, `dev_thump` from `tools/gen_audio_dev.mjs`.
 - **Pocket spaces** (2026-09-14): request `pocket {kind: "factory" | "restaurant" | ""}` builds that space
   beside the room on every machine (`dv.pk`, `game.pockets.build_kind`); `dev.pocket_go(into)` moves the
   local player to its spawn and back (panel "Go there" / "Back to the start").

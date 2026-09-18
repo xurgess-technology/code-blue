@@ -1,229 +1,227 @@
 # Changelog
 
-Everything that changes in **Malpractice**, newest first. St. Doe's General is under constant renovation;
-this is the paperwork.
+Everything that changes in **Malpractice**, newest first. One minor version per day of work, one
+patch per thing we did that day. How to add to it: [RULES.md](RULES.md#changelog).
 
-The layout follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
-[Semantic Versioning](https://semver.org/). We're pre-1.0, so the rules are loose: every chunk of
-work bumps the minor version (0.**x**.0), fixes on top of it bump the patch (0.x.**y**), and 1.0.0
-is the day it's a game you'd charge money for. The current version also lives in `project.godot`
-(`config/version`).
+**2026-09-18 (0.6.x)**
 
-New work goes under **Unreleased** as it lands. When we call a version done, that section gets a
-number and a date, and a fresh empty **Unreleased** goes on top.
+- **0.6.13**: Spring cleaning 🧹
+    - Removed: Moved to `deprecated/` (kept, but nothing loads it): the first Night Nurse, eleven registered models nothing used (the old Kenney and Quaternius stand-in monsters and patients, a spare surgeon, a desk, a bench, a keyboard) and the old web prototype.
+    - Removed: Four sounds nothing played (`screech`, `win`, `economy_bar` from the gold bar days, `dev_defib` from a menu secret that's gone), recipes and all.
+    - Removed: 78 textures Godot had extracted from build leftovers into `art/human/` (now git-ignored), and about 320 MB of old screenshots, logs and caches.
+- **0.6.12**: The Hive gets a glow-up 🍄
+    - Changed: A new Hive on the surgeons' own body: charcoal skin, the skull broken open, the brain gone and a pale shelf fungus growing out of the hole into the scalp.
+    - Added: Its own shamble, dragging that right leg, and a lunge.
+    - Added: Its eyes tell you when it's seen you: a soft orange pinpoint while it wanders; locked on, its head comes up to stare right at you and the whole eyeball floods orange.
+    - Changed: Strapped to an OR table it's its new self too. There's no brain to take out any more; that part is getting rethought.
+    - Fixed: Its gown moves with its legs instead of its thighs punching through the front every step.
+- **0.6.11**: The changelog gets a makeover
+    - Changed: This file: one line per day, a bullet per thing, a labelled sub-bullet per change.
+    - Added: [RULES.md](RULES.md), a home for development rules. The changelog's rules are the first tenants.
+- **0.6.10**: THE NIGHT NURSE HAS YOU BY THE THROAT 🫲🫲🫲
+    - Changed: She no longer takes hearts: she grabs you by the throat, lifts you to her face, cocks her head with a crack, then drops you downed and vanishes somewhere far off. About two seconds, and nobody can stop it.
+    - Changed: A new Night Nurse in the game's art style: a soft figurine face under the mask, big black eyes, long chunky black hair, stiff chunky clothes. The old model lives in `deprecated/`.
+    - Changed: The art style's hair rule: hair is fine where a character calls for it, built chunky. Surgeons stay bald.
+    - Fixed: Her legs no longer poke through the front of her skirt on a long stride.
+- **0.6.9**: A camera that stares back
+    - Added: F5 now cycles three views: first person, over the shoulder, and facing you.
+    - Added: The camera swings round you to get to the front instead of cutting.
+    - Added: Facing you there's no crosshair; you aim where your head looks.
+    - Fixed: Sprinting over the shoulder no longer puts a shiny white patch on the back of your head. Your own flashlight was lighting your own skull.
+- **0.6.8**: Dear diary
+    - Added: This changelog, backfilled from the git history, and a version number in `project.godot`.
+- **0.6.7**: Over-the-shoulder camera
+    - Added: An optional over-the-shoulder view: Settings -> Controls -> Camera, or F5.
+    - Added: You see your surgeon and what's in their hand, and the crosshair still aims.
+    - Changed: First person is still the default. Operating, Hive Eyes, being downed or carried all put you back in your own head.
+- **0.6.6**: ROCKET BOOTS 🚀🚀🚀 THE SHOP SELLS A REAL THING 🚀🚀🚀
+    - Added: Rocket boots: $100 a pair at the pharmacy. They go on your feet, not in your hands.
+    - Added: Hold crouch through a sprint-dive to fly straight ahead on a new fuel bar (~1.5 s, ~18 m).
+    - Added: Faceplants: fly into a wall head first and it costs a heart.
+    - Added: Heel thrusters, flames and a burn sound, so everyone sees you coming.
+- **0.6.5**: The art style, written down
+    - Added: DESIGN.md explains how characters and models should look: an exaggerated person, never chibi, never a doll.
+- **0.6.4**: surgeon_a tidy-up
+    - Changed: The old realistic surgeon model (no longer a player body) is unmasked, has no gash and a fuller build.
+- **0.6.3**: The OR grows
+    - Added: The lab wall round the corner, storage shelves and a janitor's closet.
+    - Changed: Surgical tools can be used straight from your hands.
+- **0.6.2**: Surgeon polish
+    - Changed: The dive flies flat out.
+    - Fixed: No belly poking through the scrubs, and no face glow on a charged shove.
+- **0.6.1**: Personnel and mirrors
+    - Added: A personnel room with real, working mirrors, a rebuilt crematorium and desks.
+    - Changed: A softer aim highlight.
+- **0.6.0**: Code Blue is dead, long live Malpractice
+    - Changed: The project itself is renamed from Code Blue to Malpractice, everywhere.
 
-Versions 0.1.0 to 0.5.0 were written after the fact from the git history, one per day of work,
-so they're summaries rather than a line per commit.
+**2026-09-17 (0.5.x)**
 
-## [Unreleased]
+- **0.5.20**: The Walk-In is now the Hive
+    - Changed: Renamed everywhere.
+- **0.5.19**: Getting lost in the fog
+    - Changed: The lot is an oval clearing. Wander too deep into the fog and you come out somewhere else instead of being steered back.
+- **0.5.18**: A NEW DOCTOR IN THE HOUSE 🩺 (THE STYLIZED SURGEON)
+    - Added: The players' new body, the stylized surgeon, built from Python in Blender.
+- **0.5.17**: Dev free camera
+    - Added: The dev panel has a free camera; P swaps between flying it and walking.
+- **0.5.16**: St. Doe's from the outside
+    - Added: Upper storeys, signs and planters on the hospital's exterior.
+    - Fixed: The upper storeys no longer z-fight over the lobby ceiling.
+- **0.5.15**: Arriving out of the fog
+    - Changed: You walk out of the fog onto a brighter parking lot at the start of a run.
+    - Changed: The fog belt is 60 m tall, with no top edge for a flashlight to find and no hard line at the horizon.
+- **0.5.14**: Pharmacy window
+    - Changed: The pharmacy front is a wall with a barred counter window instead of a wall of bars.
+- **0.5.13**: Test hygiene
+    - Added: `docs/FAILING_TESTS.md` lists the tests already red on main, and `CLAUDE.md` points at it.
+- **0.5.12**: The database becomes a slide projector
+    - Changed: A slide projector instead of a green terminal.
+- **0.5.11**: Rubber stamps
+    - Added: Faxes get hand-pressed rubber ink stamps, stamped after the page settles.
+- **0.5.10**: WE ARE NOW MALPRACTICE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    - Changed: The game is called **Malpractice**. The hospital is **St. Doe's General** ("Doe General" on the faxes). Code Blue had a good run.
+- **0.5.9**: Operators stay put
+    - Fixed: The paramedics' gurney could shove the operating player out of the operation. You're rooted to the table now.
+- **0.5.8**: Fax polish
+    - Changed: Every fax screen moves the same way, and faster.
+- **0.5.7**: Surgery look pass
+    - Changed: One look for the infection on Bob's arm, and Bob's gown pulls back round the forceps' skin patch.
+    - Added: A teammate's flashlight lights the wound.
+- **0.5.6**: Carry camera, done properly
+    - Changed: The carry camera sits over your right shoulder; the body you carry rides your left.
+- **0.5.5**: Saw marking
+    - Changed: The saw follows a pre-op skin-marker line instead of a glowing guide.
+- **0.5.4**: Shift assignment fax
+    - Added: Starting a session from the menu rolls into a shift assignment fax.
+- **0.5.3**: Throw wind-up
+    - Added: Charging a throw draws your arm back, or both arms overhead for big things.
+- **0.5.2**: Terminal lock screen
+    - Added: The terminal locks and signs you out when you walk away or go idle.
+    - Added: The Night Nurse gets a scan ring; the furnace view lingers after a body goes in.
+    - Changed: The carry camera sits closer; the dev door only exists in dev mode.
+- **0.5.1**: Bodies stay bodies
+    - Changed: A finished monster case stays as a body until someone burns it.
+    - Fixed: Carried bodies can't be mixed up with a player's network id.
+- **0.5.0**: The wall terminal
+    - Added: Hold your scan laser on the break room screen to sign in. The screen is shared, and everyone sees everyone's laser.
+    - Removed: The old terminal UI.
 
-### Added
-- **The Night Nurse's grab.** She no longer takes hearts. If she gets a hand on you, she has you by the
-  throat with both hands in a snap and straightens to her full height, holding you up to her face
-  with your legs kicking and your arms hanging. Your view is locked on her face, straight on, until
-  her head snaps over to one side with a crack, cocked, considering you. Then she drops you, downed,
-  and she's gone: somewhere far off, out of everyone's light. About two seconds, and nothing anyone
-  can do. Watching her doesn't stop it once she has you, and nothing else can touch you meanwhile.
-- **A camera that faces you.** F5 now cycles three views: first person, over the shoulder, and a new
-  one out in front looking back at your surgeon, centred. The camera swings round you to get there
-  instead of cutting. Facing you there's no crosshair (it would be pointing at your face), and you
-  aim where your head looks. It's in Settings -> Controls -> Camera as FRONT too.
+**2026-09-16 (0.4.x)**
 
-### Changed
-- **The Hive got a glow-up, literally.** A new model on the surgeons' own body: charcoal skin, the
-  skull broken open and the brain gone, a pale shelf fungus bulging out of the hole and rooting into
-  the scalp. Still in the gown, still hunched, still dragging that right leg, now with a proper
-  shamble and a lunge of its own.
-- **Its eyes tell you when it's seen you.** Wandering, they're a soft orange pinpoint. Once it locks
-  on, the head comes up out of its hang to stare right at you, the whole eyeball floods orange and
-  lights up its face. Lose it and the head sinks back and the eyes go dim again.
-- Strapped to an OR table, the Hive is its new self too (no brain to take out any more; that part is
-  getting rethought).
-- **A new Night Nurse**, rebuilt in the game's art style: a soft figurine face under the mask with big
-  black eyes, long chunky black hair down her back and over her chest instead of the cap and bun,
-  stiff chunky clothes, and all the old grime and blood kept as detailed paint. Same height, same
-  wrong walk. The first model is kept in `deprecated/`.
-- The art style's hair rule: hair is fine where a character calls for it, as long as it's built
-  chunky (surgeons stay bald).
+- **0.4.14**: Dev mode, secretly
+    - Added: A secret pharmacy order turns on dev mode. The dev panel works anywhere, with a hidden room past the lot.
+- **0.4.13**: Patient exits
+    - Added: Dead patients go to the furnace; the saved walk out on their own.
+- **0.4.12**: The wall terminal, part one
+    - Added: A projector screen and scan laser, cards you can drill into, tool models as links.
+    - Changed: Lighting stays inside the room it belongs to.
+- **0.4.11**: The tip fax
+    - Added: First-time tutorials arrive in a small corner fax.
+    - Changed: Health moved to the top left.
+- **0.4.10**: Terminals and settings
+    - Added: Terminal 3D models, scanner feedback and a per-player database.
+    - Changed: Settings are a fax now.
+- **0.4.9**: Nice try
+    - Fixed: Spoiled brains no longer sell at full price.
+- **0.4.8**: THE HUB REBUILD 🏥🏥🏥 (FROM ZACH'S ACTUAL FLOORPLAN)
+    - Added: The building from Zach's floorplan: three OR tables, the lobby, a fax-ordering pharmacy, a furnace built into the crematorium wall, a break room printer and computer.
+- **0.4.7**: Fax-style title menu
+    - Added: The sign-in sheet feeds in after the launch printout.
+- **0.4.6**: Export builds
+    - Added: `build.bat` and a Windows export preset with the shader baker.
+- **0.4.5**: Loading that never freezes
+    - Added: A loading screen that's a sweeping, beeping heart monitor, and a launch printout.
+    - Added: Levels build in the background.
+- **0.4.4**: Sprint-dive and prone
+    - Added: Crouch while sprinting to dive; you land prone with a thud.
+    - Added: The crouch key cycles stand, crouch and prone.
+    - Changed: Toggle sprint, a grace window and no cooldown, after playtesting.
+- **0.4.3**: Over the shoulder by default (for about an afternoon)
+    - Changed: The default camera went over the shoulder, then back to first person the same day. See 0.6.7 for how that ends.
+- **0.4.2**: Round ability slots
+    - Changed: The ability hotbar is circular icon slots.
+- **0.4.1**: Hub redesign
+    - Added: Real pharmacy and crematorium rooms, a kiosk and a terminal desk.
+- **0.4.0**: Surgery from your hands
+    - Changed: A surgery step can use its supply from the shelf or from your hands.
 
-### Fixed
-- The Hive's gown now moves with its legs instead of having its thighs punch through the front on
-  every step. Modesty, sort of.
-- The Night Nurse's legs no longer poke out through the front of her skirt on a long stride.
-- Sprinting in the shoulder view put a shiny white patch on the back of your head: your own
-  flashlight, which lives in your head, was lighting your skull as you leaned into the run. Your
-  torch no longer lights your own body.
+**2026-09-15 (0.3.x)**
 
-## [0.6.0] - 2026-09-18
+- **0.3.7**: Aim highlight
+    - Changed: Things you can use highlight when you aim at them, instead of labels floating everywhere.
+- **0.3.6**: Tuning pass
+    - Changed: The first call rings as soon as you clock in.
+    - Changed: The fog is a hard wall your flashlight can't cut through.
+    - Changed: The bone saw swing lost its velocity pop and gained camera feedback.
+    - Changed: Sedated patients twitch less.
+- **0.3.5**: Pause menu exits
+    - Added: Exit to Main Menu and Exit to Desktop on the pause screen.
+- **0.3.4**: Manual OR doors
+    - Changed: The OR doors are double doors you open with E.
+- **0.3.3**: The database terminal
+    - Added: The database terminal. Hive Eyes gets a fly-through and glazed eyes your teammates can see; Echo gets a pulse.
+    - Removed: The medical guide.
+- **0.3.2**: GOODBYE GOLD BARS 💸 HELLO PHARMACY
+    - Added: The pharmacy (placebo pills, $15, emotionally supportive) and the crematorium furnace (throw loot in to sell it).
+    - Added: Charged throws.
+    - Removed: Gold bars, the sell bin and the gold pile.
+- **0.3.1**: The fog lot
+    - Added: A ring of fog, and an ambulance that drives in for every delivery.
+    - Changed: The lot is stripped bare and spawns moved indoors.
+- **0.3.0**: Crouch, jump, abilities, scanner
+    - Added: Crouch and jump.
+    - Added: Ability slots on Alt+1-4, each with its own cooldown.
+    - Added: The scanner: hold R on a monster to learn about it.
 
-The shop finally sells something that does something.
+**2026-09-14 (0.2.x)**
 
-### Added
-- **Rocket boots**, the pharmacy's first real item: $100 a pair on the lobby fax. Taking a pair puts
-  them on (your hands stay free), one pair each, and they stay on through death until a new run.
-  Hold crouch through a sprint-dive and they light: you fly straight ahead, level and fast, burning
-  a new **fuel** bar under stamina (about 1.5 s of flight, ~18 m, refilling on the ground). Let go
-  and you drop into the normal dive landing.
-- **Faceplants**: flying head first into a wall or furniture stops the burn, bounces you back and
-  costs a heart. Glancing off a wall at an angle is free. Teammates see heel thrusters, flames, a
-  glow on the walls, and they hear you coming.
-- **Over-the-shoulder camera**, as an option: Settings -> Controls -> Camera (FIRST / SHOULDER), or
-  **F5** anywhere. First person stays the default. You see your own surgeon, the item in their hand,
-  and the crosshair still aims. The game takes you back to first person while you're operating, in
-  Hive Eyes, downed, being carried or dead.
-- A **personnel** room with real, working mirrors, a rebuilt crematorium, desks, and a softer aim
-  highlight in the hub.
-- The OR's **lab wall** round the corner, storage shelves and a janitor's closet; surgical tools can
-  now be used straight from your hands.
-- A written **art style** for characters and models in DESIGN.md ("an exaggerated person, never
-  chibi, never a doll").
-- Tests: rocket boots and the shoulder camera in `controlstest`, a `rocket_boots` multiplayer
-  scenario, and a `bootsshot` screenshot tool.
+- **0.2.7**: Human models
+    - Added: Players, paramedics and Bob as Blender-built humans, and a proper carried-body pose.
+- **0.2.6**: The seal
+    - Added: The seal patient: a Blender model with infection and amputation looks.
+- **0.2.5**: Pocket spaces
+    - Added: The Factory and the Restaurant, stitched into the hospital through seams, rebuilt with each shift's wings.
+- **0.2.4**: Hands
+    - Added: First-person arms, items held properly, body poses, wind-ups and the carry camera.
+- **0.2.3**: Doors
+    - Added: Room doors and locked wing gates.
+    - Added: The wings are rebuilt for every shift.
+- **0.2.2**: The Night Nurse moves in
+    - Added: Her Blender model replaces the stand-in, and she gets her own dev panel section.
+- **0.2.1**: Dissection
+    - Added: Monster patients, a skull saw and brain forceps, and re-dosing while you work.
+- **0.2.0**: Monsters
+    - Added: The Walk-In (now the Hive).
+    - Changed: The Discharged is redesigned, and monsters get health, sedation and lying down.
 
-### Changed
-- The dive now flies flat out instead of hopping upright.
-- Surgeon polish: no belly poking through the scrubs, no glowing face on a charged shove.
-- The old realistic `surgeon_a` model (no longer a player body) is unmasked, with no gash and a
-  fuller build.
-- The project is renamed from Code Blue to Malpractice, everywhere.
+**2026-09-13 (0.1.x)**
 
-## [0.5.0] - 2026-09-17
-
-The hospital gets a name, a face and a new doctor.
-
-### Added
-- The game is now **Malpractice**, and the hospital is **St. Doe's General** ("Doe General" on the
-  faxes).
-- **The outside of the hospital**: upper storeys, signs and planters. You also now arrive by walking
-  out of the fog onto a brighter parking lot, instead of spawning inside.
-- **Fog you can get lost in**: an oval clearing ringed by a 60 m tall fog belt. Wander in too deep
-  and you come out somewhere else instead of being politely steered back.
-- **The stylized surgeon**, the players' new body, built in Python in Blender.
-- **The wall terminal**: a shared projector screen. Hold your scan laser on it to sign in, drill
-  into cards, and everyone sees everyone's laser dot. The database became a slide projector, with a
-  lock screen that signs you out when you walk away or go idle.
-- A **throw wind-up**: your arm draws back (or both arms go overhead for big things) while you charge.
-- Starting a session from the menu now rolls into a shift assignment fax.
-- Dev panel: a free camera (P swaps between flying it and walking), and a button to put a
-  flatlined patient on the table.
-- `docs/FAILING_TESTS.md` and `CLAUDE.md`, so nobody panics about the tests that were already red.
-
-### Changed
-- The **Walk-In is now the Hive**, everywhere.
-- The **carry camera** sits over your right shoulder, framed like a proper third-person game; the
-  body you carry rides your left shoulder. It lingers a moment after you throw a body in the furnace.
-- **Fax polish**: every fax screen moves the same way, faster, and gets hand-pressed rubber stamps.
-- The **pharmacy** front is a wall with a barred counter window instead of a whole wall of bars.
-- Surgery looks: the saw now follows a pre-op skin-marker line instead of a glowing guide; Bob's
-  gown pulls back round the forceps' patch; a teammate's flashlight lights the wound; the infection
-  on Bob's arm has one consistent look.
-
-### Fixed
-- The operator stays rooted at the table (the paramedics' gurney used to shove them out of the
-  operation).
-- Carried bodies can't be confused with a player's network id; Hive Eyes snaps back if its Hive is gone.
-- The exterior's upper storeys no longer z-fight and flicker over the lobby ceiling.
-
-## [0.4.0] - 2026-09-16
-
-Moving day: the hub gets rebuilt from a real floorplan.
-
-### Added
-- **The hub rebuild**, from Zach's floorplan: three OR tables, the lobby, a fax-ordering pharmacy,
-  the crematorium furnace built into the wall, and a break room with a printer and computer.
-- **Sprint-dive and prone**: crouch while sprinting to dive and land prone with a thud; the crouch key
-  now steps through stand, crouch and prone.
-- **A loading screen** that's a sweeping, beeping heart monitor, a launch printout, and levels built
-  in the background so loading never freezes.
-- **A fax-style title menu**: the sign-in sheet feeds in after the launch printout. Settings became
-  a fax too.
-- **The tip fax**: first-time tutorials in a small corner fax. Health moved to the top left.
-- **Export builds**: `build.bat` and a Windows preset with the shader baker.
-- **Patient exits**: bodies go to the furnace; the saved walk out on their own.
-- **Dev mode** as a secret pharmacy order: the dev panel works anywhere, with a hidden room past
-  the lot.
-- Terminal 3D models, scanner feedback, a per-player database, and circular icon slots for the
-  ability hotbar.
-
-### Changed
-- Surgery can use a step's supply from the shelf or straight from your hands.
-- Toggle sprint, a grace window and no cooldown on the dive, after playtesting.
-- The default camera went over the shoulder in the morning and back to first person by the
-  afternoon. (See 0.6.0 for how that story ends.)
-
-### Fixed
-- Spoiled brains no longer sell at full price. Nice try.
-- Three tests broken by the rebuilt rooms, a furnace-throw flake in devtest, and the bot getting
-  stuck on things that aren't items in looptest.
-
-## [0.3.0] - 2026-09-15
-
-Sweep 4A: the hub starts to feel like a place.
-
-### Added
-- **Crouch, jump, ability slots** (Alt+1-4) with their own cooldowns, and **the scanner** (hold R on
-  a monster to learn about it).
-- **The fog lot**: the parking lot stripped bare, a ring of fog, an ambulance that drives in for
-  every delivery, and spawns moved indoors.
-- **The pharmacy and the crematorium**: order placebo pills, sell loot by throwing it through the
-  furnace grate. **Charged throws**, and **placebo pills**: $15 a bottle, mechanically useless,
-  emotionally supportive.
-- **The database terminal** replaces the medical guide. Hive Eyes gets a fly-through and glazed eyes
-  your teammates can see; Echo gets a pulse.
-- **Exit to Main Menu / Exit to Desktop** on the pause screen.
-- An **aim highlight** on things you can use, instead of floating labels everywhere.
-
-### Changed
-- The first call rings as soon as you clock in (no grace period).
-- The fog is a hard opaque wall your flashlight can't cut through.
-- The OR doors are manual double doors (E to open).
-- The bone saw's swing lost its velocity pop and gained some camera feedback.
-- The patient's twitching under sedation is toned down.
-
-### Removed
-- Gold bars, the sell bin and the gold pile.
-
-## [0.2.0] - 2026-09-14
-
-Sweep 3: things that fight back, and things you can do to them.
-
-### Added
-- **Combat**: bone saw swings (the saw can break), anesthetic jabs, shoves, and dragging sedated
-  monsters and strapping them to a table.
-- **Monsters**: the Walk-In (now the Hive) and a redesigned Discharged, with health, sedation and
-  lying down.
-- **Brains**: brain loot that spoils and rots, the blender, and the abilities you get from drinking
-  one: **Echo** and **Hive Eyes**.
-- **Dissection**: monster patients, a skull saw and brain forceps, re-dosing while you work.
-- **The Night Nurse**'s Blender model in the game, with a dev panel section.
-- **Doors**: room doors, locked wing gates, and the wings rebuilt every shift.
-- **Pocket spaces**: the Factory and the Restaurant, other places stitched into the hospital through
-  seams, with mirrors that show who's inside.
-- **Hands**: first-person arms, held items gripped properly, body poses, wind-ups, and the carry
-  camera.
-- **Human models**: players, paramedics and Bob as Blender-built humans, and the **seal** as a
-  patient.
-
-### Changed
-- Strapped monsters wear their walking rig, thrashing on the table.
-- Wing rebuilds are measured and faster.
-
-## [0.1.0] - 2026-09-13
-
-Day one. The hospital opens its doors, against medical advice.
-
-### Added
-- **The game**: a Godot 4.7 co-op hospital horror (then called Code Blue), plus the web prototype
-  it grew from.
-- **Surgery minigames**: saw, anesthetic, tourniquet, forceps and gauze, each giving feedback in the
-  world instead of gauges.
-- **The shift loop**: several patients at once, the phone, paramedics, clocking out and game over.
-- **Downed players**: 0 HP downs you; crawl, bleed out, get carried to the player table and stitched
-  up with a suture kit.
-- **A generated hospital**: wings split into hallways and rows of rooms, Kenney and Poly Haven assets,
-  and a lit area outside.
-- **Inventory**: four hand slots, bulky loot, sellable loot, colour coding and money.
-- **The OR wall monitor** and a minimal HUD.
-- **Multiplayer**: hosting over Steam or IP, joining mid-shift, and per-field replication built to
-  survive bad connections, with a multi-process test harness.
-- **Settings** (audio, display, controls), and a secret **dev room** with a dev gun, bots and a panel.
+- **0.1.13**: Combat
+    - Added: Bone saw swings (the saw can break), anesthetic jabs, dragging sedated monsters and strapping them to a table.
+- **0.1.12**: Brains
+    - Added: Brain loot that spoils, the blender, and two abilities from drinking them: Echo and Hive Eyes.
+- **0.1.11**: Loot models
+    - Added: Real models for 15 kinds of loot, and rigged paramedics.
+- **0.1.10**: Netcode rewrite
+    - Changed: Replication sends and acknowledges each field on its own, so a bad connection catches up instead of falling over.
+- **0.1.9**: The OR wall monitor
+    - Added: A monitor on the OR wall and a minimal HUD.
+- **0.1.8**: The shift loop
+    - Added: Several patients at once, the phone, paramedics, clocking out and game over.
+- **0.1.7**: Downed players
+    - Added: 0 HP downs you: crawl, bleed out, get carried to the player table and stitched up.
+- **0.1.6**: A generated hospital
+    - Added: Wings split into hallways and rows of rooms, furnished with Kenney and Poly Haven assets.
+- **0.1.5**: Inventory and money
+    - Added: Four hand slots, bulky loot, sellable loot, colour coding and money.
+- **0.1.4**: Multiplayer
+    - Added: Host over Steam or IP, join mid-shift, and a multi-process test harness.
+- **0.1.3**: Surgery that feels right
+    - Changed: The saw, anesthetic, tourniquet, forceps and gauze give feedback in the world instead of gauges.
+- **0.1.2**: The dev room
+    - Added: A secret dev room with a dev gun, bots and a panel.
+- **0.1.1**: Settings
+    - Added: Audio, display and control settings.
+- **0.1.0**: THE HOSPITAL IS OPEN 🚑🚑🚑 (AGAINST MEDICAL ADVICE)
+    - Added: Code Blue, a Godot 4.7 co-op hospital horror game, and the web prototype it grew from.

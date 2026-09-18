@@ -9,7 +9,6 @@
 //
 //   dev_zap_01/_02   the dev gun's kill shot: a bright falling laser zap with a crackle
 //   dev_thump        the knock-down shot: a low pneumatic whump
-//   dev_defib        a defibrillator charging whine and the thump (the secret code on the menu)
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -101,31 +100,6 @@ function thump() {
   return b;
 }
 
-function defib() {
-  const r = rngFor('defib'), b = new Buf(1.6);
-  let ph = 0, ph2 = 0;
-  const charge = 1.05;
-  for (let i = 0; i < b.d.length; i++) {
-    const t = i / SR;
-    if (t < charge) {
-      // The capacitor whine climbs and gets louder.
-      const k = t / charge;
-      const f = 900 + 3200 * k * k;
-      ph += TAU * f / SR;
-      const env = Math.min(1, t / 0.05) * (0.15 + 0.35 * k);
-      b.add(i, Math.sin(ph) * env + Math.sin(ph * 2.01) * env * 0.2);
-    } else {
-      const tt = t - charge;
-      const f = 50 + 120 * Math.exp(-tt * 25.0);
-      ph2 += TAU * f / SR;
-      const env = Math.min(1, tt / 0.003) * Math.exp(-tt * 6.0);
-      const snap = (r() * 2 - 1) * Math.exp(-tt * 60.0) * 0.9;
-      b.add(i, Math.sin(ph2) * env * 1.2 + snap);
-    }
-  }
-  return b;
-}
-
 function writeWav(file, buf, targetDb = -3) {
   const p = buf.peak();
   const k = p > 0 ? Math.pow(10, targetDb / 20) / p : 1;
@@ -153,10 +127,9 @@ const FILES = {
   'dev_zap_01.wav': () => zap(1),
   'dev_zap_02.wav': () => zap(2),
   'dev_thump.wav': () => thump(),
-  'dev_defib.wav': () => defib(),
 };
 
 fs.mkdirSync(OUT, { recursive: true });
 for (const [name, build] of Object.entries(FILES)) {
-  writeWav(path.join(OUT, name), build(), name.includes('defib') ? -4 : -3);
+  writeWav(path.join(OUT, name), build(), -3);
 }

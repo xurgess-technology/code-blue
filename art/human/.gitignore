@@ -6,3 +6,6 @@ renders/preview/
 # hu_build.py exports these, then hu_glb_extern.py writes the game copies under assets/models/characters/human/
 *_embedded.glb
 logs/
+# Godot's import of the *_embedded.glb intermediates extracts textures here: never commit them
+*_embedded*.png
+*_embedded*.import

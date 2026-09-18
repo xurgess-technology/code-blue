@@ -514,13 +514,6 @@ const SFX_BUILDERS = {
     b.tone(0, { freq: 160, end: 50, type: 'sawtooth', dur: 0.35, vol: 0.3, filter: 600 });
     return t;
   },
-  screech: () => {
-    const rnd = rngFor('screech');
-    const t = sfxTrack(1.4), b = new Bus(t, null, 0);
-    b.tone(0, { freq: 1100, end: 220, type: 'sawtooth', dur: 0.7, vol: 0.22, filter: 2400 });
-    b.noise(0, { dur: 0.6, vol: 0.18, freq: 1600, q: 0.7, rnd });
-    return t;
-  },
   thud: () => {
     const rnd = rngFor('thud');
     const t = sfxTrack(0.8), b = new Bus(t, null, 0);
@@ -586,11 +579,6 @@ const SFX_BUILDERS = {
   flatline: () => {
     const t = sfxTrack(3.0), b = new Bus(t, null, 0);
     b.tone(0, { freq: 880, type: 'sine', dur: 2.5, vol: 0.18, attack: 0.005, release: 0.06 });
-    return t;
-  },
-  win: () => {
-    const t = sfxTrack(1.6), b = new Bus(t, null, 0);
-    [523, 659, 784, 1047].forEach((f, i) => b.tone(i * 0.15, { freq: f, type: 'triangle', dur: 0.5, vol: 0.14 }));
     return t;
   },
   // One heartbeat pair. audio_manager.gd re-triggers it and scales rate + volume with
