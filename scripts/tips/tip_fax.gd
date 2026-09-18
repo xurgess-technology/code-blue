@@ -15,6 +15,7 @@ extends CanvasLayer
 ##   show_tip(id)         queue a tip now (ignores whether it was seen; tests and the dev panel)
 ##   dismiss() -> bool    tear off the memo on screen; false when there is none (Esc does nothing)
 ##   is_showing() -> bool
+##   is_stamped() -> bool  the memo has printed in full and its TIP stamp has settled
 ##   reset_seen()         forget every tip this machine has shown
 
 const Fax := preload("res://scripts/fax_printer.gd")
@@ -84,6 +85,9 @@ var _cur := {}            # {id, lines: [{text, kind}], total_chars, chars, paus
 var _machine := Fax.Motion.new(0.0)   # 0 below the screen .. 1 standing in the corner
 var _check_t := 0.0
 var _last_line := -1
+## What the memo is: stamped on the page once it has finished printing. "TIP" for every memo today.
+var _stamp := Fax.Stamp.new()
+var _stamp_on := false
 
 
 func _ready() -> void:
@@ -113,6 +117,12 @@ func show_tip(id: String) -> void:
 
 func is_showing() -> bool:
 	return not _cur.is_empty() and float(_cur.get("tear_t", -1.0)) < 0.0
+
+
+## The memo on screen has printed in full and its stamp has come down and settled (screenshot tools
+## wait for this rather than guessing at seconds).
+func is_stamped() -> bool:
+	return is_showing() and _stamp_on and not _stamp.hidden() and not _stamp.moving()
 
 
 func dismiss() -> bool:
@@ -221,11 +231,18 @@ func _tick(delta: float) -> void:
 		if after != _last_line:
 			_last_line = after
 			_sfx("print_line", -16.0)
+		return
+	# Printed out: the page holds still, then what it is gets stamped on it.
+	if not _stamp_on:
+		_stamp_on = true
+		_stamp.arm()
+	elif _stamp.moving() and _stamp.step(delta):
+		_sfx("print_stamp", -9.0)
 
 
 func _start(id: String) -> void:
 	var tip: Dictionary = TIPS[id]
-	var lines: Array = [{"text": ">> MEMO  COUNTY GENERAL", "kind": "head"},
+	var lines: Array = [{"text": ">> MEMO  DOE GENERAL", "kind": "head"},
 		{"text": String(tip.title), "kind": "title"}]
 	for para in tip.text:
 		for l in _wrap(String(para), WRAP_CHARS):
@@ -235,8 +252,11 @@ func _start(id: String) -> void:
 	var total := 0
 	for l in lines:
 		total += maxi(1, String(l.text).length())
-	_cur = {"id": id, "lines": lines, "total_chars": total, "chars": 0.0, "pause": 0.0, "t": 0.0, "tear_t": -1.0, "h": 0.0}
+	_cur = {"id": id, "lines": lines, "total_chars": total, "chars": 0.0, "pause": 0.0, "t": 0.0, "tear_t": -1.0,
+		"h": 0.0, "stamp": String(tip.get("stamp", "TIP"))}
 	_last_line = -1
+	_stamp = Fax.Stamp.new()
+	_stamp_on = false
 	_sfx("beep", -10.0)
 
 
@@ -362,6 +382,10 @@ func _draw_memo(x: float, slot_y: float) -> void:
 				_canvas.draw_string(_font, Vector2(x + 24.0, y), text, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT, Color(Fax.INK, 0.92 * alpha))
 		y += LINE_H * (0.55 if String(l.kind) == "gap" else 1.0)
 		n += len
+	# What the memo is, stamped by hand across the top right of the printed page.
+	if _stamp_on and not _stamp.hidden():
+		Fax.draw_stamp(_canvas, _font, String(_cur.get("stamp", "TIP")),
+			Vector2(x + PAPER_W - 72.0, top + 40.0), 26, _stamp.punch(), Fax.STAMP_INK, alpha)
 
 
 # ---------------------------------------------------------------------------

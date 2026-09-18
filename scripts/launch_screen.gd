@@ -1,6 +1,6 @@
 extends CanvasLayer
 ## The launch printout. While the one-time warmup runs (scripts/warmup.gd), the game's own admission
-## chart feeds out of a dot-matrix printer: the patient is Code Blue. main.gd shows it over the title
+## chart feeds out of a dot-matrix printer: the patient is Malpractice. main.gd shows it over the title
 ## menu and frees it when `done` fires.
 ##
 ## The page is a fixed script printed at a steady pace, not a progress readout, so it never jumps:
@@ -80,6 +80,9 @@ var _feed_dist := 0.0
 var _feed_tick := 0.0
 var _head_from := 0.0
 var _scroll := 0.0
+## The current sheet's top edge, set every frame in _draw_page: the stamp lands near it (top right of
+## the page) rather than on the line it was queued as.
+var _page_top := 0.0
 ## Pages: the chart prints onto sheets of PAGE_LINES lines. A full sheet ejects (flies up and off),
 ## and a fresh one peeks out of the slot before the next line prints.
 var _page_start := 0      # index in _printed of the current page's first line
@@ -154,9 +157,9 @@ func _queue_chart() -> void:
 	var items := Items.ITEMS.size()
 	for line in [
 		[">> FAX  %s  %s  PAGE 1" % [date, clock], "dim", false],
-		["COUNTY GENERAL  /  NIGHT ADMISSIONS", "text", false],
+		["DOE GENERAL  /  NIGHT ADMISSIONS", "text", false],
 		["", "rule", false],
-		["PATIENT ........ CODE BLUE", "text", false],
+		["PATIENT ........ MALPRACTICE", "text", false],
 		["ADMITTED ....... %s  %s" % [date, clock], "text", false],
 		["COMPLAINT ...... Unresponsive. Will not start on its own.", "text", false],
 		["", "rule", false],
@@ -372,6 +375,7 @@ func _draw_page() -> void:
 		page_top = slot_y
 	elif _peek_t >= 0.0:
 		page_top = lerpf(slot_y, print_y - margin, ease(minf(_peek_t / PEEK_SECONDS, 1.0), 0.5))
+	_page_top = page_top
 	# Once stamped, the whole sheet leaves: its bottom edge comes up out of the slot with the rest of it.
 	var page_bottom := slot_y - _feed_px if _feed_t >= 0.0 else INF
 	Fax.draw_paper(_canvas, size, l, paper_scroll_px(), 1.0, page_bottom, false, page_top)
@@ -413,8 +417,9 @@ func _draw_line(line: Dictionary, x: float, y: float, w: float, fs: int, shown: 
 		"rule":
 			Fax.draw_rule(_canvas, x, y - fs * 0.35, w, 1.0)
 		"stamp":
-			Fax.draw_stamp(_canvas, _font, String(line.text), Vector2(x + w - 150.0, y - 42.0), int(fs * 1.9),
-					1.0 - _stamp_anim / 0.1, Fax.STAMP_INK, 1.0)
+			# Top right of the sheet, not on this line: a hand stamps the page where there is room.
+			Fax.draw_stamp(_canvas, _font, String(line.text), Vector2(x + w - 120.0, _page_top + 78.0),
+					int(fs * 1.9), 1.0 - _stamp_anim / 0.1, Fax.STAMP_INK, 1.0)
 		"gap":
 			pass
 		_:

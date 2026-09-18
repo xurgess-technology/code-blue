@@ -159,23 +159,129 @@ static func draw_rule(ci: CanvasItem, x: float, y: float, w: float, a: float) ->
 		dx += 14.0
 
 
-## A rubber stamp: a double-ruled box, tilted, centred on `centre`. `punch` (0..1) is how freshly it
+## A rubber stamp: a double-ruled box, tilted down to the right (how a hand holds one), centred on
+## `centre` -- generally the top right of the page. `punch` (0..1) is how freshly it
 ## came down (1 = the instant it hits, drawn a little larger).
+##
+## Pressed by hand onto the printed page, not printed with it (a fax is monochrome; the red comes
+## from the rubber stamp in the nurse's hand). So the ink is patchy: each side of the box is its own
+## stroke at its own weight, the rubber rocked and left a faint second impression, and specks of
+## paper show through where it didn't take. All of it is seeded from the text and the spot, so a
+## stamp looks the same every frame and two stamps don't look alike.
 static func draw_stamp(ci: CanvasItem, font: Font, text: String, centre: Vector2, size: int, punch: float,
-		ink: Color, a: float, angle := -0.14) -> void:
+		ink: Color, a: float, angle := 0.12) -> void:
 	var k := 1.0 + 0.5 * clampf(punch, 0.0, 1.0)
 	var big := int(size * k)
 	var tw := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, big).x
 	var box := Vector2(tw + 34.0, big + 20.0)
-	ci.draw_set_transform(centre, angle, Vector2.ONE)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(text) ^ int(centre.x) * 73856093 ^ int(centre.y) * 19349663
+
+	ci.draw_set_transform(centre, angle + rng.randf_range(-0.012, 0.012), Vector2.ONE)
 	var col := Color(ink, 0.85 * a)
-	ci.draw_rect(Rect2(-box * 0.5, box), col, false, 4.0)
-	ci.draw_rect(Rect2(-box * 0.5 + Vector2(6, 6), box - Vector2(12, 12)), Color(col, col.a * 0.5), false, 1.5)
-	ci.draw_string(font, Vector2(-tw * 0.5, big * 0.36), text, HORIZONTAL_ALIGNMENT_LEFT, -1, big, col)
+	var half := box * 0.5
+	# The box: four strokes, each a touch heavier or lighter, and each stopping short of the corner.
+	var corners := [-half, Vector2(half.x, -half.y), half, Vector2(-half.x, half.y)]
+	var light := rng.randi_range(0, 3)   # one side the rubber barely touched
+	for i in 4:
+		var p: Vector2 = corners[i]
+		var q: Vector2 = corners[(i + 1) % 4]
+		var d := (q - p).normalized()
+		var gap := rng.randf_range(0.0, 7.0)
+		var w := rng.randf_range(3.0, 5.5)
+		var ia := rng.randf_range(0.75, 1.0)
+		if i == light:
+			w *= 0.5
+			ia *= 0.4
+		ci.draw_line(p + d * gap, q - d * rng.randf_range(0.0, 7.0), Color(col, col.a * ia), w)
+	# The inner rule, broken into a few dashes.
+	var inner := box - Vector2(12, 12)
+	var ih := inner * 0.5
+	var icorners := [-ih, Vector2(ih.x, -ih.y), ih, Vector2(-ih.x, ih.y)]
+	for i in 4:
+		var p: Vector2 = icorners[i]
+		var q: Vector2 = icorners[(i + 1) % 4]
+		var t := 0.0
+		while t < 1.0:
+			var seg := rng.randf_range(0.22, 0.4)
+			ci.draw_line(p.lerp(q, t), p.lerp(q, minf(t + seg, 1.0)),
+				Color(col, col.a * rng.randf_range(0.25, 0.6)), 1.5)
+			t += seg + rng.randf_range(0.04, 0.12)
+	# The rubber rocked: a faint offset impression under the solid one.
+	var rock := Vector2(rng.randf_range(-2.0, 2.0), rng.randf_range(-1.5, 1.5))
+	var base := Vector2(-tw * 0.5, big * 0.36)
+	ci.draw_string(font, base + rock, text, HORIZONTAL_ALIGNMENT_LEFT, -1, big, Color(col, col.a * 0.3))
+	ci.draw_string(font, base, text, HORIZONTAL_ALIGNMENT_LEFT, -1, big, col)
+	# Paper showing through where the ink didn't take: a dry patch that eats part of the stamp, and
+	# speckle over the rest.
+	# f keeps the grain in proportion: the same speck sizes would swallow a small stamp whole.
+	var f := clampf(float(big) / 56.0, 0.4, 1.6)
+	# The dry patch rides along the top or bottom band, where it eats the box instead of the word.
+	var dry := Vector2(rng.randf_range(-half.x * 0.7, half.x * 0.7),
+		half.y * rng.randf_range(0.6, 1.0) * (-1.0 if rng.randf() < 0.5 else 1.0))
+	for _i in 7:
+		var ds := rng.randf_range(4.0, 10.0) * f
+		ci.draw_rect(Rect2(dry + Vector2(rng.randf_range(-22.0, 22.0), rng.randf_range(-5.0, 5.0)) * f,
+			Vector2(ds, ds * rng.randf_range(0.7, 1.5))), Color(PAPER, rng.randf_range(0.5, 0.85) * a))
+	for _i in 40:
+		var s := rng.randf_range(2.0, 6.5) * f
+		ci.draw_rect(Rect2(Vector2(rng.randf_range(-half.x, half.x), rng.randf_range(-half.y, half.y)),
+			Vector2(s, s * rng.randf_range(0.5, 1.7))), Color(PAPER, rng.randf_range(0.4, 0.9) * a))
 	ci.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
 # -- motion ------------------------------------------------------------------------------------
+
+## A stamp coming down on a page that has settled: arm() it once the page is at rest, step() it every
+## frame, and pass punch() to draw_stamp. Nothing is drawn while it waits (hidden()), so call sites
+## skip the stamp until it lands; step() returns true on the frame it lands, for the sound.
+##
+## Unarmed, it reads as already stamped (hidden() false, punch() 0), so a page drawn without ever
+## arming one -- headless, a screenshot, a state restored mid-flight -- still shows its stamp.
+class Stamp extends RefCounted:
+	## Paper stops, a beat, then the stamp comes down.
+	const DELAY := 0.16
+	## The impression settles from "just hit" (drawn larger) to its resting size.
+	const PUNCH := 0.1
+
+	var _wait := -1.0
+	var _anim := -1.0
+
+	## Start the wait. The page should be at rest (or about to be) when this is called.
+	func arm(delay := DELAY) -> void:
+		_wait = maxf(delay, 0.0)
+		_anim = -1.0
+
+	## Already stamped, no animation (headless, or a page that arrives stamped).
+	func settled() -> void:
+		_wait = -1.0
+		_anim = -1.0
+
+	## True while the stamp has not come down yet: draw the page without it.
+	func hidden() -> bool:
+		return _wait >= 0.0
+
+	## Feed to draw_stamp: 1 the instant it hits, easing to 0 as the impression settles.
+	func punch() -> float:
+		return clampf(1.0 - _anim / PUNCH, 0.0, 1.0) if _anim >= 0.0 else 0.0
+
+	## True while it still needs frames (waiting or settling).
+	func moving() -> bool:
+		return _wait >= 0.0 or (_anim >= 0.0 and _anim < PUNCH)
+
+	## Advance it. Returns true on the frame the stamp lands (play the cue then).
+	func step(dt: float) -> bool:
+		if _wait >= 0.0:
+			_wait -= dt
+			if _wait <= 0.0:
+				_wait = -1.0
+				_anim = 0.0
+				return true
+			return false
+		if _anim >= 0.0 and _anim < PUNCH:
+			_anim = minf(_anim + dt, PUNCH)
+		return false
+
 
 ## Animation seconds for a frame of `delta`: real time (the dev panel's slow motion doesn't slow the
 ## paper), clamped to MAX_STEP.

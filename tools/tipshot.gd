@@ -37,7 +37,7 @@ func _ready() -> void:
 	await _walk_into("break_room")
 	await _seconds(1.4)
 	await _shot("1_break_room_printing")
-	await _seconds(4.0)
+	await _stamped()
 	await _shot("2_break_room_printed")
 	var esc := InputEventAction.new()
 	esc.action = "pause"
@@ -48,7 +48,7 @@ func _ready() -> void:
 	print("[tipshot] paused after Esc on a memo: ", game.paused)
 	await _seconds(1.0)
 	await _walk_into("hub_crematorium")
-	await _seconds(5.5)
+	await _stamped()
 	await _shot("4_crematorium_printed")
 	main.tips.reset_seen()
 	get_tree().quit(0)
@@ -61,6 +61,17 @@ func _walk_into(kind: String) -> void:
 			bot.teleport(game._floor_at(Vector3(c.x, 0.0, c.y)))
 			return
 	print("[tipshot] no room ", kind)
+
+
+## Wait until the memo on screen has printed in full and its stamp has settled (the memo's length and
+## the frame pacing decide when that is, so a fixed wait raced it).
+func _stamped() -> void:
+	var end := Time.get_ticks_msec() + 12000
+	while Time.get_ticks_msec() < end and not main.tips.is_stamped():
+		await get_tree().process_frame
+	if not main.tips.is_stamped():
+		print("[tipshot] memo never finished stamping")
+	await _seconds(0.1)
 
 
 func _seconds(s: float) -> void:
