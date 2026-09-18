@@ -21,8 +21,8 @@ import bpy
 import numpy as np
 from mathutils import Vector, Matrix
 import hu_params, hu_body, hu_rig
-import st_sdf, st_char, st_clips, st_hive_clips
-for m in (st_sdf, st_char, st_clips, st_hive_clips):
+import st_sdf, st_char, st_clips, st_hive_clips, st_sono_clips
+for m in (st_sdf, st_char, st_clips, st_hive_clips, st_sono_clips):
     importlib.reload(m)
 
 ARGS = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
@@ -51,11 +51,52 @@ def body_for(V):
     P = hu_params.get('surgeon_a' if V['outfit'] == 'scrubs' else 'bob')
     P.update(height=V['height'], girth=V['girth'], head_scale=V['head_scale'], fem=V['fem'])
     b = hu_body.Body(P, 1)
+    ext = V.get('neck_ext', 0.0)
+    if ext:
+        # a long neck: push the head joint, the crown and the head centre straight up. The neck bone
+        # grows by exactly that much and the head's geometry (st_char.Head.neck_sdf_local) grows down
+        # to meet the shoulders again, so nothing below the collarbones moves.
+        up = Vector((0.0, 0.0, ext))
+        b.J['headj'] = b.J['headj'] + up
+        b.J['crown'] = b.J['crown'] + up
+        b.HC = b.HC + up
     b.spine_joints()
     b.build_arm()
     b.build_fingers()
     b.build_leg()
     return b
+
+
+def add_neck_bones(arm, body):
+    """The Sonographer's neck is a chain, so it can stretch. The shared skeleton's one `neck` bone is
+    cut into four (`neck`, `neck2`, `neck3`, `neck4`) between the collar joint and the head joint, and
+    the head is hung off the last of them. The game stretches the chain by pushing each bone further
+    along its parent (scripts/monsters/sonographer_rig.gd), which pulls the windpipe rings apart with
+    it, because the neck, the windpipe and the throat's skin are all weighted along the same chain.
+    This is the one place the Sonographer leaves the shared skeleton, and it stops at the neck."""
+    J = body.J
+    a = Vector(J['neck'])
+    b = Vector(J['headj'])
+    step = (b - a) / 4.0
+    bpy.context.view_layer.objects.active = arm
+    bpy.ops.object.mode_set(mode='EDIT')
+    eb = arm.data.edit_bones
+    eb['neck'].tail = a + step
+    prev = eb['neck']
+    for i in (2, 3, 4):
+        n = eb.new('neck%d' % i)
+        n.head = a + step * (i - 1)
+        n.tail = a + step * i
+        n.parent = prev
+        # not connected: a connected bone ignores its pose location, and the stretch is a location
+        n.use_connect = False
+        n.align_roll(Vector((0, -1, 0)))
+        prev = n
+    eb['head'].parent = prev
+    eb['head'].use_connect = False
+    bpy.ops.object.mode_set(mode='OBJECT')
+    for bo in arm.data.bones:
+        bo.use_deform = bo.name != 'root'
 
 
 # ====================================================================== materials
@@ -145,7 +186,80 @@ def set_lock(v):
         m.node_tree.nodes['Lock'].outputs[0].default_value = v
 
 
+SONO_GLOW = (0.10, 0.60, 1.0)       # linear cold blue: the light inside the windpipe
+SONO_EMIT = 26.0                    # emission at a full charge (it idles at a twentieth of that)
+
+
+def sono_glow_material():
+    """The Sonographer's windpipe: pale cartilage lit from inside. The node 'Charge' ramps it,
+    0 quiet through 1 charging an echo; set_charge() drives it for the review shots."""
+    m = bpy.data.materials.get('ST_SonoGlow')
+    if m:
+        return m
+    m = bpy.data.materials.new('ST_SonoGlow')
+    m.use_nodes = True
+    nt = m.node_tree
+    b = nt.nodes['Principled BSDF']
+    ca = nt.nodes.new('ShaderNodeAttribute')
+    ca.attribute_name = 'Col'
+    nt.links.new(ca.outputs['Color'], b.inputs['Base Color'])
+    ch = nt.nodes.new('ShaderNodeValue')
+    ch.name = 'Charge'
+    ch.outputs[0].default_value = 0.0
+    ma = nt.nodes.new('ShaderNodeMath')
+    ma.operation = 'MULTIPLY_ADD'
+    nt.links.new(ch.outputs[0], ma.inputs[0])
+    ma.inputs[1].default_value = SONO_EMIT
+    ma.inputs[2].default_value = SONO_EMIT / 20.0
+    nt.links.new(ma.outputs[0], b.inputs['Emission Strength'])
+    b.inputs['Emission Color'].default_value = SONO_GLOW + (1.0,)
+    b.inputs['Roughness'].default_value = 0.22
+    return m
+
+
+def sono_pane_material():
+    """The thin skin over the throat: wet, and see-through enough that the rings show."""
+    m = bpy.data.materials.get('ST_SonoPane')
+    if m:
+        return m
+    m = attr_material('ST_SonoPane', spec=0.6)
+    b = m.node_tree.nodes['Principled BSDF']
+    b.inputs['Alpha'].default_value = 0.40
+    for attr, val in (('surface_render_method', 'BLENDED'), ('blend_method', 'BLEND'), ('show_transparent_back', False)):
+        try:
+            setattr(m, attr, val)
+        except Exception:
+            pass
+    return m
+
+
+def set_charge(v):
+    m = bpy.data.materials.get('ST_SonoGlow')
+    if m:
+        m.node_tree.nodes['Charge'].outputs[0].default_value = v
+
+
+def sono_gel_material():
+    """The gel drips: clear, wet, barely there."""
+    m = bpy.data.materials.get('ST_SonoGel')
+    if m:
+        return m
+    m = attr_material('ST_SonoGel', coat=1.0, spec=0.7)
+    b = m.node_tree.nodes['Principled BSDF']
+    b.inputs['Alpha'].default_value = 0.55
+    for attr, val in (('surface_render_method', 'BLENDED'), ('blend_method', 'BLEND')):
+        try:
+            setattr(m, attr, val)
+        except Exception:
+            pass
+    return m
+
+
 def material_for(kind, hive_eye=False):
+    if kind == st_char.GLOW:
+        return sono_glow_material()
+    if kind == st_char.PANE:
+        return sono_pane_material()
     if kind == st_char.SKIN:
         return attr_material('ST_Skin', sss=0.12, spec=0.45)
     if kind == st_char.EYE:
@@ -199,10 +313,18 @@ def mesh_part(prefix, part, V, coll):
 # ====================================================================== weights
 ALLOWED = {
     'Head': ['head', 'neck', 'upperchest', 'chest'],
+    'Coat': ['hips', 'spine', 'chest', 'upperchest', 'shoulder.L', 'shoulder.R', 'upperarm.L', 'upperarm.R', 'thigh.L', 'thigh.R'],
+    'Shirt': ['hips', 'spine', 'chest', 'upperchest', 'shoulder.L', 'shoulder.R', 'upperarm.L', 'upperarm.R', 'forearm.L', 'forearm.R'],
+    'Tie': ['chest', 'upperchest'],
+    'Cable_A': ['neck', 'upperchest', 'shoulder.R', 'upperarm.R'],
+    'Cable_B': ['upperarm.R', 'forearm.R'],
+    'Cable_C': ['forearm.R', 'hand.R'],
     'Top': ['hips', 'spine', 'chest', 'upperchest', 'shoulder.L', 'shoulder.R', 'upperarm.L', 'upperarm.R', 'forearm.L', 'forearm.R'],
     'Gown': ['hips', 'spine', 'chest', 'upperchest', 'shoulder.L', 'shoulder.R', 'upperarm.L', 'upperarm.R'],
     'Pants': ['hips', 'thigh.L', 'thigh.R', 'shin.L', 'shin.R'],
     'Wristband': ['forearm.L'],
+    'Throat': ['neck', 'neck2', 'neck3', 'neck4', 'head'],
+    'ThroatSkin': ['neck', 'neck2', 'neck3', 'neck4', 'head'],
 }
 
 
@@ -304,23 +426,49 @@ def assign_weights(ob, part, sk, arm):
     groups = {n: ob.vertex_groups.new(name=n) for n in names}
     if len(names) == 1:
         groups[names[0]].add(list(range(len(P))), 1.0, 'REPLACE')
-    elif part.name == 'Head':
-        # by height up the neck: chest below the neck joint, the head from just under the jaw
+    elif part.name in ('Head', 'Throat', 'ThroatSkin'):
+        chain = 'neck2' in {b.name for b in arm.data.bones}
         z = P[:, 2]
         zn = sk.J['neck'][2]
         zh = sk.J['headj'][2]
-        w_head = st_char.smooth01((z - (zh - 0.085)) / 0.035)
-        w_neck = st_char.smooth01((z - (zn - 0.03)) / 0.05) * (1 - w_head)
-        w_up = (1 - w_head - w_neck) * st_char.smooth01((z - 1.25 * sk.s) / 0.08)
-        w_ch = 1 - w_head - w_neck - w_up
-        for n, w in (('head', w_head), ('neck', w_neck), ('upperchest', w_up), ('chest', w_ch)):
+        W = {}
+        if chain:
+            # the stretching neck: four bones share the run from the collar to the jaw, so pushing
+            # them apart stretches the neck and pulls the windpipe's rings apart with it
+            names = list(st_char.NECK_CHAIN)
+            edges = [zn + (zh - zn) * i / len(names) for i in range(len(names) + 1)]
+            w_head = st_char.smooth01((z - (zh - 0.055)) / 0.030)
+            rest = 1.0 - w_head
+            for i, n in enumerate(names):
+                lo, hi = edges[i], edges[i + 1]
+                band = st_char.smooth01((z - (lo - 0.018)) / 0.036) * (1 - st_char.smooth01((z - (hi - 0.018)) / 0.036))
+                W[n] = band
+            tot = sum(W.values())
+            for n in W:
+                W[n] = W[n] / np.maximum(tot, 1e-9) * rest
+            W['head'] = w_head
+            if part.name == 'Head':
+                below = 1.0 - st_char.smooth01((z - (zn - 0.05)) / 0.06)
+                for n in W:
+                    W[n] = W[n] * (1.0 - below)
+                W['upperchest'] = below * st_char.smooth01((z - 1.25 * sk.s) / 0.08)
+                W['chest'] = below * (1.0 - st_char.smooth01((z - 1.25 * sk.s) / 0.08))
+        else:
+            w_head = st_char.smooth01((z - (zh - 0.085)) / 0.035)
+            w_neck = st_char.smooth01((z - (zn - 0.03)) / 0.05) * (1 - w_head)
+            w_up = (1 - w_head - w_neck) * st_char.smooth01((z - 1.25 * sk.s) / 0.08)
+            W = {'head': w_head, 'neck': w_neck, 'upperchest': w_up,
+                 'chest': 1 - w_head - w_neck - w_up}
+        for n, w in W.items():
+            if n not in groups:
+                groups[n] = ob.vertex_groups.new(name=n)
             for i in np.nonzero(w > 1e-3)[0]:
                 groups[n].add([int(i)], float(w[i]), 'REPLACE')
-    elif part.name in ('Top', 'Gown', 'Pants', 'Belly', 'TopRolled'):
-        arms = part.name in ('Top', 'Gown')
-        legs = part.name in ('Gown', 'Pants')
+    elif part.name in ('Top', 'Gown', 'Pants', 'Belly', 'TopRolled', 'Coat', 'Shirt'):
+        arms = part.name in ('Top', 'Gown', 'Coat', 'Shirt')
+        legs = part.name in ('Gown', 'Pants', 'Coat')
         W = trunk_weights(P, sk, arms=arms, legs=legs, leg_k=1.0 if part.name == 'Pants' else 0.85,
-                          skirt=part.name == 'Gown')
+                          skirt=part.name in ('Gown', 'Coat'))
         for n, w in W.items():
             if n not in groups:
                 groups[n] = ob.vertex_groups.new(name=n)
@@ -381,6 +529,40 @@ def pose_hive(rig):
     return p
 
 
+def pose_sono(rig):
+    """The review stand: the Sonographer's own idle, so the hunched neck, the cocked head and the
+    probe hand are all exactly where the clips put them."""
+    return st_sono_clips.idle_pose(rig, 30)
+
+
+def set_crane(c, amount):
+    """Stretch the neck chain for a render. The game does this every frame in code
+    (scripts/monsters/sonographer_rig.gd); here it is just so the review can see it craned."""
+    arm = c['arm']
+    per = st_char.CRANE_M * amount / 4.0
+    for b in st_sono_clips.NECK:
+        pb = arm.pose.bones.get(b)
+        if pb is None:
+            continue
+        pb.location = (0.0, per, 0.0)
+    bpy.context.view_layer.update()
+
+
+def pose_for(V):
+    if V.get('sono'):
+        return pose_sono
+    return pose_hive if V['outfit'] == 'gown' else pose_surgeon
+
+
+def clips_for(V):
+    """The variant's own clip module, or None for the shared human set."""
+    if V.get('hive'):
+        return st_hive_clips
+    if V.get('sono'):
+        return st_sono_clips
+    return None
+
+
 # ====================================================================== build
 def build_variant(name, x_off):
     V = st_char.get(name)
@@ -391,6 +573,8 @@ def build_variant(name, x_off):
     coll = bpy.data.collections.new(name)
     bpy.context.scene.collection.children.link(coll)
     arm = hu_rig.build_armature(body, name + '_Rig')
+    if V.get('sono'):
+        add_neck_bones(arm, body)
     bpy.context.scene.collection.objects.unlink(arm)
     coll.objects.link(arm)
     obs = []
@@ -405,7 +589,7 @@ def build_variant(name, x_off):
             ob.hide_set(True)
         obs.append(ob)
     rig = hu_rig.Rig(arm, body)
-    pose = pose_hive(rig) if V['outfit'] == 'gown' else pose_surgeon(rig)
+    pose = pose_for(V)(rig)
     pose.apply(arm)
     arm.location = (x_off, 0, 0)
     return {'V': V, 'arm': arm, 'coll': coll, 'obs': obs, 'body': body, 'head': info['head'], 'rig': rig, 'pose': pose}
@@ -535,8 +719,7 @@ def anim_strips(c, frames_per=6, clips=None):
     """Every clip of the shared human set, played on this character: a row of frames per clip."""
     arm = c['arm']
     body = c['body']
-    is_hive = c['V'].get('hive', False)
-    clip_mods = (st_hive_clips,) if is_hive else (hu_rig, st_clips)
+    clip_mods = (clips_for(c['V']),) if clips_for(c['V']) else (hu_rig, st_clips)
     for mod in clip_mods:
         mod.build_actions(arm, body)
     scn = bpy.context.scene
@@ -611,10 +794,13 @@ def export_and_compare(c, name):
     os.makedirs(out_dir, exist_ok=True)
     orig = {o.name: list(o.data.materials) for o in c['obs']}
     is_hive = c['V'].get('hive', False)
+    cm = clips_for(c['V'])
     res = st_export.export(c, out_dir, variant, tex=int(arg('tex', '2048')), ao_samples=int(arg('ao', '24')),
-                           clips=(st_hive_clips,) if is_hive else None)
+                           clips=(cm,) if cm else None)
     if is_hive:
         game_dir = os.path.normpath(os.path.join(HERE, '..', '..', 'assets', 'models', 'monsters', 'hive'))
+    elif c['V'].get('sono'):
+        game_dir = os.path.normpath(os.path.join(HERE, '..', '..', 'assets', 'models', 'monsters', 'sonographer'))
     else:
         game_dir = os.path.normpath(os.path.join(HERE, '..', '..', 'assets', 'models', 'characters', 'human'))
     os.makedirs(game_dir, exist_ok=True)
@@ -633,7 +819,7 @@ def export_and_compare(c, name):
     arm = c['arm']
     arm.animation_data.action = None
     rig = hu_rig.Rig(arm, c['body'])
-    (pose_hive if is_hive else pose_surgeon)(rig).apply(arm)
+    pose_for(c['V'])(rig).apply(arm)
     bpy.context.view_layer.update()
     shots = []
     for tag, show_high in (('dense', True), ('game', False)):
@@ -687,11 +873,18 @@ def main():
         bpy.data.objects.remove(o, do_unlink=True)
     os.makedirs(OUT, exist_ok=True)
     chars = {}
-    layout = {'surgeon': -0.45, 'hive': 0.50, 'surgeon_graft': 3.0}
+    layout = {'surgeon': -0.45, 'hive': 0.50, 'surgeon_graft': 3.0, 'sonographer': 0.50}
     for name in ONLY:
         chars[name] = build_variant(name, layout[name])
     studio()
     bpy.context.view_layer.update()
+    for nm, c in chars.items():
+        # which way the posed head faces, in armature axes: the Sonographer's must point the way it
+        # side-steps (+X)
+        o = head_point(c, (0, 0, 0))
+        log('%s head at (%.2f, %.2f, %.2f)  faces %s' % (
+            nm, o.x - c['arm'].location.x, o.y, o.z,
+            tuple(round(v, 2) for v in (head_point(c, (0, -0.3, 0)) - o).normalized())))
     if '--export' in ARGS:
         export_and_compare(chars[ONLY[0]], ONLY[0])
         log('done')
@@ -798,7 +991,55 @@ def main():
                 clear([cam, amb] + el)
                 bpy.context.scene.world.node_tree.nodes['Background'].inputs['Color'].default_value = (0.02, 0.025, 0.03, 1)
         set_lock(0.0)
-    for key, shot in (('surgeon', 'face_surgeon'), ('hive', 'face_hive'), ('hive', 'face_hive_lock'), ('surgeon_graft', 'face_graft')):
+    if 'sonographer' in chars:
+        show_only(chars, ('sonographer',))
+        c = chars['sonographer']
+        x0 = layout['sonographer']
+        for crane in (0.0, 1.0):
+            set_crane(c, crane)
+            sfx = '_craned' if crane else ''
+            set_charge(crane)
+            for shot, cam_at, tgt, lens, res in (
+                    ('sono_front' + sfx, (x0, -6.0, 1.35), (x0, 0, 1.20), 70, (900, 1400)),
+                    ('sono_side' + sfx, (x0 + 5.4, -0.5, 1.35), (x0, 0, 1.20), 70, (900, 1400)),
+                    ('sono_34' + sfx, (x0 + 2.8, -5.0, 1.55), (x0, 0, 1.20), 70, (900, 1400)),
+                    ('sono_back' + sfx, (x0 - 1.8, 5.0, 1.70), (x0, 0, 1.25), 70, (900, 1400))):
+                if want(shot):
+                    L = std_lights((x0, 0.0, 1.3))
+                    cam = camera(cam_at, tgt, lens)
+                    render(shot, res)
+                    clear(L + [cam])
+            if want('sono_throat' + sfx):
+                # the neck and the window in it, from the front and a little below
+                nz = 0.5 * (c['body'].J['neck'].z + c['body'].HC.z) + 0.30 * crane
+                tgt = (x0, 0.0, nz)
+                L = std_lights(tgt, 0.3)
+                cam = camera((x0 + 0.10, -0.95, nz - 0.10), tgt, 85)
+                render('sono_throat' + sfx, (900, 1100))
+                clear(L + [cam])
+            if want('sono_dark' + sfx):
+                # the game's look: near dark, a teal ambient, a warm flashlight from the viewer
+                bpy.context.scene.world.node_tree.nodes['Background'].inputs['Color'].default_value = (0.004, 0.012, 0.012, 1)
+                tgt = (x0, 0, 1.45 + 0.3 * crane)
+                cam = camera((x0 + 0.3, -3.6, 1.75), tgt, 32)
+                fl = add_light('SPOT', (x0 + 0.5, -3.5, 1.62), tgt, 700, (1.0, 0.82, 0.58), 0.05, 'Flash', spot=(40, 0.6))
+                amb = add_light('AREA', (x0, 0, 3.6), (x0, 0, 0), 40, (0.35, 0.8, 0.75), 4.0, 'Amb')
+                render('sono_dark' + sfx, (1400, 1100))
+                clear([cam, fl, amb])
+                bpy.context.scene.world.node_tree.nodes['Background'].inputs['Color'].default_value = (0.02, 0.025, 0.03, 1)
+            if want('sono_probe' + sfx) and not crane:
+                # the wand grown into the right palm and the cable running up the arm
+                sk = st_char.Skel(c['body'])
+                tip = st_char.probe_tip(sk)
+                tgt = tuple(tip + np.array([0.0, 0.0, 0.06]))
+                L = std_lights(tgt, 0.3)
+                cam = camera(tuple(tip + np.array([-0.22, -0.52, 0.22])), tgt, 70)
+                render('sono_probe', (1000, 1000))
+                clear(L + [cam])
+        set_crane(c, 0.0)
+        set_charge(0.0)
+    for key, shot in (('surgeon', 'face_surgeon'), ('hive', 'face_hive'), ('hive', 'face_hive_lock'),
+                      ('sonographer', 'face_sono'), ('surgeon_graft', 'face_graft')):
         if key not in chars or not want(shot):
             continue
         show_only(chars, (key,))

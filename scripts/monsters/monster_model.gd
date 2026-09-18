@@ -11,6 +11,7 @@ const NurseLook := preload("res://scripts/monsters/night_nurse_look.gd")
 const HiveLook := preload("res://scripts/monsters/hive_look.gd")
 const NurseRig := preload("res://scripts/monsters/night_nurse_rig.gd")
 const HiveRig := preload("res://scripts/monsters/hive_rig.gd")
+const SonoRig := preload("res://scripts/monsters/sonographer_rig.gd")
 
 const RIG_KEY := "patient/human"
 const LOOPING := ["idle", "walk", "sprint"]
@@ -25,6 +26,9 @@ var shaper = null
 var nurse = null
 ## The Hive's model: its pose modifier (hive_rig.gd), null for every other look. It is `shaper` too.
 var hive = null
+## The Sonographer's model: its pose modifier and its look interface (sonographer_rig.gd), null for
+## every other look. It is `shaper` too.
+var sono = null
 var iv: Node3D = null            ## the Discharged's IV pole, top-level
 ## Movable ears: [{node: Node3D pivot on the head, side: +1 left / -1 right, rest: outward radians}]
 var ears: Array = []
@@ -44,6 +48,9 @@ func setup(monster_kind: String) -> void:
 		play("idle")
 		return
 	if kind == "hive" and HiveRig.build(self):
+		play("idle")
+		return
+	if kind == "sonographer" and SonoRig.build(self):
 		play("idle")
 		return
 	rig = Assets.spawn(RIG_KEY) if Assets.has(RIG_KEY) else null
@@ -70,6 +77,25 @@ func setup(monster_kind: String) -> void:
 		_:
 			DischargedLook.build(self)
 	play("idle")
+
+
+## The Sonographer's look, on top of the clip. Safe on any model: the others ignore it.
+##   suspicion   0..1  the neck cranes with it and the throat glows brighter: the body is the meter
+##   charge      0..1  the charge pose, and the glow running down the cable into the probe
+##   mode              which clip family is playing (idle, wander, suspicious, charging, echo, rush,
+##                     wail, search, stagger, lying)
+##   aim               the world direction the probe points while it charges and echoes
+##   crane_limit 0..1  how far the neck may stretch up before it bends forward instead (the ceiling
+##                     check; the brain does the raycast, the model just obeys the number)
+## See docs/CONTRACTS.md, "The Sonographer's model".
+func set_sono_look(suspicion: float, charge: float, mode: String, aim := Vector3.ZERO, crane_limit := 1.0) -> void:
+	if sono != null:
+		sono.set_look(suspicion, charge, mode, aim, crane_limit)
+
+
+## Where an echo fires from and which way it points: the probe's tip (its -Z), not the head.
+func echo_origin() -> Transform3D:
+	return sono.echo_origin() if sono != null else global_transform
 
 
 ## Ears that turn toward a sound and flare while listening (the Discharged). Every machine,
@@ -112,6 +138,13 @@ static func make_lying(monster_kind: String) -> Node3D:
 		m.anim.stop()
 		m.skeleton.reset_bone_poses()
 		back = 0.1   # the dress at her shoulder blades; the flared skirt sinks into whatever she lies on
+	elif m.sono != null:
+		# Its rest pose is standing straight and the poser's `lying` brings the arms in, as the Hive
+		# does. The neck goes back to rest length with it: nothing is craned on the table.
+		m.sono.set_look(0.0, 0.0, "lying")
+		m.anim.stop()
+		m.skeleton.reset_bone_poses()
+		back = 0.11
 	elif m.hive != null:
 		# Its rest pose is standing straight; no clip plays, and the poser's `lying` brings the arms in.
 		m.anim.stop()
@@ -120,7 +153,7 @@ static func make_lying(monster_kind: String) -> Node3D:
 	else:
 		m.play("idle", 0.0, 0.0)
 	# The model's up (+Y, feet to head) becomes -X, its front (-Z) becomes +Y.
-	var tall := 2.1 if monster_kind == "discharged" else (2.3 if monster_kind == "night_nurse" else 1.75)
+	var tall := 2.1 if monster_kind == "discharged" else (2.3 if monster_kind == "night_nurse" else (2.05 if monster_kind == "sonographer" else 1.75))
 	m.transform = Transform3D(Basis(Vector3(0, 0, 1), Vector3(-1, 0, 0), Vector3(0, -1, 0)), Vector3(tall * 0.5, back, 0.0))
 	return root
 
@@ -148,6 +181,8 @@ func eye_offset() -> Vector3:
 		return NurseRig.EYE_OFFSET
 	if hive != null:
 		return hive.eye_offset
+	if sono != null:
+		return sono.eye_offset
 	return Vector3(0.0, 0.13, 0.1)
 
 
@@ -187,6 +222,8 @@ func _anim_key() -> String:
 		return NurseRig.KEY
 	if hive != null:
 		return HiveRig.KEY
+	if sono != null:
+		return SonoRig.KEY
 	return RIG_KEY
 
 
@@ -225,3 +262,4 @@ func _build_fallback() -> void:
 func _process(delta: float) -> void:
 	if iv != null and iv.has_method("follow"):
 		iv.follow(self, delta)
+

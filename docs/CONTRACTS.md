@@ -591,6 +591,75 @@ HiveRig.WALK_SPEED 0.85      # rate = speed / WALK_SPEED (0.4..2.4x)
   fungus showing; the dissection head that opens is built hidden, only to place the `skull`, `brain`
   and `injection` sites, since the Hive has no brain (harvest waits on the grafting redesign).
 
+### The Sonographer's model (2026-09-18, chunk A of docs/SONOGRAPHER.md)
+
+The model only: the hunting, the echo, the rename and the sounds are chunk B (`sono-brain`). Asset
+`monster/sonographer` (`assets/models/monsters/sonographer/`, built in Blender from `art/stylized/`,
+variant `sonographer`, clips `art/stylized/st_sono_clips.py`): a standalone model, no cart, about
+2.1 m at rest and 2.7 m craned, feet at y 0. `MonsterModel.setup("sonographer")` builds it through
+`scripts/monsters/sonographer_rig.gd`; without the asset it falls back to the reshaped Kenney rig.
+
+**The neck is the suspicion meter.** The shared skeleton's one neck bone is cut into a chain of four
+(`neck`, `neck2`, `neck3`, `neck4`; `st_build.add_neck_bones`) and the rig stretches that chain by up
+to `SonoRig.CRANE_M` (0.6 m) as `suspicion` rises, unfolding it out of its hunch as it goes. The
+windpipe and the see-through skin over it are weighted along the same chain, so the rings pull apart
+as it cranes and the throat burns brighter. **No clip ever stretches it**: every clip poses the neck
+hunched and the crane is a 0..1 blend laid on top, eased so it rises quickly and sinks slowly. This
+is the only place the Sonographer leaves the shared skeleton, and it stops at the neck.
+
+**The look interface.** The whole surface between the model and whatever drives it, so a stand-in can
+wear it too and whichever chunk merges second hooks them together:
+
+```gdscript
+model.set_sono_look(suspicion, charge, mode, aim, crane_limit)
+#   suspicion   0..1  the neck cranes with it and the throat glows brighter
+#   charge      0..1  the charge pose, and the glow running throat -> cable -> probe
+#   mode              which clip family is playing: idle, wander, suspicious, charging, echo, rush,
+#                     wail, search, stagger, lying
+#   aim               the world direction the probe points while it charges and echoes
+#   crane_limit 0..1  how far the neck may stretch up before it bends forward instead. 1 is open
+#                     sky; below 1 it trades height for reach, so the head never goes up through a
+#                     ceiling. The brain does the raycast, the model just obeys the number.
+model.echo_origin()          # Transform3D at the probe's tip, -Z the way the wand points: an echo
+                             # fires from the probe, not from the head or the chest
+model.sono                   # SonoPoser (SkeletonModifier3D) or null; it is also model.shaper
+model.sono.crane()           # 0..1, what the neck is actually doing this frame
+model.shaper.lying / daze / rise / stagger / twitch / listen / listen_yaw   # the usual rig_shaper inputs
+model.set_ears(listen, yaw, delta)   # the two ears swivel, as the Discharged's do
+model.play(logical, rate, blend)
+#   "idle" SonoIdle, "walk" SonoWander (0.8 m/s), "run" SonoRush (3.1 m/s), "attack" SonoWail,
+#   "listen" SonoListen, "charge" SonoCharge, "echo" SonoEcho, "search" SonoSearch,
+#   "stagger" SonoStagger, "lying" SonoLying
+SonoRig.WANDER_SPEED 0.80 / RUSH_SPEED 3.10    # rate = speed / the clip's speed
+```
+
+`set_sono_look` is safe on any model: every other look ignores it.
+
+- **The pieces.** The ears (`Human_Ear_L` / `_R`) come off the skin at load and hang under pivots at
+  `Site_ear_L` / `_R` in the model's own axes, so they turn. The windpipe (`Human_Throat`) gets
+  `shaders/sono_glow.gdshader` in violet (`#9b6bff`, matching `art/icons/echolocation.svg`) plus a
+  cold omni light; the skin over it (`Human_ThroatSkin`) is translucent, and **nothing covers the
+  throat**: the collar is open and the tie pulled loose. The probe grown into the right palm
+  (`Human_Probe`) and the three runs of cable up that arm (`Human_Cable_A/B/C`) share the same
+  shader: the charge lights the throat, then each run in turn, then the probe, so you see it
+  travelling out to the wand. The gel drips (`Human_Gel_*`) are their own pieces, and the skin gets a
+  glossy copy of its baked material, because the wet gel is what the flashlight catches.
+- **Posture.** Tall and thin, shoulders rounded, head cocked. The right hand is never free (the wand
+  is fused into it): it hangs and sways, rises to point, and clubs. The left hand is long-fingered
+  and spread, feeling the air.
+- **Lying** (sedated, dragged, `make_lying`): the poser eases every bone back to rest, which takes
+  the neck back to rest length, and brings the arms in to its sides.
+- Review: **`tools/sono_lab.tscn`** is the stage for it: a plain lit box with the Sonographer in
+  front of a fixed camera, head to toe with headroom for the craned neck, cycling every clip in
+  place with a caption naming it and the look interface's values, walking a little to each side
+  between rounds. Nothing in it waits on the hospital, a player or a warmup, so it is in frame from
+  the first frame; `-- --capture` writes what the window is actually showing at 5, 15, 30, 45 and
+  60 s. `tools/monster_lab.tscn -- --sono` still walks it through the clips in the corridor, and the
+  shots `sono_4m`, `sono_wander`, `sono_crane_0`,
+  `sono_crane_half`, `sono_crane_full`, `sono_crane_ceiling`, `sono_charge`, `sono_probe`,
+  `sono_rush`, `sono_wail`, `sono_search`, `sono_throat`, `sono_face` and `sono_lying` are in
+  `--shots`.
+
 ## Database terminal (terminal redesign, 2026-09-16: the break room projector screen)
 
 The guide binder, the desk computer, its E prompt and `main.terminal_ui` are gone. The database is

@@ -151,6 +151,26 @@ const MODELS := {
 		"anims": {"idle": "HiveIdle", "walk": "HiveWalk", "run": "HiveWalk", "attack": "HiveAttack"},
 		"note": "The Hive, made for Malpractice with Blender scripts (art/stylized). No third-party licence.",
 	},
+	# The Sonographer (2026-09-18): the stylized kit (art/stylized, variant `sonographer`), about
+	# 2.1 m at rest and 2.7 m craned, feet at y 0, facing +Z. A standalone model: no cart. On the human
+	# skeleton except for its neck, which is a chain of four bones (`neck`, `neck2`, `neck3`, `neck4`)
+	# so it can stretch; the game drives that stretch from suspicion. Blind: the sockets are scarred
+	# flat and there are no eye pieces. Its big swivelling ears (Human_Ear_L / _R), its glowing
+	# windpipe (Human_Throat) behind the see-through skin of its throat (Human_ThroatSkin), the
+	# ultrasound probe grown into its right hand (Human_Probe), the three runs of cable up that arm
+	# (Human_Cable_A/B/C) and the gel drips (Human_Gel_*) are all their own pieces; Site_ear_L/_R,
+	# Site_throat, Site_cable and Site_probe say where things go.
+	# No root motion. scripts/monsters/sonographer_rig.gd.
+	"monster/sonographer": {
+		"path": "res://assets/models/monsters/sonographer/sonographer_st.glb",
+		"scale": 1.0, "yaw": 180,
+		"anims": {
+			"idle": "SonoIdle", "walk": "SonoWander", "run": "SonoRush", "attack": "SonoWail",
+			"listen": "SonoListen", "charge": "SonoCharge", "echo": "SonoEcho",
+			"search": "SonoSearch", "stagger": "SonoStagger", "lying": "SonoLying",
+		},
+		"note": "The Sonographer, made for Malpractice with Blender scripts (art/stylized). No third-party licence.",
+	},
 	# ---- patients ---------------------------------------------------------
 	# The seal patient (2026-09-14): built in-house from Python in Blender (art/seal/), authored in the
 	# PatientBody frame (nose -X, belly on y 0, its left +Z), so no fix-ups. 16k triangles, 20 bones,
