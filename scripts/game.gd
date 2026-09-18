@@ -155,6 +155,7 @@ const SpawnerScript := preload("res://scripts/item_spawner.gd")
 const SurgeryScript := preload("res://scripts/surgery/surgery_system.gd")
 const DevRoomScript := preload("res://scripts/dev/dev_room.gd")
 const EconomyScript := preload("res://scripts/economy/economy.gd")
+const ExteriorScript := preload("res://scripts/level/exterior.gd")   # the hospital's front, seen from the lot
 # SWEEP 4A HOOK (pharmacy, chunk 3): PillLines is a class_name (scripts/economy/pill_lines.gd),
 # used directly below.
 const LootSpawnerScript := preload("res://scripts/economy/loot_spawner.gd")
@@ -706,6 +707,7 @@ func _build_level(for_seed: int) -> void:
 	_attach_light_flicker(level)
 	_add_occluders()
 	_add_landmarks()
+	ExteriorScript.build(level, level_info)   # the storeys, signs and planters facing the lot
 	# DOORS HOOK: the level's doors and the wings' generation.
 	doors.clear()
 	doors.register(level_info.get("door_nodes", []))

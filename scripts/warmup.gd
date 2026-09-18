@@ -21,6 +21,7 @@ const MonsterModel := preload("res://scripts/monsters/monster_model.gd")
 const DevGun := preload("res://scripts/dev/dev_gun.gd")  # DEV HOOK
 const LootTable := preload("res://scripts/economy/loot_table.gd")  # INVENTORY HOOK
 const EconomyScript := preload("res://scripts/economy/economy.gd")  # INVENTORY HOOK
+const ExteriorScript := preload("res://scripts/level/exterior.gd")  # the hospital's front
 const PlayerBodyScript := preload("res://scripts/downed/player_body.gd")  # DOWNED HOOK
 const PlayerTableScript := preload("res://scripts/downed/player_table.gd")  # DOWNED HOOK
 const OrScreenScript := preload("res://scripts/orscreen/or_screen.gd")  # ORSCREEN HOOK
@@ -83,6 +84,7 @@ static func run(game: Node, progress: Callable = Callable(), ready_to_draw: Call
 	_inert(shelf)
 	_report(progress, "items", Items.ITEMS.size())
 	EconomyScript.warm(shelf)
+	ExteriorScript.warm(shelf)   # the front: concrete, window glass, sign letters
 	_inert(shelf)
 	_report(progress, "economy")
 	AimHighlight.warm(shelf)   # AFFORDANCE HOOK: the aim-highlight rim shader (scripts/aim_highlight.gd)

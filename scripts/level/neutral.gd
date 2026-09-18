@@ -45,6 +45,14 @@ static func build(st: S, door_x: float, oy: int, rng: Rng) -> Rect2i:
 	for c in [12.4, 18.6, 25.4, 31.6]:
 		put.call("bollard", c, 3.4, SOUTH, {"canopy_post": true})
 
+	# ---- by the doors: benches, bins, a wheelchair somebody left (2026-09-17, exterior pass) -----
+	# The planters against the wall, the signs and the storeys above are level/exterior.gd.
+	put.call("outdoor_bench", 14.8, 1.7, SOUTH)
+	put.call("outdoor_bench", 17.3, 1.7, SOUTH)
+	put.call("bin", 18.9, 0.9, SOUTH)
+	put.call("bin", 25.4, 0.9, SOUTH)
+	put.call("wheelchair", 25.9, 2.5, Vector2(0.8, 0.6).normalized())
+
 	# ---- ambulance bay: a marking and a lane, no parked prop --------------------------------
 	# The ambulance itself is a driven vehicle now (shift_loop.gd / ambulance.gd), not a static
 	# piece. `ambulance.position` is the bay parking spot; the lane runs south into the fog.
