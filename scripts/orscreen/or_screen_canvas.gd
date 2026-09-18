@@ -20,6 +20,7 @@ var _font: Font
 
 func _ready() -> void:
 	_font = ThemeDB.fallback_font
+	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS   # the item icons are imported with mipmaps
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 
@@ -130,7 +131,7 @@ func _draw_panel_wide(r: Rect2, p: Dictionary) -> void:
 	var px := 33 if steps.size() <= 4 else 28
 	var col_w := w * 0.6
 	for s in steps:
-		_step_row(Rect2(16, y, col_w - 24, row - 8), s, px)
+		_step_row(Rect2(16, y, col_w - 24, row - 8), s, px, true, true)
 		y += row
 	_status_line(Vector2(26, h - 14), p, w - 52, 30)
 	# Supplies
@@ -301,7 +302,7 @@ static func _ecg_shape(p: float) -> float:
 	return y
 
 
-func _step_row(r: Rect2, s: Dictionary, px: int, show_item := false) -> void:
+func _step_row(r: Rect2, s: Dictionary, px: int, show_item := false, icon_only := false) -> void:
 	var st := String(s.state)
 	var box := Rect2(r.position.x + 8, r.position.y + (r.size.y - px * 0.8) * 0.5, px * 0.8, px * 0.8)
 	var col := GREEN_DIM
@@ -322,9 +323,18 @@ func _step_row(r: Rect2, s: Dictionary, px: int, show_item := false) -> void:
 	var avail := r.end.x - tx - 8
 	if show_item and st != "done":
 		var item := String(s.item_name).to_upper()
-		var iw := _font.get_string_size(item, HORIZONTAL_ALIGNMENT_LEFT, -1, px - 6).x
-		_txt(Vector2(r.end.x - iw - 8, r.position.y + r.size.y * 0.5 + px * 0.33), item, px - 6, Color(TEXT, 0.4))
-		avail -= iw + 12
+		var iw := 0.0
+		if not icon_only:
+			iw = _font.get_string_size(item, HORIZONTAL_ALIGNMENT_LEFT, -1, px - 6).x
+			_txt(Vector2(r.end.x - iw - 8, r.position.y + r.size.y * 0.5 + px * 0.33), item, px - 6, Color(TEXT, 0.4))
+			avail -= iw + 12
+		# The item the step needs, as its icon, just before its name.
+		var icon: Texture2D = ItemIcons.framed(String(s.get("item", "")))
+		if icon != null:
+			var side := r.size.y * 0.86
+			var ir := Rect2(r.end.x - iw - 14 - side, r.position.y + (r.size.y - side) * 0.5, side, side)
+			draw_texture_rect(icon, ir, false, Color(1, 1, 1, 1.0 if st == "current" else 0.55))
+			avail -= side + 8
 	_txt(Vector2(tx, r.position.y + r.size.y * 0.5 + px * 0.36), _fit(label, px, avail), px, text_col)
 
 
@@ -356,7 +366,13 @@ func _supplies(r: Rect2, p: Dictionary, px: int, row: float) -> void:
 		var cw := _font.get_string_size(count, HORIZONTAL_ALIGNMENT_LEFT, -1, px).x
 		var baseline := y + row * 0.5 + px * 0.36
 		_txt(Vector2(r.end.x - cw - 6, baseline), count, px, col)
-		_txt(Vector2(box.end.x + 12, baseline), _fit(String(s.name).to_upper(), px, r.end.x - cw - box.end.x - 30), px,
+		var nx := box.end.x + 12
+		var icon: Texture2D = ItemIcons.framed(String(s.get("kind", "")))
+		if icon != null:
+			var side := row * 0.86
+			draw_texture_rect(icon, Rect2(nx, y + (row - side) * 0.5, side, side), false, Color(1, 1, 1, 1.0 if ok else 0.85))
+			nx += side + 10
+		_txt(Vector2(nx, baseline), _fit(String(s.name).to_upper(), px, r.end.x - cw - nx - 18), px,
 			TEXT if ok else Color(TEXT, 0.8))
 		y += row
 

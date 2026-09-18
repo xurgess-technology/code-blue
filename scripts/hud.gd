@@ -49,6 +49,7 @@ const ABILITY_DESC := {
 func _ready() -> void:
 	add_to_group("hud")   # SWEEP 4A HOOK (scanner): scan_fx.gd finds the banner here
 	_font = ThemeDB.fallback_font
+	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS   # the icons are imported with mipmaps
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
@@ -194,7 +195,22 @@ func _draw_prompt(w: float, h: float, me) -> void:
 	if me.aim_prompt != "":
 		drawn.append("prompt")
 		if me.aim_prompt.begins_with("!"):
-			_text(Vector2(0, y), me.aim_prompt.substr(1), 14, Color("e0a020"), HORIZONTAL_ALIGNMENT_CENTER, w)
+			var msg: String = me.aim_prompt.substr(1)
+			_text(Vector2(0, y), msg, 14, Color("e0a020"), HORIZONTAL_ALIGNMENT_CENTER, w)
+			# The table's "Hold Forceps to do this.": the item it names, as its icon.
+			var need := _prompt_item(msg)
+			var icon: Texture2D = ItemIcons.bare(need) if need != "" else null
+			if icon != null:
+				drawn.append("prompt_icon")
+				var tw := _font.get_string_size(msg, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
+				var ir := Rect2(w * 0.5 - tw * 0.5 - 40.0, y - 24.0, 32.0, 32.0)
+				var sb := StyleBoxFlat.new()
+				sb.bg_color = Color(SLOT_BG, 0.85)
+				sb.border_color = ItemIcons.border(need)
+				sb.set_border_width_all(2)
+				sb.set_corner_radius_all(6)
+				draw_style_box(sb, ir)
+				draw_texture_rect(icon, ir.grow(-3.0), false)
 		else:
 			var key := "[E]" if me.aim_hold <= 0.0 or me.aim_prompt.begins_with("Hold E") else "[Hold E]"
 			# HANDS HOOK: a prompt that names its own key ("[Click] Jab it") is shown as it is.
@@ -203,92 +219,361 @@ func _draw_prompt(w: float, h: float, me) -> void:
 		y += 20.0
 
 
+## The item a "Hold [2] Forceps to do this." prompt names ("" when it is not that prompt).
+func _prompt_item(msg: String) -> String:
+	if not (msg.begins_with("Hold ") and msg.ends_with(" to do this.")):
+		return ""
+	var name := msg.substr(5, msg.length() - 5 - " to do this.".length())
+	var sp := name.find(" ")
+	if sp > 0 and name.substr(0, sp).is_valid_int():
+		name = name.substr(sp + 1)
+	return ItemIcons.kind_named(name)
+
+
 const SLOT_TEAL := Color(0.3, 0.9, 0.82)
 const SLOT_GOLD := Color(1.0, 0.74, 0.28)
 
 
-## The slot bar (inventory, sweep 2): four compact boxes at the bottom centre. A surgical stack
-## has a teal edge, loot a gold one with its value; a bulky stack's second slot is hatched in
-## gold and bridged to its stack. The selected stack (both halves when bulky) is outlined.
+const SLOT_PX := 56.0          # one hand slot, square
+const SLOT_GAP := 8.0
+const BAR_MARGIN := 16.0       # from the bottom of the screen
+const SMALL_PX := 28.0         # a slot in the Alt (shrunk) row
+const NAME_SECONDS := 2.0      # how long a held item's name hangs above the bar
+const POP_SECONDS := 0.3       # the pickup pop: crosshair to slot
+const SLOT_BG := Color(0.04, 0.05, 0.07)
+const SELECT_COL := Color("f6efd4")
+
+# The item bar's own memory: what each slot held last frame (for the pickup pop), what the hands
+# held last frame (for the name flash) and what is flying right now.
+var _seen: Array = []
+var _seen_owner := -1
+var _held_sig := ""
+var _flash_name := ""
+var _flash_until := -1.0
+var _pops: Array = []          # [{kind, t0}]
+var _slot_ctr: Dictionary = {} # slot index -> where its icon is on screen (last draw)
+## Element ids the last _draw_hands drew as slots, for tests: "slot" per hand slot, "wide" per bulky stack.
+var slots_drawn: Array = []
+
+
+## The icon item bar (docs/ITEMS_AND_ICONS.md, chunk C): one square per hand slot along the bottom
+## centre, each showing the item's bare icon on a dark rounded square with its category border, the
+## key number in a corner and a live count on stacks. The selected slot is lifted and outlined; a bulky
+## stack is ONE wide slot across its two (adjacent) slots. No prices. While Alt is held the row slides
+## up and shrinks to the small row the ability icons sit in when idle (and they grow into the bar).
 func _draw_hands(w: float, h: float, me) -> void:
 	drawn.append("hands")
 	var n: int = me.slots.size()
-	var box := Vector2(112, 40)
-	var gap := 6.0
-	var x0 := w * 0.5 - (box.x * n + gap * (n - 1)) * 0.5
-	var y := h - 66.0
-	var sel_head: int = me.selected_head()
-	# SWEEP 4A HOOK (controls): while Alt is held, the item bar slides up and shrinks into the same
-	# small top-left row the ability bar's icons occupy when idle (_draw_ability_bar), and the
-	# ability bar grows into this row instead. `t` is the same `_alt_t` both bars share, so they
-	# cross-fade into each other's spot over ~0.12 s rather than overlapping.
 	var t := clampf(_alt_t, 0.0, 1.0)
-	var small := Vector2(30, 20)
-	var small_y := y - small.y - 6.0
+	var sel_head: int = me.selected_head()
+	_track_hands(me, sel_head)
+	slots_drawn = []
+	_slot_ctr.clear()
+	var full := t < 0.5
+	var units := bar_units(w, h, me.slots, sel_head, t)
+	# Non-adjacent bulky halves (the pair wraps round the bar): a bracket over both, full size only.
+	if full:
+		for u in units:
+			var tail: int = me.tail_of(int(u.slot))
+			if tail >= 0 and not bool(u.wide) and not bool(u.ghost) and String(me.slots[int(u.slot)].kind) != "":
+				var a: Rect2 = u.rect
+				var b: Rect2 = _unit_rect(units, tail)
+				var ya := minf(a.position.y, b.position.y) - 5.0
+				var col := Color(ItemIcons.border(String(me.slots[int(u.slot)].kind)), 0.8)
+				draw_polyline(PackedVector2Array([Vector2(a.get_center().x, a.position.y - 1), Vector2(a.get_center().x, ya),
+					Vector2(b.get_center().x, ya), Vector2(b.get_center().x, b.position.y - 1)]), col, 2.0)
+	for u in units:
+		var i: int = u.slot
+		var head: int = me.head_of(i)
+		var kind := String(me.slots[head].kind)
+		var wide: bool = u.wide
+		_draw_slot(u.rect, kind, me.slots[head], String(u.keys), bool(u.sel), full, bool(u.ghost), wide)
+		slots_drawn.append("wide" if wide else "slot")
+		var ctr: Vector2 = (u.rect as Rect2).get_center()
+		_slot_ctr[i] = ctr
+		if wide:
+			_slot_ctr[int(u.other)] = ctr
+	_draw_name_flash(w, h - BAR_MARGIN - SLOT_PX, t)
+	_draw_pops(w, h)
+
+
+func _unit_rect(units: Array, slot: int) -> Rect2:
+	for u in units:
+		if int(u.slot) == slot:
+			return u.rect
+	return Rect2()
+
+
+## Where every slot of the bar goes (pure, so a headless test can read it): one unit per square drawn,
+## {slot, rect, wide, ghost, sel, keys, other}. `t` is the Alt blend (0 full bar, 1 the small row). A
+## bulky stack whose two slots sit side by side (and the bar is full size) is ONE unit, wide, holding
+## its head; the unit for a second half that cannot join its head is `ghost`. The selected unit is
+## lifted and grown.
+static func bar_units(w: float, h: float, slots: Array, selected_head: int, t: float) -> Array:
+	var n := slots.size()
+	var x0 := w * 0.5 - (SLOT_PX * n + SLOT_GAP * (n - 1)) * 0.5
+	var y := h - BAR_MARGIN - SLOT_PX
+	var small_y := y - SMALL_PX - 6.0
 	var rects := []
 	for i in n:
-		var big_r := Rect2(x0 + i * (box.x + gap), y, box.x, box.y)
-		var small_r := Rect2(x0 + i * (small.x + 4.0), small_y, small.x, small.y)
+		var big_r := Rect2(x0 + i * (SLOT_PX + SLOT_GAP), y, SLOT_PX, SLOT_PX)
+		var small_r := Rect2(x0 + i * (SMALL_PX + 4.0), small_y, SMALL_PX, SMALL_PX)
 		rects.append(Rect2(big_r.position.lerp(small_r.position, t), big_r.size.lerp(small_r.size, t)))
-	# Bridges between a bulky stack and its second half, drawn under the boxes (full size only).
-	if t < 0.5:
-		for i in n:
-			var tail: int = me.tail_of(i)
-			if tail < 0 or String(me.slots[i].kind) == "":
-				continue
-			var a: Rect2 = rects[mini(i, tail)]
-			var b: Rect2 = rects[maxi(i, tail)]
-			if absi(i - tail) == 1:
-				draw_rect(Rect2(a.end.x - 2, a.position.y + 12, b.position.x - a.end.x + 4, box.y - 24), Color(SLOT_GOLD, 0.55))
-			else:
-				var ya := a.position.y - 4.0
-				draw_line(Vector2(a.get_center().x, ya), Vector2(b.get_center().x, ya), Color(SLOT_GOLD, 0.75), 2.0)
-				draw_line(Vector2(a.get_center().x, ya), Vector2(a.get_center().x, a.position.y), Color(SLOT_GOLD, 0.75), 2.0)
-				draw_line(Vector2(b.get_center().x, ya), Vector2(b.get_center().x, b.position.y), Color(SLOT_GOLD, 0.75), 2.0)
+	var full := t < 0.5
+	var out := []
+	var done := {}
 	for i in n:
-		var s: Dictionary = me.slots[i]
+		if done.has(i):
+			continue
+		var is_tail: bool = slots[i].has("of")
+		var head: int = int(slots[i].of) if is_tail else i
+		var kind := String(slots[head].kind) if head >= 0 and head < n else ""
 		var r: Rect2 = rects[i]
-		var head: int = me.head_of(i)
-		var sel: bool = head == sel_head
-		var kind := String(me.slots[head].kind)
-		draw_rect(r, Color(0, 0, 0, 0.72 if sel else 0.55))
-		var accent := Color(0.5, 0.55, 0.6, 0.55)
-		if kind != "" and Items.is_surgical(kind):
-			accent = SLOT_TEAL
-		elif kind != "" and Items.is_loot(kind):
-			accent = SLOT_GOLD
-		if kind != "":
-			draw_rect(Rect2(r.position.x, r.end.y - 3, r.size.x, 3), Color(accent, 0.85))
-		draw_rect(r, Color("f0e6c8") if sel else Color(0.5, 0.55, 0.6, 0.5), false, 2.0 if sel else 1.0)
-		if t < 0.5:
-			_text(r.position + Vector2(5, 13), "%d" % (i + 1), 10, Color("8a9aa0"))
-		if kind == "":
+		var keys := "%d" % (i + 1)
+		var wide := false
+		var other := -1
+		if full and kind != "":
+			# The stack's other slot.
+			for j in n:
+				if j != head and slots[j].has("of") and int(slots[j].of) == head:
+					other = j
+			var mine := i
+			var pair := head if is_tail else other
+			if pair >= 0 and absi(pair - mine) == 1:
+				if is_tail:
+					continue   # its head draws the wide slot
+				wide = true
+				r = (rects[mini(mine, pair)] as Rect2).merge(rects[maxi(mine, pair)])
+				keys = "%d" % (mini(mine, pair) + 1)
+				done[pair] = true
+		var sel := head == selected_head
+		if sel and full:
+			r.position.y -= 8.0
+			r = r.grow(4.0)
+		out.append({"slot": i, "rect": r, "wide": wide, "ghost": is_tail and not wide, "sel": sel, "keys": keys, "other": other})
+	return out
+
+
+## One slot. `r` is where it is, `small` its Alt-row size (no text), `ghost` the second half of a bulky
+## stack that could not be joined to its head (drawn fainter, no count).
+func _draw_slot(r: Rect2, kind: String, s: Dictionary, keys: String, sel: bool, full: bool, ghost: bool, wide: bool) -> void:
+	var radius := 10 if full else 6
+	var sb := StyleBoxFlat.new()
+	sb.set_corner_radius_all(radius)
+	if kind == "":
+		sb.bg_color = Color(0, 0, 0, 0.32)
+		sb.border_color = Color(0.5, 0.55, 0.6, 0.22)
+		sb.set_border_width_all(1)
+		draw_style_box(sb, r)
+		if full:
+			_text(r.position + Vector2(6, 13), keys, 10, Color("8a9aa0", 0.4))
+		return
+	var border := ItemIcons.border(kind)
+	if sel:
+		var ob := StyleBoxFlat.new()
+		ob.bg_color = Color(0, 0, 0, 0)
+		ob.border_color = SELECT_COL
+		ob.set_border_width_all(2)
+		ob.set_corner_radius_all(radius + 3)
+		draw_style_box(ob, r.grow(3.0))
+	sb.bg_color = Color(SLOT_BG, 0.94 if sel else 0.8)
+	sb.border_color = Color(border, 0.45 if ghost else 1.0)
+	sb.set_border_width_all(3 if full else 2)
+	draw_style_box(sb, r)
+	var trinket := ItemIcons.is_trinket(kind)
+	if trinket and full:
+		var inner := StyleBoxFlat.new()
+		inner.bg_color = Color(0, 0, 0, 0)
+		inner.border_color = Color(1.0, 0.96, 0.75, 0.5)
+		inner.set_border_width_all(1)
+		inner.set_corner_radius_all(radius - 3)
+		draw_style_box(inner, r.grow(-4.0))
+	# The icon: as tall as the slot allows, centred (across both halves of a wide slot).
+	var side := minf(r.size.y, SLOT_PX + 8.0 if sel else SLOT_PX) - (12.0 if full else 6.0)
+	var box := Rect2(r.get_center() - Vector2(side, side) * 0.5, Vector2(side, side))
+	var tex := ItemIcons.bare(kind)
+	var spoil := _spoil_of(kind, s)
+	var used: bool = bool(s.get("used", false))
+	var grey_k := 0.0
+	if not spoil.is_empty():
+		grey_k = 1.0 if bool(spoil.spoiled) else clampf(1.0 - float(spoil.frac), 0.0, 1.0)
+	if used:
+		grey_k = 1.0
+	var a := 0.45 if ghost else 1.0
+	if tex != null:
+		draw_texture_rect(tex, box, false, Color(1, 1, 1, a))
+		if grey_k > 0.01:
+			var gt := ItemIcons.grey(kind)
+			if gt != null:
+				draw_texture_rect(gt, box, false, Color(0.86, 0.86, 0.86, a * grey_k))
+	else:
+		# No icon yet (a new kind): its first letters on a plain slot, in its category colour.
+		var abbr := Items.display_name(kind).substr(0, 2).to_upper()
+		_text(r.position + Vector2(0, r.size.y * 0.5 + 8), abbr, 22, Color(border, 0.9 * a), HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
+	if used and full:
+		_draw_crack(box)
+	if not full:
+		return
+	if not spoil.is_empty() and not bool(spoil.spoiled):
+		var f: float = clampf(float(spoil.frac), 0.0, 1.0)
+		var rc := Color("5ccf6a").lerp(Color("e0a020"), clampf((1.0 - f) * 2.0, 0.0, 1.0)).lerp(Color("e8322e"), clampf((0.5 - f) * 2.0, 0.0, 1.0))
+		_draw_ring(r.grow(2.5), f, rc)
+	_text(r.position + Vector2(6, 13), keys, 10, Color("dfe8ee", 0.75))
+	if wide:
+		_text(r.position + Vector2(r.size.x - 14, 13), "%d" % (int(keys) + 1), 10, Color("dfe8ee", 0.75))
+	if trinket:
+		_glint(r.position + Vector2(11, r.size.y - 11), 6.0)
+	var count := int(s.get("count", 0))
+	if count > 1 and not ghost:
+		var label := "x%d" % count
+		var tw := _font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
+		var pill := Rect2(r.end.x - tw - 12.0, r.end.y - 20.0, tw + 9.0, 16.0)
+		var pb := StyleBoxFlat.new()
+		pb.bg_color = Color(0, 0, 0, 0.82)
+		pb.border_color = Color(border, 0.9)
+		pb.set_border_width_all(1)
+		pb.set_corner_radius_all(6)
+		draw_style_box(pb, pill)
+		_text(Vector2(pill.position.x + 4.5, pill.end.y - 3.5), label, 13, Color("ffffff"))
+
+
+## A small four-point sparkle.
+func _glint(c: Vector2, k: float) -> void:
+	var col := Color(1.0, 0.96, 0.75, 0.9)
+	draw_line(c + Vector2(-k, 0), c + Vector2(k, 0), col, 1.5)
+	draw_line(c + Vector2(0, -k), c + Vector2(0, k), col, 1.5)
+	draw_line(c + Vector2(-k, -k) * 0.4, c + Vector2(k, k) * 0.4, col, 1.0)
+	draw_line(c + Vector2(-k, k) * 0.4, c + Vector2(k, -k) * 0.4, col, 1.0)
+
+
+## A jagged crack across an icon box: a used-up trinket.
+func _draw_crack(b: Rect2) -> void:
+	var p := PackedVector2Array([b.position + b.size * Vector2(0.72, 0.02), b.position + b.size * Vector2(0.56, 0.24),
+		b.position + b.size * Vector2(0.64, 0.38), b.position + b.size * Vector2(0.44, 0.55),
+		b.position + b.size * Vector2(0.52, 0.68), b.position + b.size * Vector2(0.3, 0.98)])
+	draw_polyline(p, Color(0, 0, 0, 0.85), 4.0)
+	draw_polyline(p, Color(1, 1, 1, 0.75), 1.5)
+
+
+## A ring around a slot that drains clockwise from the top as `f` (1 full .. 0 gone) falls.
+func _draw_ring(r: Rect2, f: float, col: Color) -> void:
+	var c := r.get_center()
+	var pts := [Vector2(c.x, r.position.y), Vector2(r.end.x, r.position.y), r.end, Vector2(r.position.x, r.end.y),
+		r.position, Vector2(c.x, r.position.y)]
+	var total := 0.0
+	for k in range(pts.size() - 1):
+		total += (pts[k + 1] - pts[k]).length()
+	draw_polyline(PackedVector2Array(pts), Color(0, 0, 0, 0.5), 3.0)
+	var left := total * clampf(f, 0.0, 1.0)
+	var line := PackedVector2Array([pts[0]])
+	for k in range(pts.size() - 1):
+		var seg: float = (pts[k + 1] - pts[k]).length()
+		if left >= seg:
+			line.append(pts[k + 1])
+			left -= seg
+		else:
+			line.append(pts[k].lerp(pts[k + 1], left / maxf(seg, 0.001)))
+			break
+	if line.size() > 1:
+		draw_polyline(line, Color(col, 0.95), 3.0)
+
+
+## How fresh a body part in `s` is: {frac: 1 fresh .. 0 gone, spoiled: bool}, or {} for anything that
+## does not spoil. Eyes and brains come from their own systems; any other kind can carry the numbers in
+## its stack as `fresh` (0..1) and `spoiled` (the seam grafting's other parts use).
+func _spoil_of(kind: String, s: Dictionary) -> Dictionary:
+	if game == null:
+		return {}
+	if Eyes.is_eye(kind) and game.get("vats") != null:
+		var f: float = game.vats.eye_factor(s)
+		return {"frac": 1.0 - Eyes.rot_of(f), "spoiled": Eyes.is_spoiled_factor(f)}
+	if game.brains != null and game.brains.is_brain(kind):
+		var f2: float = game.brains.factor_of(s)
+		return {"frac": clampf((f2 - game.brains.MIN_FACTOR) / (1.0 - game.brains.MIN_FACTOR), 0.0, 1.0), "spoiled": f2 < game.brains.ROTTEN_FACTOR}
+	if s.has("fresh"):
+		return {"frac": float(s.fresh), "spoiled": bool(s.get("spoiled", float(s.fresh) <= 0.0))}
+	return {}
+
+
+## Watches the hands: a new item in a slot starts the pickup pop and (when it is what you hold now)
+## the name above the bar; switching slots flashes the name of what you now hold.
+func _track_hands(me, sel_head: int) -> void:
+	var n: int = me.slots.size()
+	var owner: int = int(me.peer_id)
+	if owner != _seen_owner or _seen.size() != n:
+		_seen_owner = owner
+		_seen = []
+		_pops.clear()
+		for i in n:
+			_seen.append([String(me.slots[i].kind), int(me.slots[i].count)])
+		_held_sig = _sig_of(me, sel_head)
+		_flash_until = -1.0
+		return
+	for i in n:
+		var kind := String(me.slots[i].kind)
+		var count: int = int(me.slots[i].count)
+		var was: Array = _seen[i]
+		if kind != "" and (was[0] != kind or count > int(was[1])) and not game.paused:
+			_pops.append({"kind": kind, "t0": _t, "slot": i})
+			if _pops.size() > 6:
+				_pops.pop_front()
+		_seen[i] = [kind, count]
+	var sig := _sig_of(me, sel_head)
+	if sig != _held_sig:
+		_held_sig = sig
+		var k := String(me.slots[sel_head].kind)
+		if k != "":
+			_flash_name = _held_name(k, me.slots[sel_head])
+			_flash_until = _t + NAME_SECONDS
+
+
+func _sig_of(me, sel_head: int) -> String:
+	return "%d:%s" % [sel_head, String(me.slots[sel_head].kind)]
+
+
+func _held_name(kind: String, s: Dictionary) -> String:
+	if Eyes.is_eye(kind):
+		return Eyes.label(kind, String(s.get("x", "")))
+	return Items.display_name(kind)
+
+
+## The held item's name over the bar, for NAME_SECONDS, fading over the last half second.
+func _draw_name_flash(w: float, bar_y: float, t: float) -> void:
+	if _t > _flash_until or t > 0.5 or _flash_name == "":
+		return
+	drawn.append("item_name")
+	var left := _flash_until - _t
+	var a := clampf(left / 0.5, 0.0, 1.0) * clampf((NAME_SECONDS - left) / 0.08, 0.0, 1.0)
+	var y := bar_y - 28.0
+	var tw := _font.get_string_size(_flash_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x
+	draw_rect(Rect2(w * 0.5 - tw * 0.5 - 12, y - 19, tw + 24, 28), Color(0, 0, 0, 0.55 * a))
+	_text(Vector2(0, y), _flash_name, 18, Color(SELECT_COL, a), HORIZONTAL_ALIGNMENT_CENTER, w)
+
+
+## The pickup pop: the icon jumps up out of the crosshair and flies into the slot it landed in.
+func _draw_pops(w: float, h: float) -> void:
+	if _pops.is_empty():
+		return
+	var live := []
+	var from := Vector2(w, h) * 0.5
+	for p in _pops:
+		var u: float = (_t - float(p.t0)) / POP_SECONDS
+		if u >= 1.0:
 			continue
-		if t >= 0.5:
-			# Shrunk: just the key and a one-letter/short hint, same spirit as the ability bar's
-			# small idle icons.
-			_text(r.position + Vector2(3, 14), "%d" % (i + 1), 9, Color("8a9aa0"))
-			continue
-		if s.has("of"):
-			# Second half of a bulky stack: hatched.
-			for k in 6:
-				var x := r.position.x + 12.0 + k * 16.0
-				draw_line(Vector2(x, r.end.y - 5), Vector2(x + 10, r.position.y + 5), Color(SLOT_GOLD, 0.18), 1.5)
-			var head_name := _fit(Items.display_name(kind), 11, box.x - 10)
-			_text(r.position + Vector2(0, 22), head_name, 11, Color(SLOT_GOLD, 0.75), HORIZONTAL_ALIGNMENT_CENTER, box.x)
-			_text(r.position + Vector2(0, 35), "(2nd slot)", 10, Color(0.75, 0.75, 0.75, 0.7), HORIZONTAL_ALIGNMENT_CENTER, box.x)
-			continue
-		var label: String = Items.def(kind).get("short", Items.display_name(kind)) if int(s.count) > 1 else Items.display_name(kind)
-		label = _fit(label, 12, box.x - 10)
-		_text(r.position + Vector2(0, 25), label, 12, Color("eeeeee"), HORIZONTAL_ALIGNMENT_CENTER, box.x)
-		if int(s.count) > 1:
-			_text(r.position + Vector2(0, 37), "x%d" % int(s.count), 10, Color("c9d1d9"), HORIZONTAL_ALIGNMENT_CENTER, box.x)
-		elif int(s.get("v", 0)) > 0:
-			# SWEEP 3 HOOK (brains): a brain shows what it is worth now.
-			var worth: int = int(game.brains.current_value(s)) if game.brains != null else int(s.v)
-			_text(r.position + Vector2(0, 37), "$%d" % worth, 10, Color(SLOT_GOLD, 0.95), HORIZONTAL_ALIGNMENT_CENTER, box.x)
-		if int(s.count) > 1 and int(s.get("v", 0)) > 0:
-			_text(r.position + Vector2(box.x - 34, 13), "$%d" % int(s.v), 10, Color(SLOT_GOLD, 0.95))
+		live.append(p)
+		var to: Vector2 = _slot_ctr.get(int(p.slot), Vector2(w * 0.5, h - 50.0))
+		var e := u * u * (3.0 - 2.0 * u)
+		var pos := from.lerp(to, e) + Vector2(0, -34.0 * sin(u * PI))
+		var side := lerpf(22.0, 44.0, e) + 26.0 * sin(u * PI)
+		var tex := ItemIcons.bare(String(p.kind))
+		var a := clampf((1.0 - u) / 0.15, 0.0, 1.0)
+		if tex != null:
+			draw_texture_rect(tex, Rect2(pos - Vector2(side, side) * 0.5, Vector2(side, side)), false, Color(1, 1, 1, a))
+		else:
+			draw_circle(pos, side * 0.35, Color(ItemIcons.border(String(p.kind)), 0.8 * a))
+	_pops = live
+	if not _pops.is_empty():
+		drawn.append("pickup_pop")
 
 
 ## SWEEP 4A HOOK (controls): the 4 ability slots, drawn as circular icon slots (rebuilt from the
@@ -305,14 +590,15 @@ func _draw_ability_bar(w: float, h: float, me) -> void:
 	drawn.append("abilities")
 	var slots: Array = b.slots_for(me.peer_id)
 	var n: int = slots.size()
-	var box := Vector2(52, 52)
-	var gap := 14.0
+	var box := Vector2(48, 48)
+	var gap := 18.0
 	var x0 := w * 0.5 - (box.x * n + gap * (n - 1)) * 0.5
 	# Big (Alt-held) circles centre on the old hands-bar top edge, leaving room below for the pip
 	# row and the ability name/reason text without crowding the bottom control-hint line.
-	var big_y := h - 66.0 - box.y * 0.5
+	var bar_y := h - BAR_MARGIN - SLOT_PX
+	var big_y := bar_y - 2.0   # just under the small item row, room below for the pips and the name
 	var small := Vector2(26, 26)
-	var small_y := (h - 66.0) - small.y - 6.0
+	var small_y := bar_y - small.y - 6.0
 	var t := clampf(_alt_t, 0.0, 1.0)
 	for i in n:
 		var big_r := Rect2(x0 + i * (box.x + gap), big_y, box.x, box.y)
@@ -329,7 +615,19 @@ func _draw_ability_bar(w: float, h: float, me) -> void:
 		var cd: float = b.cooldown_left(me.peer_id, String(b.ABILITY_ID_TO_PATH.get(id, ""))) if id != "" else 0.0
 		var reason := _slot_reason(me, id, cd)
 		var usable := id != "" and reason == ""
-		draw_circle(c, rad, Color(0, 0, 0, 0.55))
+		var icon := ItemIcons.ability(id) if id != "" else null
+		var in_use := _ability_in_use(me, b, id, lvl, cd)
+		if icon != null:
+			# The round icon carries its own frame; the HUD adds the glow in the ability's colour:
+			# steady when ready, stronger while it runs, dim on cooldown.
+			var gcol: Color = ItemIcons.ABILITY_COLOR.get(id, Color.WHITE)
+			var ga := 0.5 if usable else 0.14
+			if in_use:
+				ga = 0.85 + 0.15 * sin(_t * 9.0)
+			for k in 4:
+				draw_circle(c, rad + 1.0 + k * (3.0 if t > 0.3 else 1.6), Color(gcol, ga * (0.32 - k * 0.075)))
+		else:
+			draw_circle(c, rad, Color(0, 0, 0, 0.55))
 		var ready_pulse := 0.0
 		# SWEEP 4A HOOK (Hive Eyes, chunk 4): a subtle pulse on the ring while a Hive is in range
 		# and the slot is otherwise idle, so you know it is worth pressing.
@@ -337,12 +635,16 @@ func _draw_ability_bar(w: float, h: float, me) -> void:
 			ready_pulse = 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.006)
 			draw_arc(c, rad + 3.0, 0.0, TAU, 28, Color("9fe8a0", 0.35 + 0.35 * ready_pulse), 2.0 + ready_pulse * 1.5)
 		var border := Color("f0e6c8", 0.85) if id != "" else Color(0.5, 0.55, 0.6, 0.4)
-		draw_arc(c, rad - 0.75, 0.0, TAU, 28, border, 1.5)
+		if icon == null:
+			draw_arc(c, rad - 0.75, 0.0, TAU, 28, border, 1.5)
 		if id == "":
 			continue
-		_draw_ability_icon(id, c, rad, usable)
+		if icon != null:
+			draw_texture_rect(icon, Rect2(c - Vector2(rad, rad), Vector2(rad, rad) * 2.0), false, Color(1, 1, 1, 1.0 if usable else 0.6))
+		else:
+			_draw_ability_icon(id, c, rad, usable)
 		if not usable:
-			draw_circle(c, rad, Color(0, 0, 0, 0.45))
+			draw_circle(c, rad, Color(0, 0, 0, 0.45 if icon == null else 0.3))
 		if cd > 0.0:
 			# A radial sweep standing in for the old bottom cooldown bar: it drains clockwise from
 			# the top as the ability comes back off cooldown.
@@ -351,14 +653,23 @@ func _draw_ability_bar(w: float, h: float, me) -> void:
 		if t < 0.7:
 			_text(Vector2(c.x - rad, r.position.y - 2), "Alt+%d" % (i + 1), 9, Color("8a9aa0"))
 		for pip in lvl:
-			draw_circle(c + Vector2((pip - (lvl - 1) * 0.5) * 8.0, rad + 8.0), 2.5, Color("9fe8a0"))
+			draw_circle(c + Vector2((pip - (lvl - 1) * 0.5) * 8.0, rad + 5.0), 2.0, Color("9fe8a0"))
 		var cost := String(ABILITY_COST.get(id, ""))
 		if cost != "" and t < 0.7:
 			_text(Vector2(c.x + rad - 30.0, r.position.y + 10.0), cost, 9, Color("e0a020"))
 		if t > 0.4:
-			_text(Vector2(c.x - box.x, c.y + rad + 16.0), _fit(name, 11, box.x * 2.0), 11, Color("eeeeee"), HORIZONTAL_ALIGNMENT_CENTER, box.x * 2.0)
+			_text(Vector2(c.x - box.x, c.y + rad + 14.0), _fit(name, 11, box.x * 2.0), 11, Color("eeeeee"), HORIZONTAL_ALIGNMENT_CENTER, box.x * 2.0)
 			if reason != "":
-				_text(Vector2(0, r.position.y - 6), reason, 11, Color("e0a020"), HORIZONTAL_ALIGNMENT_CENTER, w)
+				_text(Vector2(0, small_y - 8.0), reason, 11, Color("e0a020"), HORIZONTAL_ALIGNMENT_CENTER, w)
+
+
+## Whether the ability is running right now (a Hive view open; Echo's outline still showing).
+func _ability_in_use(me, b, id: String, lvl: int, cd: float) -> bool:
+	if id == "hive_in":
+		return bool(me.get("hive_view"))
+	if id == "echo":
+		return cd > b.ECHO_COOLDOWN - b.echo_seconds(lvl)
+	return false
 
 
 ## A small procedural glyph per ability, centered at `c` and scaled off the slot radius `rad`.

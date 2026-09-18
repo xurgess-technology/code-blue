@@ -470,6 +470,24 @@ func _draw_section(id: String, index: int) -> void:
 		num.position = Vector2(12, 8)
 		num.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		card.add_child(num)
+		# An item's card carries its framed icon (procedures and monsters have none).
+		var tex: Texture2D = ItemIcons.framed(key) if known and (id == "surgery" or id == "other") else null
+		if tex != null:
+			var side := ch - 22.0
+			var ic := TextureRect.new()
+			ic.texture = tex
+			ic.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+			ic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			ic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			ic.position = Vector2(cw - side - 12.0, 11.0)
+			ic.size = Vector2(side, side)
+			ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			card.add_child(ic)
+			card.alignment = HORIZONTAL_ALIGNMENT_LEFT
+			for st in ["normal", "hover", "pressed", "disabled"]:
+				(card.get_theme_stylebox(st) as StyleBoxFlat).content_margin_right = side + 22.0
+			card.clip_text = true
+			card.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	if pages > 1:
 		var prev := _button("< PREV", Vector2(190, 56), 26)
 		prev.position = Vector2(0, grid_h + 14)
@@ -531,6 +549,25 @@ func _draw_entry(section: String, key: String) -> void:
 		_body.add_child(hint)
 	var specs: Array = p.get("models", [])
 	_show_models(section + ":" + key, specs)
+	# The framed icon(s) of the item (or of each tool a procedure uses), beside the turning model.
+	var kinds: Array = []
+	for m in specs:
+		if (m as Dictionary).has("item") and not kinds.has(String(m.item)):
+			kinds.append(String(m.item))
+	var isz := 150.0 if kinds.size() == 1 else minf(96.0, 440.0 / maxf(1.0, kinds.size()))
+	for n in kinds.size():
+		var tex := ItemIcons.framed(String(kinds[n]))
+		if tex == null:
+			continue
+		var ic := TextureRect.new()
+		ic.texture = tex
+		ic.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+		ic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		ic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		ic.position = Vector2(_preview.position.x - _body.position.x + 6.0 + n * (isz + 6.0), 0.0)
+		ic.size = Vector2(isz, isz)
+		ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_body.add_child(ic)
 	if not specs.is_empty():
 		_plate.visible = true
 		# Four sides of the specimen, one slide each: stepping round it is another slide change.
