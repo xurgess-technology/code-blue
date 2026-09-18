@@ -15,6 +15,12 @@ var torso_w := 0.0
 ## every frame by body_hands.gd from the hold/carry/wind-up pose table) so crouching still reads
 ## while holding or carrying something.
 var crouch := 0.0
+## The Night Nurse's grab (scripts/monsters/nurse_grab.gd): 0..1, hanging by the neck from her hands.
+## The arms hang limp at their sides, swinging a little with the kick; the legs hang limp, toes
+## pointed, kicking weakly and less and less; the head tipped back toward her. `dangle_t` is how long they have
+## hung (body_hands.gd counts it). Generic (human) rigs only; it replaces the arm targets meanwhile.
+var dangle := 0.0
+var dangle_t := 0.0
 
 var _idx := {}
 
@@ -103,6 +109,39 @@ func _generic(sk: Skeleton3D) -> void:
 		_aim(sk, upper, up_dir, w)
 		if fore >= 0:
 			_aim(sk, fore, d, w)
+	if dangle > 0.001:
+		_dangle(sk, clampf(dangle, 0.0, 1.0))
+
+
+func _dangle(sk: Skeleton3D, k: float) -> void:
+	var t := dangle_t
+	# The kick: fast and wild at first, then weaker and slower as it runs out.
+	var fade := exp(-t * 1.1)
+	var kick := sin(t * 11.0) * fade
+	var tremble := Vector3(sin(t * 53.0), cos(t * 47.0), sin(t * 61.0)) * 0.05 * (0.4 + fade)
+	for side in [[".L", 1.0], [".R", -1.0]]:
+		var sd: String = side[0]
+		var s: float = side[1]
+		var thigh := sk.find_bone("thigh" + sd)
+		var shin := sk.find_bone("shin" + sd)
+		var foot := sk.find_bone("foot" + sd)
+		if thigh >= 0:
+			_aim(sk, thigh, Vector3(0.04 * s, -1.0, 0.10 + 0.30 * kick * s).normalized(), k)
+		if shin >= 0:
+			_aim(sk, shin, Vector3(0.0, -1.0, -0.18 - 0.35 * maxf(0.0, kick * s)).normalized(), k)
+		if foot >= 0:
+			_aim(sk, foot, Vector3(0.0, -0.85, 0.5).normalized(), k)   # toes pointed down
+		# The arms hang limp at their sides, swaying a little with the kick.
+		var upper := int(_gidx.get("arm_r" if s < 0.0 else "arm_l", -1))
+		var fore := int(_gidx.get(("arm_r" if s < 0.0 else "arm_l") + "_fore", -1))
+		var sway := 0.12 * kick * s
+		if upper >= 0:
+			_aim(sk, upper, (Vector3(0.14 * s, -1.0, 0.04 + sway) + tremble * 0.3).normalized(), k)
+		if fore >= 0:
+			_aim(sk, fore, (Vector3(0.06 * s, -1.0, 0.12 + sway) + tremble * 0.3).normalized(), k)
+	var head := sk.find_bone(String(rig.bones.get("head", "head")))
+	if head >= 0:
+		_turn(sk, head, Quaternion.IDENTITY.slerp(Quaternion(Vector3.RIGHT, -0.4), k))   # tipped back, up at her
 
 
 ## Turn a bone (skeleton space) so its +Y points along dir, by weight w.

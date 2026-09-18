@@ -149,6 +149,16 @@ func update(delta: float) -> void:
 			anim.play(clip, 0.2)
 		anim.speed_scale = rate
 
+	# ---- the Night Nurse's grab: hanging by the neck (body_poser.gd `dangle`) replaces every other pose
+	var held_now := int(player.held_by) >= 0
+	poser.dangle = move_toward(float(poser.dangle), 1.0 if held_now else 0.0, delta * (12.0 if held_now else 20.0))
+	poser.dangle_t = poser.dangle_t + delta if held_now else 0.0
+	if held_now:
+		poser.arm_r_w = 0.0
+		poser.arm_l_w = 0.0
+		poser.torso_w = 0.0
+		return
+
 	# ---- which poses, how much
 	var target := {}
 	if player.carrying != 0:
@@ -392,7 +402,10 @@ func _human_clip(delta: float, act: Dictionary) -> void:
 	# SPRINT-DIVE HOOK: flat out in the air, then belly-sliding on the landing until it slows to a crawl.
 	var dive: bool = anim.has_animation(String(clips.get("dive", ""))) and not player.downed and player.carried_by == 0 and not player.on_table \
 		and (player.dive_in_air() or (player.prone and _speed > DIVE_SLIDE_SPEED))
-	if player.carried_by != 0:
+	if int(player.held_by) >= 0:
+		want = "idle"   # the Nurse's grab: body_poser.gd's dangle does the rest
+		_oneshot_t = 0.0
+	elif player.carried_by != 0:
 		want = "carried"
 		_oneshot_t = 0.0
 	elif player.on_table:

@@ -1,6 +1,6 @@
 """Build the Night Nurse: geometry, UVs, rig, weights, animations, baked PBR maps, .blend and .glb.
 
-blender --background --factory-startup --python nn_build.py -- [--tex=2048] [--ao-samples=24] [--nobake]
+blender --background --factory-startup --python nn_build.py -- [--tex=2048] [--ao-samples=24] [--nobake] [--export]
 """
 import sys
 import os
@@ -32,6 +32,7 @@ def arg(name, default):
 TEX = arg('tex', 2048)
 AO_SAMPLES = arg('ao-samples', 24)
 NOBAKE = '--nobake' in ARGS
+EXPORT = '--export' in ARGS    # also write the game copy: assets/models/monsters/night_nurse/night_nurse.glb
 T0 = time.time()
 
 
@@ -153,6 +154,7 @@ def main():
         b.use_deform = b.name != 'root'
     for nm in ('dress', 'apron'):
         R.skirt_weights(objs[nm])
+    R.hair_weights(objs['hair_long'])
     low = join([objs['dress']] + [objs[p.name] for p in parts if p.name != 'dress'], 'NightNurse')
     bpy.ops.object.select_all(action='DESELECT')
     low.select_set(True)
@@ -249,6 +251,8 @@ def main():
     bpy.ops.wm.save_as_mainfile(filepath=blend_path, relative_remap=True, compress=True)
     log('saved', blend_path)
 
+    if not EXPORT:
+        return
     arm.animation_data.action = None
     for pb in arm.pose.bones:
         pb.rotation_quaternion = (1, 0, 0, 0)
@@ -269,6 +273,5 @@ def main():
     game_glb = os.path.normpath(os.path.join(HERE, '..', '..', '..', 'assets', 'models', 'monsters', 'night_nurse', 'night_nurse.glb'))
     files, size = nn_glb_extern.extern(glb, game_glb)
     log('game copy', game_glb, size // 1024, 'KB, textures:', ', '.join(f for f, _ in files))
-
 
 main()

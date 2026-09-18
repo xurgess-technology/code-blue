@@ -39,7 +39,9 @@ extends Node
 ##                    comes back, then drinks a Discharged brain and shrieks Echo; the host sees the
 ##                    points, the hive view and the echo noise
 ##   monsters         host + 1 client: a Hive sedated, hit, dragged and woken on the host; the
-##                    client sees each (sweep 3)
+##                    client sees each (sweep 3). Then a Night Nurse grabs the client: it hangs from
+##                    her hands with its view locked on her face, sees her head snap, drops downed
+##                    and she is gone
 ##   dissection       a Hive strapped to a table: client 1 saws the skull and pulls the brain,
 ##                    client 2 re-doses it meanwhile; sedation replicates within 0.05
 ##   pockets          (--pocket=factory) client 1 walks through a seam into the pocket holding gauze
@@ -1763,7 +1765,33 @@ func _sc_monsters():
 		w.wake()
 		if not await _until(func(): return _count_msgs("mo_awake") > 0 or _count_msgs("fail") > 0, 30.0, "the client to see it wake"):
 			return
-		await _finish_together("sedated, hit, dragged and woke a Hive; the client saw each")
+		# The Night Nurse's grab (scripts/monsters/nurse_grab.gd), on client 1.
+		var victim = game.players[_peer_of(1)]
+		_hurtable = victim.peer_id
+		victim.invuln = 0.0
+		for m in game.monsters.values():
+			m.calm = 60.0   # nothing else wanders over meanwhile
+		var fwd: Vector3 = -victim.global_transform.basis.z
+		fwd.y = 0.0
+		var n: Node = game._add_monster("night_nurse", victim.global_position + fwd.normalized() * 0.9)
+		n.calm = 60.0   # she only grabs when the test says so
+		_send("ng_start", {"id": n.monster_id})
+		await _wall_wait(1.0)
+		if not game.nurse_grab(n, victim):
+			return _end(false, "game.nurse_grab refused client 1 (hp %d invuln %.1f downed %s)" % [victim.hp, victim.invuln, victim.downed])
+		var taken: Vector3 = victim.held_from
+		if not await _until(func(): return victim.downed or _count_msgs("fail") > 0, 10.0, "client 1 downed when she lets go"):
+			return
+		# The victim's own machine puts them back down; its next report brings them here.
+		await _until(func(): return victim.global_position.distance_to(taken) < 0.3, 3.0, "client 1 back on the spot she took them from")
+		if victim.held_by != -1 or victim.global_position.distance_to(taken) > 0.3 or victim.hp != 0:
+			return _end(false, "after the grab: held_by %d, %.2f m from where she took them, hp %d" % [victim.held_by, victim.global_position.distance_to(taken), victim.hp])
+		if n.global_position.distance_to(taken) < 10.0:
+			return _end(false, "she did not vanish (%.1f m away)" % n.global_position.distance_to(taken))
+		_say("the Nurse grabbed client 1, dropped them downed and vanished %.0f m away" % n.global_position.distance_to(taken))
+		if not await _until(func(): return _count_msgs("ng_seen") > 0 or _count_msgs("fail") > 0, 30.0, "client 1's view of the grab"):
+			return
+		await _finish_together("sedated, hit, dragged and woke a Hive; the client saw each; the Nurse's grab replicated")
 		return
 	if not await _wait_shift_as_client():
 		return
@@ -1783,6 +1811,35 @@ func _sc_monsters():
 	if not await _until(func(): return not w.is_sedated() and w.model.rotation.x < 0.3, 20.0, "the Hive getting up"):
 		return
 	_send("mo_awake", {})
+	if index == 1:
+		if not await _until(func(): return _count_msgs("ng_start") > 0, 60.0, "the Nurse test to start"):
+			return
+		var nid := int(_msgs("ng_start")[0].data.id)
+		var me := _me()
+		# Held: my body hangs from her grip and my view is on her face, straight on.
+		var seen := {"lift": 0.0, "look": -1.0, "cock": 0.0, "from": Vector3.ZERO}
+		if not await _until(func(): return int(me.held_by) == nid, 20.0, "held_by = the Nurse on my machine"):
+			return
+		seen.from = me.held_from
+		if not await _until(func():
+			var nm = game.monsters.get(nid)
+			if nm == null or not is_instance_valid(nm):
+				return me.downed
+			seen.lift = maxf(float(seen.lift), me.global_position.y - (seen.from as Vector3).y)
+			var cam: Camera3D = me.camera
+			var to: Vector3 = nm.eye_transform().origin - cam.global_position
+			if float(nm.grab_t) > 0.6:
+				seen.look = maxf(float(seen.look), (-cam.global_transform.basis.z).dot(to.normalized()))
+			if nm.model.nurse != null:
+				seen.cock = maxf(float(seen.cock), float(nm.model.nurse.cock))
+			return me.downed, 15.0, "being held, then dropped downed"):
+			return
+		_say("held: lifted %.2f m, looking at her face %.3f, her head cocked %.2f" % [seen.lift, seen.look, seen.cock])
+		if float(seen.lift) < 0.25 or float(seen.look) < 0.97 or (game.monsters[nid].model.nurse != null and float(seen.cock) < 0.9):
+			return _end(false, "the grab on my machine: lifted %.2f m, look %.3f, cock %.2f" % [seen.lift, seen.look, seen.cock])
+		if not await _until(func(): return game.monsters.has(nid) and game.monsters[nid].global_position.distance_to(seen.from) > 10.0, 10.0, "the Nurse gone from beside me"):
+			return
+		_send("ng_seen", {})
 	await _finish_together("saw the Hives, one sedated (lying), hit, dragged by me and waking")
 
 

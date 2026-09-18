@@ -355,7 +355,7 @@ replaces the arm meshes through `fp_arms.make_arm()` and the rig through `rig_ma
 
 ---
 
-## The Night Nurse (made in-house, 2026-09-14) — `assets/models/monsters/night_nurse/`
+## The Night Nurse (made in-house, 2026-09-14; the stylized model since 2026-09-18) — `assets/models/monsters/night_nurse/`
 
 | Key | File | Source | Author | Licence | size (m) | Fix-ups |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -364,12 +364,12 @@ replaces the arm meshes through `fp_arms.make_arm()` and the rig through `rig_ma
 - **Not downloaded, not made by an AI image or mesh service.** Every vertex, UV, weight,
   keyframe and texel comes from `nn_geometry.py`, `nn_materials.py`, `nn_rig.py` and `nn_build.py`
   (procedural Cycles materials baked to 2048 px maps). `art/night_nurse/README.md` explains the
-  build and how to rebuild it (about 6 minutes); `art/night_nurse/` has a `.gdignore`, so the
+  build and how to rebuild it (about 4 minutes); `art/night_nurse/` has a `.gdignore`, so the
   Blender sources, bake inputs and renders are kept in the repo but never imported.
-- 19,036 triangles, 2 materials, 53 bones, clips `Frozen`, `Idle`, `Walk` (in place). Godot
+- 26,704 triangles (8.8k of them hair), 2 materials, 53 bones, clips `Frozen`, `Idle`, `Walk` (in place). Godot
   generates mesh LODs on import. The six maps are separate files (the GLB references them) so their
   import settings stick: VRAM compressed with mipmaps, the normal maps in normal-map mode. The GLB
-  is 0.9 MB, the maps 24 MB of PNG.
+  is 1.2 MB. The first model (19k triangles) is in `deprecated/night_nurse/`.
 - `nn_build.py` exports an embedded GLB (not committed) and runs `nn_glb_extern.py`, which writes
   the game copy and its textures here.
 

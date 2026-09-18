@@ -1,4 +1,8 @@
-"""Night Nurse procedural geometry (pure Python + mathutils, no bpy).
+"""The Night Nurse: procedural geometry (pure Python + mathutils, no bpy).
+
+The stylized pass (DESIGN.md, "Art style"): the same skeleton, proportions and pose as the original,
+with big simple soft forms. No ribs, tendons, knuckle bumps or neck cords; thick stiff cloth with
+chunky hems; soft figurine features under the mask; hair as a solid shell under long chunky strands that hang down her back and chest; no cap.
 
 Every part is generated from analytic shape functions at a resolution multiplier `res`:
 res=1 is the game mesh, res=3 is the dense copy the normal/AO maps are baked from.
@@ -299,8 +303,8 @@ DRESS_KEYS = [  # z, half-width (X), half-depth (Y), centre y, superellipse n
     (1.42, 0.121, 0.089, -0.004, 2.2),
     (1.56, 0.135, 0.093, -0.002, 2.3),
     (1.66, 0.142, 0.090, 0.004, 2.4),
-    (1.72, 0.150, 0.086, 0.008, 2.5),
-    (1.765, 0.128, 0.078, 0.012, 2.3),
+    (1.72, 0.142, 0.086, 0.008, 2.4),     # a narrower shoulder shelf: the sleeve heads carry the shoulder line
+    (1.765, 0.118, 0.078, 0.012, 2.3),
     (1.80, 0.094, 0.064, 0.016, 2.2),
     (1.83, 0.056, 0.052, 0.018, 2.0),
     (1.85, 0.050, 0.048, 0.018, 2.0),
@@ -313,31 +317,29 @@ D_N = pchip(_dz, [k[4] for k in DRESS_KEYS])
 
 
 def skirt_fold(th, z):
-    A = 0.030 * smooth01((1.08 - z) / 0.70)
-    g = 0.004 * smooth01(1.0 - abs(z - 1.20) / 0.09)   # gathers under the waistband
-    if A <= 0 and g <= 0:
+    A = 0.024 * smooth01((1.08 - z) / 0.70)
+    if A <= 0:
         return 0.0
     c, s = math.cos(th), math.sin(th)
-    drift = noise.noise(Vector((c * 1.2, s * 1.2, z * 1.6 + 3.1)))
-    x = th * 9.0 + drift * 2.4
-    p = math.sin(x) + 0.35 * math.sin(2.0 * x + 1.3) + 0.55 * noise.noise(Vector((c * 2.4, s * 2.4, z * 2.8 + 7.0)))
-    p = max(-1.0, min(1.0, p / 1.5))
-    return A * p + g * math.sin(th * 26.0)
+    drift = noise.noise(Vector((c * 1.0, s * 1.0, z * 1.1 + 3.1)))
+    x = th * 5.0 + drift * 1.2
+    # a few rounded, stiff folds: a softened sine, no fine noise
+    p = math.sin(x)
+    return A * math.copysign(abs(p) ** 0.7, p)
 
 
 def dress_offset(th, z, fold=1.0, extra=0.0):
     ra, rb = D_RY(z), D_RX(z)
     a, b = sell(th, ra + extra, rb + extra, D_N(z))
     f = skirt_fold(th, z) * fold
-    # gaunt chest: a sternum hollow and ribs pressing through the bodice
-    if 1.34 < z < 1.64:
+    if False:   # (the original's ribs and sternum; the stylized bodice is smooth)
         side = abs(math.sin(th))
         front = max(0.0, math.cos(th))
         f -= 0.006 * front ** 6 * smooth01(1 - abs(z - 1.52) / 0.1)
         rib = 0.5 + 0.5 * math.sin((z - 1.36) * TAU / 0.036)
         f -= 0.0028 * rib * smooth01((side - 0.35) / 0.3) * front ** 0.3 * smooth01(1 - abs(z - 1.47) / 0.12)
         # shoulder blades press through the back
-    if 1.50 < z < 1.74:
+    if False:
         back = max(0.0, -math.cos(th))
         f += 0.010 * smooth01(1 - abs(abs(math.sin(th)) - 0.45) / 0.25) * back * smooth01(1 - abs(z - 1.63) / 0.1)
     n = Vector((math.cos(th), math.sin(th), 0.0))
@@ -368,9 +370,9 @@ def build_dress(res):
 
     def hem_z(th):
         c, s = math.cos(th), math.sin(th)
-        return 0.34 + 0.008 * noise.noise(Vector((c * 2.2, s * 2.2, 5.0)))
+        return 0.34 + 0.004 * noise.noise(Vector((c * 1.2, s * 1.2, 5.0)))
     # inner turn-up of the hem so the open bottom never shows a hole
-    for zi, sc in [(0.50, 0.93), (0.37, 0.955)]:
+    for zi, sc in [(0.50, 0.90), (0.36, 0.93)]:
         rings.append([Vector((q.x * sc, (q.y - D_CY(zi)) * sc + D_CY(zi), zi)) for q in (dress_point(th, zi, 1.0) for th in th_of)])
     rings.append([dress_point(th, hem_z(th), 1.0, 0.004) for th in th_of])
     for z in zs[1:]:
@@ -382,7 +384,7 @@ def build_dress(res):
             ring.append(dress_point(th, zz))
         rings.append(ring)
     # collar: roll outwards, then tuck back in towards the neck
-    for zi, extra in [(1.838, 0.016), (1.842, 0.008), (1.836, -0.006)]:
+    for zi, extra in [(1.836, 0.020), (1.846, 0.016), (1.848, 0.004), (1.838, -0.008)]:
         rings.append([dress_point(th, zi, 0.0, extra) for th in th_of])
     P.rings(rings)
     return P
@@ -401,10 +403,10 @@ def build_apron(res):
         for c in range(cols):
             u = c / (cols - 1)
             th = lerp(-1.15, 1.15, u)
-            ztop, zbot = 1.268, 0.45 + 0.012 * noise.noise(Vector((u * 4.0, 1.0, 2.0)))
+            ztop, zbot = 1.268, 0.45
             z = lerp(zbot, ztop, v)
-            A = 0.030 * smooth01((1.08 - z) / 0.70)
-            f = 0.5 * skirt_fold(th, z) + 0.5 * A + 0.010
+            A = 0.024 * smooth01((1.08 - z) / 0.70)
+            f = 0.5 * skirt_fold(th, z) + 0.5 * A + 0.014 + 0.004 * smooth01(1 - v / 0.08)
             ra, rb = D_RY(z), D_RX(z)
             a, b = sell(th, ra, rb, D_N(z))
             n = Vector((math.cos(th), math.sin(th), 0))
@@ -414,7 +416,7 @@ def build_apron(res):
             nrow.append(Vector((math.sin(th), -math.cos(th), 0.0)))
         Pts.append(row)
         Nr.append(nrow)
-    P.slab(Pts, Nr, 0.003)
+    P.slab(Pts, Nr, 0.008)
     # bib
     rows, cols = 7 * res + 1, 9 * res + 1
     Pts, Nr = [], []
@@ -425,12 +427,12 @@ def build_apron(res):
         row, nrow = [], []
         for c in range(cols):
             th = lerp(-half, half, c / (cols - 1))
-            p = dress_point(th, z, 0.0, 0.006 + 0.004 * (1 - v))
+            p = dress_point(th, z, 0.0, 0.009 + 0.004 * (1 - v))
             row.append(p)
             nrow.append(Vector((math.sin(th), -math.cos(th), 0.0)))
         Pts.append(row)
         Nr.append(nrow)
-    P.slab(Pts, Nr, 0.0025)
+    P.slab(Pts, Nr, 0.007)
     return P
 
 
@@ -460,9 +462,10 @@ def build_straps(res):
     P = Part('straps', 'cloth', ['spine', 'chest', 'upperchest', 'shoulder.L', 'shoulder.R', 'hips'])
     P.const = {'apron': 1.0}
     for sgn in (1, -1):
-        ctrl = [(sgn * 0.40, 1.565), (sgn * 0.52, 1.69), (sgn * 0.95, 1.765), (sgn * 1.8, 1.76),
-                (sgn * 2.45, 1.64), (sgn * 2.75, 1.42), (sgn * 2.85, 1.27)]
-        surface_ribbon(P, ctrl, 0.022, 0.011, 0.0025, res, 20)
+        # over the shoulder close to the neck, on top of the sleeve heads (which grow out of the bodice)
+        ctrl = [(sgn * 0.40, 1.565), (sgn * 0.52, 1.69), (sgn * 0.85, 1.785), (sgn * 1.6, 1.80),
+                (sgn * 2.4, 1.68), (sgn * 2.75, 1.42), (sgn * 2.85, 1.27)]
+        surface_ribbon(P, ctrl, 0.030, 0.016, 0.006, res, 20)
     return P
 
 
@@ -472,7 +475,7 @@ def build_belt(res):
     segs = 40 * res
     th_of = [math.pi + TAU * j / segs for j in range(segs)]
     rings = []
-    for z, e in [(1.246, 0.004), (1.247, 0.016), (1.297, 0.016), (1.298, 0.004)]:
+    for z, e in [(1.240, 0.006), (1.243, 0.022), (1.301, 0.022), (1.304, 0.006)]:
         rings.append([dress_point(th, z, 0.0, e) for th in th_of])
     P.rings(rings)
     return P
@@ -484,19 +487,18 @@ def build_sleeve_L(res):
     P.attr_fn = lambda p: {'crease': 1.0 - 0.6 * smooth01(abs(p.z - ELBOW.z) / 0.15),
                            'blood': 0.8 * smooth01((1.20 - p.z) / 0.08)}
     end = ELBOW.lerp(WRIST, 0.53)
-    start = SHOULDER + Vector((-0.045, 0.0, 0.03))
-    ctrl = chaikin([start, SHOULDER + Vector((0.004, 0, -0.02)), ELBOW, end], 2)
-    path, L = resample(ctrl, 18 * res + 1, lambda t: t)
+    # The sleeve grows out of the bodice: it starts buried near the neck, thin, and arcs over the shoulder
+    # (a raglan line), so there is no cut end or corner sticking up above the shoulder.
+    start = Vector((0.050, 0.008, 1.735))
+    ctrl = chaikin([start, Vector((0.110, 0.007, 1.752)), SHOULDER + Vector((0.012, 0, -0.030)), ELBOW, end], 3)
+    path, L = resample(ctrl, 22 * res + 1, lambda t: t)
     segs = 16 * res
-    s_el = (ELBOW - SHOULDER).length + 0.05
+    s_el = (ELBOW - SHOULDER).length + 0.11
 
     def off(s, t, th):
-        r = lerp(0.050, 0.041, smooth01(s / s_el)) - 0.006 * smooth01((s - s_el) / 0.3)
-        r += 0.003 * math.exp(-((s - 0.05) / 0.06) ** 2)          # puffed sleeve head
-        el = math.exp(-((s - s_el) / 0.07) ** 2)
-        r += el * (0.004 * math.sin(th * 3 + s * 40) + 0.003 * math.sin(s * 95.0))
-        r += 0.0025 * noise.noise(Vector((math.cos(th) * 2, math.sin(th) * 2, s * 12)))
-        r += 0.004 * smooth01((s - (L - 0.03)) / 0.01)            # starched cuff
+        r = lerp(0.050, 0.041, smooth01((s - 0.06) / (s_el - 0.06))) - 0.006 * smooth01((s - s_el) / 0.3)
+        r *= lerp(0.55, 1.0, smooth01(s / 0.08))                  # thin where it is buried in the bodice
+        r += 0.009 * smooth01((s - (L - 0.045)) / 0.012)          # a thick starched cuff
         return (r * math.cos(th), r * 0.92 * math.sin(th))
     rings, S, fr = sweep(path, segs, off, Vector((0, -1, 0)))
     # tuck the cuff back inside
@@ -543,24 +545,17 @@ def build_forearm_L(res, joints):
         c, sn = math.cos(th), math.sin(th)
         u = s - s_wr
         # forearm: thin, flattened, tendon ridges and a wrist bone
-        ra = lerp(0.025, 0.019, smooth01(s / s_wr))
-        rb = lerp(0.023, 0.0155, smooth01(s / s_wr))
-        ra += 0.0012 * math.sin(th * 5) * smooth01(s / s_wr)
+        ra = lerp(0.027, 0.021, smooth01(s / s_wr))
+        rb = lerp(0.025, 0.018, smooth01(s / s_wr))
         # palm: wide and thin
         w = smooth01((u + 0.012) / 0.040)
-        ra = lerp(ra, 0.041, w)
-        rb = lerp(rb, 0.0135, w)
+        ra = lerp(ra, 0.044, w)
+        rb = lerp(rb, 0.0165, w)
         a, b = sell(th, ra, rb, lerp(2.0, 2.6, w))
         bump = 0.0
         # ulna head on the back/outer side of the wrist
-        bump += 0.004 * math.exp(-((u + 0.004) / 0.012) ** 2) * max(0.0, -sn) * max(0.0, -c) ** 0.5
-        # knuckles on the back of the hand
-        for k in KNUCKLE_OFFS:
-            bump += 0.0045 * math.exp(-((u - PALM_LEN + 0.008) / 0.011) ** 2) * math.exp(-((a - k) / 0.008) ** 2) * max(0.0, -sn)
-        # extensor tendons fanning to the knuckles
-        for k in KNUCKLE_OFFS:
-            ka = lerp(0.0, k, smooth01(u / PALM_LEN))
-            bump += 0.0014 * math.exp(-((a - ka) / 0.0035) ** 2) * max(0.0, -sn) * smooth01(u / 0.03) * smooth01((PALM_LEN - u) / 0.02)
+        # a soft back of the hand: one gentle rise, no bones or tendons
+        bump += 0.002 * smooth01(u / 0.05) * max(0.0, -sn)
         # close the end
         end = smooth01((s - (L - 0.034)) / 0.034)
         a = a * lerp(1.0, 0.86, end)
@@ -610,12 +605,7 @@ def finger_tube(P, base, dirs_lens, radii, res, segs_base, name, joints, tip_nai
         # buried base: start thin inside the palm so no end cap pokes through the skin
         r = lerp(radii[0], radii[1], t) * lerp(0.45, 1.0, smooth01(sl / 0.018))
         back = max(0.0, -c)
-        for j in jl[1:-1]:
-            # bony knuckles, thin shafts between them
-            r += 0.0026 * math.exp(-((sl - j) / 0.008) ** 2) * (0.5 + 0.8 * back)
-        for k in range(len(jl) - 1):
-            mid = (jl[k] + jl[k + 1]) * 0.5
-            r -= 0.0009 * math.exp(-((sl - mid) / ((jl[k + 1] - jl[k]) * 0.3)) ** 2)
+        # smooth tubes: no knuckle bumps
         # round fingertip: close with a quarter circle over the last few millimetres
         rem = max(0.0, Ltot - sl)
         tip_len = radii[1] * 1.2
@@ -660,8 +650,8 @@ def build_fingers_L(res, joints):
         for k, frac in enumerate((0.44, 0.31, 0.25)):
             d = rotate_towards(d, B, FINGER_CURL[i][k])
             seg.append((d, L * frac))
-        r0 = [0.0086, 0.0090, 0.0085, 0.0074][i]
-        finger_tube(P, base, seg, (r0, r0 * 0.74), res, 7, name, joints)
+        r0 = [0.0095, 0.0100, 0.0094, 0.0082][i]
+        finger_tube(P, base, seg, (r0, r0 * 0.80), res, 7, name, joints)
         bones += ['%s%d.L' % (name, k + 1) for k in range(3)]
     # thumb: from the heel of the palm, along the index finger
     base = WRIST + T * 0.030 + N * 0.020 + B * 0.003
@@ -670,29 +660,32 @@ def build_fingers_L(res, joints):
     for k, (l, c) in enumerate(((0.052, 0.10), (0.038, 0.14), (0.030, 0.18))):
         d = rotate_towards(d, B, c)
         seg.append((d, l))
-    finger_tube(P, base, seg, (0.0145, 0.0080), res, 7, 'thumb', joints)
+    finger_tube(P, base, seg, (0.0150, 0.0092), res, 7, 'thumb', joints)
     bones += ['thumb1.L', 'thumb2.L', 'thumb3.L', 'hand.L']
     P.bones = bones
     return P
 
 
 # ---------------------------------------------------------------- legs and shoes
+LEG_TOP = Vector((0.0895, -0.004, 0.44))   # where the stocking starts, up under the skirt
+
+
 def build_leg_L(res):
     P = Part('leg.L', 'cloth', ['thigh.L', 'shin.L', 'foot.L'])
     P.const = {'stocking': 1.0}
     P.attr_fn = lambda p: {'blood': 0.35 * smooth01((0.3 - p.z) / 0.2)}
-    ctrl = chaikin([KNEE + Vector((0, 0, 0.16)), KNEE, ANKLE + Vector((0, 0, 0.0)), ANKLE + Vector((0, -0.01, -0.05))], 2)
+    # The stocking starts a hand above the hem, not at mid-thigh: hidden under the skirt it only ever
+    # showed by poking out through the front of it on a long stride (dark, from the baked shadow).
+    ctrl = chaikin([LEG_TOP, LEG_TOP.lerp(ANKLE, 0.5), ANKLE, ANKLE + Vector((0, -0.01, -0.05))], 2)
     path, L = resample(ctrl, 14 * res + 1)
     segs = 12 * res
 
     def off(s, t, th):
         c, sn = math.cos(th), math.sin(th)
-        z = KNEE.z + 0.16 - s
+        z = LEG_TOP.z - s
         r = 0.045
-        r += 0.010 * math.exp(-((z - 0.44) / 0.09) ** 2) * max(0.0, -c) ** 0.7  # calf, at the back
+        r += 0.007 * math.exp(-((z - 0.44) / 0.12) ** 2) * max(0.0, -c) ** 0.7  # a soft calf
         r = lerp(r, 0.024, smooth01((0.30 - z) / 0.17))
-        r += 0.004 * math.exp(-((z - 0.10) / 0.02) ** 2) * abs(sn)   # ankle bones
-        r += 0.006 * math.exp(-((z - KNEE.z) / 0.035) ** 2) * max(0.0, c)  # kneecap
         return (r * c, r * 0.92 * sn)
     rings, S, fr = sweep(path, segs, off, Vector((0, -1, 0)))
     P.rings(rings, S, cap_start=path[0] + Vector((0, 0, 0.005)), cap_end=path[-1] - Vector((0, 0, 0.005)))
@@ -746,23 +739,19 @@ def build_shoe_L(res):
 # ---------------------------------------------------------------- head
 HEAD_FEATS = [
     # centre (head-local), sigma, amplitude
-    ((0.029, -0.088, 0.016), (0.019, 0.035, 0.016), -0.030, 'sock'),
-    ((-0.029, -0.088, 0.016), (0.019, 0.035, 0.016), -0.030, 'sock'),
-    ((0.033, -0.093, 0.045), (0.022, 0.03, 0.007), 0.005, ''),
-    ((-0.033, -0.093, 0.045), (0.022, 0.03, 0.007), 0.005, ''),
-    ((0.0, -0.100, 0.028), (0.008, 0.03, 0.010), -0.002, ''),
-    ((0.0, -0.098, -0.012), (0.009, 0.04, 0.028), 0.010, ''),
-    ((0.0, -0.100, -0.036), (0.012, 0.04, 0.012), 0.004, ''),
-    ((0.052, -0.070, 0.000), (0.018, 0.03, 0.012), 0.005, ''),
-    ((-0.052, -0.070, 0.000), (0.018, 0.03, 0.012), 0.005, ''),
-    ((0.050, -0.066, -0.046), (0.020, 0.03, 0.025), -0.012, ''),
-    ((-0.050, -0.066, -0.046), (0.020, 0.03, 0.025), -0.012, ''),
-    ((0.068, -0.030, 0.035), (0.015, 0.025, 0.020), -0.008, ''),
-    ((-0.068, -0.030, 0.035), (0.015, 0.025, 0.020), -0.008, ''),
-    ((0.0, -0.085, -0.108), (0.020, 0.03, 0.020), 0.002, ''),
-    ((0.074, 0.004, 0.000), (0.006, 0.016, 0.026), 0.011, ''),
-    ((-0.074, 0.004, 0.000), (0.006, 0.016, 0.026), 0.011, ''),
+    # Figurine features: big round soft sockets, a soft brow, a small nose, small ears pressed to the head,
+    # a gentle cheek hollow; no temples, cheekbones or chin detail.
+    ((0.030, -0.088, 0.016), (0.023, 0.035, 0.020), -0.026, 'sock'),
+    ((-0.030, -0.088, 0.016), (0.023, 0.035, 0.020), -0.026, 'sock'),
+    ((0.032, -0.093, 0.046), (0.030, 0.03, 0.010), 0.004, ''),
+    ((-0.032, -0.093, 0.046), (0.030, 0.03, 0.010), 0.004, ''),
+    ((0.0, -0.098, -0.014), (0.011, 0.04, 0.022), 0.008, ''),
+    ((0.050, -0.066, -0.046), (0.026, 0.03, 0.030), -0.005, ''),
+    ((-0.050, -0.066, -0.046), (0.026, 0.03, 0.030), -0.005, ''),
+    ((0.072, 0.004, 0.000), (0.008, 0.018, 0.022), 0.007, ''),
+    ((-0.072, 0.004, 0.000), (0.008, 0.018, 0.022), 0.007, ''),
 ]
+EYE_R = 0.0105          # big glossy black eyes at the bottom of the sockets
 
 
 def head_point(th, phi, positive_only=False, lift=0.0):
@@ -818,16 +807,16 @@ def build_head(res):
         extras.append(ex)
     P.rings(rings, [phi * 0.12 for phi in phis], extras,
             cap_start=HEAD_C + Vector((0, 0.004, -0.141)), cap_end=HEAD_C + Vector((0, 0.0, 0.137)))
-    # deep, wet little eyes at the bottom of the sockets
+    # big glossy black eyes at the bottom of the sockets
     for sx in (1, -1):
-        c = HEAD_C + Vector((sx * 0.028, -0.055, 0.014))
+        c = HEAD_C + Vector((sx * 0.029, -0.061, 0.015))
         er = []
-        es = 8 * res
-        for k in range(1, 7 * res):
-            a = math.pi * k / (7 * res) - math.pi * 0.5
-            er.append([c + Vector((0.0065 * math.cos(a) * math.sin(TAU * j / es), -0.0065 * math.cos(a) * math.cos(TAU * j / es), 0.0055 * math.sin(a))) for j in range(es)])
+        es = 12 * res
+        for k in range(1, 9 * res):
+            a = math.pi * k / (9 * res) - math.pi * 0.5
+            er.append([c + Vector((EYE_R * math.cos(a) * math.sin(TAU * j / es), -EYE_R * math.cos(a) * math.cos(TAU * j / es), EYE_R * 0.9 * math.sin(a))) for j in range(es)])
         ex = [[{'eye': 1.0, 'sock': 1.0} for _ in r] for r in er]
-        P.rings(er, None, ex, cap_start=c + Vector((0, 0, -0.0055)), cap_end=c + Vector((0, 0, 0.0055)))
+        P.rings(er, None, ex, cap_start=c + Vector((0, 0, -EYE_R * 0.9)), cap_end=c + Vector((0, 0, EYE_R * 0.9)))
     return P
 
 
@@ -854,58 +843,88 @@ def build_hair(res):
             z0 = hairline(th)
             phi0 = phi_for(z0)
             phi = lerp(phi0, math.pi * 0.5 * 0.94, v ** 0.9)
-            lift = 0.0025 + 0.0015 * smooth01(v * 3)
+            lift = 0.004 + 0.004 * smooth01(v * 2.5)          # a solid shell, not a painted cap
             ring.append(head_point(th, phi, True, lift)[0])
         rings.append(ring)
     P.rings(rings, None, None, cap_end=HEAD_C + Vector((0, 0.0, 0.1415)))
-    # bun
-    c = HEAD_C + Vector((0.0, 0.104, -0.005))
-    er = []
-    es = 16 * res
-    nr = 10 * res
-    for k in range(1, nr):
-        a = math.pi * k / nr - math.pi * 0.5
-        ring = []
-        for j in range(es):
-            t = TAU * j / es
-            wob = 1 + 0.08 * math.sin(t * 5 + a * 3)
-            ring.append(c + Vector((0.034 * math.cos(a) * math.sin(t) * wob, 0.026 * (math.sin(a) + 0.0), 0.030 * math.cos(a) * math.cos(t) * wob)))
-        er.append(ring)
-    # rings along Y: orient so the pole axis is Y (front pole buried in the skull)
-    P.rings(er, None, None, cap_start=c + Vector((0, -0.026, 0)), cap_end=c + Vector((0, 0.026, 0)))
-    # loose greasy strands escaping the bun, hanging over one eye and onto the mask
-    strands = [(-0.42, 0.95, -0.085, 0.0040), (-0.33, 0.80, -0.070, 0.0032), (-0.52, 1.00, -0.050, 0.0030),
-               (-0.24, 0.62, -0.030, 0.0026), (-0.60, 1.05, -0.100, 0.0034), (0.36, 0.70, -0.045, 0.0028),
-               (0.46, 0.85, -0.020, 0.0024)]
-    for k, (th0, th1, zend, w) in enumerate(strands):
-        count = 12 * res + 1
-        rows, nrs = [], []
-        pts = []
-        for i in range(count):
-            t = i / (count - 1)
-            th = lerp(th0, th0 * th1, t) + 0.05 * math.sin(t * 5.0 + k)
-            z = lerp(hairline(th0) - 0.002, zend, t)
-            phi = math.asin(max(-1.0, min(1.0, z / (0.135 if z > 0 else 0.138))))
-            lift = lerp(0.0028, 0.0105, smooth01((0.01 - z) / 0.03)) + 0.002 * t
-            pts.append(head_point(th, phi, True, lift)[0])
-        for i, p in enumerate(pts):
-            t = i / (count - 1)
-            tan = (pts[min(i + 1, count - 1)] - pts[max(i - 1, 0)]).normalized()
-            n = (p - HEAD_C).normalized()
-            side = tan.cross(n).normalized()
-            half = w * lerp(1.0, 0.35, t) * 0.5
-            rows.append([p - side * half, p + side * half])
-            nrs.append([n, n])
-        old = P.const
-        P.const = {'hair': 1.0}
-        P.slab(rows, nrs, 0.0010)
-        P.const = old
+    return P
+
+
+# long loose hair: chunky strands from the crown, all the way round, parted round the face, hanging
+# down her back (to the waist) and over her chest; short ones at the sides so they clear the shoulders
+HAIR_LIFT = 0.014            # above the scalp shell
+HAIR_CLEAR = 0.030           # off the dress, collar, straps and bib
+
+
+def hair_groups():
+    """(hang angle, end height, radius) per strand. Angles: 0 = front, +pi/2 = her left."""
+    out = []
+    for sx in (1, -1):
+        for k in range(8):                                  # framing the face, down onto the chest
+            th = lerp(0.78, 1.18, k / 7)
+            out.append((sx * th, 1.40 + 0.12 * noise.noise(Vector((k * 1.7, sx, 0.3))), 0.0065))
+        for k in range(6):                                  # over the ears, stopping above the shoulders
+            th = lerp(1.26, 1.98, k / 5)
+            out.append((sx * th, 1.94 + 0.02 * noise.noise(Vector((k * 1.3, sx, 1.1))), 0.0060))
+        for k in range(18):                                 # down the back
+            th = lerp(2.08, math.pi - 0.04, k / 17)
+            out.append((sx * th, 1.10 + 0.14 * noise.noise(Vector((k * 1.1, sx, 2.7))), 0.0085))
+    out.append((math.pi, 1.08, 0.0085))
+    return out
+
+
+def body_radius(th, z):
+    """Horizontal distance from the body's axis to the dress surface in direction th."""
+    zz = min(z, 1.845)
+    q = dress_point(th, zz, 0.0, 0.0)
+    return math.hypot(q.x, q.y - D_CY(zz))
+
+
+def hair_path(th, z_end, r, k):
+    pts = []
+    # down the scalp from the crown to the widest point of the head
+    for i in range(9):
+        phi = lerp(1.30, 0.02, i / 8)
+        lift = HAIR_LIFT + r * 0.3 + 0.004 * smooth01(-phi / 0.2)
+        pts.append(head_point(th, phi, True, lift)[0])
+    ex = pts[-1]
+    rad0 = Vector((ex.x, ex.y - D_CY(1.8), 0.0))
+    th_dir = math.atan2(rad0.x, -rad0.y)
+    rh = rad0.length
+    out_dir = Vector((math.sin(th_dir), -math.cos(th_dir), 0.0))
+    side = Vector((0, 0, 1)).cross(out_dir)
+    z = ex.z - 0.03
+    step = 0.035
+    while z > z_end:
+        d = (ex.z - z)
+        need = body_radius(th_dir, z) + HAIR_CLEAR + r
+        rr = max(rh + 0.004 * smooth01(d / 0.2), need)
+        wave = 0.007 * smooth01(d / 0.25) * math.sin(d * 11.0 + k * 1.9)
+        c = Vector((0.0, D_CY(min(z, 1.845)), z))
+        pts.append(c + out_dir * rr + side * wave)
+        z -= step
+    return chaikin(pts, 2), out_dir
+
+
+def build_hair_long(res):
+    P = Part('hair_long', 'skin', ['head', 'neck', 'upperchest', 'chest', 'spine'], uv_boost=0.15)   # flat colour: little texture space
+    P.const = {'hair': 1.0}
+    segs = 4 * res
+    for k, (th, z_end, r) in enumerate(hair_groups()):
+        ctrl, out_dir = hair_path(th, z_end, r, k)
+        path, L = resample(ctrl, 16 * res + 1)
+
+        def off(s, t, a, r=r):
+            w = r * lerp(0.55, 1.0, smooth01(t / 0.12)) * lerp(1.0, 0.35, smooth01((t - 0.75) / 0.25))
+            return (w * 0.55 * math.cos(a), w * math.sin(a))    # flattened against the head and body
+        rings, S, fr = sweep(path, segs, off, out_dir)
+        T = fr[0]
+        P.rings(rings, S, cap_start=path[0] - T[0] * 0.002, cap_end=path[-1] + T[-1] * 0.003)
     return P
 
 
 def build_neck(res):
     P = Part('neck', 'skin', ['upperchest', 'neck', 'head'])
-    P.const = {'vein': 1.0}
     ctrl = [NECK_BASE + Vector((0, 0, -0.03)), NECK_BASE + Vector((0, -0.004, 0.08)), HEAD_C + Vector((0, 0.03, -0.08))]
     path, L = resample(chaikin(ctrl, 2), 12 * res + 1)
     segs = 18 * res
@@ -914,8 +933,6 @@ def build_neck(res):
         c, sn = math.cos(th), math.sin(th)
         r = lerp(0.036, 0.030, smooth01(t * 1.5))
         # sternocleidomastoid cords, trachea
-        cord = math.exp(-((abs(math.atan2(sn, c)) - 0.75 + 0.35 * t) / 0.22) ** 2)
-        r += 0.0035 * cord + 0.0022 * math.exp(-(math.atan2(sn, c) / 0.25) ** 2) * math.exp(-((t - 0.45) / 0.2) ** 2)
         return (r * c, r * sn)
     rings, S, fr = sweep(path, segs, off, Vector((0, -1, 0)))
     P.rings(rings, S)
@@ -941,7 +958,7 @@ def build_mask(res):
             z = lerp(ztop, zbot, v)
             phi = math.asin(max(-1.0, min(1.0, z / (0.135 if z > 0 else 0.138))))
             # pleats bulge across the middle
-            pleat = 0.0042 * abs(math.sin(v * math.pi * 3.0)) ** 0.6 * smooth01(1 - abs(th) / 1.3)
+            pleat = 0.0050 * abs(math.sin(v * math.pi * 3.0)) ** 0.9 * smooth01(1 - abs(th) / 1.3)
             lift = 0.0030 + pleat + 0.006 * smooth01((v - 0.75) / 0.25) * centre  # pulled taut under the chin
             p, _ = head_point(th, phi, True, lift)
             # stretch flat across the hollow between cheekbone and nose
@@ -956,7 +973,7 @@ def build_mask(res):
         Pts.append(row)
         Nr.append(nrow)
         ex.append(erow)
-    P.slab(Pts, Nr, 0.0018, ex)
+    P.slab(Pts, Nr, 0.004, ex)
     # ties round the back of the head
     for sx in (1, -1):
         for z0, z1 in ((-0.006, 0.03), (-0.118, -0.065)):
@@ -973,12 +990,12 @@ def build_mask(res):
                 t = (path[min(i + 1, len(path) - 1)] - path[max(i - 1, 0)]).normalized()
                 n = (p - HEAD_C).normalized()
                 side = t.cross(n).normalized()
-                rws.append([p - side * 0.003, p + side * 0.003])
+                rws.append([p - side * 0.0045, p + side * 0.0045])
                 nrs.append([n, n])
             P2 = P
             old = P2.const
             P2.const = {'mask': 1.0, 'tie': 1.0}
-            P2.slab(rws, nrs, 0.0015)
+            P2.slab(rws, nrs, 0.003)
             P2.const = old
     return P
 
@@ -1033,7 +1050,7 @@ def build_cap(res):
 def build_all(res=1):
     joints = {}
     parts = [build_dress(res), build_apron(res), build_straps(res), build_belt(res), build_neck(res),
-             build_head(res), build_hair(res), build_mask(res), build_cap(res)]
+             build_head(res), build_hair(res), build_hair_long(res), build_mask(res)]     # no cap: her hair is the top of the silhouette
     left = [build_sleeve_L(res), build_forearm_L(res, joints), build_fingers_L(res, joints), build_leg_L(res), build_shoe_L(res)]
     for p in left:
         parts.append(p)

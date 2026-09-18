@@ -38,6 +38,7 @@ const NurseBrain := preload("res://scripts/monsters/night_nurse_brain.gd")
 const HiveBrain := preload("res://scripts/monsters/hive_brain.gd")
 const Zones := preload("res://scripts/hospital_builder.gd")
 const NurseRig := preload("res://scripts/monsters/night_nurse_rig.gd")
+const NurseGrab := preload("res://scripts/monsters/nurse_grab.gd")
 
 var monster_id: int = 0
 var kind: String = DISCHARGED
@@ -52,6 +53,11 @@ var speed: float = 0.0          ## current ground speed, m/s
 var observed: bool = false      ## Night Nurse: someone is watching it in the light
 var listen_yaw: float = 0.0     ## Discharged: head turn toward the sound, relative to facing
 var lunge_t: float = 0.0        ## > 0 while the lunge plays
+## Night Nurse: the peer id of the surgeon she holds by the neck (0 nobody), and how long she has held
+## them. Host authoritative (report `gp`); every machine counts grab_t itself (nurse_grab.gd).
+var grab_peer: int = 0
+var grab_t: float = 0.0
+var _grab_cracked := false
 var body_radius: float = 0.38
 var height: float = 1.85
 
@@ -543,9 +549,43 @@ func try_contact(lunge_range: float) -> bool:
 	_prev_close = d
 	if d < body_radius + C.PLAYER_RADIUS + 0.25:
 		face_dir(p.global_position - global_position, 1.0, 1.0)
-		game.monster_hit_player(self, p)
+		if kind == NIGHT_NURSE and game.has_method("nurse_grab"):
+			game.nurse_grab(self, p)   # she never hits: she takes hold (nurse_grab.gd)
+		else:
+			game.monster_hit_player(self, p)
 		return true
 	return false
+
+
+## Host (game.nurse_grab): she has `p` by the neck. Snaps round to face them; stands still.
+func start_grab(p: Node) -> void:
+	grab_peer = int(p.peer_id)
+	grab_t = 0.0
+	_grab_cracked = false
+	lunge_t = 0.0
+	stop()
+	face_dir(p.global_position - global_position, 1.0, 1.0)
+
+
+func end_grab() -> void:
+	grab_peer = 0
+	grab_t = 0.0
+
+
+## Where the surgeon she holds hangs (every machine; game.pinned_pose): by the neck from her grip,
+## facing her, carried up off the spot they were taken from over NurseGrab.LIFT.
+func grab_victim_pose(p: Node) -> Transform3D:
+	var fwd := -global_transform.basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized() if fwd.length() > 0.001 else Vector3.FORWARD
+	var grip := Vector3.ZERO
+	if model != null and model.get("nurse") != null:
+		grip = model.nurse.grip_world
+	if grip == Vector3.ZERO:
+		grip = global_position + fwd * 0.85 + Vector3.UP * 1.95   # no posed model (fallback rig, headless)
+	var hang := grip + fwd * NurseRig.NECK_DEPTH - Vector3.UP * (C.EYE_H - NurseGrab.NECK_BELOW_EYES)
+	var o: Vector3 = (p.held_from as Vector3).lerp(hang, NurseGrab.lift(grab_t))
+	return Transform3D(Basis(Vector3.UP, rotation.y + PI), o)
 
 
 # =========================================================================
@@ -679,7 +719,9 @@ static func _spot_clear(space: PhysicsDirectSpaceState3D, p: Vector3) -> bool:
 # =========================================================================
 
 func _update_visual(delta: float) -> void:
-	var frozen := kind == NIGHT_NURSE and observed
+	var frozen := kind == NIGHT_NURSE and observed and grab_peer == 0
+	if grab_peer != 0:
+		grab_t += delta
 	if not frozen:
 		# A watched nurse stays frozen mid-reach; everything else plays out.
 		lunge_t = maxf(0.0, lunge_t - delta)
@@ -786,6 +828,18 @@ func _update_visual(delta: float) -> void:
 ## She never lies down: she cannot be sedated, and a kill is the dev room's corpse (dev_gun.gd).
 func _nurse_visual(delta: float) -> void:
 	var nr = model.nurse
+	if grab_peer != 0:
+		# The grab (nurse_grab.gd): the clip stops dead and every bit of motion is the pose; being
+		# watched changes nothing now.
+		model.play(model.current() if model.current() != "" else "idle", 0.0)
+		_recoil = 0.0
+		nr.recoil = 0.0
+		nr.lunge = 0.0
+		nr.grab = NurseGrab.reach(grab_t)
+		nr.cock = NurseGrab.cock(grab_t)
+		return
+	nr.grab = 0.0
+	nr.cock = 0.0
 	var calm_now := calm > 0.0
 	if observed:
 		model.play(model.current(), 0.0)
@@ -847,6 +901,10 @@ func _update_sound(delta: float) -> void:
 	if calm_now and not _last_calm and mode == Mode.RETREAT:
 		Audio.play("monsters_grab", global_position + Vector3.UP * 1.2, 0.0, 0.05)
 	_last_calm = calm_now
+	if grab_peer != 0 and not _grab_cracked and grab_t >= NurseGrab.SNAP_AT:
+		# Her head snapping over: a crack, right in the held surgeon's face.
+		_grab_cracked = true
+		Audio.play("dissection_crack", eye_transform().origin, 3.0, 0.05)
 
 	_sound_timer -= delta
 	if not near_viewer:
@@ -922,6 +980,7 @@ func report() -> Dictionary:
 		"ob": observed, "ly": snappedf(listen_yaw, 1.0 / 64.0), "lg": lunge_t > 0.0, "cm": calm > 0.0,
 		# Sweep 3: sedated flag, who drags it, hit counter (flinch + sound on every machine).
 		"sd": mode == Mode.SEDATED, "db": dragged_by, "hc": hit_count,
+		"gp": grab_peer,   # the Night Nurse's grab: who she holds
 	}
 
 
@@ -942,3 +1001,8 @@ func apply_remote(s: Dictionary) -> void:
 		mode = Mode.SEDATED
 	dragged_by = int(s.get("db", 0))
 	hit_count = int(s.get("hc", hit_count))
+	var gp := int(s.get("gp", 0))
+	if gp != grab_peer:
+		grab_peer = gp
+		grab_t = 0.0
+		_grab_cracked = false

@@ -18,12 +18,27 @@ so they're summaries rather than a line per commit.
 ## [Unreleased]
 
 ### Added
+- **The Night Nurse's grab.** She no longer takes hearts. If she gets a hand on you, she has you by the
+  throat with both hands in a snap and straightens to her full height, holding you up to her face
+  with your legs kicking and your arms hanging. Your view is locked on her face, straight on, until
+  her head snaps over to one side with a crack, cocked, considering you. Then she drops you, downed,
+  and she's gone: somewhere far off, out of everyone's light. About two seconds, and nothing anyone
+  can do. Watching her doesn't stop it once she has you, and nothing else can touch you meanwhile.
 - **A camera that faces you.** F5 now cycles three views: first person, over the shoulder, and a new
   one out in front looking back at your surgeon, centred. The camera swings round you to get there
   instead of cutting. Facing you there's no crosshair (it would be pointing at your face), and you
   aim where your head looks. It's in Settings -> Controls -> Camera as FRONT too.
 
+### Changed
+- **A new Night Nurse**, rebuilt in the game's art style: a soft figurine face under the mask with big
+  black eyes, long chunky black hair down her back and over her chest instead of the cap and bun,
+  stiff chunky clothes, and all the old grime and blood kept as detailed paint. Same height, same
+  wrong walk. The first model is kept in `deprecated/`.
+- The art style's hair rule: hair is fine where a character calls for it, as long as it's built
+  chunky (surgeons stay bald).
+
 ### Fixed
+- The Night Nurse's legs no longer poke out through the front of her skirt on a long stride.
 - Sprinting in the shoulder view put a shiny white patch on the back of your head: your own
   flashlight, which lives in your head, was lighting your skull as you leaned into the run. Your
   torch no longer lights your own body.
