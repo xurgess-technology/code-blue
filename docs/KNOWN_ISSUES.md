@@ -1,5 +1,8 @@
 # Known issues
 
+> **Tests currently failing on `main` are listed in [FAILING_TESTS.md](FAILING_TESTS.md).** Check it
+> before assuming a test failure is yours.
+
 Open problems from the content sweep of 2026-09-12 (patients, items, containers, surgery,
 guide, monsters). Nothing here breaks a shift; each is a feel, look or robustness problem to fix.
 

@@ -4,6 +4,8 @@ A co-op first-person horror game set in a dark, half-abandoned hospital. Clock i
 
 Built with Godot 4.7 (GDScript). See [DESIGN.md](DESIGN.md) for the game design and [docs/CONTRACTS.md](docs/CONTRACTS.md) for how the systems fit together.
 
+**Working on this with an agent?** Start with [CLAUDE.md](CLAUDE.md). Tests already failing on `main` are in [docs/FAILING_TESTS.md](docs/FAILING_TESTS.md).
+
 ## Play
 
 Double-click `play.bat`. It expects Godot at `Desktop\Godot_v4.7.2-stable_win64.exe\`; edit the file if yours lives elsewhere.
