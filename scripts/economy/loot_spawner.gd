@@ -50,6 +50,10 @@ static func plan(seed_value: int, shift: int, info: Dictionary, occupied: Dictio
 	var out: Array = []
 	var units := {}
 	var kinds := LootTable.kinds()
+	# Trinkets are finds: a few a shift in total, some kinds capped (LootTable max_per_shift).
+	var wanted := _draw_trinkets(rng)   # kind -> how many are still to place
+	var placed := {}
+	var out_locs: Array = []
 	# Two passes: the first honours the chance roll; the second tops up to MIN_LOOT.
 	for pass_i in 2:
 		for loc in locs:
@@ -61,34 +65,92 @@ static func plan(seed_value: int, shift: int, info: Dictionary, occupied: Dictio
 			var chance := BASE_CHANCE * (1.0 + DEPTH_CHANCE_GAIN * float(depth))
 			if loc.container_id != "":
 				chance *= CONTAINER_CHANCE_SCALE
+			chance *= float(LootTable.ROOM_CHANCE.get(String(loc.room_kind), 1.0))
 			if pass_i == 0 and rng.randf() > chance:
 				continue
-			var kind := _pick_kind(kinds, loc, rng)
+			var kind := _pick_kind(kinds, loc, rng, placed, wanted)
 			if kind == "":
 				continue
-			var d := LootTable.def(kind)
-			var b: Array = d.get("batch", [1, 1])
-			var count := rng.randi_range(int(b[0]), int(b[1])) if d.get("stack", false) else 1
-			var value := 0
-			for n in count:
-				value += LootTable.roll_value(kind, depth, rng.randf())
-			var e := {"kind": kind, "count": count, "value": value, "container_id": loc.container_id,
-				"slot": int(loc.slot), "anchor": int(loc.anchor), "depth": depth}
-			if loc.container_id == "" and int(loc.anchor) < 0:
-				e["position"] = loc.position
-				e["yaw"] = rng.randf() * TAU
-			out.append(e)
+			out.append(_entry(kind, loc, rng))
+			out_locs.append(loc)
+			placed[kind] = int(placed.get(kind, 0)) + 1
+			if wanted.has(kind):
+				wanted[kind] = int(wanted[kind]) - 1
 			loc["taken"] = true
 			units[loc.unit] = int(units.get(loc.unit, 0)) + 1
+	# A wanted trinket that found no fitting spot swaps into a plain stack whose spot suits it.
+	for kind in wanted.keys():
+		for n in maxi(0, int(wanted[kind])):
+			var order: Array = range(out.size())
+			for i in range(order.size() - 1, 0, -1):
+				var j := rng.randi_range(0, i)
+				var t = order[i]
+				order[i] = order[j]
+				order[j] = t
+			for i in order:
+				if not LootTable.is_trinket(String(out[i].kind)) and _fits(kind, out_locs[i]):
+					out[i] = _entry(kind, out_locs[i], rng)
+					break
 	return out
 
 
-static func _pick_kind(kinds: Array, loc: Dictionary, rng: RandomNumberGenerator) -> String:
+## The shift's trinkets: LootTable.TRINKETS_PER_SHIFT of them, drawn by each kind's trinket_weight,
+## a kind with max_per_shift no more than that. {kind: count}.
+static func _draw_trinkets(rng: RandomNumberGenerator) -> Dictionary:
+	var n := rng.randi_range(int(LootTable.TRINKETS_PER_SHIFT[0]), int(LootTable.TRINKETS_PER_SHIFT[1]))
+	var got := {}
+	for k in n:
+		var open: Array = []
+		var total := 0.0
+		for kind in LootTable.kinds():
+			if LootTable.is_trinket(kind) and int(got.get(kind, 0)) < int(LootTable.LOOT[kind].get("max_per_shift", 1000000)):
+				open.append(kind)
+				total += float(LootTable.LOOT[kind].get("trinket_weight", 1.0))
+		var roll := rng.randf() * total
+		for kind in open:
+			roll -= float(LootTable.LOOT[kind].get("trinket_weight", 1.0))
+			if roll <= 0.0 or kind == open[open.size() - 1]:
+				got[kind] = int(got.get(kind, 0)) + 1
+				break
+	return got
+
+
+static func _entry(kind: String, loc: Dictionary, rng: RandomNumberGenerator) -> Dictionary:
+	var depth: int = loc.depth
+	var d := LootTable.def(kind)
+	var b: Array = d.get("batch", [1, 1])
+	var count := rng.randi_range(int(b[0]), int(b[1])) if d.get("stack", false) else 1
+	var value := 0
+	for n in count:
+		value += LootTable.roll_value(kind, depth, rng.randf())
+	var e := {"kind": kind, "count": count, "value": value, "container_id": loc.container_id,
+		"slot": int(loc.slot), "anchor": int(loc.anchor), "depth": depth}
+	if loc.container_id == "" and int(loc.anchor) < 0:
+		e["position"] = loc.position
+		e["yaw"] = rng.randf() * TAU
+	return e
+
+
+## Whether `kind` can sit at `loc` at all (surface, container, bulky rules), whatever the room.
+static func _fits(kind: String, loc: Dictionary) -> bool:
+	var d: Dictionary = LootTable.LOOT[kind]
+	var t: String = loc.type
+	if t.begins_with("container:"):
+		return not d.get("bulky", false) and float(d.get("containers", {}).get(t.substr(10), 0.0)) > 0.0
+	if t.begins_with("loose:"):
+		var surf := t.substr(6)
+		return (d.get("surfaces", []) as Array).has(surf) and not (d.get("bulky", false) and surf == "tray")
+	return true
+
+
+static func _pick_kind(kinds: Array, loc: Dictionary, rng: RandomNumberGenerator, placed := {}, wanted := {}) -> String:
 	var weights: Array = []
 	var total := 0.0
 	for kind in kinds:
 		var d: Dictionary = LootTable.LOOT[kind]
 		var w := LootTable.weight(kind, String(loc.room_kind), int(loc.depth))
+		if (LootTable.is_trinket(kind) and int(wanted.get(kind, 0)) <= 0) or int(placed.get(kind, 0)) >= int(d.get("max_per_shift", 1000000)):
+			w = 0.0
 		if w <= 0.0:
 			weights.append(0.0)
 			continue

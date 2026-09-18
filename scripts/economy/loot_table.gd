@@ -12,6 +12,8 @@ extends RefCounted
 ##   bulky          takes two hand slots (and never fits in a container)
 ##   fragile        a violent drop (hit, shove) cracks it: the stack loses value
 ##   stack          several merge into one hand slot (value adds up); batch is the spawn size
+##   trinket_weight how often a shift's trinket draw picks it (see TRINKETS_PER_SHIFT)
+##   max_per_shift  at most this many of the kind in a shift
 ##   trinket        sells, but a later chunk gives it one job too (the item list in docs/ITEMS_AND_ICONS.md)
 ##   tier           0 common junk .. 3 rare valuables; higher tiers get likelier deeper in
 ##   rooms          room kind -> weight; "*" is any other kind. Unlisted kinds without "*" never.
@@ -21,59 +23,59 @@ extends RefCounted
 const LOOT := {
 	# ---- plain loot: it exists to be sold -----------------------------------------------------
 	"pill_bottle": {
-		"name": "Pill bottle", "short": "Pill bottles", "value": [22, 44], "tier": 0, "stack": true, "batch": [1, 3],
+		"name": "Pill bottle", "short": "Pill bottles", "value": [26, 52], "tier": 0, "stack": true, "batch": [1, 3],
 		"rooms": {"pharmacy": 2.72, "patient_room": 1.19, "nurse_station": 1.36, "restroom": 1.02, "supply_closet": 1.02, "janitor_closet": 0.68, "lab": 0.85, "cafeteria": 0.51, "*": 0.255},
 		"surfaces": ["counter", "tray"], "containers": {"med_fridge": 0.35, "station_drawers": 0.4},
 	},
 	"xray_film": {
-		"name": "X-ray film", "short": "X-ray films", "value": [45, 90], "tier": 0,
-		"rooms": {"radiology": 3.2, "office": 1.28, "supply_closet": 0.8, "patient_room": 0.64, "lab": 0.64, "morgue": 0.64, "janitor_closet": 0.48, "*": 0.16},
-		"surfaces": ["counter", "gurney"], "containers": {"drawer_unit": 0.3},
+		"name": "X-ray film", "short": "X-ray films", "value": [50, 100], "tier": 0,
+		"rooms": {"radiology": 3.2, "office": 0.64, "supply_closet": 0.4, "patient_room": 0.32, "lab": 0.32, "morgue": 0.32, "janitor_closet": 0.24, "*": 0.08},
+		"surfaces": ["counter", "gurney", "floor"], "containers": {"drawer_unit": 0.3},
 	},
 	"heart_monitor": {
-		"name": "Heart monitor", "short": "Heart monitors", "value": [110, 200], "tier": 2, "bulky": true, "fragile": true,
+		"name": "Heart monitor", "short": "Heart monitors", "value": [130, 230], "tier": 2, "bulky": true, "fragile": true,
 		"rooms": {"patient_room": 0.224, "nurse_station": 0.112, "supply_closet": 0.112, "janitor_closet": 0.09, "corridor": 0.067, "lab": 0.067, "*": 0.011},
 		"surfaces": ["counter", "gurney", "floor"], "containers": {},
 	},
 	"gold_watch": {
-		"name": "Gold watch", "short": "Gold watches", "value": [100, 240], "tier": 3,
+		"name": "Gold watch", "short": "Gold watches", "value": [120, 280], "tier": 3,
 		"rooms": {"office": 0.252, "waiting_room": 0.42, "morgue": 0.672, "restroom": 0.336, "cafeteria": 0.336, "lab": 0.168, "*": 0.063},
 		"surfaces": ["counter", "tray", "floor"], "containers": {"station_drawers": 0.3, "drawer_unit": 0.3},
 	},
 	"ultrasound": {
 		"name": "Portable ultrasound", "short": "Portable ultrasounds", "value": [260, 440], "tier": 3, "bulky": true, "fragile": true,
 		"rooms": {"radiology": 0.7, "patient_room": 0.14, "supply_closet": 0.14, "lab": 0.14, "*": 0.017},
-		"surfaces": ["counter", "gurney"], "containers": {},
+		"surfaces": ["counter", "gurney", "floor"], "containers": {},
 	},
 	# ---- trinkets: they sell, but each also does one thing (a later chunk). Rarer than plain loot.
 	"desk_phone": {
-		"name": "Desk phone", "short": "Desk phones", "value": [30, 60], "tier": 0, "trinket": true,
-		"rooms": {"office": 0.6, "nurse_station": 0.42, "waiting_room": 0.36, "cafeteria": 0.54, "*": 0.03},
+		"name": "Desk phone", "short": "Desk phones", "value": [30, 60], "tier": 0, "trinket": true, "trinket_weight": 3.0,
+		"rooms": {"office": 4.5, "nurse_station": 3.15, "waiting_room": 2.7, "cafeteria": 4.05, "patient_room": 1.05, "*": 0.225},
 		"surfaces": ["counter"], "containers": {},
 	},
 	"laptop": {
-		"name": "Laptop", "short": "Laptops", "value": [110, 200], "tier": 2, "fragile": true, "trinket": true,
-		"rooms": {"lab": 0.96, "office": 0.72, "nurse_station": 0.36, "radiology": 0.36, "cafeteria": 0.3, "*": 0.03},
+		"name": "Laptop", "short": "Laptops", "value": [110, 200], "tier": 2, "fragile": true, "trinket": true, "trinket_weight": 1.2,
+		"rooms": {"lab": 0.672, "office": 0.504, "nurse_station": 0.252, "radiology": 0.252, "cafeteria": 0.21, "*": 0.021},
 		"surfaces": ["counter"], "containers": {},
 	},
 	"defibrillator": {
-		"name": "Defibrillator", "short": "Defibrillators", "value": [170, 310], "tier": 3, "bulky": true, "trinket": true,
+		"name": "Defibrillator", "short": "Defibrillators", "value": [170, 310], "tier": 3, "bulky": true, "trinket": true, "trinket_weight": 1.0, "max_per_shift": 1,
 		"rooms": {"corridor": 0.21, "nurse_station": 0.168, "patient_room": 0.105, "waiting_room": 0.126, "supply_closet": 0.084, "janitor_closet": 0.084, "*": 0.006},
 		"surfaces": ["floor", "counter", "gurney"], "containers": {},
 	},
 	"reflex_hammer": {
-		"name": "Reflex hammer", "short": "Reflex hammers", "value": [30, 60], "tier": 0, "trinket": true,
-		"rooms": {"office": 0.4, "patient_room": 0.2, "nurse_station": 0.2, "janitor_closet": 0.15, "supply_closet": 0.15, "morgue": 0.15, "*": 0.025},
+		"name": "Reflex hammer", "short": "Reflex hammers", "value": [30, 60], "tier": 0, "trinket": true, "trinket_weight": 3.0,
+		"rooms": {"office": 1.0, "patient_room": 0.5, "nurse_station": 0.5, "janitor_closet": 0.375, "supply_closet": 0.375, "morgue": 0.375, "*": 0.063},
 		"surfaces": ["counter", "tray"], "containers": {"drawer_unit": 0.4},
 	},
 	"epipen": {
-		"name": "EpiPen", "short": "EpiPens", "value": [40, 80], "tier": 1, "trinket": true,
-		"rooms": {"nurse_station": 0.32, "pharmacy": 0.32, "patient_room": 0.16, "supply_closet": 0.16, "restroom": 0.12, "cafeteria": 0.12, "*": 0.02},
+		"name": "EpiPen", "short": "EpiPens", "value": [40, 80], "tier": 1, "trinket": true, "trinket_weight": 1.2,
+		"rooms": {"nurse_station": 0.307, "pharmacy": 0.307, "patient_room": 0.154, "supply_closet": 0.154, "restroom": 0.115, "cafeteria": 0.115, "*": 0.019},
 		"surfaces": ["counter", "tray"], "containers": {"station_drawers": 0.5, "med_fridge": 0.3},
 	},
 	"pulse_oximeter": {
-		"name": "Pulse oximeter", "short": "Pulse oximeters", "value": [60, 110], "tier": 1, "trinket": true,
-		"rooms": {"patient_room": 0.24, "nurse_station": 0.32, "supply_closet": 0.12, "lab": 0.16, "morgue": 0.12, "*": 0.02},
+		"name": "Pulse oximeter", "short": "Pulse oximeters", "value": [60, 110], "tier": 1, "trinket": true, "trinket_weight": 1.2,
+		"rooms": {"patient_room": 0.072, "nurse_station": 0.096, "supply_closet": 0.036, "lab": 0.048, "morgue": 0.036, "*": 0.006},
 		"surfaces": ["counter", "tray"], "containers": {"station_drawers": 0.5},
 	},
 	# BRAINS (sweep 3, scripts/brains): harvested from a dissected monster, never found. No rooms,
@@ -98,6 +100,11 @@ const LOOT := {
 		"eye": true, "rooms": {}, "surfaces": [], "containers": {},
 	},
 }
+
+## A shift holds this many trinkets in total (inclusive range); the kinds' room weights decide which.
+const TRINKETS_PER_SHIFT := [3, 5]
+## Room kinds whose spots are likelier to hold loot at all (radiology has few spots).
+const ROOM_CHANCE := {"radiology": 3.0}
 
 ## Weight multiplier by tier on the surface (depth 0); deeper rooms lift the rare tiers.
 const TIER_BASE := [1.0, 0.55, 0.28, 0.12]
@@ -148,3 +155,7 @@ static func roll_value(kind: String, depth: int, roll: float) -> int:
 	var v: Array = LOOT.get(kind, {}).get("value", [10, 10])
 	var base := lerpf(float(v[0]), float(v[1]), clampf(roll, 0.0, 1.0))
 	return maxi(1, roundi(base * (1.0 + float(maxi(0, depth)) * DEPTH_VALUE_GAIN)))
+
+
+static func is_trinket(kind: String) -> bool:
+	return bool(LOOT.get(kind, {}).get("trinket", false))

@@ -45,14 +45,21 @@ func _initialize() -> void:
 	var total_value := 0
 	var total_stacks := 0
 	var trinket_stacks := 0
+	var trinket_kinds := {}
+	var shift_trinkets: Array = []   # trinkets in each planned shift
+	var shift_defibs_max := 0
+	var radiology_seeds := 0
 	for sd in seeds:
 		var info := {}
 		var gen: Dictionary = MG.generate(sd)
 		var level: Node3D = HB.build(gen, info)
 		var seed_value := 0
 		var seed_stacks := 0
+		var rad_hit := false
 		for shift in [1, 2, 3]:
 			var rooms_of := {}
+			var st := 0
+			var defibs := 0
 			for loc in LootSpawner._locations(info, {}):
 				places[loc.room_kind] = int(places.get(loc.room_kind, 0)) + 1
 				rooms_of[loc.key] = loc.room_kind
@@ -63,9 +70,19 @@ func _initialize() -> void:
 				by_kind[kind] = int(by_kind.get(kind, 0)) + 1
 				if TRINKETS.has(kind):
 					trinket_stacks += 1
+					st += 1
+					trinket_kinds[kind] = int(trinket_kinds.get(kind, 0)) + 1
+				if kind == "defibrillator":
+					defibs += 1
 				var key := "%s:%d" % [e.container_id, int(e.slot)] if String(e.container_id) != "" else "anchor:%05d" % int(e.anchor)
 				var room := String(rooms_of.get(key, "?"))
 				by_room[room] = int(by_room.get(room, 0)) + 1
+				if room == "radiology" and (kind == "xray_film" or kind == "ultrasound"):
+					rad_hit = true
+			shift_trinkets.append(st)
+			shift_defibs_max = maxi(shift_defibs_max, defibs)
+		if rad_hit:
+			radiology_seeds += 1
 		total_value += seed_value
 		total_stacks += seed_stacks
 		if report:
@@ -77,10 +94,16 @@ func _initialize() -> void:
 		print("kinds: ", by_kind)
 		print("rooms: ", by_room)
 		print("places: ", places)
+		print("trinkets per shift: ", shift_trinkets, " by kind (all shifts): ", trinket_kinds)
 		print("TOTAL $%d in %d stacks over %d seeds x 3 shifts; trinkets %d" % [total_value, total_stacks, seeds.size(), trinket_stacks])
 	for k in CUT:
 		_check(not by_kind.has(k), "no %s in any plan" % k)
-	_check(trinket_stacks * 100 < total_stacks * 35, "trinkets are rarer than plain loot (%d of %d stacks)" % [trinket_stacks, total_stacks])
+	var in_range := true
+	for n in shift_trinkets:
+		in_range = in_range and n >= 3 and n <= 5
+	_check(in_range, "every shift has 3 to 5 trinkets in total %s" % str(shift_trinkets))
+	_check(shift_defibs_max <= 1, "at most one defibrillator a shift (%d)" % shift_defibs_max)
+	_check(radiology_seeds * 2 > seeds.size(), "radiology gets X-ray film or an ultrasound on most seeds (%d of %d)" % [radiology_seeds, seeds.size()])
 	for r in OLD_ROOMS:
 		if int(places.get(r, 0)) > 0:
 			_check(int(by_room.get(r, 0)) > 0, "room kind '%s' gets loot (%d places, %d stacks)" % [r, int(places.get(r, 0)), int(by_room.get(r, 0))])
