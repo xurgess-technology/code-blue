@@ -31,6 +31,15 @@ Godot's import cache stays warm. At most four tasks run at once, one per slot. T
   `override.cfg`), seeded with Zach's settings and seen tips. Review windows and tests in a slot
   never touch Zach's own saves, and slots never share test files.
 
+### Status
+
+When Zach asks for **status**, the orchestrator answers with a table, one row per slot (all four,
+idle ones too): **Slot**, **Branch**, **Overall task** (what the branch is for), **Working on now**
+(the step it's on this minute) and **Status** (Building, **Waiting on Zach**, Testing, Ready to
+merge, Idle). Below it, one line each for what's queued and what's blocked on what. It checks the
+branches (`git log main..branch`, `tools\slots.bat status`) first, and says so when it can't see
+something.
+
 ### The brief
 
 The orchestrator gives each subagent: the goal, what done looks like, what Zach should see, the
