@@ -221,6 +221,17 @@ var bot_dive: int = 0
 ## DEV HOOK (scripts/dev): a dev room bot or target dummy. The host simulates it like a local
 ## player through the bot_* seam; everyone else sees it like a remote player.
 var is_bot: bool = false
+## GRAFT HOOK (dev panel, "Control Dr. Botsworth"): a human at this machine is driving this bot's
+## body instead of their own. Local presentation only, never replicated: `bot_active` goes off so
+## _local_step reads the keyboard, the body goes first person on this machine alone, and every
+## other machine still sees an ordinary bot. Only the host can possess (it is the machine that
+## simulates bots); see scripts/dev/dev_room.gd possess_bot().
+var possessed_local: bool = false
+
+
+## GRAFT HOOK: this machine looks out of this body -- its own player, or a possessed bot.
+func view_local() -> bool:
+	return is_local or possessed_local
 ## DEV HOOK: seconds left knocked down (no moving). Wave 3's downed state replaces this.
 var stun: float = 0.0
 ## DEV HOOK: flying through walls (dev panel).
@@ -235,8 +246,16 @@ var downed: bool = false
 var bleed: float = 0.0
 var carried_by: int = 0
 var carrying: int = 0
+## Lying on the player table. Downed, a teammate carried you there; GRAFT HOOK: healthy, you aimed
+## at the table and pressed E to strap yourself in (game.strap_in), and hold E to get up again.
 var on_table: bool = false
+## Seconds of E held: on a downed teammate to pick them up, or strapped in to get back up.
 var carry_hold: float = 0.0
+
+
+## GRAFT HOOK: awake and strapped to the player table (not a downed patient on it).
+func strapped() -> bool:
+	return on_table and alive and not downed
 ## The Night Nurse's grab (scripts/monsters/nurse_grab.gd): the monster id of the Nurse holding this
 ## player up by the neck (-1 nobody), and where they stood when she took them (host authoritative,
 ## report key `nh`; held_from is recorded on every machine). Held, the body hangs from her grip
@@ -663,7 +682,7 @@ func _make_body() -> Node3D:
 # =========================================================================
 
 func _input(event: InputEvent) -> void:
-	if not is_local or not alive:
+	if not view_local() or not alive:
 		return
 	if hive_view or dev_input_held:
 		return   # SWEEP 3 HOOK (brains): the mouse is not yours while you look through a Hive
@@ -1189,17 +1208,21 @@ func _pinned_step(delta: float) -> void:
 	var pose: Transform3D = game.pinned_pose(self) if game != null else global_transform
 	global_position = pose.origin
 	_target_pos = pose.origin
-	var local_driver: bool = is_local or (is_bot and game != null and game.is_host())
+	var local_driver: bool = view_local() or (is_bot and game != null and game.is_host())
 	if local_driver:
+		var keys: bool = not bot_active and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED \
+			and not dev_input_held and (game == null or not game.paused)
 		if bot_active:
 			_yaw = bot_yaw
 			_pitch = bot_pitch
 			if bot_press != _bot_press_seen:
 				_bot_press_seen = bot_press
 				interact_count += 1
-		elif Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and not dev_input_held and Input.is_action_just_pressed("interact") and (game == null or not game.paused):
+		elif keys and Input.is_action_just_pressed("interact"):
 			interact_count += 1
-		wants_interact = false
+		# GRAFT HOOK: strapped in awake, holding E gets you back up (game._tick_table_holds times
+		# it, exactly like the hold that picks a downed teammate up).
+		wants_interact = strapped() and (bot_interact if bot_active else (keys and Input.is_action_pressed("interact")))
 		if held_by >= 0:
 			_held_look(delta)
 		rotation.y = _yaw
@@ -1310,8 +1333,8 @@ func _update_aim() -> void:
 		_jab_prompt = ""
 		_jab_prompt_t = 0.0
 	# AFFORDANCE HOOK: only the local player ever sees their own highlight (a bot's aim is a host
-	# decision, not something drawn to anyone's screen).
-	if is_local:
+	# decision, not something drawn to anyone's screen -- unless a human is driving that bot).
+	if view_local():
 		_update_aim_highlight()
 
 
@@ -1344,6 +1367,11 @@ func _update_aim_core() -> void:
 	# Downed hook: on the floor or the table there is nothing to use, only a call for help.
 	if downed:
 		aim_prompt = "Call for help"
+		return
+	# GRAFT HOOK: strapped down awake, the straps are the only thing you can reach.
+	if on_table:
+		if game != null and game.has_method("get_up_prompt"):
+			aim_prompt = game.get_up_prompt(self)
 		return
 	var node: Node = null
 	if bot_active and bot_aim_id != "" and game != null:
@@ -1718,11 +1746,11 @@ func _process(_delta: float) -> void:
 			if s.kind != "":
 				holder.add_child(_held_model(String(s.kind), int(s.count), holder == _held_fp))
 		# The flashlight hand hides nothing; the held stack sits in the other hand.
-		_held_fp.visible = is_local
-		_held_tp.visible = not is_local or _mirror_self or _carry_body
+		_held_fp.visible = view_local()
+		_held_tp.visible = not view_local() or _mirror_self or _carry_body
 		if is_local:
 			_put_on_self_layer(_held_tp)
-		if is_local:
+		if view_local():
 			hands.held_changed(String(s.kind), int(s.count))   # HANDS HOOK: lower and raise
 	# HANDS HOOK: the carry camera, then both hands posed from what is held and the wind-up state.
 	if carry_cam != null:
@@ -1731,7 +1759,7 @@ func _process(_delta: float) -> void:
 		var want_mask: int = (cm & ~HandsFP.HANDS_LAYER) if carry_cam.hides_hands() else (cm | HandsFP.HANDS_LAYER)
 		if want_mask != cm:
 			camera.cull_mask = want_mask
-	if is_local and hands.visible:
+	if view_local() and hands.visible:
 		hands.update(_delta)
 	if body_hands != null:
 		body_hands.update(_delta)
@@ -1911,6 +1939,43 @@ func revive(with_hp: int) -> void:
 var _downed_seen := false
 
 
+## GRAFT HOOK (dev panel, "Control Dr. Botsworth"): this machine's human takes this bot's body over,
+## or hands it back. Local presentation and input only: nothing here is replicated, so the other
+## machines carry on seeing an ordinary bot walking about. Host only (it simulates the bots).
+func set_possessed(on: bool) -> void:
+	if not is_bot or on == possessed_local:
+		return
+	possessed_local = on
+	bot_active = not on
+	set_process_input(view_local())
+	if on:
+		bot_move = Vector2.ZERO
+		bot_interact = false
+		bot_sprint = false
+		bot_crouch = false
+		bot_prone = false
+		_yaw = rotation.y
+		_pitch = head.rotation.x
+		_stance_want = STAND
+		camera.cull_mask &= ~LightRoomsSelf.SELF
+		flashlight.light_cull_mask &= ~LightRoomsSelf.SELF
+		apply_fov(float(Settings.get_value("fov")))
+		set_flashlight(true)
+	else:
+		bot_yaw = _yaw
+		bot_pitch = _pitch
+		set_flashlight(false)
+	# First person here, an ordinary surgeon body everywhere else.
+	body_visual.visible = not on
+	if body_hands != null:
+		body_hands.set_active(not on)
+	name_tag.visible = not on and alive
+	hands.visible = on
+	_held_fp.visible = on
+	_held_tp.visible = not on
+	refresh_downed_visuals()
+
+
 ## Downed hook: laid on the player table you look up at the ceiling, feet (and the surgeon) ahead.
 func look_up_from_table() -> void:
 	var yaw := float(game.player_table_yaw()) - PI * 0.5 if game != null else rotation.y
@@ -1954,7 +2019,7 @@ func flinch() -> void:
 
 
 func _set_visible_alive(a: bool) -> void:
-	if not is_local:
+	if not view_local():
 		body_visual.visible = a or is_bot  # DEV HOOK: dead bots stay, lying where they fell
 		name_tag.visible = a
 	# Downed hook: a downed body is walked over, not bumped into (teammates aim at DownedAim).
@@ -1964,10 +2029,13 @@ func _set_visible_alive(a: bool) -> void:
 ## Downed hook: set every visual that follows from downed / carried / on_table. Idempotent.
 func refresh_downed_visuals() -> void:
 	_set_visible_alive(alive)
-	if on_table and not is_local:
-		body_visual.visible = false   # the lying PlayerBody on the table stands in
+	# A downed patient on the table has a lying PlayerBody standing in for them (player_surgery).
+	# GRAFT HOOK: a healthy surgeon who strapped themselves in has no case and no stand-in, so their
+	# own body lies there (body_hands plays the "lying" clip from `on_table`) for everyone else.
+	if on_table and downed and not view_local():
+		body_visual.visible = false
 		name_tag.visible = false
-	if is_local:
+	if view_local():
 		hands.visible = alive and not downed and held_by < 0 and (game == null or not game.dev_on() or not game.dev.has_gun(peer_id))
 
 
@@ -1975,13 +2043,13 @@ func refresh_downed_visuals() -> void:
 ## you hang over the carrier's shoulder. Dead bots lie there too.
 func _update_down_pose(delta: float) -> void:
 	# Prone lies and crawls with the same body pose as being downed.
-	var down := stun > 0.0 or downed or (is_bot and not alive) or prone
+	var down := stun > 0.0 or downed or (is_bot and not alive) or prone or on_table
 	# SWEEP 4A HOOK (controls): the third-person crouch pose (body_poser.gd): a torso lean blended
 	# in independently of the hold/carry/wind-up targets body_hands sets every frame.
 	if body_hands != null and "poser" in body_hands and body_hands.poser != null:
 		var want_crouch_w: float = 1.0 if (crouching and not down) else 0.0
 		body_hands.poser.crouch = move_toward(float(body_hands.poser.crouch), want_crouch_w, delta * 6.0)
-	if is_local and not is_bot:
+	if view_local():
 		var eye := C.EYE_H
 		if on_table:
 			eye = 0.28
@@ -2009,8 +2077,16 @@ func _update_down_pose(delta: float) -> void:
 		var back := 1.0 if carried_by != 0 else 0.0
 		if not is_equal_approx(head.position.z, back):
 			head.position.z = back
-		return
+		# GRAFT HOOK: normally nobody sees your own body, so it is never posed. A mirror, the carry
+		# camera, the dev free camera or driving Dr. Botsworth all show it: pose it like a remote one.
+		if not body_visual.visible:
+			return
 	if body_hands != null and body_hands.lies_by_clip():
+		# GRAFT HOOK: on the table, the body goes exactly where every machine's pinned_pose puts it.
+		# (A remote copy's own node already sits there; the local one's yaw follows your mouse.)
+		if on_table and game != null:
+			body_visual.global_transform = game.pinned_pose(self)
+			return
 		# HUMAN HOOK: the human lies, crawls and hangs over the shoulder by its own clips; the Carried
 		# clip's origin (the belly on the shoulder) goes onto the carrier's left shoulder, mirrored.
 		# The whole transform (not rotation/position) so the carry's mirror never outlives it.

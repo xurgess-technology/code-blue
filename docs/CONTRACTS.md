@@ -965,8 +965,22 @@ knocked down, no movement; a `"stun"` event plus the dev snapshot block), `nocli
   `bot_input(t, skill)` (skill from the bot's meta `bot_skill`). Minigames must keep
   `bot_input` finishing their step.
 - Interactables: `dev_disp_<item kind>` dispensers (endless stacks) and `dev_disp_dev_gun`.
+- Test tool: `--dev` after `--` turns dev mode on as soon as the level exists, so a review window
+  (`tools
+eview.bat 2 "..." --dev`) opens with the panel a keypress away.
 - World changes from the panel or tests: `game.dev.request(action, args)`; the host applies,
   a client sends. Shots: `game.dev.fire(shooter, from, dir, "kill" | "knock")`.
+- **Control Dr. Botsworth** (grafting chunk B, 2026-09-18): the panel's button spawns a bot called
+  Dr. Botsworth if he is not there (an ordinary `is_bot` Player: real hands, a real operator at a
+  table) and moves this machine's input and camera into him; the same button hands them back. Local
+  only and host only, like the free camera -- nothing is replicated, so the rest of the session sees
+  an ordinary bot, and your own surgeon stays where you left it, strapped down or not.
+  `dev.control_botsworth()`, `dev.possess_bot(id)`, `dev.release_bot()`, `dev.possessing`,
+  `dev.possessed_player()`; `Player.set_possessed(on)` / `possessed_local` / `view_local()`
+  (`is_local or possessed_local`: first-person hands, the mouse, the aim highlight);
+  `game.possessed`, `game.driving_player()` / `driving_id()` (what `viewed_player()`, the HUD and
+  `surgery_system`'s local-operator and report routing use, so the minigames run under your mouse).
+  The bot's brain is skipped while you drive it and picks its order back up afterwards.
 - Sounds `dev_zap`, `dev_thump` from `tools/gen_audio_dev.mjs`.
 - **Pocket spaces** (2026-09-14): request `pocket {kind: "factory" | "restaurant" | ""}` builds that space
   beside the room on every machine (`dv.pk`, `game.pockets.build_kind`); `dev.pocket_go(into)` moves the
@@ -1460,6 +1474,34 @@ game.downed_view           # scripts/downed/downed_view.gd: blood trails, the lo
   (`tools/gen_audio_downed.mjs`).
 - Tests: `tools/downedtest.tscn` (headless), `tools/downedshot.tscn` (windowed shots into
   `tools/downed_shots/`), nettest scenario `downed`, devtest downed checks.
+
+### Strapping yourself down (grafting chunk B, 2026-09-18, docs/GRAFTING.md)
+
+A healthy surgeon can lie on the table themselves, awake, and hold E to get up. The state is the
+same `on_table` as a downed patient's, with no case and no stitches, so everything that already
+follows `on_table` (the pinned pose, the look-up camera, the "lying" clip, `ot` in the snapshot)
+works unchanged. `Player.strapped()` is the difference: `on_table and alive and not downed`.
+
+```gdscript
+game.TABLE_UP_HOLD (1.2 s)
+game.strap_in_prompt(q) -> String        # "Lie down and strap in", "!..." or "" (not on offer)
+game.strap_in(q, table_index := -1)      # host; E at the table when the prompt says so
+game.get_up_block(p) -> String           # "" = free to go. CHUNK C REFUSES HERE after the scoop
+game.get_up_prompt(p) -> String          # what the strapped surgeon sees looking up
+game.get_up_from_table(p)                # host; the straps come off, they stand beside the table
+game.someone_on_table() -> Node          # whoever lies on a table (downed or strapped), else null
+game.table_free(ti) -> bool              # no case, no gurney on the way, nobody lying on it
+game.strap_table: int                    # hub: the patient table they strapped to (-1); snapshot "st"
+```
+
+- The prompt hangs off the existing aim spots: `player_table` on levels with one, and each patient
+  table (`table`, `table_<i>`) on the hub, where `strap_table` rides the snapshot so every machine's
+  `player_table` (and so `pinned_pose`) names the same table. Only one person is ever on a table.
+- Getting up is `carry_hold` again, timed by `game._tick_table_holds` from the strapped player's
+  `wants_interact` (`Player._pinned_step` reports E while strapped). The HUD ring says GETTING UP.
+- `refresh_downed_visuals` only hides the body for a *downed* patient on the table, who has a lying
+  `PlayerBody` standing in; a strapped surgeon's own body lies there for everyone else to see.
+- Tests: `tools/straptest.tscn` (headless).
 
 ## Combat (combat worker, sweep 3)
 

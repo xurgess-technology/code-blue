@@ -48,6 +48,7 @@ const WorldItemScript := preload("res://scripts/world_item.gd")
 const LootTable := preload("res://scripts/economy/loot_table.gd")
 const MonsterScript3 := preload("res://scripts/monster.gd")  # SWEEP 3 HOOK (monsters): display names
 const DevDoorScript := preload("res://scripts/dev/dev_door.gd")
+const FreeCamScript := preload("res://scripts/dev/free_cam.gd")   # GRAFT HOOK: shows your own body
 ## How far south of the parking lot's far edge the hidden room stands, metres (well past the fog).
 const ROOM_GAP := 30.0
 
@@ -277,6 +278,7 @@ func _stock_containers(entries: Array) -> void:
 
 ## Dev mode off or the session over: undo anything global (the room's geometry stays with its level).
 func reset_state() -> void:
+	release_bot()   # GRAFT HOOK: back into your own body before the bots go
 	for id in bots.keys():
 		_free_bot(id)
 	bots.clear()
@@ -332,6 +334,8 @@ func _host_tick(delta: float) -> void:
 			if String(c.get("state", "")) == "on_table" and float(c.vitals) > 0.0:
 				c.vitals = minf(100.0, float(c.vitals) + delta * 100.0 / drain)
 	for id in brains.keys():
+		if id == possessing:
+			continue   # GRAFT HOOK: a human has the wheel; the brain keeps its order for afterwards
 		var b = brains[id]
 		b.tick(delta)
 		if bots.has(id):
@@ -908,7 +912,7 @@ func phone_call() -> void:
 	game.say("*ring ring* (the phone call arrives with the shift loop)", 3.0)
 
 
-func spawn_bot(kind: String, who: Node = null) -> int:
+func spawn_bot(kind: String, who: Node = null, force_name: String = "", at = null) -> int:
 	if not is_host():
 		return 0
 	kind = "dummy" if kind == "dummy" else "bot"
@@ -922,6 +926,8 @@ func spawn_bot(kind: String, who: Node = null) -> int:
 		else:
 			n_bots += 1
 	var bot_name: String = "Dummy %d" % (n_dummies + 1) if kind == "dummy" else BOT_NAMES[n_bots % BOT_NAMES.size()]
+	if force_name != "":
+		bot_name = force_name   # GRAFT HOOK: "Control Dr. Botsworth" always makes Dr. Botsworth
 	var owner_id: int = who.peer_id if who != null else Net.my_id()
 	bots[id] = {"name": bot_name, "kind": kind, "order": "stay" if kind == "dummy" else "follow",
 		"item": "gauze", "to": "shelf", "owner": owner_id, "status": "", "done": 0}
@@ -933,6 +939,8 @@ func spawn_bot(kind: String, who: Node = null) -> int:
 		p.bot_yaw = PI   # face the spawn so the target rings show
 	else:
 		pos = _in_front_of(who, 2.0) if who != null else game.spawn_points()[0]
+	if at != null:
+		pos = at
 	p.teleport(pos)
 	if kind == "bot":
 		var brain = BotBrain.new(self, p)
@@ -942,7 +950,95 @@ func spawn_bot(kind: String, who: Node = null) -> int:
 	return id
 
 
+# =========================================================================
+# GRAFT HOOK: Dr. Botsworth, a bot you drive yourself (dev panel, "Control Dr. Botsworth")
+# =========================================================================
+
+## The bot this machine's human is driving, 0 for none. Local only, like the free camera: nothing
+## here is replicated, so everyone else keeps seeing an ordinary bot with an ordinary body, and
+## your own surgeon stays exactly where you left it, strapped down or not.
+var possessing := 0
+const BOTSWORTH := "Dr. Botsworth"
+
+
+func possessed_player() -> Node:
+	return game.players.get(possessing) if possessing != 0 else null
+
+
+## The panel's toggle: into Dr. Botsworth, or back into your own body. Host only -- bots live on the
+## host, so only the host can put a pair of hands in one.
+func control_botsworth() -> void:
+	if game == null or not game.dev_on():
+		return
+	if possessing != 0:
+		release_bot()
+		return
+	if not is_host():
+		game.say("Only the host can control Dr. Botsworth.", 3.0)
+		return
+	var me = game.local_player()
+	if me == null:
+		return
+	var id := _botsworth_id()
+	if id == 0:
+		id = spawn_bot("bot", me, BOTSWORTH, _botsworth_spot(me))
+		order_bot(id, "stay")
+	possess_bot(id)
+
+
+func _botsworth_id() -> int:
+	for id in bots.keys():
+		if String(bots[id].get("name", "")) == BOTSWORTH and String(bots[id].get("kind", "")) == "bot":
+			return int(id)
+	return 0
+
+
+## Beside the player table when you are lying on it (in front of you is the ceiling), else in front.
+func _botsworth_spot(me: Node) -> Vector3:
+	if me.on_table and not game.player_table.is_empty():
+		var b := Basis(Vector3.UP, game.player_table_yaw())
+		return game._floor_at((game.player_table.position as Vector3) + b * Vector3(1.3, 0.0, 0.0))
+	return _in_front_of(me, 2.0)
+
+
+## Local: your input and camera move into `id`'s body; your own surgeon stands (or lies) still.
+func possess_bot(id: int) -> void:
+	var p = game.players.get(id)
+	if p == null or not is_instance_valid(p) or not bool(p.get("is_bot")) or not p.alive:
+		return
+	release_bot()
+	possessing = id
+	game.possessed = id
+	p.set_possessed(true)
+	var me = game.local_player()
+	if me != null and is_instance_valid(me):
+		me.dev_input_held = true
+		FreeCamScript._show_body_on(me, true)   # so you can look at yourself from over there
+	game.say("You are %s. The same button puts you back." % p.player_name, 3.0)
+	state_changed.emit()
+
+
+## Local: back into your own body. Safe to call when you are already in it.
+func release_bot() -> void:
+	if possessing == 0:
+		return
+	var p = game.players.get(possessing)
+	possessing = 0
+	game.possessed = 0
+	if p != null and is_instance_valid(p):
+		p.set_possessed(false)
+	var me = game.local_player()
+	if me != null and is_instance_valid(me):
+		me.dev_input_held = false
+		FreeCamScript._show_body_on(me, false)
+		if me.camera != null:
+			me.camera.current = true
+	state_changed.emit()
+
+
 func remove_bot(id: int) -> void:
+	if id == possessing:
+		release_bot()   # GRAFT HOOK: never leave the camera in a body about to be freed
 	if not bots.has(id):
 		return
 	var p = game.players.get(id)

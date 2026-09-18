@@ -55,7 +55,7 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_t += delta
-	var me = game.local_player() if game != null else null
+	var me = game.driving_player() if game != null else null   # GRAFT HOOK: or Dr. Botsworth
 	var tired: bool = me != null and me.stamina < 0.995
 	_stamina_show = clampf(_stamina_show + (delta * 4.0 if tired else -delta * 1.5), 0.0, 1.0)
 	var fuel_low: bool = me != null and me.boots and (me.fuel < 0.995 or me.rocketing)
@@ -81,7 +81,7 @@ func _draw() -> void:
 	var h := size.y
 	var in_surgery: bool = game.surgery_camera() != null  # downed hook: either table
 	_draw_vignette(w, h)
-	var me = game.local_player()
+	var me = game.driving_player()   # GRAFT HOOK: the hands and prompt of whoever you are driving
 	if me != null and me.alive and not game.paused and not in_surgery:
 		_draw_crosshair(w, h)
 		_draw_prompt(w, h, me)
@@ -169,7 +169,7 @@ func _draw_host_info(w: float) -> void:
 
 
 func _draw_crosshair(w: float, h: float) -> void:
-	var me = game.local_player()
+	var me = game.driving_player()
 	# The camera facing you (the "front" camera setting): the middle of the screen is your own face.
 	if me != null and me.carry_cam != null and me.carry_cam.front_view():
 		return
@@ -525,7 +525,7 @@ func _draw_dead_banner(w: float) -> void:
 func _draw_holds(w: float, h: float) -> void:
 	var progress := 0.0
 	var label := ""
-	var me = game.local_player()
+	var me = game.driving_player()
 	if game.phase == Game.Phase.LOBBY and game.punch > 0.0:
 		progress = game.punch
 		label = "CLOCKING IN"
@@ -533,8 +533,9 @@ func _draw_holds(w: float, h: float) -> void:
 		progress = game.punch   # loop: clocking out
 		label = "CLOCKING OUT"
 	elif me != null and me.carry_hold > 0.0:   # downed hook
-		progress = clampf(me.carry_hold / Game.CARRY_HOLD, 0.0, 1.0)
-		label = "LIFTING"
+		# GRAFT HOOK: strapped to the table, the same hold undoes the straps instead.
+		progress = clampf(me.carry_hold / (Game.TABLE_UP_HOLD if me.on_table else Game.CARRY_HOLD), 0.0, 1.0)
+		label = "GETTING UP" if me.on_table else "LIFTING"
 	elif me != null and game.brains != null and game.brains.blend_progress(me.peer_id) > 0.0:   # SWEEP 3 HOOK (brains)
 		progress = game.brains.blend_progress(me.peer_id)
 		label = "BLENDING"
