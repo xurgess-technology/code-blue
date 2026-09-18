@@ -175,13 +175,9 @@ func _show_body(on: bool) -> void:
 	_body_shown = on
 	if p.body_visual == null:
 		return
-	p.body_visual.visible = on
-	if on:
-		# The torch sits inside the head: the local body must not shadow its own beam.
-		for mi in p.body_visual.find_children("*", "GeometryInstance3D", true, false):
-			(mi as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	if p.body_hands != null:
-		p.body_hands.set_active(on)
+	# Player shows it on its own layer, unshadowed (the torch sits inside the head), and lets the
+	# first-person camera draw that layer while it's shown.
+	p.set_carry_body(on)
 
 
 ## True while the first-person hands and held stack should hide: only once the third-person body

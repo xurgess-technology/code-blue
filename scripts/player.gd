@@ -215,6 +215,7 @@ const CombatScript := preload("res://scripts/combat/combat.gd")
 ## the body's clips, poses and hand sockets (`body_hands`, scripts/hands/body_hands.gd), the wind-ups
 ## (game.combat.windup) and the over-the-shoulder carry camera (`carry_cam`, local player only).
 const HandsFP := preload("res://scripts/hands/fp_hands.gd")
+const LightRoomsSelf := preload("res://scripts/level/light_rooms.gd")
 const BodyHandsScript := preload("res://scripts/hands/body_hands.gd")
 const HumanModel := preload("res://scripts/human/human_model.gd")   # HUMAN HOOK
 const CarryCameraScript := preload("res://scripts/camera/carry_camera.gd")
@@ -222,6 +223,10 @@ const Grips := preload("res://scripts/hands/grips.gd")
 const FogRingScript := preload("res://scripts/level/fog_ring.gd")   # SWEEP 4A HOOK (fog lot, chunk 2)
 var body_hands: RefCounted = null
 var carry_cam: RefCounted = null
+## Local only: the body is shown to the mirror cameras (scripts/personnel/mirrors.gd) / to the carry
+## camera. It lives on LightRooms.SELF, which the first-person camera only draws for the carry camera.
+var _mirror_self := false
+var _carry_body := false
 ## Test seam: true holds the shove button (charging), false lets go (the shove fires).
 var bot_charge: bool = false
 var _bot_charging := false
@@ -487,6 +492,7 @@ func _ready() -> void:
 	if is_local:
 		body_visual.visible = false
 		body_hands.set_active(false)   # HANDS HOOK: nobody sees it (until the carry camera shows it)
+		camera.cull_mask &= ~LightRoomsSelf.SELF   # the own body only for mirrors and the carry camera
 		name_tag.visible = false
 		hands.visible = true
 		# Settings hook: the local camera follows the field of view setting, live.
@@ -1138,8 +1144,8 @@ func _update_aim() -> void:
 		_update_aim_highlight()
 
 
-## AFFORDANCE HOOK: swap the aim-highlight rim (scripts/aim_highlight.gd) onto whatever `aim_id`
-## now points at, replacing the old always-on floating labels as the primary "you can interact
+## AFFORDANCE HOOK: move the aim highlight (scripts/aim_highlight.gd: a slight brightening) onto
+## whatever `aim_id` now points at, replacing the old always-on floating labels as the primary "you can interact
 ## with this" signal (docs/CONTRACTS.md, "Interaction"). Skips anything whose prompt begins with
 ## "!" (the existing "can't use this right now" convention), same as the crosshair prompt already
 ## does for its own styling.
@@ -1535,7 +1541,9 @@ func _process(_delta: float) -> void:
 				holder.add_child(_held_model(String(s.kind), int(s.count), holder == _held_fp))
 		# The flashlight hand hides nothing; the held stack sits in the other hand.
 		_held_fp.visible = is_local
-		_held_tp.visible = not is_local
+		_held_tp.visible = not is_local or _mirror_self
+		if is_local:
+			_put_on_self_layer(_held_tp)
 		if is_local:
 			hands.held_changed(String(s.kind), int(s.count))   # HANDS HOOK: lower and raise
 	# HANDS HOOK: the carry camera, then both hands posed from what is held and the wind-up state.
@@ -1549,6 +1557,47 @@ func _process(_delta: float) -> void:
 		hands.update(_delta)
 	if body_hands != null:
 		body_hands.update(_delta)
+
+
+## Mirrors: show the local body to the mirror cameras (on, while one is rendering) or stop.
+func set_mirror_self(on: bool) -> void:
+	if not is_local or on == _mirror_self:
+		return
+	_mirror_self = on
+	_refresh_self_body()
+
+
+## The carry camera showing the local body over the shoulder (carry_camera.gd).
+func set_carry_body(on: bool) -> void:
+	if not is_local or on == _carry_body:
+		return
+	_carry_body = on
+	_refresh_self_body()
+
+
+## The local body: shown when a mirror or the carry camera wants it, always on LightRooms.SELF, never
+## shadowing (the torch sits inside the head), and seen by the first-person camera only for the carry
+## camera.
+func _refresh_self_body() -> void:
+	var show := _mirror_self or _carry_body
+	if body_visual != null:
+		body_visual.visible = show
+		if show:
+			_put_on_self_layer(body_visual)
+			for mi in body_visual.find_children("*", "GeometryInstance3D", true, false):
+				(mi as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	if body_hands != null:
+		body_hands.set_active(show)
+	_held_tp.visible = _mirror_self
+	if _carry_body:
+		camera.cull_mask |= LightRoomsSelf.SELF
+	else:
+		camera.cull_mask &= ~LightRoomsSelf.SELF
+
+
+func _put_on_self_layer(root: Node) -> void:
+	for n in root.find_children("*", "VisualInstance3D", true, false):
+		(n as VisualInstance3D).layers = LightRoomsSelf.SELF
 
 
 ## A held stack, tinted, placed by the kind's grip (scripts/hands/grips.gd) so its grip point sits

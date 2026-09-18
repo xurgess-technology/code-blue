@@ -1,40 +1,41 @@
 class_name AimHighlight
 extends RefCounted
-## Interactable-affordance sweep: the primary "you can use this" signal is now a thin glowing rim
-## on whatever the local player is aiming at (R.E.P.O.'s look, per DESIGN.md), not a permanently
-## floating label. Purely local and cosmetic: each player highlights only what THEY personally
-## aim at (driven by `Player.aim_id` / `_update_aim_highlight`, itself already local-only), so
-## this adds no network traffic and never touches host-authoritative interaction logic.
+## Interactable-affordance sweep: what the local player is aiming at, if they can use it, catches
+## the light a little: it brightens slightly (a faint warm lift, a touch more at its edges) and
+## fades in over a tenth of a second. Together with the crosshair ring (hud.gd) and the prompt
+## under it, that says "you can use this" without the glowing silhouette this used to draw (Zach:
+## the outline was far too harsh). Purely local and cosmetic: each player highlights only what
+## THEY aim at (`Player.aim_id` / `_update_aim_highlight`), no network traffic, no change to
+## interaction logic.
 ##
-## Technique: a duplicated inverted-hull mesh, added as a CHILD of each of the target's own
-## MeshInstance3Ds (so it inherits that instance's transform for free instead of needing its own
-## copy of it), pushed out along its own normals in the vertex shader and drawn back-face-only
-## (`cull_front`) so only the sliver of "extra" geometry beyond the real silhouette is visible: a
-## clean rim around the object. One shared shader/material for every highlighted thing in the
-## game; at most a handful of extra draws for whatever is currently aimed at (never more than one
-## thing per local player), so it costs nothing worth measuring even with many interactables
-## on screen (see tools/perfprobe.gd). Warmed once in scripts/warmup.gd like item_models.gd's
-## teal/gold rim (docs/CONTRACTS.md, "Inventory and money").
+## Technique: a copy of each of the target's biggest MeshInstance3Ds, added as a CHILD of it (so it
+## inherits its transform for free), a hair proud of its surface and drawn front faces only with an
+## additive, unlit material. One material per highlight (only ever one per local player), faded in
+## with a tween. Warmed once in scripts/warmup.gd.
 
 const SHADER_CODE := """
 shader_type spatial;
-render_mode unshaded, cull_front, depth_draw_always, shadows_disabled;
+render_mode unshaded, blend_add, depth_draw_never, cull_back, shadows_disabled;
 
-uniform vec3 tint : source_color = vec3(1.0, 0.95, 0.6);
-uniform float width = 0.016;
+uniform vec3 tint : source_color = vec3(1.0, 0.93, 0.78);
+uniform float amount = 0.0;
 
 void vertex() {
-	VERTEX += NORMAL * width;
+	VERTEX += NORMAL * 0.002;
 }
 
 void fragment() {
-	float pulse = 0.85 + 0.15 * sin(TIME * 5.0);
-	ALBEDO = tint * pulse * 1.4;
+	float facing = clamp(dot(normalize(NORMAL), normalize(VIEW)), 0.0, 1.0);
+	float edge = pow(1.0 - facing, 3.0);
+	ALBEDO = tint * (0.055 + 0.09 * edge) * amount;
 }
 """
+## Seconds for the brightening to fade in.
+const FADE_IN := 0.1
 
-## Same spirit as ItemModels.TINT_MAX_MESHES: outline the big readable shapes of a target, not
-## every screw and bolt (cheaper, and the rim reads better without dozens of tiny outline slivers).
+
+## Same spirit as ItemModels.TINT_MAX_MESHES: brighten the big readable shapes of a target, not
+## every screw and bolt (each one is another draw).
 const MAX_MESHES := 6
 const _SHELL_NAME := "AimOutlineFx"
 const _META_KEY := "_aim_outlined"
@@ -78,7 +79,12 @@ static func set_highlighted(node: Node, on: bool) -> void:
 		parts.append(node)
 	parts.append_array(node.find_children("*", "MeshInstance3D", true, false))
 	parts.sort_custom(func(a, b): return _aabb_vol(a) > _aabb_vol(b))
-	var mat := _material()
+	var mat: ShaderMaterial = _material().duplicate()
+	if node.is_inside_tree():
+		var tw := node.create_tween()
+		tw.tween_method(func(v: float) -> void: mat.set_shader_parameter("amount", v), 0.0, 1.0, FADE_IN)
+	else:
+		mat.set_shader_parameter("amount", 1.0)
 	for i in mini(parts.size(), MAX_MESHES):
 		var mi: MeshInstance3D = parts[i]
 		if mi.mesh == null or mi.has_node(_SHELL_NAME):

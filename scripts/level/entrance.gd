@@ -5,7 +5,7 @@ extends RefCounted
 ##   row 0       north wall, the gate into the north wing (cols 16-17)
 ##   rows 1-4    the hallway, gates into the west and east wings at either end (rows 2-3)
 ##   rows 6-12   OR (supply storage closet + locker alcove on its west side) | spine | crematorium
-##   rows 14-18  break room                                                  | spine | unassigned
+##   rows 14-18  break room                                                  | spine | personnel
 ##   rows 20-28  waiting room | lobby (triage desk, the phone) | pharmacy behind its wall and window
 ##   rows 30-31  vestibule (cols 18-21), main doors in row 32 (cols 19-20) onto the neutral area
 ##
@@ -37,8 +37,14 @@ const MAIN_DOORS := [19, 20]
 const DOOR_X := 20.0
 ## The OR's double doors onto the spine.
 const OR_DOORS := [Vector2i(14, 8), Vector2i(14, 9)]
+## The vein machine's parts in its own frame (piece_factory.gd draws it to match): how far the
+## hand plate stands out in front of its centre, and where the screen's glass is.
+const VEIN_PLATE_Z := 0.5
+const VEIN_SCREEN_Z := 0.39
+const VEIN_SCREEN_Y := 1.9
+const VEIN_SCREEN_SIZE := Vector2(3.2, 1.7)
 ## Every room kind the hub registers (all safe: no loot, no case supplies, no monsters).
-const ROOM_KINDS := ["or", "or_storage", "or_lockers", "hub_crematorium", "break_room", "hub_unassigned",
+const ROOM_KINDS := ["or", "or_storage", "or_lab", "hub_crematorium", "break_room", "hub_personnel",
 		"hub_waiting", "lobby", "hub_pharmacy"]
 
 
@@ -66,11 +72,11 @@ static func build(st: S, ox: int, oy: int) -> void:
 
 	# ---- rooms --------------------------------------------------------------------------------
 	var storage: int = room.call(1, 6, 3, 3, "or_storage")
-	var locker_bay: int = room.call(1, 10, 4, 3, "or_lockers")   # open to the OR, no wall between
+	var lab_bay: int = room.call(1, 10, 4, 3, "or_lab")   # the lab's storage bay, open to the OR
 	var or_room: int = room.call(5, 6, 9, 7, "or")
 	var crematorium: int = room.call(19, 6, 10, 7, "hub_crematorium")
 	var break_room: int = room.call(1, 14, 13, 5, "break_room")
-	var unassigned: int = room.call(19, 14, 13, 5, "hub_unassigned")
+	var personnel: int = room.call(19, 14, 13, 5, "hub_personnel")
 	var waiting: int = room.call(1, 20, 11, 9, "hub_waiting")
 	var lobby: int = room.call(13, 20, 10, 9, "lobby")
 	var pharmacy: int = room.call(24, 20, 8, 9, "hub_pharmacy")
@@ -92,11 +98,11 @@ static func build(st: S, ox: int, oy: int) -> void:
 	st.set_keep(ox + 5, oy + 6)
 	st.set_keep(ox + 5, oy + 8)
 	door.call(14, 16, break_room, Vector2i(13, 16))
-	door.call(18, 16, unassigned, Vector2i(19, 16))
+	door.call(18, 16, personnel, Vector2i(19, 16))
 	for c in MAIN_DOORS:
 		door.call(c, H - 1, lobby, Vector2i(c, H - 2))
 	st.rooms[lobby]["entry"] = Vector2i(ox + 19, oy + 28)
-	st.rooms[locker_bay]["entry"] = Vector2i(ox + 4, oy + 11)
+	st.rooms[lab_bay]["entry"] = Vector2i(ox + 4, oy + 11)
 	st.rooms[waiting]["entry"] = Vector2i(ox + 11, oy + 24)
 	st.rooms[pharmacy]["entry"] = Vector2i(ox + 24, oy + 24)
 
@@ -162,7 +168,7 @@ static func build(st: S, ox: int, oy: int) -> void:
 	put.call("notice_board", 7.0, 19.0, N, break_room)
 	put.call("plant", 12.6, 14.5, SOUTH, break_room)
 
-	# ---- OR (x 5-13, y 6-12), supply storage (x 1-3, y 6-8), locker bay (x 1-4, y 10-12) -----------
+	# ---- OR (x 5-13, y 6-12), supply storage (x 1-3, y 6-8), lab bay (x 1-4, y 10-12) --------------
 	# Chunk 2: three patient tables in a row along the north wall, each with its own monitor on the
 	# wall above its head end; a downed teammate goes on whichever is free (game.downed_any_table).
 	# On a tile row's centre line: the table (0.7 m deep) only claims its tiles, and so gets its
@@ -181,25 +187,113 @@ static func build(st: S, ox: int, oy: int) -> void:
 				"height": Defs.mount_height(mon) + Defs.size(mon).y * 0.5,
 				"size": Vector2(Defs.size(mon).x, Defs.size(mon).y), "table": i})
 	st.spots["or_screen"] = (st.spots["or_screens"] as Array)[1]
-	put.call("wall_clock", 9.8, 13.0, N, or_room)
-	put.call("crash_cart", 10.5, 12.5, N, or_room)
+	# An anesthesia cart in each gap between the tables, the crash cart by the west wall, the clock
+	# above it, the scrub sinks by the doors.
+	for x in [8.55, 11.0]:
+		put.call("anesthesia_cart", x, 6.0 + depth.call("anesthesia_cart"), SOUTH, or_room)
+	put.call("crash_cart", 5.0 + depth.call("crash_cart"), 9.45, E, or_room)
+	put.call("wall_clock", 5.0, 8.6, E, or_room)
 	for y in [10.5, 12.5]:
 		put.call("scrub_sink", 14.0 - depth.call("scrub_sink"), y, WEST, or_room)
-	put.call("gurney", 8.0, 12.55, E, or_room)
-	put.call("bin", 5.5, 12.6, N, or_room)
+	# The lab wall, across from the tables (the south wall, on your left coming in the doors): one
+	# station per tile, the fume hood at the far end and the sink by the doors. Set dressing so far;
+	# the stations' spots are recorded (spots.lab -> level_info.lab) for whatever uses them later,
+	# the centrifuge first.
+	var lab := [["fume_hood", 5], ["blood_fridge", 6], ["lab_specimens", 7], ["lab_microscope", 8],
+			["lab_vials", 9], ["lab_centrifuge", 10], ["lab_analyzer", 11], ["lab_sink", 12]]
+	st.spots["lab"] = {}
+	for e in lab:
+		var kind: String = e[0]
+		var lx := float(e[1]) + 0.5
+		var ly: float = 13.0 - depth.call(kind)
+		if not put.call(kind, lx, ly, N, or_room):
+			push_error("entrance: OR lab %s at (%.2f, %.2f) did not fit" % [kind, lx, ly])
+		st.spots["lab"][kind.trim_prefix("lab_")] = {"pos": Vector2(ox + lx, oy + ly), "yaw": Defs.yaw_facing(N)}
 	# The supply shelf stands in the storage closet, against its north wall.
 	st.spots["shelf"] = {"pos": Vector2(ox + 2.0, oy + 6.0 + 0.25 / Defs.TILE), "yaw": Defs.yaw_facing(SOUTH)}
 	st.blocked[st.idx(ox + 2, oy + 6)] = 1
+	# The lab's storage bay: glass supply cabinets, steel shelving.
 	for x in [1.55, 2.55, 3.55]:
-		put.call("lockers", x, 13.0 - depth.call("lockers"), N, locker_bay)
+		put.call("glass_cabinet", x, 13.0 - depth.call("glass_cabinet"), N, lab_bay)
+	put.call("steel_shelves", 1.0 + depth.call("steel_shelves"), 10.6, E, lab_bay)
 
-	# ---- crematorium (x 19-28, y 6-12) and the unassigned room (x 19-31, y 14-18) ----------------
+	# ---- crematorium (x 19-28, y 6-12) and personnel (x 19-31, y 14-18) -------------------------
 	# The furnace is built into the east wall (col 29): a grated hatch over a window (rows 8-9, facing
 	# the doors) into a sealed 2 x 2 fire chamber (cols 30-31) nobody can walk into. economy.gd builds
 	# it at the spot below; its firelight is the room's light. Wide open, nothing else.
 	for y in [8, 9]:
 		st.set_keep(ox + 28, oy + y)
 		st.set_keep(ox + 29, oy + y, 2)
+	# Junk and bodies waiting their turn in the fire, heaped up the long walls from the doors to the
+	# furnace, leaving the lane between them (rows 8-9) clear from the doors to the hatch. The end by
+	# the furnace stays low, under the hatch's swing. A drag trail of blood down the lane.
+	var junk := func(kind: String, x: float, y: float, face: Vector2) -> void:
+		if not put.call(kind, x, y, face, crematorium):
+			push_error("entrance: crematorium %s at (%.2f, %.2f) did not fit" % [kind, x, y])
+	# North band (rows 6-7) and south band (rows 10-12), each in three pieces on whole tiles:
+	# cols 19-22, 23-25 and 26-28.
+	junk.call("junk_mound_n1", 21.1, 7.0, SOUTH)
+	junk.call("junk_mound_n2", 24.7, 7.0, SOUTH)
+	junk.call("junk_mound_n3", 27.6, 7.0, SOUTH)
+	junk.call("junk_mound_s1", 21.1, 11.5, N)
+	junk.call("junk_mound_s2", 24.7, 11.5, N)
+	junk.call("junk_mound_s3", 27.6, 11.5, N)
+	junk.call("blood_trail", 21.5, 9.1, E)
+	junk.call("blood_trail", 24.4, 9.0, E)
+	junk.call("blood_pool", 27.6, 9.0, E)
+	junk.call("ash_pile", 28.0, 8.1, SOUTH)
+	junk.call("litter", 23.4, 8.5, N)
+	junk.call("litter", 20.3, 9.6, E)
+
+	# Personnel: the staff locker room. Walking in from the spine: lockers down the left (north)
+	# wall with the four staff lockers among them, sinks with mirrors down the right (south) wall and
+	# then the big full-length mirror, benches between. Past them the back half is white tile: three
+	# showers on each side wall, a drain under each, and across the whole back wall the palm vein
+	# machine and its big screen. Only the set dressing so far: nothing works yet, but the stations'
+	# spots are recorded (spots.personnel -> level_info.personnel) for when they do. The mirrors do
+	# reflect (scripts/personnel/mirrors.gd, built from the same spots).
+	var place := func(kind: String, x: float, y: float, face: Vector2) -> void:
+		if not put.call(kind, x, y, face, personnel):
+			push_error("entrance: personnel %s at (%.2f, %.2f) did not fit" % [kind, x, y])
+	# Left wall: old banks either side of the four staff lockers, one per player.
+	var locker_x := 24.0
+	var locker_y: float = 14.0 + depth.call("staff_lockers")
+	for x in [19.7, 20.7, 21.7, 22.7, 25.3]:
+		place.call("lockers", x, 14.0 + depth.call("lockers"), SOUTH)
+	place.call("staff_lockers", locker_x, locker_y, SOUTH)
+	for x in [21.7, 24.4]:
+		place.call("bench", x, 16.5, N)
+	# Right wall: sinks with mirrors, then the big mirror where the tile starts.
+	var sinks: Array = []
+	for x in [20.0, 21.0, 22.0, 23.0, 24.0]:
+		place.call("vanity", x, 19.0 - depth.call("vanity"), N)
+		sinks.append({"pos": Vector2(ox + x, oy + 19.0 - depth.call("vanity")), "yaw": Defs.yaw_facing(N)})
+	var mirror_x := 25.3
+	place.call("full_mirror", mirror_x, 19.0, N)
+	# The back half (x 26-31): white tile, showers on both side walls, the machine on the end wall.
+	place.call("tile_floor", 29.0, 16.5, WEST)
+	place.call("tile_wall_end", 32.0, 16.5, WEST)
+	place.call("tile_wall", 29.0, 14.0, SOUTH)
+	place.call("tile_wall", 29.0, 19.0, N)
+	for x in [26.9, 28.2, 29.5]:
+		place.call("shower", x, 14.0, SOUTH)
+		place.call("shower", x, 19.0, N)
+		place.call("floor_drain", x, 14.45, SOUTH)
+		place.call("floor_drain", x, 18.55, N)
+	var machine_x: float = 32.0 - depth.call("vein_machine")
+	place.call("vein_machine", machine_x, 16.5, WEST)
+	var lockers: Array = []
+	for i in 4:
+		lockers.append({"pos": Vector2(ox + locker_x - 0.6 + 0.4 * i, oy + locker_y), "yaw": Defs.yaw_facing(SOUTH)})
+	st.spots["personnel"] = {
+		"lockers": lockers,
+		"sinks": sinks,
+		"mirror": {"pos": Vector2(ox + mirror_x, oy + 19.0), "yaw": Defs.yaw_facing(N)},
+		# The hand plate on the machine's console, and the middle of its screen's glass.
+		"scanner": {"pos": Vector2(ox + machine_x - VEIN_PLATE_Z / Defs.TILE, oy + 16.5), "yaw": Defs.yaw_facing(WEST)},
+		"screen": {"pos": Vector2(ox + machine_x + VEIN_SCREEN_Z / Defs.TILE, oy + 16.5), "yaw": Defs.yaw_facing(WEST),
+				"height": VEIN_SCREEN_Y, "size": VEIN_SCREEN_SIZE},
+	}
 
 	# ---- waiting room (x 1-11, y 20-28) ------------------------------------------------------------
 	for y in [22.5, 24.5, 26.5]:
@@ -247,10 +341,8 @@ static func build(st: S, ox: int, oy: int) -> void:
 	st.spots["phone"] = {"pos": Vector2(ox + 16.5 + 0.33 / Defs.TILE, oy + 23.5 - 0.9 / Defs.TILE), "yaw": Defs.yaw_facing(E),
 			"height": 1.12, "desk": true}
 	put.call("office_desk", 14.0, 20.0 + depth.call("office_desk"), SOUTH, lobby)
-	put.call("computer", 14.0, 20.3, SOUTH, lobby, {"y": 0.75})
 	put.call("office_chair", 14.0, 21.3, N, lobby)
 	put.call("office_desk", 15.0, 27.0, N, lobby)
-	put.call("computer", 15.0, 27.1, N, lobby, {"y": 0.75})
 	put.call("office_chair", 15.0, 26.1, SOUTH, lobby)
 	put.call("chair_row", 14.5, 28.5, N, lobby)
 	put.call("directory_board", 20.0, 20.0, SOUTH, lobby)
@@ -307,6 +399,18 @@ static func build(st: S, ox: int, oy: int) -> void:
 			Vector2i(10, 16), Vector2i(4, 22), Vector2i(8, 25), Vector2i(4, 27), Vector2i(16, 22), Vector2i(20, 25),
 			Vector2i(16, 27), Vector2i(19, 30), Vector2i(27, 22), Vector2i(27, 26)]:
 		st.lights.append({"tile": Vector2i(ox + p.x, oy + p.y), "zone": z, "mode": -1})
-	# The unassigned room: one fixture, dead. The crematorium: one dead fixture; the fire lights it.
-	st.lights.append({"tile": Vector2i(ox + 25, oy + 16), "zone": z, "mode": 2})
-	st.lights.append({"tile": Vector2i(ox + 22, oy + 9), "zone": z, "mode": 2})
+	# More fixtures filling the gaps, so the hub reads lighter than the wings (the wings keep theirs):
+	# between the hallway's set ones, down the spine, and one more or two in the break room, waiting
+	# room, lobby and pharmacy. Rolled like the rest (mostly steady).
+	for p in [Vector2i(7, 2), Vector2i(13, 3), Vector2i(19, 2), Vector2i(25, 3), Vector2i(16, 12), Vector2i(16, 19),
+			Vector2i(7, 16), Vector2i(9, 22), Vector2i(9, 27), Vector2i(20, 21), Vector2i(14, 25), Vector2i(30, 24)]:
+		st.lights.append({"tile": Vector2i(ox + p.x, oy + p.y), "zone": z, "mode": -1})
+	# Personnel: lit, steady, bright. Plus a little yellow from the big mirror's bulbs, and cold white
+	# over the vein machine.
+	for x in [21, 24, 27]:
+		st.lights.append({"tile": Vector2i(ox + x, oy + 16), "zone": z, "mode": 0, "bright": true})
+	st.lights.append({"tile": Vector2i(ox + 30, oy + 16), "zone": z, "mode": 0,
+			"tint": Color(0.82, 0.9, 1.0), "energy": 1.4, "range": 1.1})
+	st.lights.append({"tile": Vector2i(ox + 25, oy + 18), "zone": z, "mode": 0, "kind": "glow",
+			"pos": Vector2(ox + 25.3, oy + 18.6), "height": 1.6, "tint": Color(1.0, 0.86, 0.6), "energy": 0.35, "range": 3.0})
+	# The crematorium has no fixture at all: the fire is its only light.

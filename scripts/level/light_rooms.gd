@@ -4,7 +4,7 @@ extends RefCounted
 ## Every light in the hospital runs without shadows (the flashlight is the only shadow caster, for
 ## the frame rate), and a light without shadows ignores walls: it lights every surface in its range,
 ## so a room's glow showed up on the far side of its walls (the projector's green in the waiting room,
-## the furnace's orange in the unassigned room, every ceiling fixture a little into its neighbours).
+## the furnace's orange in the personnel room, every ceiling fixture a little into its neighbours).
 ##
 ## So light is bound to areas with render layers instead. The map is split into areas: each room,
 ## and each connected stretch of floor outside rooms (a corridor, a lobby strip, the lot). Areas close
@@ -27,10 +27,14 @@ extends RefCounted
 
 const Store := preload("res://scripts/level/level_state.gd")
 
-## Render layer bits free for areas (0 is DYNAMIC; 11 and 12 are the pocket spaces' copies; 17, 18
-## and 19 the dev gun, the first-person hands and the minigames).
-const AREA_BITS := [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 14, 15, 16]
+## Render layer bits free for areas (0 is DYNAMIC; 11 and 12 are the pocket spaces' copies; 16 is
+## SELF; 17, 18 and 19 the dev gun, the first-person hands and the minigames). Real maps colour with
+## at most 8 of them.
+const AREA_BITS := [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 14, 15]
 const DYNAMIC := 1
+## The local player's own body, drawn only for mirror cameras (scripts/personnel/mirrors.gd) and the
+## over-the-shoulder carry camera: the first-person camera leaves it out. Lit like DYNAMIC.
+const SELF := 1 << 16
 ## Areas whose floors come within this many tiles of each other must not share a bit.
 const CONFLICT_TILES := 6
 ## A strip of floor outside rooms this small that touches two or more areas is a joint, not an area;

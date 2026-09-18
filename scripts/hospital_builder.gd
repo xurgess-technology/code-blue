@@ -11,6 +11,8 @@ extends RefCounted
 ## Maps without furniture data (hand-made tile maps in tools) go through the legacy builder.
 
 const LightRooms := preload("res://scripts/level/light_rooms.gd")
+const MirrorsScript := preload("res://scripts/personnel/mirrors.gd")
+const Brick := preload("res://scripts/level/brick.gd")
 const MG := preload("res://scripts/mapgen.gd")
 const S := preload("res://scripts/level/level_state.gd")
 const Defs := preload("res://scripts/level/piece_defs.gd")
@@ -26,7 +28,7 @@ const PegboardScript := preload("res://scripts/containers/pegboard.gd")
 const TERMINAL_MODEL_PATH := "res://scripts/database/terminal_model.gd"
 
 ## Places where nothing a case needs is placed and monsters never spawn.
-const SAFE_ROOMS := ["or", "or_storage", "or_lockers", "hub_crematorium", "break_room", "hub_unassigned",
+const SAFE_ROOMS := ["or", "or_storage", "or_lab", "hub_crematorium", "break_room", "hub_personnel",
 		"hub_waiting", "lobby", "hub_pharmacy", "entrance", "neutral", "anteroom", "clockin"]
 
 ## Kept for perception.gd and tools/monster_lab.gd.
@@ -55,11 +57,11 @@ const OUTDOOR_LIGHT_ENERGY := 6.5
 const CANOPY_LIGHT_RANGE := 8.0
 const CANOPY_LIGHT_ENERGY := 2.6
 
-const TILE_FLOOR_ROOMS := ["restroom", "morgue", "or", "or_storage", "or_lockers", "hub_crematorium", "janitor_closet", "lab", "radiology"]
+const TILE_FLOOR_ROOMS := ["restroom", "morgue", "or", "or_storage", "or_lab", "hub_crematorium", "janitor_closet", "lab", "radiology"]
 const WARM_FLOOR_ROOMS := ["lobby", "break_room", "waiting_room", "hub_waiting", "cafeteria", "office"]
 const TILE_WALL_ROOMS := ["restroom", "or", "morgue"]
-## Hub rebuild: floor, walls and ceiling all charred black brick, the colour of the furnace's brick
-## (economy/furnace.gd uses CHAR_COLOR too).
+## Hub rebuild: floor, walls and ceiling all charred brick (scripts/level/brick.gd, which the
+## furnace's brickwork wears too); CHAR_COLOR is its average, for anything flat-coloured.
 const CHARRED_ROOMS := ["hub_crematorium"]
 const CHAR_COLOR := Color(0.11, 0.085, 0.07)
 
@@ -390,6 +392,7 @@ static func commit_steps(p: Dictionary, parent: Node3D) -> Array:
 			(p.out.anchors as Array).append_array(p.floor_anchors))
 	if part == PART_BASE:
 		steps.append(func(): _commit_lectern(p, parent))
+		steps.append(func(): _commit_mirrors(p, parent))
 	mark.call("anchors")
 	# Lights.
 	var llist: Array = p.lights
@@ -487,7 +490,9 @@ static func _geo_material(key: String) -> Material:
 		"facade": return surface_mat("mat/concrete", Color(0.42, 0.42, 0.40), 0.9)
 		"paint_white": return _paint_mat("white", Color(0.78, 0.78, 0.74))
 		"paint_yellow": return _paint_mat("yellow", Color(0.8, 0.6, 0.1))
-		"char": return _paint_mat("char", CHAR_COLOR)
+		"char": return Brick.wall_material()
+		"char_floor": return Brick.floor_material()
+		"char_ceiling": return Brick.ceiling_material()
 	return surface_mat("mat/wall", Color(0.62, 0.64, 0.60), 0.85)
 
 
@@ -689,8 +694,8 @@ static func _build_surfaces(gen: Dictionary, geo: GeoChunks, part: int = PART_BA
 				else:
 					var kind := place_kind(gen, tx, ty)
 					if CHARRED_ROOMS.has(kind):
-						fkey = "char"
-						ckey = "char"
+						fkey = "char_floor"
+						ckey = "char_ceiling"
 					elif TILE_FLOOR_ROOMS.has(kind):
 						fkey = "tile"
 					elif WARM_FLOOR_ROOMS.has(kind) or kind == "entrance":
@@ -1260,6 +1265,41 @@ static func _fill_landmarks(gen: Dictionary, info: Dictionary) -> void:
 		info["shelf"] = {"position": _w(spots.shelf.pos), "yaw": float(spots.shelf.yaw)}
 	if spots.has("lectern"):
 		info["lectern"] = {"position": _w(spots.lectern.pos), "yaw": float(spots.lectern.yaw)}
+	if spots.has("lab"):
+		# The OR's lab wall (entrance.gd): each station by name (centrifuge, vials, microscope, ...).
+		var lab := {}
+		for k in spots.lab:
+			lab[k] = {"position": _w(spots.lab[k].pos), "yaw": float(spots.lab[k].yaw)}
+		info["lab"] = lab
+	if spots.has("personnel"):
+		# The personnel room's stations (entrance.gd), in world space, for whatever brings them to life.
+		var pr: Dictionary = spots.personnel
+		var at := func(s: Dictionary) -> Dictionary:
+			var d := {"position": _w(s.pos), "yaw": float(s.yaw)}
+			if s.has("height"):
+				d["height"] = float(s.height)
+			if s.has("size"):
+				d["size"] = s.size
+			return d
+		var lockers: Array = []
+		for s in pr.lockers:
+			lockers.append(at.call(s))
+		var sinks: Array = []
+		for s in pr.sinks:
+			sinks.append(at.call(s))
+		info["personnel"] = {"lockers": lockers, "sinks": sinks, "mirror": at.call(pr.mirror),
+				"scanner": at.call(pr.scanner), "screen": at.call(pr.screen)}
+
+
+## Personnel's mirrors (scripts/personnel/mirrors.gd): real reflections over the big mirror's glass
+## and every sink's.
+static func _commit_mirrors(p: Dictionary, root: Node3D) -> void:
+	var spots: Dictionary = p.gen.spots
+	if not spots.has("personnel"):
+		return
+	var mirrors: Node3D = MirrorsScript.new()
+	root.add_child(mirrors)
+	mirrors.setup(spots.personnel, func(pos: Vector2, y: float) -> Vector3: return _w(pos, y))
 
 
 ## Builds at the "lectern" spot MapGen reserved in the break room (docs/CONTRACTS.md "Hospital"
@@ -1322,6 +1362,22 @@ static func _commit_lights(p: Dictionary, list: Array, lights_root: Node3D) -> v
 			node = _make_outdoor_light(kind)
 			node.name = "Outdoor_%d_%d" % [tile.x, tile.y]
 			node.position = pos
+		elif kind == "glow":
+			# A bare glow with no fixture: light coming off something (a vent, a mirror's bulbs).
+			pos = _w(l.pos, float(l.height))
+			node = Node3D.new()
+			node.name = "Glow_%d_%d" % [tile.x, tile.y]
+			node.position = pos
+			var glow := OmniLight3D.new()
+			glow.name = "Bulb"
+			glow.light_color = l.get("tint", Color.WHITE)
+			glow.light_energy = float(l.get("energy", 1.0))
+			glow.omni_range = float(l.get("range", LIGHT_RANGE))
+			glow.shadow_enabled = false
+			glow.distance_fade_enabled = true
+			glow.distance_fade_begin = 16.0
+			glow.distance_fade_length = 6.0
+			node.add_child(glow)
 		else:
 			pos = C.tile_to_world(tile.x, tile.y)
 			node = Legacy._make_light_fixture(mode, ((seed * 73856093) ^ (tile.x * 19349663) ^ (tile.y * 83492791)) & 0x7FFFFFFF)
@@ -1338,6 +1394,11 @@ static func _commit_lights(p: Dictionary, list: Array, lights_root: Node3D) -> v
 				bulb.light_energy = LIGHT_ENERGY * 1.7
 				bulb.omni_range = LIGHT_RANGE * 1.35
 				bulb.light_color = Color(0.96, 0.98, 1.0)
+			elif l.has("tint"):
+				# A fixture with its own colour and strength (personnel's scanner alcove).
+				bulb.light_color = l.tint
+				bulb.light_energy = LIGHT_ENERGY * float(l.get("energy", 1.0))
+				bulb.omni_range = LIGHT_RANGE * float(l.get("range", 1.0))
 		lights_root.add_child(node)
 		out.append({"tile": tile, "position": pos, "mode": mode, "node": node})
 
@@ -1399,7 +1460,7 @@ static func _sign_specs(gen: Dictionary, part: int) -> Array:
 	for r in gen.rooms:
 		if count >= MAX_SIGNS:
 			break
-		if int(r.zone) == S.ZONE_ENTRANCE and not String(r.kind) in ["or", "break_room", "hub_crematorium"]:
+		if int(r.zone) == S.ZONE_ENTRANCE and not String(r.kind) in ["or", "break_room", "hub_crematorium", "hub_personnel"]:
 			continue
 		var label: String = Rooms.KINDS.get(r.kind, {}).get("label", "")
 		if String(r.kind) == "or":
@@ -1408,6 +1469,8 @@ static func _sign_specs(gen: Dictionary, part: int) -> Array:
 			label = "STAFF ONLY"
 		elif String(r.kind) == "hub_crematorium":
 			label = "CREMATORIUM"
+		elif String(r.kind) == "hub_personnel":
+			label = "PERSONNEL"
 		if label == "":
 			continue
 		var door := Vector2i(-1, -1)

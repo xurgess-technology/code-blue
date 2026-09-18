@@ -1638,9 +1638,9 @@ Rebuilt around that:
 
 ## Export builds (build.bat) (2026-09-16)
 
-- **`build.bat`** exports the Windows build players get: `builds\windows\CodeBlue.exe` + `CodeBlue.pck`
+- **`build.bat`** exports the Windows build players get: `builds\windows\Malpractice.exe` + `Malpractice.pck`
   (+ the GodotSteam and `steam_api64.dll` libraries), no import step. `build.bat debug` adds
-  `CodeBlue.console.exe` for the engine log; `nolaunch` skips starting it. Preset: `export_presets.cfg`
+  `Malpractice.console.exe` for the engine log; `nolaunch` skips starting it. Preset: `export_presets.cfg`
   ("Windows Desktop"; `tools/`, `docs/`, `prototype-web/` left out). Needs the 4.7.2 export templates
   in `%APPDATA%\Godot\export_templates\4.7.2.stable\` (only the Windows x86_64 ones are installed on
   Zach's machine; Linux/Steam Deck would need the rest of the .tpz).
@@ -1666,7 +1666,7 @@ Rebuilt around that:
 - **The title menu is page 2 of the launch fax** (`scripts/menu.gd`): a night-shift sign-in sheet on
   the same printer. Tick boxes (`Menu.FaxOption`, real Buttons drawn as ink: focus/hover pencils a
   tick, choosing stamps an X that stays while that choice loads), the name and join address typed on
-  blanks, status as a red NOTE line. New EXIT tick box quits. The dev code turns the CODE BLUE stamp
+  blanks, status as a red NOTE line. New EXIT tick box quits. The dev code turns the MALPRACTICE stamp
   blue. No instructions on the sheet (Zach: the hosting/port help and controls list were clutter;
   the in-game host info line still shows the address to share).
 - **No printer on the menu at rest.** During the hand-off the printer slides off the bottom of the
@@ -1923,3 +1923,16 @@ Rebuilt around that:
 - `tools/settingstest.gd`'s pause check now expects the shift resumed straight after Esc.
 - `tools/faxshot.tscn` (windowed) drives every transition, logs durations, saves contact sheets.
   Not run: the test suites (settingstest, devtest, faxcheck, inventorytest touch these screens).
+
+## hospitalshot: colours wash out and flip in some shots (2026-09-18, open)
+
+- **In `tools/hospitalshot.tscn` only; not seen in play (Zach).** Some shots come out washed teal
+  with colours flipped: orange fire teal, red bins blue, white paper black, dark walls light. The
+  first-person hands and the HUD in the same frame are normal, so it isn't a whole-screen effect.
+- Seen when a large glass surface (piece_factory's glass surface: the blood fridge door, the fume
+  hood sash, glass cabinets) or the furnace window is in the middle of the view: `hub_or`,
+  `hub_crematorium`, and the lab shots aimed at the fridge. Shots of the same rooms from other angles
+  are fine.
+- Ruled out (A/B, same pose): the crematorium's brick and junk, its fixture, bloom, SSIL, the
+  furnace's spot light and its fog energy. Not yet tested: the aim highlight (`aim_highlight.gd`,
+  the crosshair was on something in every bad shot), and the glass material itself.

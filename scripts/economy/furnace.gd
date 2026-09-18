@@ -20,6 +20,7 @@ extends Node3D
 ## Local frame: origin on the floor at the room-side face of the wall, the room toward +Z.
 
 const ItemsDB := preload("res://scripts/items.gd")
+const BrickScript := preload("res://scripts/level/brick.gd")
 
 const WIDTH := 3.3             # the facade across (the wall tiles' 3 m, a little into the neighbours)
 const HOLE_W := 2.4
@@ -157,8 +158,8 @@ func _label(text: String, size: int, col: Color) -> Label3D:
 func _build() -> void:
 	var steel := _mat("steel", Color(0.36, 0.36, 0.38), 0.4, 0.7)
 	var dark_steel := _mat("dark_steel", Color(0.12, 0.12, 0.13), 0.5, 0.6)
-	# The same charred black as the crematorium's floor, walls and ceiling (HospitalBuilder.CHAR_COLOR).
-	var brick := _mat("brick", Color(0.11, 0.085, 0.07), 0.9)
+	# The same charred brick as the crematorium's walls (scripts/level/brick.gd, world triplanar).
+	var brick: Material = BrickScript.wall_material()
 	var soot := _mat("soot", Color(0.05, 0.045, 0.04), 0.95)
 	var ember := _mat("ember", Color(0.5, 0.12, 0.02), 0.8, 0.0, Color(1.0, 0.32, 0.05), 2.2)
 	var hw := WIDTH * 0.5

@@ -161,7 +161,12 @@ func _draw_crosshair(w: float, h: float) -> void:
 	var c := Vector2(w, h) * 0.5
 	var me = game.local_player()
 	var spread: float = 9.0 if me.sprinting else (6.0 if me.moving else 4.0)
+	var usable: bool = me.aim_id != "" and not String(me.aim_prompt).begins_with("!")
 	var col := Color(1, 1, 1, 0.55) if me.aim_id == "" else Color(1.0, 0.95, 0.7, 0.9)
+	# On something you can use, a small ring opens in the middle (aim_highlight.gd brightens it).
+	if usable:
+		drawn.append("crosshair_ring")
+		draw_arc(c, 5.0, 0.0, TAU, 24, col, 1.5, true)
 	draw_line(c + Vector2(-spread - 4, 0), c + Vector2(-spread, 0), col, 1.5)
 	draw_line(c + Vector2(spread, 0), c + Vector2(spread + 4, 0), col, 1.5)
 	draw_line(c + Vector2(0, -spread - 4), c + Vector2(0, -spread), col, 1.5)

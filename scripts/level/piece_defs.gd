@@ -52,7 +52,7 @@ const P := {
 	"plant": {"size": Vector3(0.45, 1.31, 0.48)},
 	"vending": {"size": Vector3(0.81, 1.97, 0.87), "block": true},
 	"med_cart": {"size": Vector3(0.7, 1.05, 0.5), "block": true},
-	"computer": {"size": Vector3(0.6, 0.5, 0.25), "collide": false},
+	"computer": {"size": Vector3(0.44, 0.52, 0.5), "collide": false},   # the standard desk computer
 	"wheelchair": {"size": Vector3(0.82, 1.1, 1.09), "block": true},
 	# ---- restrooms --------------------------------------------------------
 	"stall": {"size": Vector3(1.5, 2.0, 1.9), "block": true},
@@ -122,6 +122,35 @@ const P := {
 	"glass_cabinet": {"size": Vector3(1.2, 1.9, 0.45), "block": true},
 	"or_screen_mount": {"size": Vector3(2.2, 1.3, 0.1), "mount": 1.25},
 	"table_monitor_mount": {"size": Vector3(1.2, 0.72, 0.1), "mount": 1.45},   # hub: one per OR table
+	# The OR's lab wall (hub): one tile-wide station each, counter below and a shelf of bottles above.
+	"lab_centrifuge": {"size": Vector3(1.5, 2.3, 0.75), "block": true},   # the vial spinner
+	"lab_vials": {"size": Vector3(1.5, 2.3, 0.75), "block": true},
+	"lab_microscope": {"size": Vector3(1.5, 2.3, 0.75), "block": true},
+	"lab_analyzer": {"size": Vector3(1.5, 2.3, 0.75), "block": true},
+	"lab_specimens": {"size": Vector3(1.5, 2.3, 0.75), "block": true},
+	"lab_sink": {"size": Vector3(1.5, 2.3, 0.75), "block": true},
+	"blood_fridge": {"size": Vector3(1.5, 2.1, 0.75), "block": true},   # with gas cylinders beside it
+	# ---- crematorium (hub): the junk and the dead waiting their turn in the fire ------------
+	# Mounds heaped against the long walls, tallest at the wall, sloping down to the lane from the
+	# doors to the hatch. Sized to whole tiles so each blocks exactly the tiles it covers.
+	"junk_mound_n1": {"size": Vector3(6.24, 2.5, 2.95), "block": true},
+	"junk_mound_n2": {"size": Vector3(4.5, 2.2, 2.95), "block": true},
+	"junk_mound_n3": {"size": Vector3(4.14, 0.85, 2.95), "block": true},   # low: under the hatch's swing
+	"junk_mound_s1": {"size": Vector3(6.24, 2.7, 4.45), "block": true},
+	"junk_mound_s2": {"size": Vector3(4.5, 2.3, 4.45), "block": true},
+	"junk_mound_s3": {"size": Vector3(4.14, 0.85, 4.45), "block": true},
+	"ash_pile": {"size": Vector3(1.4, 0.3, 1.1), "collide": false},
+	"litter": {"size": Vector3(1.6, 0.02, 1.3), "collide": false},
+	# ---- personnel (hub): the staff locker room ---------------------------
+	"staff_lockers": {"size": Vector3(2.4, 1.95, 0.5), "block": true},   # four, one per player
+	"vanity": {"size": Vector3(1.2, 2.3, 0.55)},   # a sink with its mirror and light over it
+	"full_mirror": {"size": Vector3(1.8, 2.86, 0.08), "mount": 0.06},   # practically floor to ceiling
+	"vein_machine": {"size": Vector3(7.2, 2.95, 1.5), "block": true},   # the whole back wall
+	"shower": {"size": Vector3(0.5, 1.4, 0.4), "mount": 0.95},
+	"floor_drain": {"size": Vector3(0.3, 0.01, 0.3), "collide": false},
+	"tile_floor": {"size": Vector3(7.5, 0.012, 9.0), "collide": false},   # the tiled back half: showers, the machine
+	"tile_wall": {"size": Vector3(9.0, 2.98, 0.02), "mount": 0.0},
+	"tile_wall_end": {"size": Vector3(7.5, 2.98, 0.02), "mount": 0.0},
 	# ---- outdoors --------------------------------------------------------------
 	"ambulance": {"size": Vector3(2.18, 2.61, 4.71), "block": true},
 	"van": {"size": Vector3(2.18, 1.96, 3.99), "block": true},

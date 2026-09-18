@@ -26,8 +26,8 @@ uniform float base = 0.035;
 
 void fragment() {
 	float facing = clamp(dot(normalize(NORMAL), normalize(VIEW)), 0.0, 1.0);
-	float edge = pow(1.0 - facing, 3.5);
-	float breathe = 0.82 + 0.18 * sin(TIME * 2.1);
+	float edge = pow(1.0 - facing, 4.5);
+	float breathe = 0.92 + 0.08 * sin(TIME * 1.6);
 	ALBEDO = tint * (edge * rim * breathe + base);
 }
 """
@@ -88,8 +88,9 @@ static func tint_material(kind: String, soft := false) -> Material:
 	m.set_shader_parameter("tint", Vector3(col.r, col.g, col.b))
 	# Gold loot is often dark metal and plastic; teal supplies are mostly bright: even them out.
 	var soft_k := 0.4 if soft else 1.0
-	m.set_shader_parameter("rim", (0.7 if key == "teal" else 0.8) * soft_k)
-	m.set_shader_parameter("base", (0.025 if key == "teal" else 0.03) * soft_k)
+	# Toned down (Zach: too harsh): a soft edge you notice in the dark, not a glowing outline.
+	m.set_shader_parameter("rim", (0.32 if key == "teal" else 0.38) * soft_k)
+	m.set_shader_parameter("base", (0.012 if key == "teal" else 0.015) * soft_k)
 	_tint_mats[cache_key] = m
 	return m
 

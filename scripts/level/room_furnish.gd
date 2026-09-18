@@ -59,7 +59,7 @@ const REQUIRED := {
 	# The hub (scripts/level/entrance.gd, hub rebuild 2026-09-16).
 	"break_room": ["time_clock", "break_table"],
 	"or": ["or_table", "surgical_lamp", "scrub_sink"],
-	"or_lockers": ["lockers"],
+	"or_lab": ["glass_cabinet"],
 	"lobby": ["reception_desk", "office_desk"],
 	"hub_pharmacy": ["med_shelf"],
 	"hub_waiting": ["chair_row", "tv_wall"],

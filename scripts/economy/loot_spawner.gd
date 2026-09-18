@@ -20,7 +20,7 @@ extends RefCounted
 
 const LootTable := preload("res://scripts/economy/loot_table.gd")
 
-const SAFE_ROOMS := ["or", "or_storage", "or_lockers", "hub_crematorium", "break_room", "hub_unassigned",
+const SAFE_ROOMS := ["or", "or_storage", "or_lab", "hub_crematorium", "break_room", "hub_personnel",
 		"hub_waiting", "lobby", "hub_pharmacy", "anteroom", "clockin", "entrance", "neutral", "outdoor", "dev"]
 ## Chance a free location holds loot at depth 0; each depth step adds DEPTH_CHANCE_GAIN of it.
 const BASE_CHANCE := 0.16

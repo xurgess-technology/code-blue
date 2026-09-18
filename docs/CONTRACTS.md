@@ -4,7 +4,7 @@ This is the agreement between the systems being built in parallel. If a contract
 or missing something, do not silently change it: tell the main session (SendMessage to
 "main") what you need and why, and build against the contract as written meanwhile.
 
-Project: `C:\Users\ZachBurgess\workspace\code-blue-godot`, Godot 4.7.2, GDScript.
+Project: `C:\Users\ZachBurgess\workspace\malpractice`, Godot 4.7.2, GDScript.
 Godot binary: `"/c/Users/ZachBurgess/Desktop/Godot_v4.7.2-stable_win64.exe/Godot_v4.7.2-stable_win64_console.exe"`.
 Design brief: `DESIGN.md`, plus the "Design decisions" section at the bottom of this file.
 
@@ -78,8 +78,9 @@ func interact(player) -> void            # HOST ONLY, called after the host vali
 
 R.E.P.O.'s look, cited in DESIGN.md: what you can interact with is signalled primarily by a visual
 cue on the object itself, not a permanently floating label. `scripts/aim_highlight.gd`
-(`AimHighlight`) is the generic version of that: a thin glowing rim on whatever the local player's
-crosshair is currently over, driven straight off the aim system above (`Player.aim_id` /
+(`AimHighlight`) is the generic version of that: whatever the local player's crosshair is over
+brightens slightly (a faint warm lift, a little more at its edges, faded in over 0.1 s; no outline
+since 2026-09-18, it was too harsh), with a small ring in the crosshair (hud.gd), driven straight off the aim system above (`Player.aim_id` /
 `aim_prompt`), local and purely cosmetic — every player highlights only what THEY aim at, no
 network traffic, no interaction-logic change.
 
@@ -91,12 +92,9 @@ AimHighlight.warm(parent: Node3D)                    # warmup.gd hook: compiles 
 `Player._update_aim_highlight()` (called from `_update_aim()`, local player only) turns the rim on
 whenever `aim_id != ""`, the node is in group `"interactable"`, and `aim_prompt` does not begin
 with `"!"` (the existing "can't use this right now" convention) — the same gate the crosshair
-prompt already uses for its own styling. Technique: a duplicated inverted-hull mesh added as a
-child of each of the target's own `MeshInstance3D`s (so it inherits that instance's transform for
-free), pushed out along its own normals in the vertex shader and drawn back-face-only so only the
-sliver of "extra" geometry beyond the real silhouette shows. One shared shader/material; at most a
-handful of extra draws for whatever is currently aimed at (never more than one thing per local
-player).
+prompt already uses for its own styling. Technique: a copy of each of the target's biggest
+`MeshInstance3D`s added as a child of it, 2 mm proud of its surface, front faces only, additive and
+unlit, one material per highlight faded in by a tween.
 
 This replaced a handful of always-on `Label3D` room/prop labels that duplicated this cue (the OR
 supply shelf's "SUPPLY - SURGICAL" tag, the break-room blender's "BLENDER" tag): removed outright,
@@ -131,6 +129,16 @@ info["containers"]    = [{id, type, room_kind, wing, depth, node, position, slot
 info["loose_anchors"] = [{position: Vector3, yaw: float, surface: "counter"|"tray"|"gurney"|"floor", room_kind: String, wing, depth}]
 info["shelf"]         = {position: Vector3, yaw: float}   # OR supply shelf, near the tables
 info["lectern"]       = {position: Vector3, yaw: float}   # in the break room
+info["lab"]           = {centrifuge, vials, microscope, analyzer, specimens, sink, blood_fridge, fume_hood:
+                         {position: Vector3, yaw: float}}   # the OR's lab wall, set dressing so far
+info["personnel"]     = {mirror, scanner (the vein machine's hand plate): {position: Vector3, yaw: float},   # the personnel room
+                         screen: {position (the glass's centre), yaw, height: float, size: Vector2 (3.2 x 1.7 m)},
+                         lockers: [{position, yaw}] (4, one per player, left to right from the room),
+                         sinks: [{position, yaw}] (5)}   # set dressing, but the mirrors reflect:
+# scripts/personnel/mirrors.gd (built by HospitalBuilder from the same spots) renders the big mirror
+# and the sink mirrors from reflected cameras, and shows the local player's own body to them only
+# (Player.set_mirror_self; the body is on LightRooms.SELF = layer bit 16, which the first-person
+# camera leaves out except while the carry camera shows the body: Player.set_carry_body).
 ```
 
 Sweep 2: which room kinds a container type stands in is `CONTAINER_ROOMS` in
@@ -579,8 +587,8 @@ game.mark_db(kind, field)             # host: sets a field true (once), saves to
 
 `MapGen.generate(seed)` (`scripts/mapgen.gd`, parts in `scripts/level/`) lays out one floor:
 an entrance building (the hub, 33 x 33 tiles since the 2026-09-16 hub rebuild, after Zach's floorplan:
-hallway, spine, OR with its supply storage closet and locker bay, crematorium with the furnace built
-into its wall, break room, unassigned room, waiting room, lobby, pharmacy, vestibule; see the header of
+hallway, spine, OR with its supply storage closet, lab wall and lab storage bay, crematorium with the furnace built
+into its wall, break room, personnel, waiting room, lobby, pharmacy, vestibule; see the header of
 `scripts/level/entrance.gd`), exactly three wings around it (`west`, `north`, `east`) and the
 neutral area outside the main doors. `HospitalBuilder.build(gen, info)` builds it and fills
 `info`. Maps without furniture data (hand-made tile maps, `tools/monster_lab.gd`) go through
@@ -639,7 +647,7 @@ rooms: [{id, kind, wing, depth, rect: Rect2 (world XZ, interior), tiles: Rect2i,
 zones: {grid, width, height, names}   # HospitalBuilder.zone_of(info, pos) -> wing id, "entrance", "neutral" or ""
 ```
 
-- Room kinds: `or`, `or_storage`, `or_lockers`, `hub_crematorium`, `break_room`, `hub_unassigned`,
+- Room kinds: `or`, `or_storage`, `or_lab`, `hub_crematorium`, `break_room`, `hub_personnel`,
   `hub_waiting`, `lobby`, `hub_pharmacy` (wing `"entrance"`, depth 0, `Entrance.ROOM_KINDS`) and `patient_room`, `supply_closet`, `pharmacy`, `nurse_station`, `waiting_room`,
   `restroom`, `office`, `lab`, `radiology`, `morgue`, `janitor_closet`, `cafeteria`. Anchors and
   containers outside rooms report `room_kind` `"corridor"` (wing hallways), `"entrance"` or
