@@ -30,7 +30,6 @@ var hive = null
 ## every other look. It is `shaper` too.
 var sono = null
 var iv: Node3D = null            ## the Discharged's IV pole, top-level
-var cart: Node3D = null          ## the Sonographer's ultrasound cart (sono_cart.gd), top-level
 ## Movable ears: [{node: Node3D pivot on the head, side: +1 left / -1 right, rest: outward radians}]
 var ears: Array = []
 var _ear_listen := 0.0
@@ -81,16 +80,24 @@ func setup(monster_kind: String) -> void:
 
 
 ## The Sonographer's look, on top of the clip: how suspicious it is (0..1, a faint throat glow), how
-## far an echo is charged (0..1, the throat and the cable ramping up), which mode it is in (idle,
-## suspicious, charging, echo, rush, wail, stagger, lying), and whether the cart is still plugged into
-## the back of its neck (false once it is sedated or killed). Safe on any model: the others ignore it.
-## See docs/CONTRACTS.md, "Monsters".
-func set_sono_look(suspicion: float, charge: float, mode: String, plugged := true) -> void:
+## far an echo is charged (0..1, the throat and the pump line ramping up), which mode it is in (idle,
+## suspicious, charging, echo, turning, rush, wail, stagger, lying), how far round the cart is swung
+## on its pivot bone (radians; 0 dragging at its right, SonoRig.CART_BEHIND round behind it), and
+## whether the pump line is still plugged into its neck (false once it is sedated or killed, which
+## also takes the cart off the model). Safe on any model: the others ignore it.
+## See docs/CONTRACTS.md, "The Sonographer's model and its cart".
+func set_sono_look(suspicion: float, charge: float, mode: String, cart_angle := 0.0, plugged := true) -> void:
 	if sono != null:
-		sono.set_look(suspicion, charge, mode, plugged)
+		sono.set_look(suspicion, charge, mode, cart_angle, plugged)
 
 
-## Where the cart's cable plugs into the back of its neck, in world space.
+## How fast the Sonographer is hauling its cart (m/s): its castors roll with it.
+func set_cart_speed(speed: float) -> void:
+	if sono != null:
+		sono.cart_speed = speed
+
+
+## Where the pump line plugs into the nape of its neck, in world space.
 func cable_point() -> Vector3:
 	return sono.cable_point() if sono != null else global_position + Vector3.UP
 
@@ -127,10 +134,6 @@ static func make_lying(monster_kind: String) -> Node3D:
 	if m.iv != null:
 		m.iv.queue_free()
 		m.iv = null
-	if m.cart != null:
-		# on the table the cart is gone: it smokes away when its Sonographer goes down
-		m.cart.queue_free()
-		m.cart = null
 	if m.shaper != null:
 		m.shaper.lying = 1.0
 	var back := 0.12 if monster_kind == "hive" else 0.09
@@ -140,8 +143,12 @@ static func make_lying(monster_kind: String) -> Node3D:
 		m.skeleton.reset_bone_poses()
 		back = 0.1   # the dress at her shoulder blades; the flared skirt sinks into whatever she lies on
 	elif m.sono != null:
-		# its rest pose is standing straight; the Lying clip lays it out flat on the table
-		m.play("lying", 1.0, 0.0)
+		# Its rest pose is standing straight, and the poser's `lying` brings the arms in, as the Hive
+		# does. The cart comes off with it: a copy is left standing wherever it went down (chunk B
+		# turns that copy into smoke).
+		m.sono.set_cart_visible(false)
+		m.anim.stop()
+		m.skeleton.reset_bone_poses()
 		back = 0.11
 	elif m.hive != null:
 		# Its rest pose is standing straight; no clip plays, and the poser's `lying` brings the arms in.
@@ -260,5 +267,5 @@ func _build_fallback() -> void:
 func _process(delta: float) -> void:
 	if iv != null and iv.has_method("follow"):
 		iv.follow(self, delta)
-	if cart != null and cart.has_method("follow"):
-		cart.follow(self, delta)
+	if sono != null:
+		sono.tick(delta)

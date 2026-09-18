@@ -21,7 +21,7 @@ downloaded or generated models. Replaces the realistic `art/human` surgeons for 
 | `st_sdf.py` | Signed distance fields in numpy (smooth unions, round cones, noise) and a surface-nets mesher |
 | `st_char.py` | The characters as data plus shapes: skeleton numbers, the head (v2 = the surgeon's), hands, limbs, scrubs, gown, gash pieces, per-vertex paint |
 | `st_build.py` | Blender driver: meshes every part, weights it to the human pipeline's skeleton, poses and renders review shots, animation strips (`--anim`), the game export (`--export`) |
-| `st_sono_clips.py` | The Sonographer's own clips: idle, walk (pushing the cart), listen, charge, echo, rush, wail, stagger, lying |
+| `st_sono_clips.py` | The Sonographer's own clips: idle, the sideways drag-walk, listen, charge, echo, the turn to rush, the rush, the wail, stagger, lying |
 | `st_clips.py` | Clips added on top of the shared 11: `Dive` (the sprint-dive, flat out in the air and belly-sliding; body_hands plays it) |
 | `st_export.py` | Game export: decimation (~21.7k tris), UV atlas per material, bakes from the dense sculpt (albedo + AO, roughness, normals, shader masks), the belly gash pieces, sites, the 11 clips, GLB |
 
@@ -47,7 +47,9 @@ lit by the material's `Lock` value, 0 wandering and 1 locked on). Hive shots: `h
 `hive_back`, `hive_top`, `face_hive`, `face_hive_lock`, `hive_dark(_lock)`, `hive_black(_lock)`.
 `sonographer` (the Sonographer: tall and straight, a neck 0.17 m longer than the kit's carrying the head out
 in front and cocked over one ear, the eye sockets scarred flat with a faint seam and no eye pieces at all, big
-swivelling ears and a glowing windpipe behind a translucent pane of throat skin, all three their own pieces).
+swivelling ears and a glowing windpipe behind a translucent pane of throat skin, all three their own pieces.
+Its ultrasound cart is part of the same model: `st_build.add_cart_bones` hangs a `cart_pivot` bone off the
+right hand and a bone under each castor, and `st_char.cart_parts` builds the cart rigidly on them).
 Sono shots: `sono_front`, `sono_side`, `sono_34`, `sono_back`, `sono_throat(_charge)`, `sono_dark(_charge)`,
 `face_sono`; `set_charge(0..1)` lights the windpipe for the charge shots.
 `--only=sonographer --export` writes `assets/models/monsters/sonographer/sonographer_st.glb` with its own clips

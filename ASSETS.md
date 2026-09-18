@@ -365,9 +365,10 @@ replaces the arm meshes through `fp_arms.make_arm()` and the rig through `rig_ma
 
 - The stylized kit as the hospital's blind, listening monster: the eye sockets scarred flat with no
   eye pieces at all, big swivelling ears and a glowing windpipe as their own pieces, and a neck
-  0.17 m longer than the kit's carrying the head out in front. Nine clips of its own
-  (`art/stylized/st_sono_clips.py`); rebuild with `st_build.py -- --only=sonographer --export`.
-  Its ultrasound cart is built in GDScript, not modelled (`scripts/monsters/sono_cart.gd`).
+  0.17 m longer than the kit's carrying the head out in front. **Its ultrasound cart is part of the
+  same model**, on a pivot bone at the right hand with a bone per castor, so the whole thing is one
+  entity. Ten clips of its own (`art/stylized/st_sono_clips.py`); rebuild with
+  `st_build.py -- --only=sonographer --export`.
 
 ---
 

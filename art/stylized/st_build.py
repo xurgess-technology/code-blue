@@ -67,6 +67,31 @@ def body_for(V):
     return b
 
 
+def add_cart_bones(arm, body):
+    """The Sonographer's cart is part of the model, so it rides bones like everything else:
+    `cart_pivot` hangs off the right hand (pointing straight down, so turning it about its own axis
+    is a clean yaw of the whole cart: that is the trailer swing chunk B drives), and one bone per
+    castor, each lying along its axle so turning it about its own axis rolls the wheel."""
+    sk = st_char.Skel(body)
+    H = Vector(tuple(st_char.cart_anchor(sk)))
+    specs = [('cart_pivot', H, H + Vector((0, 0, -0.14)), 'hand.R', Vector((0, -1, 0)))]
+    for name, _dx, _dy in st_char.CASTORS:
+        c = Vector(tuple(st_char.castor_centre(sk, name)))
+        specs.append((name, c - Vector((0, 0.03, 0)), c + Vector((0, 0.03, 0)), 'cart_pivot', Vector((0, 0, 1))))
+    bpy.context.view_layer.objects.active = arm
+    bpy.ops.object.mode_set(mode='EDIT')
+    eb = arm.data.edit_bones
+    for n, h, t, par, roll in specs:
+        b = eb.new(n)
+        b.head, b.tail = h, t
+        b.parent = eb[par]
+        b.use_connect = False
+        b.align_roll(roll)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    for b in arm.data.bones:
+        b.use_deform = b.name != 'root'
+
+
 # ====================================================================== materials
 def attr_material(name, sss=0.0, coat=0.0, spec=0.5, sheen=0.0, emit=None):
     m = bpy.data.materials.get(name)
@@ -448,21 +473,9 @@ def pose_hive(rig):
 
 
 def pose_sono(rig):
-    """Standing tall and straight, the long neck carrying the head out ahead of the chest and cocked
-    over one ear, both hands out in front where the cart's handle is. Never the Hive's hunch."""
-    from hu_rig import Pose, spine, arm_hang, hand_relax, planted, Rx, Ry, Rz
-    s = rig.body.s
-    p = Pose(rig)
-    p.hips = Vector((0.0, 0.0, -0.004 * s))
-    spine(p, lean=0.05, yaw=0.02, roll=0.01, neck_comp=0.0)
-    p.rel('neck', Rx(0.44) @ Rz(0.05))
-    p.rel('head', Rx(-0.30) @ Ry(0.26) @ Rz(0.06))
-    for side, sg in (('L', 1.0), ('R', -1.0)):
-        ball = Vector((rig.ball[side].x * 0.86, rig.ball[side].y, rig.ball[side].z))
-        planted(p, side, ball, 0.0, yaw=sg * 0.05)
-        arm_hang(p, side, swing=1.05, abduct=0.13, bend=0.62, wrist=-0.25, twist=0.30)
-        hand_relax(p, side, curl=0.75, thumb=0.35)
-    return p
+    """The review stand: the Sonographer's own idle, so the cart, the turned head and the hand on the
+    handle are all exactly where the clips put them."""
+    return st_sono_clips.idle_pose(rig, 30)
 
 
 def pose_for(V):
@@ -490,6 +503,8 @@ def build_variant(name, x_off):
     coll = bpy.data.collections.new(name)
     bpy.context.scene.collection.children.link(coll)
     arm = hu_rig.build_armature(body, name + '_Rig')
+    if V.get('sono'):
+        add_cart_bones(arm, body)
     bpy.context.scene.collection.objects.unlink(arm)
     coll.objects.link(arm)
     obs = []
@@ -793,6 +808,11 @@ def main():
         chars[name] = build_variant(name, layout[name])
     studio()
     bpy.context.view_layer.update()
+    for nm, c in chars.items():
+        # which way the posed head faces, in armature axes: the Sonographer's must point the way it
+        # side-steps (+X), not at its own cart
+        o = head_point(c, (0, 0, 0))
+        log('%s head faces' % nm, tuple(round(v, 2) for v in (head_point(c, (0, -0.3, 0)) - o).normalized()))
     if '--export' in ARGS:
         export_and_compare(chars[ONLY[0]], ONLY[0])
         log('done')

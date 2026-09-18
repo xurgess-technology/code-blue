@@ -596,51 +596,73 @@ HiveRig.WALK_SPEED 0.85      # rate = speed / WALK_SPEED (0.4..2.4x)
 The model only: the hunting, the echo, the rename and the sounds are chunk B (`sono-brain`). Asset
 `monster/sonographer` (`assets/models/monsters/sonographer/`, built in Blender from `art/stylized/`,
 variant `sonographer`, clips `art/stylized/st_sono_clips.py`): 2.05 m, feet at y 0, the human
-skeleton with a neck 0.17 m longer than everyone else's, and no eye pieces at all — the sockets are
-scarred flat. `MonsterModel.setup("sonographer")` builds it through
+skeleton with a neck 0.17 m longer than everyone else's, no eye pieces at all (the sockets are
+scarred flat), and **its ultrasound cart on the same skeleton** — the monster and the cart are one
+entity and one model. `MonsterModel.setup("sonographer")` builds it through
 `scripts/monsters/sonographer_rig.gd`; without the asset it falls back to the reshaped Kenney rig.
 
+**How it moves.** It walks **sideways**: the chest square on, side-stepping toward its own left, the
+right arm out to its right holding the cart's handle, and the head turned hard over its shoulder to
+face where it is going. To attack it **swings round** (`SonoTurn`) and comes at you **head on**, the
+left arm flailing in front and the cart hauled round behind it. The spine stays upright in every
+clip on purpose: in the dark it must never read like the Hive.
+
+**The cart's bones.** `cart_pivot` hangs off `hand.R`, pointing straight down, so turning it about
+its own axis is a clean yaw of the whole cart — that is the trailer swing. Each castor is its own
+bone (`castor_fl/fr/bl/br`) lying along its axle. The rig sets all of them in skeleton space every
+frame, so the cart stays upright and pointing where `cart_angle` says whatever the clip or the hand
+did. `SonoRig.SQUEAKY` names the castor that squeaks (its fork is visibly bent).
+
 **The look interface.** This is the whole surface between the model and whatever drives it, so a
-stand-in model can wear it too, and chunk B can hook the real one up by swapping the kind:
+stand-in model can wear it too, and whichever chunk merges second hooks them together:
 
 ```gdscript
-model.set_sono_look(suspicion, charge, mode, plugged)
+model.set_sono_look(suspicion, charge, mode, cart_angle, plugged)
 #   suspicion 0..1   a faint glow in the throat
-#   charge    0..1   the throat and the cable ramp up bright, with a band of light travelling
-#                    down the cable from the neck to the cart
-#   mode             "idle" | "suspicious" | "charging" | "echo" | "rush" | "wail" | "stagger" | "lying"
-#   plugged          false once it is sedated or killed: the cable lets go of its neck and goes dark
-model.cable_point()          # where the cable plugs into the back of its neck, in world space
-model.cart                   # the ultrasound cart (sono_cart.gd), top-level; free it and it is gone
-model.cart.offset            # SonoCart.PUSH in front of it while it walks, SonoCart.DRAG behind while it rushes
-model.cart.squeak_wheel      # the castor that squeaks, and model.cart.rolled the metres it has travelled
-model.sono                   # SonoPoser (SkeletonModifier3D) or null; it is also model.shaper
+#   charge    0..1   the throat and the pump line ramp up bright, with a band of light travelling
+#                    down the line from the neck to the cart
+#   mode             "idle" | "suspicious" | "charging" | "echo" | "turning" | "rush" | "wail" |
+#                    "stagger" | "lying"
+#   cart_angle       the cart pivot's angle, radians: 0 out at its right (dragging),
+#                    SonoRig.CART_BEHIND (-1.06) swung round behind it (rushing). Chunk B eases
+#                    between them a beat after the body turns; nothing here does that for it.
+#   plugged          false once it is sedated or killed: the line lets go of the nape, goes dark,
+#                    and the cart comes off the model
+model.set_cart_speed(m_per_s)    # the castors roll with it and the cart jostles
+model.cable_point()              # where the line plugs into the nape, in world space
+model.sono                       # SonoPoser (SkeletonModifier3D) or null; it is also model.shaper
+model.sono.echo_origin()         # Transform3D: an echo fires from the head, not the chest (-Z is the face)
+model.sono.cart_box()            # {node, half}: the cart's one collision box. Chunk B builds the body
+model.sono.make_cart()           # a standalone copy of the cart, standing exactly where it is now
+model.sono.set_cart_visible(on)  # take the cart off the model (make_cart leaves the copy behind)
 model.shaper.lying / daze / rise / stagger / twitch / listen / listen_yaw   # the usual rig_shaper inputs
 model.set_ears(listen, yaw, delta)   # the two ears swivel, as the Discharged's do
 model.play(logical, rate, blend)
-#   "idle" SonoIdle, "walk" SonoWalk (1.05 m/s), "run" SonoRush (3.1 m/s), "attack" SonoWail,
-#   "listen" SonoListen, "charge" SonoCharge, "echo" SonoEcho, "stagger" SonoStagger, "lying" SonoLying
-SonoRig.WALK_SPEED 1.05 / RUSH_SPEED 3.10    # rate = speed / the clip's speed
+#   "idle" SonoIdle, "walk" SonoDrag (0.95 m/s sideways), "turn" SonoTurn, "run" SonoRush (3.1 m/s),
+#   "attack" SonoWail, "listen" SonoListen, "charge" SonoCharge, "echo" SonoEcho,
+#   "stagger" SonoStagger, "lying" SonoLying
+SonoRig.DRAG_SPEED 0.95 / RUSH_SPEED 3.10    # rate = speed / the clip's speed
 ```
 
-`set_sono_look` is safe on any model: every other look ignores it.
+`set_sono_look` and `set_cart_speed` are safe on any model: every other look ignores them.
 
 - **The pieces.** The ears (`Human_Ear_L` / `_R`) come off the skin at load and hang under pivots at
   `Site_ear_L` / `_R` in the model's own axes, so they turn. The windpipe (`Human_Throat`) gets
   `shaders/sono_glow.gdshader` and a small cold omni light; the pane of skin over it
-  (`Human_ThroatSkin`) goes translucent so the rings show through it. `Site_cable` at the nape is
-  where the cart plugs in.
-- **The cart** (`scripts/monsters/sono_cart.gd`) is top-level and follows like the Discharged's IV
-  pole: it eases to `offset` metres along the Sonographer's facing, turns to keep its handle, screen
-  and cable socket pointing at it, and rolls its castors. No collider, so it can never block a
-  hallway. The cable is twelve segments of the same glow shader, curved out over the shoulder so it
-  goes round the body instead of through it.
-- **Posture.** Upright, with a long neck carrying the head out in front of the chest and cocked over
-  one ear. Every clip keeps the spine lean near zero on purpose: in the dark it must never read like
-  the Hive's hunch.
+  (`Human_ThroatSkin`) goes translucent so the rings show through it. The cart is `Human_Cart`,
+  `Human_CartScreen` (the monitor, which is simply on) and `Human_Castor_*`; they hide together.
+  `Site_cable` (the nape), `Site_pump` (the cart's outlet), `Site_echo` (the face) and
+  `Site_cart_box` mark the rest.
+- **The pump line** is drawn in code between `Site_pump` and `Site_cable`: eight segments of the same
+  glow shader. Both ends ride bones that keep the same relation in every clip, so the run is short,
+  always the same shape and never clips through anything.
+- **Sedated, killed, on the table.** `plugged = false` (or mode "lying") takes the cart off the model
+  and puts the line out; `make_cart()` hands back a copy standing where it was, for chunk B to turn
+  into smoke. The lying body has no cart.
 - Review: `tools/monster_lab.tscn -- --sono` walks it through every clip with the look interface
-  ramping and a caption; the shots `sono_4m`, `sono_cart`, `sono_back`, `sono_listen`, `sono_charge`,
-  `sono_throat`, `sono_face`, `sono_lying` are in `--shots`.
+  ramping and a caption, and leaves the cart copy standing when the line comes out; the shots
+  `sono_4m`, `sono_drag`, `sono_drag_back`, `sono_listen`, `sono_charge`, `sono_turn`, `sono_rush`,
+  `sono_wail`, `sono_throat`, `sono_face`, `sono_lying` are in `--shots`.
 
 ## Database terminal (terminal redesign, 2026-09-16: the break room projector screen)
 

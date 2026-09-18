@@ -212,8 +212,8 @@ static func run(game: Node, progress: Callable = Callable(), ready_to_draw: Call
 	# builds her Blender model (monster/night_nurse: its two skinned materials, shadow mesh and the
 	# first load of its six maps), so the first Night Nurse of a session does not hitch.
 	var mx := -1.0
-	# "sonographer" also builds its ultrasound cart, the cable and the glow shader its throat and cable
-	# share, and the translucent pane of skin over its windpipe.
+	# "sonographer" also builds its ultrasound cart (part of the same model), the pump line and the
+	# glow shader its throat and line share, and the translucent pane of skin over its windpipe.
 	for kind in ["discharged", "night_nurse", "hive", "sonographer"]:  # SWEEP 3 HOOK (monsters)
 		var model: Node3D = MonsterModel.new()
 		shelf.add_child(model)
@@ -221,7 +221,7 @@ static func run(game: Node, progress: Callable = Callable(), ready_to_draw: Call
 		model.position = Vector3(mx, -1.6, -2.0)
 		model.scale = Vector3.ONE * 0.5
 		if model.has_method("set_sono_look"):
-			model.set_sono_look(0.6, 0.6, "charging", true)
+			model.set_sono_look(0.6, 0.6, "charging", 0.0, true)
 		mx += 1.0
 		await _slice(slice)
 	_inert(shelf)

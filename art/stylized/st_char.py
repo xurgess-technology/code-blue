@@ -63,7 +63,7 @@ VARIANTS = {
         neck_ext=0.17,
         skin=(0.55, 0.55, 0.51), flush=(0.54, 0.41, 0.40), lip=(0.38, 0.31, 0.32),
         hair=(0.10, 0.10, 0.10), iris=(0.2, 0.2, 0.2), cloth=(0.50, 0.57, 0.56),
-        scar=(0.66, 0.64, 0.60), glow=(0.38, 0.86, 1.0),
+        scar=(0.66, 0.64, 0.60), glow=(0.38, 0.86, 1.0), cart=(0.70, 0.68, 0.60),
         jaw=0.45, cheek=0.15, nose=0.85, brow=0.0, jowl=0.0, sag=0.30, mouth_open=0.45, eye_open=0.62,
         outfit='gown', graft=False, seed=13),
 }
@@ -1085,7 +1085,114 @@ def build(name, body):
         _scrubs(V, sk, parts)
     else:
         _gown(V, sk, parts)
+    if V.get('sono'):
+        cart_parts(V, sk, parts)
     return parts, {'V': V, 'sk': sk, 'head': head}
+
+
+# ====================================================================== the Sonographer's cart
+# The cart is part of the model, on the same skeleton: everything here is rigidly weighted to the
+# bones st_build.add_cart_bones adds. `cart_anchor` is where the pivot bone sits (the right wrist in
+# the rest pose), and the cart is authored hanging off it, out to the character's right and a little
+# behind, so with the right hand posed back at the anchor the cart is always in the same place.
+CART_OFF = np.array([-0.34, 0.22, 0.0])     # the cart's base centre, from the anchor, on the floor
+CART_HALF = np.array([0.26, 0.22, 0.60])    # half extents of the one collision box, round CART_BOX_C
+CART_BOX_C = np.array([0.0, 0.0, 0.58])     # its centre above the base
+CASTORS = (('castor_fl', 0.185, 0.155), ('castor_fr', 0.185, -0.155),
+           ('castor_bl', -0.185, 0.155), ('castor_br', -0.185, -0.155))
+CASTOR_R = 0.046
+SQUEAKY = 'castor_br'                       # the one that squeaks (a crooked fork, so it sits askew)
+
+
+def cart_anchor(sk):
+    """Where the cart's pivot bone sits: the right wrist in the rest pose."""
+    return sk.mirror(sk.J['wrist'])
+
+
+def cart_centre(sk):
+    """The cart's base centre, on the floor (z 0)."""
+    c = cart_anchor(sk) + CART_OFF
+    return np.array([c[0], c[1], 0.0])
+
+
+def castor_centre(sk, name):
+    c = cart_centre(sk)
+    for n, dx, dy in CASTORS:
+        if n == name:
+            return np.array([c[0] + dx, c[1] + dy, CASTOR_R])
+    return c
+
+
+def _cart_paint(P, C, base, grime=0.45):
+    """Cream enamel gone dirty, darker in the corners, with a grimy tide line low down."""
+    col = np.tile(srgb(base), (len(P), 1)) * (0.92 + 0.14 * S.fbm(P, 22.0, 61, 3))[:, None]
+    low = smooth01((0.34 - P[:, 2]) / 0.34)
+    g = smooth01((S.fbm(P, 9.0, 64, 3) - 0.56 + 0.22 * low) / 0.12) * grime
+    col = mix(col, srgb((0.34, 0.30, 0.20)), np.clip(g, 0, 1))
+    scuff = smooth01((S.fbm(P, 40.0, 67, 2) - 0.70) / 0.05) * low
+    col = mix(col, srgb((0.26, 0.26, 0.27)), np.clip(scuff * 0.7, 0, 1))
+    return col, np.full(len(P), 0.55) - 0.15 * g
+
+
+def cart_parts(V, sk, parts):
+    """The chunky ultrasound cart: a castored base, a boxy body with the pump and the line's stub, a
+    column, a monitor whose screen is just on, and the handle bar the right hand holds. Each castor is
+    its own piece on its own bone so it can spin."""
+    C = cart_centre(sk)
+    H = cart_anchor(sk)
+    cx, cy = C[0], C[1]
+    shell = V.get('cart', (0.72, 0.70, 0.62))
+    R = None
+    base = S.rbox((cx, cy, 0.135), (0.245, 0.205, 0.042), 0.020)
+    deck = S.rbox((cx, cy, 0.185), (0.205, 0.175, 0.020), 0.010)
+    body = S.rbox((cx, cy, 0.455), (0.200, 0.168, 0.230), 0.030)
+    # drawer lines cut into the front (the side facing the monster, +X)
+    for dz in (0.34, 0.46, 0.58):
+        body = S.subtract(body, S.rbox((cx + 0.200, cy, dz), (0.010, 0.150, 0.006), 0.003), k=0.004)
+    column = S.round_cone((cx - 0.02, cy, 0.66), (cx - 0.02, cy, 0.99), 0.032, 0.026)
+    monitor = S.rbox((cx + 0.010, cy, 1.115), (0.045, 0.205, 0.150), 0.018, S.rot((0, 1, 0), 14))
+    # the pump: a drum on the far side with the line's stub coming out of the top of it
+    pump = S.round_cone((cx - 0.10, cy - 0.175, 0.72), (cx - 0.10, cy - 0.175, 0.86), 0.072, 0.066)
+    stub = S.round_cone((cx - 0.10, cy - 0.175, 0.86), (cx - 0.06, cy - 0.16, 0.95), 0.026, 0.020)
+    # the handle: a bar out of the body up to the hand, and a grip across it
+    grip_a = np.array([H[0] - 0.02, H[1] - 0.10, H[2]])
+    grip_b = np.array([H[0] - 0.02, H[1] + 0.10, H[2]])
+    stem = S.round_cone((cx + 0.14, cy, 0.66), tuple(grip_a * 0.5 + grip_b * 0.5), 0.026, 0.020)
+    grip = S.round_cone(tuple(grip_a), tuple(grip_b), 0.021, 0.021)
+    f = S.union(base, deck, k=0.02)
+    f = S.union(f, body, k=0.03)
+    f = S.union(f, column, k=0.03)
+    f = S.union(f, monitor, k=0.02)
+    f = S.union(f, pump, k=0.03)
+    f = S.union(f, stub, k=0.02)
+    f = S.union(f, stem, k=0.03)
+    f = S.union(f, grip, k=0.02)
+    # the castor forks stay on the cart; only the wheels spin
+    for name, dx, dy in CASTORS:
+        fk = S.rbox((cx + dx, cy + dy, CASTOR_R + 0.048), (0.020, 0.030, 0.048), 0.008,
+                    S.rot((0, 0, 1), 20 if name == SQUEAKY else 0))
+        f = S.union(f, fk, k=0.010)
+    lo = np.array([min(cx - 0.32, H[0] - 0.12), cy - 0.30, -0.02])
+    hi = np.array([max(cx + 0.32, H[0] + 0.12), cy + 0.30, 1.32])
+    parts.append(Part('Cart', CLOTH, f, lo, hi, 0.0045,
+                      paint=lambda P: _cart_paint(P, C, shell), rigid='cart_pivot'))
+    # the screen: a plate on the front of the monitor, its own piece so the game can light it
+    screen = S.rbox((cx + 0.056, cy, 1.115), (0.008, 0.170, 0.118), 0.006, S.rot((0, 1, 0), 14))
+    parts.append(Part('CartScreen', CLOTH, screen, np.array([cx - 0.02, cy - 0.22, 0.94]),
+                      np.array([cx + 0.14, cy + 0.22, 1.30]), 0.0022,
+                      paint=lambda P: (np.tile(srgb((0.30, 0.36, 0.38)), (len(P), 1)), np.full(len(P), 0.22)),
+                      rigid='cart_pivot'))
+    # the castors, each on its own bone
+    for name, dx, dy in CASTORS:
+        c = np.array([cx + dx, cy + dy, CASTOR_R])
+        # the axle lies along Y, so the wheel rolls the way the cart is dragged (along X)
+        tyre = S.torus(tuple(c), CASTOR_R * 0.72, CASTOR_R * 0.28, S.rot((1, 0, 0), 90))
+        hub = S.round_cone((c[0], c[1] - 0.014, c[2]), (c[0], c[1] + 0.014, c[2]), 0.016, 0.016)
+        w = S.union(tyre, hub, k=0.006)
+        parts.append(Part('Castor_' + name.split('_')[1].upper(), SHOE, w,
+                          c - (CASTOR_R + 0.03), c + (CASTOR_R + 0.03), 0.0022,
+                          paint=lambda P: (np.tile(srgb((0.10, 0.10, 0.11)), (len(P), 1)), np.full(len(P), 0.75)),
+                          rigid=name))
 
 
 def eye_paint(V, P, c, r, kind):
