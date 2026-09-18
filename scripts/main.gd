@@ -548,6 +548,9 @@ func _process(_delta: float) -> void:
 	if surgery_cam != null:
 		if not surgery_cam.current:
 			surgery_cam.make_current()
+	elif dev_panel != null and dev_panel.free_cam_on():   # DEV HOOK: the dev free camera
+		if not dev_panel.free_cam.current:
+			dev_panel.free_cam.make_current()
 	else:
 		var view = game.viewed_player() if game.phase != Game.Phase.MENU else null
 		if view != null and not view.camera.current:

@@ -11,6 +11,7 @@ const LootTableScript := preload("res://scripts/economy/loot_table.gd")
 const DevRoomScript := preload("res://scripts/dev/dev_room.gd")   # NURSE HOOK: pace names
 const MonsterPages := preload("res://scripts/database/monster_pages.gd")
 const OFF := Color(1.0, 0.4, 0.35)
+const FreeCamScript := preload("res://scripts/dev/free_cam.gd")
 
 var game: Node = null
 var main: Node = null
@@ -25,12 +26,15 @@ var _bot_rows := {}       # bot id -> {status: Label, order: OptionButton, item:
 var _dragging := {}
 var _places: Array = []      # [{name, pos}] for "Go to"
 var _places_level: Node = null
+var free_cam: Camera3D = null   # scripts/dev/free_cam.gd; local only, P swaps camera <-> surgeon
 
 
 func setup(g: Node, m: Node) -> void:
 	game = g
 	main = m
 	layer = 8
+	free_cam = FreeCamScript.new()
+	add_child(free_cam)
 	_build()
 	_root.visible = false
 
@@ -63,9 +67,29 @@ func _input(event: InputEvent) -> void:
 	elif _open and event.physical_keycode == KEY_ESCAPE:
 		toggle(false)
 		get_viewport().set_input_as_handled()
+	elif event.physical_keycode == KEY_P and free_cam.is_on() and not _open \
+			and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+		free_cam.swap()
+		get_viewport().set_input_as_handled()
+
+
+## True while the dev free camera should be the view (main.gd keeps it current).
+func free_cam_on() -> bool:
+	return free_cam != null and free_cam.is_on()
+
+
+func _set_free_cam(on: bool) -> void:
+	if on == free_cam.is_on():
+		return
+	if on:
+		free_cam.start(game)
+	else:
+		free_cam.stop()
 
 
 func _process(delta: float) -> void:
+	if free_cam.is_on() and not _in_room():
+		free_cam.stop()
 	if _open and not _in_room():
 		toggle(false)
 	if not _open:
@@ -133,6 +157,10 @@ func _build() -> void:
 	_button(you2, "All abilities", func(): _req("abilities"))
 	_button(you2, "Revive all", func(): _req("revive_all"))
 	_label(col, "Gun: left click kills, right click downs. Noclip: Space up, Ctrl down.", 11, DIM)
+	var fc := _row(col)
+	_c["free_cam"] = _check(fc, "Free camera", func(on): _set_free_cam(on))
+	_c["free_cam_mode"] = _label(fc, "", 12, DIM)
+	_label(col, "Free camera: P swaps between flying the camera and walking the surgeon. WASD, mouse, Space up, Ctrl down, Shift fast.", 11, DIM)
 
 	# ---- world
 	_section(col, "World")
@@ -493,6 +521,8 @@ func _refresh() -> void:
 		else "Client: every change is asked of the host."
 	(_c["god"] as CheckBox).set_pressed_no_signal(dev.god.has(me))
 	(_c["noclip"] as CheckBox).set_pressed_no_signal(dev.noclip.has(me))
+	(_c["free_cam"] as CheckBox).set_pressed_no_signal(free_cam.is_on())
+	(_c["free_cam_mode"] as Label).text = "" if not free_cam.is_on() else ("P: flying the camera" if free_cam.flying else "P: walking the surgeon")
 	(_c["gun"] as CheckBox).set_pressed_no_signal(dev.gun.has(me))
 	if _places_level != game.level:
 		_rebuild_places()
