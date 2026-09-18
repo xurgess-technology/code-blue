@@ -12,15 +12,17 @@ extends RefCounted
 const DIR := "res://assets/models/characters/human"
 const CLOTH_SHADER := "res://assets/models/characters/human/shaders/human_cloth.gdshader"
 const SKIN_SHADER := "res://assets/models/characters/human/shaders/human_skin.gdshader"
-const SURGEONS := ["surgeon_a", "surgeon_b", "surgeon_c"]
+## What players wear: the stylized surgeon (art/stylized). surgeon_a/b/c stay registered but unused.
+const SURGEONS := ["surgeon_st"]
 const KEYS := {
+	"surgeon_st": "char/human_surgeon_st",
 	"surgeon_a": "char/human_surgeon_a", "surgeon_b": "char/human_surgeon_b", "surgeon_c": "char/human_surgeon_c",
 	"bob": "patient/human_bob", "paramedic_a": "crew/human_paramedic_a", "paramedic_b": "crew/human_paramedic_b",
 }
 ## The colour the scrubs are baked in (C.PLAYER_COLORS[0]).
 const BAKED_TINT := Color("3d8f80")
 ## Height of each variation (metres), for fits that scale with the body (sites JSON `height`).
-const HEIGHTS := {"surgeon_a": 1.80, "surgeon_b": 1.68, "surgeon_c": 1.75, "bob": 1.75, "paramedic_a": 1.83, "paramedic_b": 1.70}
+const HEIGHTS := {"surgeon_st": 1.80, "surgeon_a": 1.80, "surgeon_b": 1.68, "surgeon_c": 1.75, "bob": 1.75, "paramedic_a": 1.83, "paramedic_b": 1.70}
 
 ## Tools and perf A/B: force every caller onto its old Kenney / primitive path.
 static var disabled := false

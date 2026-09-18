@@ -1,0 +1,6 @@
+# Rebuilt by st_build.py (a few minutes); too big to commit
+*.blend
+*.blend1
+out/
+renders/
+__pycache__/

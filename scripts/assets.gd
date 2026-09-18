@@ -115,6 +115,13 @@ const MODELS := {
 		"anims": {"idle": "Idle", "walk": "Jog", "run": "Sprint"},
 		"note": "Player surgeon C, made for Malpractice with Blender scripts (art/human/blender_src). No third-party licence.",
 	},
+	# The stylized surgeon (2026-09-18, art/stylized): the players' body. Same skeleton, clips and
+	# piece/site contract as the surgeons above; eyes are separate pieces (Human_Eye_L / _R).
+	"char/human_surgeon_st": {
+		"path": "res://assets/models/characters/human/surgeon_st.glb", "scale": 1.0, "yaw": 180,
+		"anims": {"idle": "Idle", "walk": "Jog", "run": "Sprint"},
+		"note": "Player surgeon, stylized, made for Malpractice with Blender scripts (art/stylized). No third-party licence.",
+	},
 	"patient/human_bob": {
 		"path": "res://assets/models/characters/human/bob.glb", "scale": 1.0, "yaw": 180,
 		"anims": {"idle": "Lying"},

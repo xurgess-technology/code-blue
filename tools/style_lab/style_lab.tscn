@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://cbstylelab01"]
+
+[ext_resource type="Script" path="res://tools/style_lab/style_lab.gd" id="1_lab"]
+
+[node name="StyleLab" type="Node3D"]
+script = ExtResource("1_lab")
