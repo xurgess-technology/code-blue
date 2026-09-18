@@ -7,6 +7,7 @@ extends Node3D
 ##   godot --path . tools/monster_lab.tscn -- --shots --only=nurse_door           # one shot
 ##   godot --path . --resolution 1600x900 tools/monster_lab.tscn -- --perf              # Hive frame cost
 ##   godot --path . tools/monster_lab.tscn -- --sono                             # the Sonographer, up close
+##   (a review window on this scene does --sono too: the scenarios draw nothing worth looking at)
 ##   options: --dist=<m> overrides the camera distance, --nopost drops the post layer
 ##
 ## Exit code 0 only when every scenario passed.
@@ -159,10 +160,13 @@ func _ready() -> void:
 	p1.name_tag.visible = false
 	for i in 4:
 		await get_tree().physics_frame
-	if OS.get_cmdline_user_args().has("--sono"):
-		await _run_sono()
-	elif shots:
+	# A review window opened on this scene wants to see something, and the scenarios are a headless
+	# test that draws nothing anyone can read. Show the Sonographer instead (tools/review.bat passes
+	# --review=<title>), and keep --sono for asking for it by hand.
+	if shots:
 		await _run_shots()
+	elif OS.get_cmdline_user_args().has("--sono") or _is_review():
+		await _run_sono()
 	else:
 		await _run_scenarios()
 
@@ -226,6 +230,14 @@ func set_all_lights(on: bool) -> void:
 
 
 ## Corridor coordinates: x metres along it, lane 0 = centre of the corridor.
+## True when this is a review window (tools/review.bat passes --review=<title>).
+func _is_review() -> bool:
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--review="):
+			return true
+	return false
+
+
 func cor(x: float, lane := 0.0) -> Vector3:
 	return Vector3(x, 0.0, 6.0 * C.TILE + lane)
 
@@ -1055,6 +1067,7 @@ func _run_shots() -> void:
 		["sono_throat", _shot_sono.bind(1.1, 0.25, "charge", 1.0, 1.0, 0.7, 0.0, 1.30)],
 		["sono_face", _shot_sono.bind(1.0, 0.40, "listen", 1.0, 0.0, 1.0, 0.0, 1.66)],
 		["sono_lying", _shot_sono_lying],
+		["sono_review_view", _shot_sono_review],
 	]
 	for s in list:
 		if only != "" and not only.split(",").has(s[0]):
@@ -1774,7 +1787,13 @@ func _run_sono() -> void:
 	var model: Node3D = MonsterModelScript.new()
 	holder.add_child(model)
 	model.setup("sonographer")
-	place_player(cor(25.2, 2.0), here + Vector3.UP * 1.45, true)
+	# the corridor is two tiles wide, so the lane has to stay inside about +-1.4
+	place_player(cor(24.6, 0.9), here + Vector3.UP * 1.35, true)
+	var eye: Vector3 = p1.global_position + Vector3.UP * C.EYE_H
+	var to: Vector3 = (here + Vector3.UP * 1.35) - eye
+	print("[monster_lab] sono ready %.1fs after launch: watcher at %.1f,%.1f (lane %.2f), %.2f m from it, %.0f deg off" % [
+		Time.get_ticks_msec() / 1000.0, eye.x, eye.z, eye.z - 6.0 * C.TILE, to.length(),
+		rad_to_deg(absf(Vector3(-sin(p1.rotation.y), 0, -cos(p1.rotation.y)).signed_angle_to(Vector3(to.x, 0, to.z), Vector3.UP)))])
 
 	var layer := CanvasLayer.new()
 	layer.layer = 40
@@ -1876,3 +1895,28 @@ func _shot_sono_lying() -> void:
 	p1._pitch = atan2(d.y, Vector2(d.x, d.z).length())
 	p1.head.rotation.x = p1._pitch
 	await wait(0.3)
+
+
+## Exactly what the review window opens on: the same spot, the same lights, the same watcher.
+func _shot_sono_review() -> void:
+	if _sono_holder != null:
+		_sono_holder.queue_free()
+	for i in bulbs.size():
+		set_light(i, true)
+	var here := cor(21.0, -0.4)
+	_sono_holder = Node3D.new()
+	_sono_holder.name = "SonographerReview"
+	game.add_child(_sono_holder)
+	_sono_holder.global_position = here
+	_sono_holder.rotation.y = -PI * 0.5
+	var model: Node3D = MonsterModelScript.new()
+	_sono_holder.add_child(model)
+	model.setup("sonographer")
+	model.play("walk", 1.0, 0.0)
+	for i in 40:
+		await get_tree().physics_frame
+		model.set_sono_look(0.05, 0.0, "drag", 0.0, true)
+		model.set_cart_speed(0.95)
+		model.set_ears(0.1, 0.1, 1.0 / 60.0)
+	place_player(cor(24.6, 0.9), here + Vector3.UP * 1.35, true)
+	await wait(0.4)
