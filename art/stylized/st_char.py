@@ -40,13 +40,19 @@ VARIANTS = {
         jaw=0.55, cheek=0.5, nose=1.0, brow=1.0, jowl=0.0, sag=0.0, mouth_open=0.0, eye_open=0.62,
         outfit='scrubs', graft=False, seed=5),
     'surgeon_graft': dict(base='surgeon', graft=True),
+    # The Hive: the surgeon's head and kit, charcoal skin, the skull open with the brain gone and a
+    # pale shelf fungus grown in its place, rooting into the scalp; orange eyes (a soft pinpoint
+    # while it wanders, the whole ball when it locks on to someone). Patient gown, hunched.
     'hive': dict(
-        height=1.75, fem=0.0, girth=1.12, head_scale=1.13, shoulders=1.0,
-        skin=(0.60, 0.61, 0.53), flush=(0.52, 0.44, 0.44), lip=(0.44, 0.38, 0.40),
-        hair=(0.30, 0.28, 0.26), iris=(0.60, 0.60, 0.52), cloth=(0.56, 0.66, 0.74),
-        jaw=0.70, cheek=0.25, nose=1.15, brow=1.3, jowl=0.35, sag=0.6, mouth_open=1.0, eye_open=1.0,
+        height=1.75, fem=0.0, girth=1.12, head_scale=1.10, shoulders=1.0, v2=True, hive=True,
+        skin=(0.30, 0.30, 0.31), flush=(0.34, 0.27, 0.27), lip=(0.19, 0.16, 0.17),
+        hair=(0.08, 0.08, 0.09), iris=(1.0, 0.42, 0.06), cloth=(0.56, 0.66, 0.74),
+        fungus=(0.87, 0.83, 0.71), glow=(1.0, 0.42, 0.06),
+        jaw=0.70, cheek=0.25, nose=1.15, brow=0.0, jowl=0.35, sag=0.6, mouth_open=1.0, eye_open=0.92,
         outfit='gown', graft=False, seed=41),
 }
+
+FUNGUS = 'fungus'
 
 
 def get(name):
@@ -238,7 +244,7 @@ class Head:
         return h
 
     # -------------------------------------------------------------- v2: the rebuilt surgeon head
-    def sdf_local_v2(self, with_neck=True, eyes=True):
+    def sdf_local_v2(self, with_neck=True, eyes=True, opened=True):
         """A shorter, fuller figurine face; small nose and ears; eyes in sockets cut to the eyeball."""
         E = S.ellipsoid
         cr = E((0, 0.010, 0.030), (0.078, 0.094, 0.092))
@@ -269,6 +275,11 @@ class Head:
         mouth = S.chain([np.array([-0.0195, -0.0885, -0.0440]), np.array([-0.009, -0.0955, -0.0458]),
                          np.array([0.009, -0.0955, -0.0458]), np.array([0.0195, -0.0885, -0.0440])], [0.0010, 0.0014, 0.0014, 0.0010])
         h = S.subtract(h, mouth, k=0.0018)
+        if self.V.get('hive'):
+            # a slack jaw: the mouth hangs open in a dark gap
+            mo = self.V['mouth_open']
+            gap = E((0, -0.092, -0.0475 - 0.002 * mo), (0.0135, 0.016, 0.0028 + 0.0022 * mo))
+            h = S.subtract(h, gap, k=0.0022)
         # eyes: a spherical socket exactly round the ball, then lids as a shell on that same sphere
         if eyes:
             ball = S.mirror_x(S.sphere(ec, er + self.gap))
@@ -281,7 +292,193 @@ class Head:
         if with_neck:
             neck = S.round_cone((0, 0.024, -0.190), (0, 0.016, -0.055), 0.046, 0.043)
             h = S.union(h, neck, k=0.016)
+        if opened and self.V.get('hive'):
+            h = self.open_skull(h)
         return h
+
+    # -------------------------------------------------------------- the Hive's open skull and its fungus
+    SKULL_C = np.array([0.0, 0.010, 0.030])       # the cranium's centre (head-local)
+    CAVITY_R = np.array([0.064, 0.080, 0.078])    # the hollow inside: the skull wall is ~12 mm thick
+
+    def skull_cut_z(self, L):
+        """Height of the ragged cut round the crown: lower at the back, broken and uneven."""
+        rag = 0.030 * (S.fbm(L, 55.0, 17, 3) - 0.5) + 0.012 * (S.fbm(L, 140.0, 23, 2) - 0.5)
+        return 0.070 - 0.075 * L[:, 1] + rag
+
+    def cavity(self):
+        return S.ellipsoid(self.SKULL_C, self.CAVITY_R)
+
+    def open_skull(self, h):
+        """Take the crown off along a broken line and hollow the brain case behind it."""
+        cav = self.cavity()
+        removed = lambda P: np.minimum(self.skull_cut_z(P) - P[:, 2], cav(P))
+        return S.subtract(h, removed, k=0.0018)
+
+    def fungus_local(self):
+        """The fungus in head-local units: a knobbly mass filling the brain case and bulging out of the
+        opening, bracket shelves stacked round the rim and over the scalp, and root threads that grip
+        the scalp below the break. Returns (sdf, pieces) where pieces name each sub-shape for paint."""
+        C = self.SKULL_C
+        core = S.ellipsoid(C + np.array([0.0, -0.002, 0.028]), (0.0625, 0.0785, 0.086))
+        core = S.displace(core, lambda P: 0.009 * (S.fbm(P, 40.0, 61, 3) - 0.5) + 0.003 * (S.fbm(P, 110.0, 62, 2) - 0.5)
+                          - 0.0045 * smooth01(1 - np.abs(S.fbm(P, 42.0, 88, 2) - 0.5) / 0.05))
+        # small knobs pushing up out of the top of the mass
+        knobs = []
+        for (ax, ay, r) in ((0.018, -0.030, 0.011), (-0.024, 0.006, 0.013), (0.010, 0.038, 0.010),
+                            (-0.006, -0.012, 0.009), (0.030, 0.012, 0.008), (-0.030, 0.042, 0.009)):
+            top = self._core_top(core, ax, ay)
+            knobs.append(S.sphere((ax, ay, top - r * 0.35), r))
+        # bracket shelves in tiered clusters, lopsided and toward the back (never where the ears are, or
+        # it reads as a pair of ears, and never two big ones matching): one big stack trailing down the
+        # back right, a small pair low on the left, a small pair and a single off the front of the break.
+        # (azimuth deg, 0 = the front, + the character's left), lift above the cut, radius, tilt (rad)
+        rng = np.random.default_rng(19)
+        clusters = ((-150, 5, 0.004, 0.034), (118, 2, -0.008, 0.018), (-38, 2, 0.010, 0.015), (22, 1, 0.012, 0.011))
+        shelves = []
+        for a0, n, lift0, r0 in clusters:
+            for i in range(n):
+                a = a0 + rng.uniform(-9, 9) + i * rng.choice((-6, 6))
+                lift = lift0 - i * r0 * 0.62
+                r = r0 * (1.0 - 0.17 * i) * rng.uniform(0.92, 1.08)
+                shelves.append(self._shelf(a, lift, r * 1.1, 0.07 - 0.02 * i + rng.uniform(-0.03, 0.03)))
+        threads = self._root_threads()
+        mass = S.union(core, *knobs, k=0.006)
+        f = mass
+        for sh in shelves:
+            f = S.union(f, sh[0], k=0.005)
+        f = S.union(f, threads, k=0.0025)
+        return f, {'mass': mass, 'shelves': shelves, 'threads': threads}
+
+    def _core_top(self, core, x, y):
+        zs = np.linspace(0.20, 0.0, 400)
+        Q = np.stack([np.full(len(zs), x), np.full(len(zs), y), zs], 1)
+        return zs[int(np.argmax(core(Q) < 0))]
+
+    def _rim_point(self, a_deg, lift):
+        """A point on the broken rim at this azimuth (head-local), and the outward direction."""
+        a = math.radians(a_deg)
+        u = np.array([math.sin(a), -math.cos(a), 0.0])
+        C = self.SKULL_C
+        # the outer skull surface at the height of the cut: march out from the centre
+        z0 = float(self.skull_cut_z(np.array([[C[0] + u[0] * 0.066, C[1] + u[1] * 0.076, 0.07]]))[0])
+        base = self.sdf_local_v2(False, eyes=False, opened=False)
+        ts = np.linspace(0.02, 0.14, 500)
+        Q = np.stack([C[0] + u[0] * ts, C[1] + u[1] * ts, np.full(len(ts), z0)], 1)
+        t = ts[int(np.argmax(base(Q) > 0))]
+        p = np.array([C[0] + u[0] * t, C[1] + u[1] * t, z0 + lift])
+        return p, u
+
+    def _shelf(self, a_deg, lift, r, tilt):
+        """A bracket shelf: a half-disc, domed on top and flat underneath, growing out from the rim."""
+        p, u = self._rim_point(a_deg, lift)
+        up = np.array([0.0, 0.0, 1.0])
+        ux = u * math.cos(tilt) + up * math.sin(tilt)
+        ty = np.cross(up, u)
+        ty /= np.linalg.norm(ty)
+        uz = np.cross(ux, ty)
+        R = np.stack([ux, ty, uz], axis=1)
+        c = p - u * 0.004
+        th = r * 0.26
+        # a fan: a half disc wider than it is deep, starting at the line where it grows out of the head,
+        # thick there and thinning to a rounded edge
+        wedge = lambda P: th * 0.8 * np.clip(0.6 - ((P - c) @ R)[:, 0] / r, 0.0, 1.2)
+        dome = S.displace(S.ellipsoid(c, (r, r * 1.25, th), R), wedge)
+        # flat underside, and nothing behind the attachment line
+        under = lambda P: -(((P - c) @ R)[:, 2] + th * 0.30)
+        shelf = S.intersect(dome, under, k=0.0015)
+        shelf = S.intersect(shelf, lambda P: -((P - c) @ R)[:, 0] - 0.15 * r, k=0.003)
+        # a lumpy, wavy outer edge
+        shelf = S.displace(shelf, lambda P: 0.0022 * (S.fbm(P, 120.0, 41, 2) - 0.5) * 2.0)
+        return shelf, p, R, r
+
+    def _root_threads(self):
+        """Pale root threads gripping the scalp: from the rim down the temples, the back of the head and
+        one creeping toward the forehead. Each follows the skin, half sunk in it."""
+        base = self.sdf_local_v2(False, eyes=False, opened=False)
+        C = self.SKULL_C
+        rng = np.random.default_rng(77)
+
+        def on_skin(a, z):
+            u = np.array([math.sin(a), -math.cos(a), 0.0])
+            ts = np.linspace(0.02, 0.16, 500)
+            Q = np.stack([C[0] + u[0] * ts, C[1] + u[1] * ts, np.full(len(ts), z)], 1)
+            t = ts[int(np.argmax(base(Q) > 0))]
+            return np.array([C[0] + u[0] * (t - 0.0009), C[1] + u[1] * (t - 0.0009), z])
+        fs = []
+        specs = [(20, 0.030), (48, 0.050), (75, 0.060), (100, 0.045), (135, 0.065), (165, 0.055),
+                 (200, 0.070), (235, 0.050), (262, 0.060), (290, 0.045), (318, 0.035), (-8, 0.022)]
+        for a_deg, drop in specs:
+            a = math.radians(a_deg)
+            p0, _ = self._rim_point(a_deg, -0.002)
+            n = 6
+            pts, rad = [], []
+            wob = rng.uniform(-0.25, 0.25)
+            for i in range(n):
+                t = i / (n - 1)
+                ai = a + wob * t + 0.10 * math.sin(t * 5.0 + a_deg)
+                zi = p0[2] - drop * t
+                pts.append(p0 if i == 0 else on_skin(ai, zi))
+                rad.append(0.0017 * (1 - t) + 0.0006 * t)
+            fs.append(S.chain(pts, rad))
+            # a side branch off the middle
+            if a_deg % 2 == 0:
+                m = pts[2]
+                ab = a + (0.35 if a_deg % 4 == 0 else -0.35)
+                b1 = on_skin(ab, m[2] - drop * 0.25)
+                b2 = on_skin(ab + 0.1, m[2] - drop * 0.45)
+                fs.append(S.chain([m, b1, b2], [0.0012, 0.0008, 0.0005]))
+        return S.union(*fs, k=0.002)
+
+    def fungus_sdf(self):
+        f, self._fungus_pieces = self.fungus_local()
+        return lambda P: f(self.local(P)) * self.hs
+
+    def fungus_paint(self, P):
+        """Pale, wet and a little yellow: bone-white shelves banded in tan on top, creamy undersides,
+        a lighter rolled lip; the mass knobbly with brown flecks; the root threads greyer."""
+        V = self.V
+        L = self.local(P)
+        pc = self._fungus_pieces
+        base = srgb(V['fungus'])
+        col = np.tile(base, (len(P), 1))
+        n = S.fbm(L, 70.0, 5, 3)
+        col *= (0.92 + 0.14 * n)[:, None]
+        rough = np.full(len(P), 0.32)
+        d_mass = pc['mass'](L)
+        d_thr = pc['threads'](L)
+        best = d_mass.copy()
+        # shelves: bands on top, cream underneath
+        for (sh, p, R, r) in pc['shelves']:
+            d = sh(L)
+            on = d < best
+            best = np.minimum(best, d)
+            Q = (L - p) @ R
+            # rings round the point it grows from: brown there, banded, a pale creamy rim
+            rr = np.linalg.norm(Q[:, :2], axis=1) / (r * 1.25)
+            top = Q[:, 2] > -r * 0.06
+            band = 0.5 + 0.5 * np.sin(rr * 30.0 + 1.3 + 3.0 * S.fbm(L, 90.0, 12, 2))
+            base_c = mix(srgb((0.52, 0.38, 0.25)), srgb((0.76, 0.66, 0.48)), smooth01(rr / 0.7))
+            base_c = mix(base_c, base_c * 0.78, np.clip(band * 0.5, 0, 1))
+            ctop = mix(base_c, srgb((0.93, 0.90, 0.80)), smooth01((rr - 0.62) / 0.22))
+            cund = srgb((0.90, 0.85, 0.64)) * (0.9 + 0.12 * S.fbm(L, 300.0, 9, 2))[:, None]
+            cs = np.where(top[:, None], ctop, cund)
+            col = np.where(on[:, None], cs, col)
+            rough = np.where(on, np.where(top, 0.55, 0.7), rough)
+        # the mass: a few small brown flecks, going yellow-tan and wetter down where it meets the skull
+        fleck = smooth01((S.fbm(L, 260.0, 31, 2) - 0.70) / 0.04)
+        m = (d_mass <= best + 1e-9)
+        cm = mix(col, srgb((0.58, 0.46, 0.32)), np.clip(fleck * 0.45, 0, 1))
+        groove = smooth01(1 - np.abs(S.fbm(L, 42.0, 88, 2) - 0.5) / 0.05)
+        cm = mix(cm, srgb((0.60, 0.50, 0.36)), np.clip(groove * 0.6, 0, 1))
+        low = smooth01((self.skull_cut_z(L) + 0.006 - L[:, 2]) / 0.012)
+        cm = mix(cm, srgb((0.46, 0.30, 0.22)), np.clip(low * 0.6, 0, 1))
+        col = np.where(m[:, None], cm, col)
+        rough = np.where(m, 0.36 - 0.12 * low, rough)
+        # threads: greyer, drier
+        t = d_thr < best - 1e-5
+        col = np.where(t[:, None], srgb((0.60, 0.59, 0.54)) * (0.9 + 0.15 * n)[:, None], col)
+        rough = np.where(t, 0.5, rough)
+        return col, rough
 
     def ear_v2(self):
         x0, y0, z0 = 0.0745, 0.012, -0.006
@@ -379,11 +576,17 @@ class Head:
         col = np.tile(base, (len(P), 1))
         n = S.fbm(P, 18.0, V['seed'], 3)
         col *= (0.96 + 0.08 * n)[:, None]
+        hive = bool(V.get('hive'))
         if V['outfit'] == 'gown':
             blot = smooth01((S.fbm(P, 9.0, 8, 3) - 0.52) / 0.1)
-            col = mix(col, srgb((0.50, 0.46, 0.44)), np.clip(blot * 0.45, 0, 1))
             vein = smooth01(1 - np.abs(S.fbm(P, 20.0, 13, 3) - 0.5) / 0.012) * smooth01((z - 0.02) / 0.03) * smooth01((np.abs(x) - 0.04) / 0.02)
-            col = mix(col, srgb((0.46, 0.50, 0.56)), np.clip(vein * 0.22, 0, 1))
+            if hive:
+                # charcoal, mottled darker; pale fungal threads showing through the skin
+                col = mix(col, col * np.array([0.72, 0.70, 0.74]), np.clip(blot * 0.6, 0, 1))
+                col = mix(col, srgb((0.46, 0.46, 0.43)), np.clip(vein * 0.30, 0, 1))
+            else:
+                col = mix(col, srgb((0.50, 0.46, 0.44)), np.clip(blot * 0.45, 0, 1))
+                col = mix(col, srgb((0.46, 0.50, 0.56)), np.clip(vein * 0.22, 0, 1))
         # warmth: cheeks, nose tip, ears
         fl = srgb(V['flush'])
         ec = self.eye_c
@@ -402,12 +605,16 @@ class Head:
         # sunken, bruised eyes on the sick
         sick = 1.0 if V['outfit'] == 'gown' else 0.0
         under = np.exp(-(((np.abs(x) - ec[0]) / 0.016) ** 2 + ((z - ec[2] + 0.012) / 0.008) ** 2)) * (y < -0.05)
-        col = mix(col, srgb((0.40, 0.33, 0.36)), np.clip(under * (0.55 * sick + 0.12), 0, 1))
+        col = mix(col, srgb((0.12, 0.09, 0.10)) if hive else srgb((0.40, 0.33, 0.36)), np.clip(under * (0.55 * sick + 0.12), 0, 1))
         if sick:
-            inside = np.exp(-((x / 0.016) ** 2 + ((z + 0.056) / 0.006) ** 2)) * (y > -0.100) * (y < -0.080)
-            col = mix(col, srgb((0.16, 0.06, 0.06)), np.clip(inside * 1.2, 0, 1))
+            if hive:
+                inside = np.exp(-((x / 0.014) ** 2 + ((z - self.mouth_z + 0.003) / 0.006) ** 2)) * (y > -0.100) * (y < -0.070)
+                col = mix(col, srgb((0.10, 0.03, 0.03)), np.clip(inside * 1.2, 0, 1))
+            else:
+                inside = np.exp(-((x / 0.016) ** 2 + ((z + 0.056) / 0.006) ** 2)) * (y > -0.100) * (y < -0.080)
+                col = mix(col, srgb((0.16, 0.06, 0.06)), np.clip(inside * 1.2, 0, 1))
             rim = np.exp(-(((np.abs(x) - ec[0]) / 0.014) ** 2 + ((z - ec[2] + 0.0075) / 0.0028) ** 2)) * (y < ec[1] + 0.004)
-            col = mix(col, srgb((0.62, 0.30, 0.30)), np.clip(rim * 0.8, 0, 1))
+            col = mix(col, srgb((0.42, 0.14, 0.10)) if hive else srgb((0.62, 0.30, 0.30)), np.clip(rim * 0.8, 0, 1))
         # brows: painted soft bars
         bx = np.abs(x)
         bz = ec[2] + 0.021 + 0.004 * np.sin((bx - 0.014) / 0.036 * math.pi) - 0.004 * ((bx - 0.012) / 0.04)
@@ -431,6 +638,9 @@ class Head:
             lash = smooth01(1 - np.abs(de - (er + 0.0015)) / 0.0022) * (dz > 0.0005) * (dy < -0.004)
             col = mix(col, np.array([0.02, 0.012, 0.01]), np.clip(lash * 0.9, 0, 1))
         rough = np.full(len(P), 0.55) - 0.12 * lip - 0.12 * scalp
+        if hive:
+            rough = rough + 0.15
+            col, rough = self.paint_opening(L, col, rough)
         if graft:
             # the grafted (left, +X) eye: angry pink skin round a stitched socket, a faint bruise
             gx, gz = (x - ec[0]) / INC_RX, (z - ec[2]) / INC_RZ
@@ -443,6 +653,30 @@ class Head:
             col = mix(col, srgb((0.78, 0.42, 0.40)), np.clip(swell * 0.55, 0, 1))
             col = mix(col, srgb((0.34, 0.06, 0.07)), np.clip(cut * 0.95, 0, 1))
             rough = rough - 0.25 * cut
+        return col, rough
+
+    def paint_opening(self, L, col, rough):
+        """The Hive's open skull: bone showing on the broken edge under a thin torn lip of skin, the
+        brain case dark and wet inside, raw skin just below the break, and the fungus's threads
+        staining pale veins into the scalp round it."""
+        z = L[:, 2]
+        dz = self.skull_cut_z(L) - z             # > 0 below the cut
+        cav = self.cavity()(L)                   # > 0 outside the brain case
+        depth = -self.sdf_local_v2(True, eyes=False, opened=False)(L)   # below the unbroken skin
+        on_cut = (np.abs(dz) < 0.003) & (cav > 0.0005)
+        lip = on_cut & (depth < 0.0022)
+        bone = on_cut & ~lip
+        wall = np.abs(cav) < 0.0025
+        raw = np.exp(-(np.maximum(dz, 0) / 0.0035) ** 2) * (cav > 0.0085) * (dz > -0.001)
+        col = mix(col, srgb((0.30, 0.11, 0.10)), np.clip(raw * 0.5, 0, 1))
+        near = smooth01((0.045 - dz) / 0.04) * (dz > 0)
+        myc = smooth01(1 - np.abs(S.fbm(L, 90.0, 71, 3) - 0.5) / 0.02) * near
+        col = mix(col, srgb((0.58, 0.57, 0.52)), np.clip(myc * 0.55, 0, 1))
+        bcol = srgb((0.80, 0.74, 0.61)) * (0.9 + 0.15 * S.fbm(L, 400.0, 3, 2))[:, None]
+        col = np.where(bone[:, None], bcol, col)
+        col = np.where(lip[:, None], srgb((0.32, 0.10, 0.09)), col)
+        col = np.where(wall[:, None] & ~on_cut[:, None], srgb((0.18, 0.05, 0.045)), col)
+        rough = np.where(bone, 0.6, np.where(wall, 0.2, rough))
         return col, rough
 
     def hair_mask(self, L):
@@ -622,8 +856,16 @@ def build(name, body):
     for side, tag in ((1, 'L'), (-1, 'R')):
         c, r = head.eye_world(side)
         kind = 'hive' if (V['outfit'] == 'gown' or (V['graft'] and side == 1)) else 'human'
-        parts.append(Part('Eye_' + tag, EYE, S.sphere(c, r), c - r * 1.3, c + r * 1.3, r / 40.0,
-                          paint=(lambda P, c=c, r=r, kind=kind: eye_paint(V, P, c, r, kind)), rigid='head'))
+        ep = Part('Eye_' + tag, EYE, S.sphere(c, r), c - r * 1.3, c + r * 1.3, r / 40.0,
+                  paint=(lambda P, c=c, r=r, kind=kind: eye_paint(V, P, c, r, kind)), rigid='head',
+                  mask=(lambda P, c=c, r=r: eye_glow_mask(P, c, r)) if kind == 'hive' else None)
+        ep.eye_kind = kind
+        parts.append(ep)
+
+    if V.get('hive'):
+        fl = head.world((-0.13, -0.13, -0.06))
+        fh = head.world((0.13, 0.13, 0.17))
+        parts.append(Part('Fungus', FUNGUS, head.fungus_sdf(), fl, fh, 0.0007, paint=head.fungus_paint, rigid='head'))
 
     if V['graft']:
         parts.append(Part('Stitches', THREAD, stitches_sdf(head), head.world((0.0, -0.11, -0.02)), head.world((0.07, -0.05, 0.05)), 0.0005,
@@ -653,18 +895,29 @@ def eye_paint(V, P, c, r, kind):
         col = mix(col, np.array([0.005, 0.005, 0.006]), pupil)
         rough = np.full(len(P), 0.05)
     else:
-        # filmed over: a milky, veined ball; a small grey pupil set off-centre, and a second one drifting
-        milk = srgb((0.84, 0.82, 0.62))
-        col = mix(col, milk, smooth01((fwd - 0.70) / 0.1))
+        # the Hive's eye: a dark, glassy ball with an ember of an iris round a bright orange point.
+        # The glow itself is in the shader (eye_glow_mask): the point while it wanders, the whole
+        # ball lit up when it locks on to someone.
+        glow = srgb(V.get('glow', (1.0, 0.42, 0.06)))
+        col = np.tile(srgb((0.055, 0.035, 0.030)), (len(P), 1))
+        col = mix(col, srgb((0.20, 0.07, 0.04)), np.clip((0.55 - fwd) * 0.6, 0, 0.4))
         vein = smooth01(1 - np.abs(S.fbm(P, 900.0, 5, 3) - 0.5) / 0.03) * np.clip(0.8 - fwd, 0, 1)
-        col = mix(col, srgb((0.62, 0.30, 0.28)), np.clip(vein * 0.8, 0, 1))
-        for (ox, oz, pr) in ((0.05, -0.05, 0.26), (-0.36, 0.26, 0.14)):
-            q = np.stack([d[:, 0] - ox, d[:, 2] - oz], 1)
-            pd = np.linalg.norm(q, axis=1)
-            p = smooth01((pr - pd) / 0.05) * (fwd > 0.3)
-            col = mix(col, srgb((0.22, 0.22, 0.20)), np.clip(p * 0.85, 0, 1))
-        rough = np.full(len(P), 0.18)
+        col = mix(col, srgb((0.30, 0.08, 0.04)), np.clip(vein * 0.7, 0, 1))
+        ember = smooth01((fwd - 0.84) / 0.05) * (1 - smooth01((fwd - 0.95) / 0.02))
+        col = mix(col, glow * 0.35, np.clip(ember * (0.6 + 0.4 * S.fbm(P, 2500.0, 3, 2)), 0, 1))
+        col = mix(col, glow, eye_glow_mask(P, c, r)[:, 0])
+        rough = np.full(len(P), 0.08)
     return col, rough
+
+
+def eye_glow_mask(P, c, r):
+    """Hive eye shader channels: R = the pinpoint (soft, bright in the middle), G = the whole ball."""
+    d = (P - c) / r
+    fwd = -d[:, 1]
+    out = np.zeros((len(P), 3))
+    out[:, 0] = smooth01((fwd - 0.955) / 0.035)
+    out[:, 1] = 1.0
+    return out
 
 
 INC_RX, INC_RZ = 0.0225, 0.0175     # the graft incision: an oval round the eye, just outside the lids
@@ -914,11 +1167,15 @@ def _gown(V, sk, parts):
         n = S.fbm(P, 14.0, 5, 3)
         col_ *= (0.94 + 0.12 * n)[:, None]
         blot = smooth01((S.fbm(P, 6.0, 8, 3) - 0.55) / 0.1)
-        col_ = mix(col_, srgb((0.52, 0.46, 0.46)), np.clip(blot * 0.5, 0, 1))
         vein = smooth01(1 - np.abs(S.fbm(P, 22.0, 13, 3) - 0.5) / 0.018)
-        col_ = mix(col_, srgb((0.42, 0.46, 0.52)), np.clip(vein * 0.35, 0, 1))
+        if V.get('hive'):
+            col_ = mix(col_, col_ * np.array([0.72, 0.70, 0.74]), np.clip(blot * 0.6, 0, 1))
+            col_ = mix(col_, srgb((0.44, 0.44, 0.41)), np.clip(vein * 0.28, 0, 1))
+        else:
+            col_ = mix(col_, srgb((0.52, 0.46, 0.46)), np.clip(blot * 0.5, 0, 1))
+            col_ = mix(col_, srgb((0.42, 0.46, 0.52)), np.clip(vein * 0.35, 0, 1))
         # knuckles and hands a little darker and redder
-        return col_, np.full(len(P), 0.5)
+        return col_, np.full(len(P), 0.66 if V.get('hive') else 0.5)
     # bare arms and hands, bare lower legs
     for side, tag in ((1, 'L'), (-1, 'R')):
         arm, (sh, el, wr, kn) = arm_sdf(sk, side, g * 1.04, from_t=0.15)

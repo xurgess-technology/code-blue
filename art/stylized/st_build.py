@@ -90,13 +90,70 @@ def attr_material(name, sss=0.0, coat=0.0, spec=0.5, sheen=0.0, emit=None):
     return m
 
 
-def material_for(kind, graft_eye=False):
+HIVE_GLOW = (1.0, 0.36, 0.035)      # linear orange
+PIN_EMIT, LOCK_EMIT = 14.0, 9.0     # emission: the pinpoint at rest, the whole ball when locked on
+
+
+def hive_eye_material():
+    """The Hive's eye: the painted ball plus orange emission, a soft point from the mask's R channel,
+    the whole ball (G) scaled by the node 'Lock' (0 wandering, 1 locked on); set_lock() drives it."""
+    m = bpy.data.materials.get('ST_HiveEye')
+    if m:
+        return m
+    m = bpy.data.materials.new('ST_HiveEye')
+    m.use_nodes = True
+    nt = m.node_tree
+    b = nt.nodes['Principled BSDF']
+    ca = nt.nodes.new('ShaderNodeAttribute')
+    ca.attribute_name = 'Col'
+    mk = nt.nodes.new('ShaderNodeAttribute')
+    mk.attribute_name = 'maskc'
+    sep = nt.nodes.new('ShaderNodeSeparateColor')
+    nt.links.new(mk.outputs['Color'], sep.inputs[0])
+    lock = nt.nodes.new('ShaderNodeValue')
+    lock.name = 'Lock'
+    lock.outputs[0].default_value = 0.0
+    # base colour: the painted ball, washed to bright orange as it locks on
+    mixn = nt.nodes.new('ShaderNodeMix')
+    mixn.data_type = 'RGBA'
+    ins = [s for s in mixn.inputs if s.type == 'RGBA']
+    nt.links.new(lock.outputs[0], mixn.inputs['Factor'])
+    nt.links.new(ca.outputs['Color'], ins[0])
+    ins[1].default_value = (1.0, 0.45, 0.08, 1.0)
+    nt.links.new([o for o in mixn.outputs if o.type == 'RGBA'][0], b.inputs['Base Color'])
+    # emission strength = R * PIN + Lock * LOCK
+    m1 = nt.nodes.new('ShaderNodeMath')
+    m1.operation = 'MULTIPLY'
+    nt.links.new(sep.outputs[0], m1.inputs[0])
+    m1.inputs[1].default_value = PIN_EMIT
+    m2 = nt.nodes.new('ShaderNodeMath')
+    m2.operation = 'MULTIPLY_ADD'
+    nt.links.new(lock.outputs[0], m2.inputs[0])
+    m2.inputs[1].default_value = LOCK_EMIT
+    nt.links.new(m1.outputs[0], m2.inputs[2])
+    nt.links.new(m2.outputs[0], b.inputs['Emission Strength'])
+    b.inputs['Emission Color'].default_value = HIVE_GLOW + (1.0,)
+    b.inputs['Roughness'].default_value = 0.08
+    b.inputs['Coat Weight'].default_value = 1.0
+    b.inputs['Coat Roughness'].default_value = 0.03
+    return m
+
+
+def set_lock(v):
+    m = bpy.data.materials.get('ST_HiveEye')
+    if m:
+        m.node_tree.nodes['Lock'].outputs[0].default_value = v
+
+
+def material_for(kind, hive_eye=False):
     if kind == st_char.SKIN:
         return attr_material('ST_Skin', sss=0.12, spec=0.45)
     if kind == st_char.EYE:
-        if graft_eye:
-            return attr_material('ST_EyeCloudy', coat=1.0, spec=0.6, emit=0.35)
+        if hive_eye:
+            return hive_eye_material()
         return attr_material('ST_Eye', coat=1.0, spec=0.6)
+    if kind == st_char.FUNGUS:
+        return attr_material('ST_Fungus', sss=0.25, coat=0.12, spec=0.4)
     if kind in (st_char.CLOTH, st_char.CAP):
         return attr_material('ST_Cloth', spec=0.3, sheen=0.3)
     if kind == st_char.SHOE:
@@ -132,8 +189,7 @@ def mesh_part(prefix, part, V, coll):
     ma.data.foreach_set('color', np.concatenate([mk, np.ones((len(mk), 1))], axis=1).astype(np.float32).ravel())
     me.color_attributes.active_color = me.color_attributes['Col']
     me.polygons.foreach_set('use_smooth', [True] * len(me.polygons))
-    graft_eye = part.mat == st_char.EYE and ('walk' in V['name'] or (V['graft'] and part.name == 'Eye_L'))
-    me.materials.append(material_for(part.mat, graft_eye))
+    me.materials.append(material_for(part.mat, getattr(part, 'eye_kind', '') == 'hive'))
     ob = bpy.data.objects.new(prefix + part.name, me)
     coll.objects.link(ob)
     log('  %-12s %7d verts %7d quads  %.1fs' % (part.name, len(verts), len(quads), time.time() - t))
@@ -664,28 +720,82 @@ def main():
             cam = camera(cam_at, (x0, 0, 0.93), 70)
             render(shot, (900, 1200))
             clear(L + [cam])
-    if 'hive' in chars and want('hive_side'):
+    def eye_lights(c, on):
+        """Orange spill from each glowing eye (only when locked on)."""
+        if not on:
+            return []
+        hd = c['head']
+        out = []
+        for sx in (1, -1):
+            ec = hd.eye_c
+            p = head_point(c, (sx * ec[0], ec[1] - hd.eye_r * 1.6, ec[2]))
+            out.append(add_light('POINT', tuple(p), tuple(p + Vector((0, -1, 0))), 0.12, HIVE_GLOW, 0.004, 'EyeGlow'))
+        return out
+
+    if 'hive' in chars:
         show_only(chars, ('hive',))
-        L = std_lights((0.5, 0.0, 1.0))
-        cam = camera((3.9, -1.2, 1.1), (0.5, 0, 0.9), 50)
-        render('hive_side', (1000, 1000))
-        clear(L + [cam])
-    for key, shot in (('surgeon', 'face_surgeon'), ('hive', 'face_hive'), ('surgeon_graft', 'face_graft')):
+        c = chars['hive']
+        x0 = layout['hive']
+        for shot, cam_at, tgt, lens, res in (('hive_side', (3.9, -1.2, 1.1), (0.5, 0, 0.9), 50, (1000, 1000)),
+                                             ('hive_front', (x0, -5.2, 1.1), (x0, 0, 0.9), 70, (900, 1200)),
+                                             ('hive_34', (x0 + 2.4, -4.4, 1.35), (x0, 0, 0.9), 70, (900, 1200)),
+                                             ('hive_back', (x0 - 1.6, 4.6, 1.5), (x0, 0, 0.95), 70, (900, 1200))):
+            if want(shot):
+                L = std_lights((x0, 0.0, 1.0))
+                cam = camera(cam_at, tgt, lens)
+                render(shot, res)
+                clear(L + [cam])
+        if want('hive_top'):
+            # looking down at the open skull from above and in front
+            hp = head_point(c, (0, 0.01, 0.07))
+            L = std_lights(tuple(hp), 0.25)
+            cam = camera(hp + Vector((0.18, -0.32, 0.42)), hp, 70)
+            render('hive_top', (1000, 1000))
+            clear(L + [cam])
+        for lock in (0.0, 1.0):
+            set_lock(lock)
+            sfx = '_lock' if lock else ''
+            if want('hive_dark' + sfx):
+                # the game's look: near dark, a teal ambient, a warm flashlight from the viewer
+                bpy.context.scene.world.node_tree.nodes['Background'].inputs['Color'].default_value = (0.004, 0.012, 0.012, 1)
+                tgt = (x0, 0, 1.2)
+                cam = camera((x0 + 0.3, -3.2, 1.62), tgt, 32)
+                fl = add_light('SPOT', (x0 + 0.5, -3.1, 1.50), tgt, 700, (1.0, 0.82, 0.58), 0.05, 'Flash', spot=(40, 0.6))
+                amb = add_light('AREA', (x0, 0, 3.0), (x0, 0, 0), 40, (0.35, 0.8, 0.75), 4.0, 'Amb')
+                el = eye_lights(c, lock)
+                render('hive_dark' + sfx, (1400, 1000))
+                clear([cam, fl, amb] + el)
+                bpy.context.scene.world.node_tree.nodes['Background'].inputs['Color'].default_value = (0.02, 0.025, 0.03, 1)
+            if want('hive_black' + sfx):
+                # no flashlight at all: what you see of it down a dark corridor
+                bpy.context.scene.world.node_tree.nodes['Background'].inputs['Color'].default_value = (0.002, 0.005, 0.005, 1)
+                cam = camera((x0 + 0.2, -3.6, 1.55), (x0, 0, 1.25), 40)
+                amb = add_light('AREA', (x0, 0, 3.0), (x0, 0, 0), 12, (0.35, 0.8, 0.75), 4.0, 'Amb')
+                el = eye_lights(c, lock)
+                render('hive_black' + sfx, (1400, 1000))
+                clear([cam, amb] + el)
+                bpy.context.scene.world.node_tree.nodes['Background'].inputs['Color'].default_value = (0.02, 0.025, 0.03, 1)
+        set_lock(0.0)
+    for key, shot in (('surgeon', 'face_surgeon'), ('hive', 'face_hive'), ('hive', 'face_hive_lock'), ('surgeon_graft', 'face_graft')):
         if key not in chars or not want(shot):
             continue
         show_only(chars, (key,))
         c = chars[key]
+        lock = shot.endswith('_lock')
+        set_lock(1.0 if lock else 0.0)
         hp = head_point(c, (0, -0.02, 0.0))
         fwd = head_point(c, (0, -0.3, 0.0)) - hp
         fwd.z *= 0.6
         fwd.normalize()
         side = Vector((-fwd.y, fwd.x, 0))
-        for tag, ang, dist in (('', 0.35, 0.62), ('_front', 0.0, 0.58), ('_side', 1.45, 0.55)):
+        angles = (('', 0.35, 0.62), ('_front', 0.0, 0.58)) if lock else (('', 0.35, 0.62), ('_front', 0.0, 0.58), ('_side', 1.45, 0.55))
+        for tag, ang, dist in angles:
             d = (fwd * math.cos(ang) + side * math.sin(ang)).normalized()
-            L = std_lights(tuple(hp), 0.25)
+            L = std_lights(tuple(hp), 0.25) + eye_lights(c, lock)
             cam = camera(hp + d * dist + Vector((0, 0, 0.02)), hp, 85)
             render(shot + tag, (1000, 1000))
             clear(L + [cam])
+        set_lock(0.0)
     if 'surgeon_graft' in chars and want('graft_full'):
         show_only(chars, ('surgeon_graft',))
         L = std_lights((3.0, 0.0, 1.0))

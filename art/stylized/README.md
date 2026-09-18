@@ -40,7 +40,10 @@ godot --path . --resolution 1280x720 tools/style_lab/style_lab.tscn             
 ```
 
 `--fast` meshes at a coarser resolution for quick iteration. Variants: `surgeon`, `surgeon_graft` (the left eye
-swapped for a Hive eye, stitched), `hive` (still on the first-pass head; next up).
+swapped for a Hive eye, stitched), `hive` (the surgeon's head and kit: charcoal skin, the skull broken open with a pale shelf fungus in place of the
+brain, `Fungus` a separate piece; orange eyes, whose glow is in the eye mask: R = the pinpoint, G = the whole ball,
+lit by the material's `Lock` value, 0 wandering and 1 locked on). Hive shots: `hive_front`, `hive_34`, `hive_side`,
+`hive_back`, `hive_top`, `face_hive`, `face_hive_lock`, `hive_dark(_lock)`, `hive_black(_lock)`.
 
 ## Game pieces (the human contract)
 

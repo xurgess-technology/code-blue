@@ -119,7 +119,7 @@ Each monster runs on one sense, so players learn them in order: eyes, then ears,
 
 | Monster | Sense | Rule |
 | --- | --- | --- |
-| **The Hive** | Eyes | A shambling patient, common near the start of every wing. Sees you and lumbers slowly after you; break line of sight and it loses interest within a few seconds. Deaf. Weak: the easy fight that teaches the saw and the capture loop. Has a brain. Hives share a hive mind (that is why they forget you so fast). |
+| **The Hive** | Eyes | A shambling patient, common near the start of every wing. Sees you and lumbers slowly after you; break line of sight and it loses interest within a few seconds. Deaf. Weak: the easy fight that teaches the saw and the capture loop. Hives share a hive mind (that is why they forget you so fast). **Look (2026-09-18):** charcoal-grey skin; the skull is broken open and the brain is gone, replaced by a pale shelf fungus that bulges out of the break and roots into the scalp; orange eyes, a soft pinpoint while it wanders and the whole eyeball lit up once it locks on to someone. With no brain, its harvest waits on the grafting redesign. |
 | **The Discharged** | Ears | Eyeless and a head taller than a surgeon, with clear ears on the large side of normal that swivel toward sounds. Drags a rattling IV pole. Hunts by sound: the rattle stops, the ears turn, then it rushes the noise. A shove stuns it. Has a brain. |
 | **The Night Nurse** | Being watched | Moves only while nobody is looking at it with light on it. A shove does nothing, and neither do the saw or the needle: she is the one you run from. No brain. |
 
@@ -198,7 +198,7 @@ exaggerated person", never chibi, never a doll.
 | Character | Style | Notes |
 |---|---|---|
 | Surgeon (players) | Stylized | Done: bald, short-sleeved scrubs, bare hands; the belly gash for the player table; a Dive clip |
-| The Hive | First pass (as `walk_in` in the scripts) | Next: onto the surgeon's head and kit, keeping its hunch and dragged leg |
+| The Hive | Stylized, in review | On the surgeon's head and kit with its hunch and dragged leg; charcoal skin, open skull with shelf fungus, orange eyes. Renders only: not exported or in the game yet |
 | Night Nurse | Blender-scripted, own look | Already exaggerated; check she sits with the rest |
 | Discharged, Bob, paramedics | Older looks | To move over |
 
