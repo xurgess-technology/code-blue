@@ -175,7 +175,7 @@ func _bulky() -> void:
 	_check(hm_tail >= 0 and me.slot_free(hm_tail), "an orphaned second half frees itself")
 	# Replication: the report is a copy and carries the pairing.
 	_clear()
-	me.take_into("microscope", 1, 250)
+	me.take_into("ultrasound", 1, 250)
 	var rep: Dictionary = me.report_full()
 	rep.sl[0].count = 99
 	_check(int(me.slots[0].count) == 1 and rep.sl.size() == 4 and (rep.sl as Array).any(func(s): return s.has("of")), "report_full copies the four slots, pairing included")
@@ -191,7 +191,7 @@ func _hit_drops() -> void:
 	me.take_into("anesthetic", 3)
 	me.take_into("gauze", 2)
 	me.take_into("laptop", 1, 200)     # fragile loot
-	me.take_into("wheelchair_wheel", 1, 40)
+	me.take_into("xray_film", 1, 40)
 	var before := game.world_items.size()
 	me.invuln = 0.0
 	game.damage_player(me, 1, "test")
@@ -203,10 +203,10 @@ func _hit_drops() -> void:
 	_check(game.world_items.size() == before + 4, "four stacks hit the floor (%d)" % (game.world_items.size() - before))
 	_check(dropped.has("anesthetic") and int(dropped.anesthetic.count) == 2, "the vials lose one to breakage")
 	_check(dropped.has("laptop") and int(dropped.laptop.value) < 200 and int(dropped.laptop.value) > 0, "the laptop cracks and is worth less (%d)" % int(dropped.get("laptop", {"value": -1}).value))
-	_check(dropped.has("wheelchair_wheel") and int(dropped.wheelchair_wheel.value) == 40, "sturdy loot keeps its value")
+	_check(dropped.has("xray_film") and int(dropped.xray_film.value) == 40, "sturdy loot keeps its value")
 	# Bulky loot drops on a shove too.
 	me.revive_full()
-	me.take_into("iv_pump", 1, 180)
+	me.take_into("defibrillator", 1, 180)
 	var other = _add_dummy()
 	await _frames(2)
 	other.teleport(me.global_position + Vector3(1.2, 0.0, 0.0))
@@ -215,7 +215,7 @@ func _hit_drops() -> void:
 	await _frames(2)
 	var holder_before := game.world_items.size()
 	game.player_shoved(other)
-	_check(me.hands_empty() and game.world_items.size() == holder_before + 1, "a shove drops the bulky IV pump")
+	_check(me.hands_empty() and game.world_items.size() == holder_before + 1, "a shove drops the bulky defibrillator")
 	game.players.erase(other.peer_id)
 	other.queue_free()
 	me.revive_full()
@@ -250,8 +250,8 @@ func _loot_spawn() -> void:
 	_check(str(a) != str(c), "a different seed gives a different plan")
 	# Deeper is worth more: the same roll at depth 3 beats depth 0.
 	_check(LootTable.roll_value("laptop", 3, 0.5) > LootTable.roll_value("laptop", 0, 0.5), "deeper loot rolls higher values")
-	_check(LootTable.weight("gold_watch", "waiting_room", 3) / LootTable.weight("stethoscope", "waiting_room", 3) \
-		> LootTable.weight("gold_watch", "waiting_room", 0) / LootTable.weight("stethoscope", "waiting_room", 0), "rare loot is likelier deeper")
+	_check(LootTable.weight("gold_watch", "waiting_room", 3) / LootTable.weight("xray_film", "waiting_room", 3) \
+		> LootTable.weight("gold_watch", "waiting_room", 0) / LootTable.weight("xray_film", "waiting_room", 0), "rare loot is likelier deeper")
 	# Colour coding: gold rim on loot, teal on supplies.
 	var gold = ItemModels.tint_material("laptop")
 	var teal = ItemModels.tint_material("gauze")

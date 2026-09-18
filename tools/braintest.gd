@@ -232,7 +232,7 @@ func _abilities_nothing_and_echo() -> void:
 	# Something to see around us: loot, a supply, a monster.
 	var here: Vector3 = me.global_position
 	var props := []
-	for k in [["laptop", 1], ["gauze", 2], ["stethoscope", 1]]:
+	for k in [["laptop", 1], ["gauze", 2], ["xray_film", 1]]:
 		var p = game._spawn_item(k[0], k[1], Transform3D(Basis(), here + Vector3(randf_range(-4, 4), 0.3, randf_range(-4, 4))), WorldItem.State.LOOSE)
 		props.append(p)
 	var mon: Node = game._add_monster("discharged", game._floor_at(here + Vector3(6, 0, 0)))

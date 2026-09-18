@@ -12,116 +12,69 @@ extends RefCounted
 ##   bulky          takes two hand slots (and never fits in a container)
 ##   fragile        a violent drop (hit, shove) cracks it: the stack loses value
 ##   stack          several merge into one hand slot (value adds up); batch is the spawn size
+##   trinket        sells, but a later chunk gives it one job too (the item list in docs/ITEMS_AND_ICONS.md)
 ##   tier           0 common junk .. 3 rare valuables; higher tiers get likelier deeper in
 ##   rooms          room kind -> weight; "*" is any other kind. Unlisted kinds without "*" never.
 ##   surfaces       loose anchor surfaces it may sit on ("counter", "tray", "gurney", "floor")
 ##   containers     container type -> weight, when it may also turn up inside one
 
 const LOOT := {
-	"stethoscope": {
-		"name": "Stethoscope", "short": "Stethoscopes", "value": [30, 60], "tier": 0,
-		"rooms": {"ward": 1.0, "patient_room": 1.0, "nurse_station": 1.2, "office": 0.5, "corridor": 0.3, "*": 0.15},
-		"surfaces": ["counter", "tray", "gurney"], "containers": {"station_drawers": 0.5},
-	},
-	"pulse_oximeter": {
-		"name": "Pulse oximeter", "short": "Pulse oximeters", "value": [25, 50], "tier": 0,
-		"rooms": {"ward": 1.0, "patient_room": 1.0, "nurse_station": 1.0, "*": 0.1},
-		"surfaces": ["counter", "tray"], "containers": {"station_drawers": 0.6},
-	},
-	"bp_cuff": {
-		"name": "Blood pressure cuff", "short": "Blood pressure cuffs", "value": [35, 70], "tier": 0,
-		"rooms": {"ward": 1.0, "patient_room": 1.0, "nurse_station": 0.9, "waiting_room": 0.3, "*": 0.1},
-		"surfaces": ["counter", "tray", "gurney"], "containers": {"station_drawers": 0.4},
-	},
-	"thermometer": {
-		"name": "Ear thermometer", "short": "Ear thermometers", "value": [15, 30], "tier": 0,
-		"rooms": {"ward": 1.0, "patient_room": 1.0, "nurse_station": 1.0, "*": 0.2},
-		"surfaces": ["counter", "tray"], "containers": {"station_drawers": 0.7, "drawer_unit": 0.3},
-	},
-	"reflex_hammer": {
-		"name": "Reflex hammer", "short": "Reflex hammers", "value": [10, 22], "tier": 0,
-		"rooms": {"office": 1.0, "ward": 0.6, "patient_room": 0.6, "*": 0.2},
-		"surfaces": ["counter", "tray"], "containers": {"drawer_unit": 0.4},
-	},
+	# ---- plain loot: it exists to be sold -----------------------------------------------------
 	"pill_bottle": {
-		"name": "Pill bottle", "short": "Pill bottles", "value": [12, 26], "tier": 0, "stack": true, "batch": [1, 3],
-		"rooms": {"pharmacy": 1.6, "ward": 0.6, "patient_room": 0.6, "restroom": 0.5, "nurse_station": 0.6, "*": 0.15},
+		"name": "Pill bottle", "short": "Pill bottles", "value": [22, 44], "tier": 0, "stack": true, "batch": [1, 3],
+		"rooms": {"pharmacy": 2.72, "patient_room": 1.19, "nurse_station": 1.36, "restroom": 1.02, "supply_closet": 1.02, "janitor_closet": 0.68, "lab": 0.85, "cafeteria": 0.51, "*": 0.255},
 		"surfaces": ["counter", "tray"], "containers": {"med_fridge": 0.35, "station_drawers": 0.4},
 	},
 	"xray_film": {
-		"name": "X-ray film", "short": "X-ray films", "value": [20, 45], "tier": 0,
-		"rooms": {"radiology": 2.0, "office": 0.8, "storage": 0.4, "*": 0.1},
+		"name": "X-ray film", "short": "X-ray films", "value": [45, 90], "tier": 0,
+		"rooms": {"radiology": 3.2, "office": 1.28, "supply_closet": 0.8, "patient_room": 0.64, "lab": 0.64, "morgue": 0.64, "janitor_closet": 0.48, "*": 0.16},
 		"surfaces": ["counter", "gurney"], "containers": {"drawer_unit": 0.3},
 	},
-	"patient_records": {
-		"name": "Patient records", "short": "Patient records", "value": [18, 40], "tier": 0,
-		"rooms": {"office": 1.4, "nurse_station": 1.0, "waiting_room": 0.4, "*": 0.1},
-		"surfaces": ["counter"], "containers": {"station_drawers": 0.5},
-	},
-	"desk_phone": {
-		"name": "Desk phone", "short": "Desk phones", "value": [20, 40], "tier": 0,
-		"rooms": {"office": 1.4, "nurse_station": 1.0, "waiting_room": 0.6, "break_room": 0.5, "*": 0.1},
-		"surfaces": ["counter"], "containers": {},
-	},
-	"wheelchair_wheel": {
-		"name": "Wheelchair wheel", "short": "Wheelchair wheels", "value": [25, 55], "tier": 0,
-		"rooms": {"maintenance": 1.4, "storage": 1.0, "corridor": 0.6, "janitor": 0.8, "*": 0.1},
-		"surfaces": ["floor", "gurney"], "containers": {},
-	},
-	"sample_rack": {
-		"name": "Blood sample rack", "short": "Blood sample racks", "value": [40, 80], "tier": 1, "fragile": true,
-		"rooms": {"lab": 2.0, "pharmacy": 0.8, "storage": 0.3, "*": 0.08},
-		"surfaces": ["counter", "tray"], "containers": {"med_fridge": 0.5},
-	},
-	"otoscope": {
-		"name": "Otoscope", "short": "Otoscopes", "value": [45, 90], "tier": 1,
-		"rooms": {"office": 1.0, "ward": 0.7, "patient_room": 0.7, "nurse_station": 0.5, "*": 0.1},
-		"surfaces": ["counter", "tray"], "containers": {"drawer_unit": 0.4, "station_drawers": 0.3},
-	},
-	"laptop": {
-		"name": "Laptop", "short": "Laptops", "value": [110, 220], "tier": 2, "fragile": true,
-		"rooms": {"office": 1.6, "nurse_station": 0.9, "lab": 0.8, "radiology": 0.6, "*": 0.08},
-		"surfaces": ["counter"], "containers": {},
+	"heart_monitor": {
+		"name": "Heart monitor", "short": "Heart monitors", "value": [110, 200], "tier": 2, "bulky": true, "fragile": true,
+		"rooms": {"patient_room": 0.224, "nurse_station": 0.112, "supply_closet": 0.112, "janitor_closet": 0.09, "corridor": 0.067, "lab": 0.067, "*": 0.011},
+		"surfaces": ["counter", "gurney", "floor"], "containers": {},
 	},
 	"gold_watch": {
-		"name": "Gold watch", "short": "Gold watches", "value": [160, 380], "tier": 3,
-		"rooms": {"office": 0.6, "waiting_room": 1.0, "morgue": 1.6, "restroom": 0.6, "*": 0.15},
+		"name": "Gold watch", "short": "Gold watches", "value": [100, 240], "tier": 3,
+		"rooms": {"office": 0.252, "waiting_room": 0.42, "morgue": 0.672, "restroom": 0.336, "cafeteria": 0.336, "lab": 0.168, "*": 0.063},
 		"surfaces": ["counter", "tray", "floor"], "containers": {"station_drawers": 0.3, "drawer_unit": 0.3},
 	},
-	"wedding_ring": {
-		"name": "Wedding ring", "short": "Wedding rings", "value": [90, 240], "tier": 3,
-		"rooms": {"restroom": 1.2, "morgue": 1.4, "waiting_room": 0.6, "*": 0.1},
-		"surfaces": ["counter", "tray", "floor"], "containers": {"station_drawers": 0.2},
+	"ultrasound": {
+		"name": "Portable ultrasound", "short": "Portable ultrasounds", "value": [260, 440], "tier": 3, "bulky": true, "fragile": true,
+		"rooms": {"radiology": 0.7, "patient_room": 0.14, "supply_closet": 0.14, "lab": 0.14, "*": 0.017},
+		"surfaces": ["counter", "gurney"], "containers": {},
 	},
-	"coffee_maker": {
-		"name": "Coffee maker", "short": "Coffee makers", "value": [40, 90], "tier": 0, "bulky": true, "fragile": true,
-		"rooms": {"break_room": 1.6, "office": 1.0, "nurse_station": 1.0, "cafeteria": 1.4, "waiting_room": 0.5, "*": 0.05},
+	# ---- trinkets: they sell, but each also does one thing (a later chunk). Rarer than plain loot.
+	"desk_phone": {
+		"name": "Desk phone", "short": "Desk phones", "value": [30, 60], "tier": 0, "trinket": true,
+		"rooms": {"office": 0.6, "nurse_station": 0.42, "waiting_room": 0.36, "cafeteria": 0.54, "*": 0.03},
 		"surfaces": ["counter"], "containers": {},
 	},
-	"heart_monitor": {
-		"name": "Heart monitor", "short": "Heart monitors", "value": [170, 300], "tier": 2, "bulky": true, "fragile": true,
-		"rooms": {"ward": 1.0, "patient_room": 1.0, "nurse_station": 0.5, "storage": 0.4, "*": 0.05},
-		"surfaces": ["counter", "gurney", "floor"], "containers": {},
-	},
-	"iv_pump": {
-		"name": "IV pump", "short": "IV pumps", "value": [150, 270], "tier": 2, "bulky": true,
-		"rooms": {"ward": 1.0, "patient_room": 1.0, "storage": 0.8, "corridor": 0.3, "*": 0.05},
-		"surfaces": ["counter", "gurney", "floor"], "containers": {},
+	"laptop": {
+		"name": "Laptop", "short": "Laptops", "value": [110, 200], "tier": 2, "fragile": true, "trinket": true,
+		"rooms": {"lab": 0.96, "office": 0.72, "nurse_station": 0.36, "radiology": 0.36, "cafeteria": 0.3, "*": 0.03},
+		"surfaces": ["counter"], "containers": {},
 	},
 	"defibrillator": {
-		"name": "Defibrillator", "short": "Defibrillators", "value": [240, 440], "tier": 3, "bulky": true,
-		"rooms": {"corridor": 1.0, "nurse_station": 1.0, "ward": 0.6, "waiting_room": 0.6, "*": 0.05},
+		"name": "Defibrillator", "short": "Defibrillators", "value": [170, 310], "tier": 3, "bulky": true, "trinket": true,
+		"rooms": {"corridor": 0.21, "nurse_station": 0.168, "patient_room": 0.105, "waiting_room": 0.126, "supply_closet": 0.084, "janitor_closet": 0.084, "*": 0.006},
 		"surfaces": ["floor", "counter", "gurney"], "containers": {},
 	},
-	"microscope": {
-		"name": "Microscope", "short": "Microscopes", "value": [220, 380], "tier": 3, "bulky": true, "fragile": true,
-		"rooms": {"lab": 2.0, "pharmacy": 0.6, "storage": 0.3, "*": 0.03},
-		"surfaces": ["counter"], "containers": {},
+	"reflex_hammer": {
+		"name": "Reflex hammer", "short": "Reflex hammers", "value": [30, 60], "tier": 0, "trinket": true,
+		"rooms": {"office": 0.4, "patient_room": 0.2, "nurse_station": 0.2, "janitor_closet": 0.15, "supply_closet": 0.15, "morgue": 0.15, "*": 0.025},
+		"surfaces": ["counter", "tray"], "containers": {"drawer_unit": 0.4},
 	},
-	"ultrasound": {
-		"name": "Portable ultrasound", "short": "Portable ultrasounds", "value": [320, 560], "tier": 3, "bulky": true, "fragile": true,
-		"rooms": {"radiology": 2.0, "ward": 0.3, "storage": 0.3, "*": 0.02},
-		"surfaces": ["counter", "gurney"], "containers": {},
+	"epipen": {
+		"name": "EpiPen", "short": "EpiPens", "value": [40, 80], "tier": 1, "trinket": true,
+		"rooms": {"nurse_station": 0.32, "pharmacy": 0.32, "patient_room": 0.16, "supply_closet": 0.16, "restroom": 0.12, "cafeteria": 0.12, "*": 0.02},
+		"surfaces": ["counter", "tray"], "containers": {"station_drawers": 0.5, "med_fridge": 0.3},
+	},
+	"pulse_oximeter": {
+		"name": "Pulse oximeter", "short": "Pulse oximeters", "value": [60, 110], "tier": 1, "trinket": true,
+		"rooms": {"patient_room": 0.24, "nurse_station": 0.32, "supply_closet": 0.12, "lab": 0.16, "morgue": 0.12, "*": 0.02},
+		"surfaces": ["counter", "tray"], "containers": {"station_drawers": 0.5},
 	},
 	# BRAINS (sweep 3, scripts/brains): harvested from a dissected monster, never found. No rooms,
 	# surfaces or containers, so the loot spawner never picks them; `value` is the full price of a

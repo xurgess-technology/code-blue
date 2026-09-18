@@ -14,61 +14,28 @@ static func build(root: Node3D, kind: String, count: int) -> void:
 	match kind:
 		"brain_hive", "brain_discharged": BrainModel.build(root, kind)
 		"eye_hive", "eye_surgeon": Eyes.build(root, kind)
-		"stethoscope": _stethoscope(root)
-		"pulse_oximeter": _pulse_oximeter(root)
-		"bp_cuff": _bp_cuff(root)
-		"thermometer": _thermometer(root)
 		"reflex_hammer": _reflex_hammer(root)
+		"epipen": _epipen(root)
+		"pulse_oximeter": _pulse_oximeter(root)
 		"pill_bottle": _pill_bottles(root, clampi(count, 1, 6))
 		"xray_film": _xray_film(root)
-		"patient_records": _records(root)
 		"desk_phone": _desk_phone(root)
-		"wheelchair_wheel": _wheel(root)
-		"sample_rack": _sample_rack(root)
-		"otoscope": _otoscope(root)
 		"laptop": _laptop(root)
 		"gold_watch": _watch(root)
-		"wedding_ring": _ring_box(root)
-		"coffee_maker": _coffee_maker(root)
 		"heart_monitor": _heart_monitor(root)
-		"iv_pump": _iv_pump(root)
 		"defibrillator": _defibrillator(root)
-		"microscope": _microscope(root)
 		"ultrasound": _ultrasound(root)
 		_: _add(root, _box(Vector3(0.15, 0.1, 0.15), _m("magenta", Color.MAGENTA)), Vector3(0, 0.05, 0))
 
 
 ## models sweep 2: what ItemModels merges into a kind's real model besides the model itself.
-##   copies:   [[asset key, Transform3D]] more models (the tubes in the sample rack)
-##   parts:    [[Mesh, surface, Transform3D, Material]] small primitive details (the blood in the
-##             tubes, the green trace on the heart monitor's glass)
+##   copies:   [[asset key, Transform3D]] more models next to the main one
+##   parts:    [[Mesh, surface, Transform3D, Material]] small primitive details (the green trace on
+##             the heart monitor's glass)
 ##   recolour: {material resource_name or "*": Color} albedo tint on the model's own materials
 ## Positions are in the model's fitted frame: base on the floor, footprint centred.
 static func asset_extras(kind: String) -> Dictionary:
 	match kind:
-		"sample_rack":
-			var copies := []
-			var parts := []
-			var blood := _m("blood", Color(0.45, 0.02, 0.03), 0.25)
-			var tube := CylinderMesh.new()
-			tube.top_radius = 0.0075
-			tube.bottom_radius = 0.0075
-			tube.height = 0.045
-			tube.radial_segments = 8
-			tube.rings = 1
-			var cap := CylinderMesh.new()
-			cap.top_radius = 0.0105
-			cap.bottom_radius = 0.0105
-			cap.height = 0.012
-			cap.radial_segments = 8
-			cap.rings = 1
-			for i in 6:
-				var x := -0.0775 + i * 0.031
-				copies.append(["item/sample_tube", Transform3D(Basis(), Vector3(x, 0.006, 0.0))])
-				parts.append([tube, 0, Transform3D(Basis(), Vector3(x, 0.03, 0.0)), blood])
-				var cm := _m("cap_%d" % (i % 3), [Color(0.7, 0.1, 0.1), Color(0.2, 0.4, 0.8), Color(0.3, 0.6, 0.25)][i % 3], 0.5)
-				parts.append([cap, 0, Transform3D(Basis(), Vector3(x, 0.086, 0.0)), cm])
-			return {"copies": copies, "parts": parts}
 		"heart_monitor":
 			var trace := _screen("ecg", Color(0.3, 1.0, 0.45))
 			var parts := []
@@ -81,8 +48,6 @@ static func asset_extras(kind: String) -> Dictionary:
 				var xf := Transform3D(Basis(Vector3.BACK, (b - a).angle()), Vector3(HEART_SCREEN.x + (a.x + b.x) * 0.5, HEART_SCREEN.y + (a.y + b.y) * 0.5, HEART_SCREEN.z))
 				parts.append([seg, 0, xf, trace])
 			return {"parts": parts}
-		"patient_records":
-			return {"recolour": {"*": Color(0.86, 0.72, 0.46)}}
 	return {}
 
 
@@ -95,26 +60,16 @@ static func footprint(kind: String) -> Vector3:
 	match kind:
 		"brain_hive", "brain_discharged": return BrainModel.footprint(kind)
 		"eye_hive", "eye_surgeon": return Eyes.footprint()
-		"stethoscope": return Vector3(0.2, 0.04, 0.2)
+		"epipen": return Vector3(0.16, 0.03, 0.03)
 		"pulse_oximeter": return Vector3(0.07, 0.05, 0.05)
-		"bp_cuff": return Vector3(0.24, 0.06, 0.14)
-		"thermometer": return Vector3(0.16, 0.04, 0.05)
 		"reflex_hammer": return Vector3(0.22, 0.04, 0.07)
 		"pill_bottle": return Vector3(0.12, 0.08, 0.06)
 		"xray_film": return Vector3(0.3, 0.02, 0.25)
-		"patient_records": return Vector3(0.24, 0.04, 0.31)
 		"desk_phone": return Vector3(0.2, 0.09, 0.2)
-		"wheelchair_wheel": return Vector3(0.58, 0.06, 0.58)
-		"sample_rack": return Vector3(0.22, 0.1, 0.08)
-		"otoscope": return Vector3(0.18, 0.05, 0.06)
 		"laptop": return Vector3(0.34, 0.24, 0.24)
 		"gold_watch": return Vector3(0.08, 0.03, 0.1)
-		"wedding_ring": return Vector3(0.06, 0.06, 0.06)
-		"coffee_maker": return Vector3(0.24, 0.34, 0.26)
 		"heart_monitor": return Vector3(0.38, 0.34, 0.2)
-		"iv_pump": return Vector3(0.2, 0.32, 0.18)
 		"defibrillator": return Vector3(0.36, 0.2, 0.28)
-		"microscope": return Vector3(0.24, 0.4, 0.3)
 		"ultrasound": return Vector3(0.42, 0.34, 0.32)
 	return Vector3(0.15, 0.1, 0.15)
 
@@ -223,14 +178,14 @@ static func _gold() -> StandardMaterial3D:
 # ---------------------------------------------------------------------------
 # small loot
 
-static func _stethoscope(root: Node3D) -> void:
-	var tube := _m("rubber_dark", Color(0.12, 0.13, 0.15), 0.7)
-	_add(root, _torus(0.06, 0.075, tube, 24, 6), Vector3(0, 0.008, 0))
-	_add(root, _cyl(0.024, 0.014, _steel(), 16), Vector3(0.09, 0.007, 0.02))
-	_add(root, _cyl(0.02, 0.004, _m("diaphragm", Color(0.9, 0.9, 0.88), 0.5), 16), Vector3(0.09, 0.016, 0.02))
-	for s in [-1.0, 1.0]:
-		_add(root, _cyl(0.003, 0.11, _steel(), 6), Vector3(-0.06, 0.012, s * 0.018), Vector3(0, s * 12.0, 90))
-		_add(root, _sphere(0.007, _black_plastic()), Vector3(-0.115, 0.012, s * 0.03))
+## A yellow auto-injector lying on its side: blue safety cap at -X, orange needle end at +X.
+static func _epipen(root: Node3D) -> void:
+	var body := _m("epi_yellow", Color(0.96, 0.82, 0.16), 0.4)
+	var y := 0.016
+	_add(root, _cyl(0.015, 0.11, body, 14), Vector3(0.005, y, 0), Vector3(0, 0, 90))
+	_add(root, _cyl(0.0165, 0.045, _m("epi_cap", Color(0.2, 0.42, 0.85), 0.45), 14), Vector3(-0.0725, y, 0), Vector3(0, 0, 90))
+	_add(root, _cyl(0.0155, 0.032, _m("epi_tip", Color(0.95, 0.42, 0.1), 0.45), 14, 0.011), Vector3(0.076, y, 0), Vector3(0, 0, -90))
+	_add(root, _box(Vector3(0.05, 0.002, 0.014), _m("epi_label", Color(0.95, 0.95, 0.9), 0.7)), Vector3(0.0, y + 0.0148, 0))
 
 
 static func _pulse_oximeter(root: Node3D) -> void:
@@ -238,22 +193,6 @@ static func _pulse_oximeter(root: Node3D) -> void:
 	_add(root, _box(Vector3(0.065, 0.022, 0.042), body), Vector3(0, 0.011, 0))
 	_add(root, _box(Vector3(0.06, 0.018, 0.04), _grey_plastic()), Vector3(0, 0.031, 0), Vector3(0, 0, -6))
 	_add(root, _box(Vector3(0.03, 0.002, 0.018), _screen("red", Color(1.0, 0.25, 0.2))), Vector3(0.004, 0.041, 0), Vector3(0, 0, -6))
-
-
-static func _bp_cuff(root: Node3D) -> void:
-	var cuff := _m("cuff_navy", Color(0.12, 0.17, 0.3), 0.9)
-	_add(root, _box(Vector3(0.2, 0.025, 0.12), cuff), Vector3(0, 0.0125, 0))
-	_add(root, _box(Vector3(0.05, 0.028, 0.121), _m("velcro", Color(0.2, 0.22, 0.25), 1.0)), Vector3(-0.07, 0.014, 0))
-	_add(root, _torus(0.035, 0.042, _black_plastic(), 16, 5), Vector3(0.05, 0.03, 0.03), Vector3(90, 0, 20))
-	_add(root, _sphere(0.022, _black_plastic()), Vector3(0.1, 0.022, -0.035))
-	_add(root, _cyl(0.024, 0.012, _m("gauge_face", Color(0.95, 0.95, 0.92), 0.4), 16), Vector3(-0.02, 0.03, 0.03))
-
-
-static func _thermometer(root: Node3D) -> void:
-	var white := _m("white_plastic", Color(0.93, 0.93, 0.9), 0.45)
-	_add(root, _box(Vector3(0.12, 0.028, 0.038), white), Vector3(-0.01, 0.014, 0))
-	_add(root, _cyl(0.012, 0.045, white, 10, 0.006), Vector3(0.07, 0.014, 0), Vector3(0, 0, -90))
-	_add(root, _box(Vector3(0.035, 0.002, 0.022), _screen("lcd", Color(0.55, 0.9, 0.7))), Vector3(-0.025, 0.029, 0))
 
 
 static func _reflex_hammer(root: Node3D) -> void:
@@ -327,15 +266,6 @@ static func _xray_material() -> StandardMaterial3D:
 	return m
 
 
-static func _records(root: Node3D) -> void:
-	var manila := _m("manila", Color(0.82, 0.68, 0.42), 0.9)
-	var paper := _m("label_paper", Color(0.96, 0.95, 0.9), 0.9)
-	_add(root, _box(Vector3(0.22, 0.012, 0.3), paper), Vector3(0.004, 0.012, 0.0))
-	_add(root, _box(Vector3(0.23, 0.006, 0.31), manila), Vector3(0, 0.003, 0))
-	_add(root, _box(Vector3(0.23, 0.006, 0.31), manila), Vector3(-0.003, 0.021, 0.004), Vector3(0, 2.0, 0))
-	_add(root, _box(Vector3(0.07, 0.007, 0.02), _m("tab_red", Color(0.7, 0.15, 0.12), 0.7)), Vector3(-0.06, 0.022, -0.16))
-
-
 static func _desk_phone(root: Node3D) -> void:
 	var body := _m("phone_grey", Color(0.18, 0.19, 0.2), 0.5)
 	_add(root, _box(Vector3(0.18, 0.05, 0.2), body), Vector3(0, 0.025, 0), Vector3(-8, 0, 0))
@@ -344,36 +274,6 @@ static func _desk_phone(root: Node3D) -> void:
 		_add(root, _box(Vector3(0.056, 0.022, 0.045), _black_plastic()), Vector3(-0.055, 0.075, s * 0.075), Vector3(-8, 0, 0))
 	_add(root, _box(Vector3(0.07, 0.004, 0.1), _m("keypad", Color(0.75, 0.76, 0.74), 0.5)), Vector3(0.04, 0.056, 0.01), Vector3(-8, 0, 0))
 	_add(root, _box(Vector3(0.05, 0.003, 0.025), _screen("amber", Color(1.0, 0.65, 0.2))), Vector3(0.04, 0.056, -0.065), Vector3(-8, 0, 0))
-
-
-static func _wheel(root: Node3D) -> void:
-	_add(root, _torus(0.24, 0.29, _m("tyre", Color(0.06, 0.06, 0.06), 0.9), 28, 6), Vector3(0, 0.025, 0))
-	_add(root, _torus(0.215, 0.235, _steel(), 28, 4), Vector3(0, 0.025, 0))
-	_add(root, _torus(0.25, 0.26, _steel(), 28, 4), Vector3(0, 0.05, 0))
-	for i in 6:
-		_add(root, _cyl(0.003, 0.45, _steel(), 4), Vector3(0, 0.025, 0), Vector3(0, i * 30.0, 90))
-	_add(root, _cyl(0.03, 0.05, _black_plastic(), 12), Vector3(0, 0.025, 0))
-
-
-static func _sample_rack(root: Node3D) -> void:
-	var rack := _m("rack_white", Color(0.9, 0.9, 0.88), 0.5)
-	_add(root, _box(Vector3(0.2, 0.012, 0.07), rack), Vector3(0, 0.006, 0))
-	_add(root, _box(Vector3(0.2, 0.01, 0.07), rack), Vector3(0, 0.05, 0))
-	for s in [-1.0, 1.0]:
-		_add(root, _box(Vector3(0.008, 0.05, 0.07), rack), Vector3(s * 0.096, 0.028, 0))
-	var glass := _glass("tube_glass", Color(0.85, 0.9, 0.95))
-	var blood := _m("blood", Color(0.45, 0.02, 0.03), 0.25)
-	for i in 6:
-		var x := -0.075 + i * 0.03
-		_add(root, _cyl(0.007, 0.08, glass, 8), Vector3(x, 0.045, 0))
-		_add(root, _cyl(0.006, 0.05, blood, 8), Vector3(x, 0.03, 0))
-		_add(root, _cyl(0.008, 0.012, _m("cap_%d" % (i % 3), [Color(0.7, 0.1, 0.1), Color(0.2, 0.4, 0.8), Color(0.3, 0.6, 0.25)][i % 3], 0.5), 8), Vector3(x, 0.09, 0))
-
-
-static func _otoscope(root: Node3D) -> void:
-	_add(root, _cyl(0.014, 0.11, _black_plastic(), 10), Vector3(-0.03, 0.014, 0), Vector3(0, 0, 90))
-	_add(root, _cyl(0.02, 0.03, _steel(), 12), Vector3(0.035, 0.02, 0), Vector3(0, 0, 90))
-	_add(root, _cyl(0.014, 0.05, _m("speculum", Color(0.2, 0.2, 0.22), 0.4), 10, 0.004), Vector3(0.075, 0.02, 0), Vector3(0, 0, -90))
 
 
 static func _laptop(root: Node3D) -> void:
@@ -394,29 +294,8 @@ static func _watch(root: Node3D) -> void:
 	_add(root, _box(Vector3(0.002, 0.001, 0.012), _black_plastic()), Vector3(0, 0.015, -0.004))
 
 
-static func _ring_box(root: Node3D) -> void:
-	var velvet := _m("velvet", Color(0.35, 0.04, 0.08), 1.0)
-	_add(root, _box(Vector3(0.05, 0.03, 0.05), velvet), Vector3(0, 0.015, 0))
-	var lid := Node3D.new()
-	_add(root, lid, Vector3(0, 0.03, -0.025), Vector3(-100, 0, 0))
-	_add(lid, _box(Vector3(0.05, 0.016, 0.05), velvet), Vector3(0, -0.008, 0.025))
-	_add(root, _torus(0.009, 0.013, _gold(), 16, 6), Vector3(0, 0.041, 0), Vector3(90, 0, 0))
-	_add(root, _sphere(0.004, _m("diamond", Color(0.9, 0.95, 1.0), 0.05, 0.0, Color(0.7, 0.85, 1.0), 1.2)), Vector3(0, 0.055, 0))
-
-
 # ---------------------------------------------------------------------------
 # bulky loot
-
-static func _coffee_maker(root: Node3D) -> void:
-	var body := _m("coffee_black", Color(0.1, 0.1, 0.11), 0.4, 0.2)
-	_add(root, _box(Vector3(0.22, 0.03, 0.24), body), Vector3(0, 0.015, 0))
-	_add(root, _box(Vector3(0.22, 0.32, 0.08), body), Vector3(0, 0.16, -0.08))
-	_add(root, _box(Vector3(0.22, 0.06, 0.2), body), Vector3(0, 0.29, 0.0))
-	_add(root, _cyl(0.07, 0.012, _steel(), 16), Vector3(0, 0.036, 0.04))
-	_add(root, _cyl(0.065, 0.13, _glass("coffee_glass", Color(0.8, 0.85, 0.85)), 16), Vector3(0, 0.107, 0.04))
-	_add(root, _cyl(0.058, 0.07, _m("coffee", Color(0.12, 0.06, 0.02), 0.2), 14), Vector3(0, 0.077, 0.04))
-	_add(root, _box(Vector3(0.012, 0.012, 0.012), _screen("coffee", Color(1.0, 0.3, 0.1))), Vector3(0.08, 0.29, 0.101))
-
 
 static func _heart_monitor(root: Node3D) -> void:
 	var shell := _m("monitor_shell", Color(0.78, 0.79, 0.77), 0.5)
@@ -437,17 +316,6 @@ static func _heart_monitor(root: Node3D) -> void:
 		_add(root, _box(Vector3(0.02, 0.03, 0.03), _black_plastic()), Vector3(s * 0.09, 0.27, 0))
 
 
-static func _iv_pump(root: Node3D) -> void:
-	var shell := _m("pump_shell", Color(0.88, 0.88, 0.85), 0.5)
-	_add(root, _box(Vector3(0.18, 0.28, 0.14), shell), Vector3(0, 0.14, 0))
-	_add(root, _box(Vector3(0.12, 0.06, 0.004), _screen("pump", Color(0.4, 0.8, 1.0))), Vector3(0, 0.22, 0.072))
-	for r in 3:
-		for c in 3:
-			_add(root, _box(Vector3(0.024, 0.016, 0.006), _m("pump_key", Color(0.35, 0.55, 0.75), 0.5)), Vector3(-0.035 + c * 0.035, 0.15 - r * 0.028, 0.072))
-	_add(root, _box(Vector3(0.05, 0.2, 0.02), _m("pump_door", Color(0.55, 0.6, 0.65), 0.4)), Vector3(0.0, 0.14, -0.08))
-	_add(root, _cyl(0.012, 0.08, _steel(), 8), Vector3(0, 0.14, -0.13), Vector3(90, 0, 0))
-
-
 static func _defibrillator(root: Node3D) -> void:
 	var case_mat := _m("aed_case", Color(0.95, 0.72, 0.08), 0.5)
 	var dark := _m("aed_dark", Color(0.12, 0.12, 0.14), 0.6)
@@ -463,23 +331,6 @@ static func _defibrillator(root: Node3D) -> void:
 	_add(root, _sphere(0.022, red), Vector3(-0.051, 0.152, -0.002)).scale = Vector3(1, 0.15, 1)
 	_add(root, _box(Vector3(0.012, 0.005, 0.05), _m("aed_bolt", Color(1, 1, 1), 0.4)), Vector3(-0.07, 0.157, 0.01), Vector3(0, 25, 0))
 	_add(root, _cyl(0.018, 0.006, _m("aed_button", Color(0.2, 0.7, 0.3), 0.4, 0.0, Color(0.2, 0.9, 0.3), 1.0), 12), Vector3(0.07, 0.154, 0.03))
-
-
-static func _microscope(root: Node3D) -> void:
-	var body := _m("scope_body", Color(0.9, 0.9, 0.88), 0.4)
-	var dark := _black_plastic()
-	_add(root, _box(Vector3(0.2, 0.04, 0.26), body), Vector3(0, 0.02, 0))
-	_add(root, _box(Vector3(0.06, 0.26, 0.06), body), Vector3(0, 0.17, -0.09), Vector3(-10, 0, 0))
-	_add(root, _box(Vector3(0.14, 0.012, 0.12), dark), Vector3(0, 0.13, 0.03))
-	_add(root, _box(Vector3(0.07, 0.002, 0.025), _glass("slide", Color(0.9, 0.95, 1.0))), Vector3(0, 0.137, 0.03))
-	_add(root, _cyl(0.03, 0.08, body, 14), Vector3(0, 0.24, -0.03), Vector3(20, 0, 0))
-	_add(root, _cyl(0.035, 0.03, _steel(), 14), Vector3(0, 0.19, 0.0))
-	for i in 3:
-		_add(root, _cyl(0.008, 0.035, _steel(), 8), Vector3(-0.02 + i * 0.02, 0.165, 0.02 - i * 0.005))
-	for s in [-1.0, 1.0]:
-		_add(root, _cyl(0.012, 0.09, dark, 10), Vector3(s * 0.022, 0.31, -0.06), Vector3(35, 0, s * 8.0))
-	for s in [-1.0, 1.0]:
-		_add(root, _cyl(0.025, 0.02, dark, 12), Vector3(s * 0.05, 0.12, -0.09), Vector3(0, 0, 90))
 
 
 static func _ultrasound(root: Node3D) -> void:

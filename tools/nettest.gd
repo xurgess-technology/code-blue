@@ -718,7 +718,7 @@ func _sc_full_shift():
 ## and a late joiner sees the money.
 func _sc_economy():
 	const SELL := {"laptop": 250, "gold_watch": 300}
-	const KEEP := "stethoscope"
+	const KEEP := "xray_film"
 	const PILL_BUYS := 3
 	if role == "host":
 		if not await _until(func(): return Net.names.size() >= 3 and game.players.size() >= 3 and game.economy.placed(), 90.0, "clients 1 and 2"):

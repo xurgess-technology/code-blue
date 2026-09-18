@@ -452,33 +452,13 @@ const MODELS := {
 	# ItemModels.make() checks `item/<loot kind>` first. `size` is the longest side in metres;
 	# the fixup measures the model and puts its base on the floor, centred. `hide` skips mesh
 	# nodes; `merge` lets ItemModels merge the parts into one mesh per material.
-	"item/thermometer": {
-		"path": "res://assets/models/items/milkandbanana/food_thermometer.glb", "size": 0.16, "pitch": -90,
-		"note": "MilkAndBanana Food Thermometer (poly.pizza): a handheld digital thermometer, lying on its back.",
-	},
 	"item/pill_bottle": {
 		"path": "res://assets/models/items/bottles/bottle20.glb", "size": 0.075,
 		"note": "Lyricsz 50 Bottles #20 (OpenGameArt): an amber bottle with a white cap.",
 	},
-	"item/patient_records": {
-		"path": "res://assets/models/items/reyshapes/folder.glb", "size": 0.31, "pitch": -90,
-		"note": "reyshapes Folder (poly.pizza), lying flat; ItemModels tints it manila.",
-	},
 	"item/desk_phone": {
 		"path": "res://assets/models/items/baked/desk_phone.glb", "size": 0.24, "yaw": 180,
 		"note": "JustinARay Red Table Phone (OpenGameArt), converted from FBX, cord decimated.",
-	},
-	"item/wheelchair_wheel": {
-		"path": "res://assets/models/items/baked/wheelchair_wheel.glb", "size": 0.6, "roll": 90,
-		"note": "One rear wheel cut out of Poly Haven wheelchair_01 (the same chair the wards use), lying flat.",
-	},
-	"item/sample_rack": {
-		"path": "res://assets/models/items/lab_assets/bottle_test_tube_rack.glb", "size": 0.22,
-		"note": "MilkAndBanana Lab Assets test tube rack (OpenGameArt); ItemModels adds the tubes.",
-	},
-	"item/sample_tube": {
-		"path": "res://assets/models/items/lab_assets/bottle_glassware_test_tube_small.glb", "size": 0.08,
-		"note": "MilkAndBanana Lab Assets small test tube, used in the blood sample rack.",
 	},
 	"item/laptop": {
 		"path": "res://assets/models/hospital/kenney_furniture/laptop.glb", "size": 0.34,
@@ -488,25 +468,13 @@ const MODELS := {
 		"path": "res://assets/models/items/baked/gold_watch.glb", "size": 0.085, "pitch": -90,
 		"note": "Poly Haven vintage_pocket_watch, lying face up.",
 	},
-	"item/coffee_maker": {
-		"path": "res://assets/models/hospital/kenney_furniture/kitchenCoffeeMachine.glb", "size": 0.34,
-		"note": "Kenney Furniture Kit kitchenCoffeeMachine (the file the break room uses), with its mug.",
-	},
 	"item/heart_monitor": {
 		"path": "res://assets/models/items/polyhaven/television_02/television_02_1k.gltf", "size": 0.38,
 		"note": "Poly Haven television_02: a boxy CRT; ItemModels adds the green trace on the glass.",
 	},
-	"item/iv_pump": {
-		"path": "res://assets/models/items/baked/iv_pump.glb", "size": 0.3,
-		"note": "Poly Haven retro_multimeter: an upright box with a dial, a carry handle and leads. Stands in for an infusion pump.",
-	},
 	"item/defibrillator": {
 		"path": "res://assets/models/kenney_mini_characters/aid-defibrillator-green.glb", "size": 0.32,
 		"note": "Kenney Mini Characters aid-defibrillator-green: an AED case with a heart.",
-	},
-	"item/microscope": {
-		"path": "res://assets/models/items/baked/microscope.glb", "size": 0.42,
-		"note": "Poly Haven industrial_microscope (the file the lab benches use).",
 	},
 	"item/ultrasound": {
 		"path": "res://assets/models/items/baked/ultrasound.glb", "size": 0.42,

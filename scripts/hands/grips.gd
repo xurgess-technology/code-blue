@@ -37,9 +37,8 @@ const GRIPS := {
 	"suture_kit": {"pos": Vector3(0.0, 0.0, 0.0), "fwd": Vector3(1, 0, 0), "up": Vector3(0, 1, 0), "style": "palm", "bundle": 2},
 	# Loot with a handle (lying models, handle along their long side).
 	"reflex_hammer": {"pos": Vector3(-0.06, 0.02, 0.0), "fwd": Vector3(1, 0, 0), "up": Vector3(0, -1, 0), "style": "fist"},
-	"thermometer": {"pos": Vector3(0.03, 0.02, 0.0), "fwd": Vector3(-1, 0, 0), "up": Vector3(0, -1, 0), "style": "fist"},
-	"otoscope": {"pos": Vector3(0.04, 0.025, 0.0), "fwd": Vector3(-1, 0, 0), "up": Vector3(0, -1, 0), "style": "fist"},
-	"wheelchair_wheel": {"pos": Vector3(0.0, 0.03, 0.26), "fwd": Vector3(0, 0, -1), "up": Vector3(0, 1, 0), "style": "palm"},
+	# EpiPen: cap at -X, needle end +X, held like the reflex hammer.
+	"epipen": {"pos": Vector3(-0.03, 0.016, 0.0), "fwd": Vector3(1, 0, 0), "up": Vector3(0, -1, 0), "style": "fist"},
 	"pill_bottle": {"bundle": 3},
 }
 

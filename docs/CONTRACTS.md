@@ -1026,7 +1026,11 @@ dev panel's supply lists do not list loot). New helpers: `is_loot`, `is_bulky`, 
 Loot (`scripts/economy/`):
 
 - `loot_table.gd`: `LOOT[kind]` `{name, short, value [min,max], tier 0..3, bulky, fragile, stack,
-  batch, rooms {room_kind: weight, "*": any}, surfaces [...], containers {type: weight}}`, 21 kinds;
+  batch, rooms {room_kind: weight, "*": any}, surfaces [...], containers {type: weight}, trinket}`, 11 kinds (plain: `pill_bottle`, `xray_film`,
+  `heart_monitor`, `gold_watch`, `ultrasound`; trinkets, which sell and get a job in a later chunk:
+  `desk_phone`, `laptop`, `defibrillator`, `reflex_hammer`, `epipen`, `pulse_oximeter`) plus the
+  brains and eyes. Room keys are the real generated room kinds (`patient_room`, `supply_closet`,
+  `janitor_closet`, `lab`, ...); trinkets are kept rarer than plain loot;
   `weight(kind, room_kind, depth)`, `roll_value(kind, depth, roll)` (+20% per depth).
 - `loot_spawner.gd`: `plan(seed, shift, level_info, occupied) -> [{kind, count, value, container_id,
   slot, anchor, position?}]`, deterministic. Depth per location from the entry's `depth`, then a
@@ -1314,8 +1318,8 @@ nodes): the existing "ambulance" piece mesh, headlights and a flasher that glow 
 `size` (longest side in metres) or `height` (metres) — either makes `spawn()` measure the model
 once and put its base on the floor, centred — plus `hide` (mesh node names to skip) and `albedo`
 (a replacement colour texture). New helpers: `Assets.fixup(key) -> Transform3D` (what `spawn()`
-applies) and `Assets.measure(key, xf) -> AABB`. Keys: `item/<loot kind>` for 15 kinds,
-`item/sample_tube`, `crew/paramedic_a`, `crew/paramedic_b`, `mat/xray_film`. Assets starts
+applies) and `Assets.measure(key, xf) -> AABB`. Keys: `item/<loot kind>` for the kinds with a model,
+`crew/paramedic_a`, `crew/paramedic_b`, `mat/xray_film`. Assets starts
 threaded loads of every `item/*` and `crew/*` file in `_ready`.
 
 `scripts/item_models.gd`:
@@ -1660,7 +1664,7 @@ p.carry_cam.front_view()                     # swung round facing the player: no
 - **Socket axes** (every hand, first and third person): origin in the palm, -Z the fingers, +Y out
   of the palm, +X the hand's right. A grip maps the model's `fwd` to -Z and `up` to +Y with `pos` in
   the palm. "palm" things lie on an open, palm-up hand; "fist" handles (saw, forceps, reflex hammer,
-  thermometer, otoscope) sit in a closed hand, thumb up. `hands: 2` (bulky loot, the guide) sit
+  EpiPen) sit in a closed hand, thumb up. `hands: 2` (bulky loot, the guide) sit
   between both palms. `HeldFirstPerson` (`Head/FX/Camera/HeldFirstPerson`) and `HeldThirdPerson`
   (`Body/HeldThirdPerson`) keep their paths: each frame they are moved onto the socket, and their
   child `Held` carries the grip transform (first person: two-handed things fit 0.22 m, big loot

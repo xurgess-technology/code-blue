@@ -203,9 +203,9 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   walking line. On the fallback ward (no `rows`) the result was not checked.
 - **Indoors the pile is capped at 2.6 m** and then grows side columns 1.35 m apart; those can go
   through nearby walls or furniture in the clock-in room or the dev room.
-- **Six loot kinds are still primitives** (models sweep: stethoscope, pulse oximeter, blood
-  pressure cuff, reflex hammer, otoscope, wedding ring): no CC0 model exists for them on the
-  vetted sources (searches in `ASSETS.md`). The other 15 are real models; see "Models" below.
+- **Three loot kinds are still primitives** (pulse oximeter, EpiPen, reflex hammer): no CC0 model
+  exists for them on the vetted sources (searches in `ASSETS.md`). The rest are real models; see
+  "Models" below.
 - **Rim overlays cost a draw call each**, now capped at the 5 biggest meshes per model. perfprobe
   `--ab` at 1600x900 medium: OR 72 fps (1% low 66), without rims 85 (69), loot hidden 89 (75);
   lobby and corridor within noise. Normal run: OR 63-73, lobby 72-91, corridor 94-119 across runs.
@@ -284,7 +284,7 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 ## Models (sweep 2 integration: loot and paramedic models)
 
 - **No CC0 gurney or stretcher exists**, so the crew's gurney is still built from shapes (now one
-  merged mesh with the brushed steel texture on the frame). Six loot kinds keep their primitive
+  merged mesh with the brushed steel texture on the frame). Three loot kinds keep their primitive
   for the same reason (see Inventory above). Swap in a model by registering `item/<kind>` in
   `scripts/assets.gd`; nothing else changes.
 - **Paramedic collision is on the world layer** (`crew.gd` `_make_blockers`: a box over the
@@ -308,9 +308,8 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 - **Two loot models are also level decoration**: the lab islands' Kenney laptop and the break
   room's coffee machine use the same files as the `laptop` and `coffee_maker` loot. Only the gold
   rim tells the loot apart.
-- **Stand-ins**: the ultrasound is a beige 90s laptop with a trackball, the IV pump a retro
-  multimeter, the heart monitor a small CRT with a drawn trace, the gold watch a pocket watch,
-  the ear thermometer a food thermometer, the desk phone a red rotary phone. They read in play,
+- **Stand-ins**: the ultrasound is a beige 90s laptop with a trackball, the heart monitor a small CRT with a drawn trace, the gold watch a pocket watch,
+  the desk phone a red rotary phone. They read in play,
   but a close look tells.
 - **First use of each loot model costs 10-300 ms** (loading the file and building the merged
   mesh). `Assets` starts loading the `item/*` and `crew/*` files on threads at start-up and the

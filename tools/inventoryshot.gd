@@ -82,7 +82,7 @@ func _game_shots() -> void:
 	# A bulky stack whose second half is not next to it.
 	_clear()
 	bot.slots[0] = {"kind": "anesthetic", "count": 2}
-	bot.slots[1] = {"kind": "microscope", "count": 1, "v": 310}
+	bot.slots[1] = {"kind": "ultrasound", "count": 1, "v": 310}
 	bot.slots[2] = {"kind": "forceps", "count": 1}
 	bot.slots[3] = {"kind": "", "count": 0, "of": 1}
 	bot.selected = 2
@@ -91,7 +91,7 @@ func _game_shots() -> void:
 
 	# ---- teal against gold in a dark room, lit and unlit
 	_clear()
-	var row := ["anesthetic", "gauze", "forceps", "bone_saw", "laptop", "stethoscope", "gold_watch", "heart_monitor", "defibrillator"]
+	var row := ["anesthetic", "gauze", "forceps", "bone_saw", "laptop", "xray_film", "gold_watch", "heart_monitor", "defibrillator"]
 	var base := dark
 	var fwd := Vector3(1, 0, 0)
 	var side := Vector3(0, 0, 1)
