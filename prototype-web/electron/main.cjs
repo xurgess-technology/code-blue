@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Electron main process for Code Blue.
+ * Electron main process for Malpractice.
  *
  *   electron . --dev      load the Vite dev server (http://localhost:5173 or $VITE_DEV_SERVER_URL)
  *   electron .            load the built renderer from dist/index.html
@@ -46,7 +46,7 @@ function createWindow() {
     height: 720,
     autoHideMenuBar: true,
     backgroundColor: '#000000',
-    title: 'Code Blue',
+    title: 'Malpractice',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,

@@ -1,6 +1,6 @@
 # Sweep 3: fight, capture, dissect, absorb — brief for every worker
 
-Project: Code Blue, Godot 4.7.2, GDScript. Read `DESIGN.md` (the monsters and "Fighting and
+Project: Malpractice, Godot 4.7.2, GDScript. Read `DESIGN.md` (the monsters and "Fighting and
 capturing monsters" sections are the design), `docs/CONTRACTS.md`, `docs/KNOWN_ISSUES.md`
 and this file first. Godot console binary:
 `"/c/Users/ZachBurgess/Desktop/Godot_v4.7.2-stable_win64.exe/Godot_v4.7.2-stable_win64_console.exe"`.

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // tools/gen_audio.mjs — offline synthesiser for Malpractice's sound and music.
 //
-// The browser build (code-blue/src/audio.ts + music.ts) synthesised everything live
+// The browser build (prototype-web/src/audio.ts + music.ts) synthesised everything live
 // with WebAudio. Godot has no equivalent, so this script ports the *character* of
 // those cues and bakes them into 16-bit PCM WAV files under audio/.
 //
@@ -375,7 +375,7 @@ function emitFile(dir, name, t, targetDb) {
 }
 
 // ================================================================ SFX
-// Ported one for one from code-blue/src/audio.ts. The WebAudio version scaled every
+// Ported one for one from prototype-web/src/audio.ts. The WebAudio version scaled every
 // cue by a distance volume; here the cue is baked at full level and the game's
 // AudioStreamPlayer3D does the distance work.
 
@@ -696,7 +696,7 @@ function periodicFilter(arr, make, passes) {
 }
 
 // ================================================================ music
-// Ported from code-blue/src/music.ts. D phrygian, three layers that must sit on top
+// Ported from prototype-web/src/music.ts. D phrygian, three layers that must sit on top
 // of each other, so all three stems share one 60 s loop length and one tempo grid:
 //   hunt     = 72 BPM  (0.8333 s beat, 72 beats in 60 s)
 //   critical = 144 BPM (exactly double, so the off-beat answers lock to the toms)

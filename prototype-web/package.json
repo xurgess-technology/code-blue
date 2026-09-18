@@ -1,5 +1,5 @@
 {
-  "name": "code-blue",
+  "name": "malpractice",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -27,8 +27,8 @@
     "ws": "^8.21.3"
   },
   "build": {
-    "appId": "com.zachburgess.codeblue",
-    "productName": "Code Blue",
+    "appId": "com.zachburgess.malpractice",
+    "productName": "Malpractice",
     "directories": {
       "output": "release"
     },

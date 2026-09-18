@@ -1,4 +1,4 @@
-# Code Blue (working title) — Design
+# Malpractice (web prototype) — Design
 
 Last updated 2026-09-12 from Zach's design interview. Items marked **TODO** are wanted but not built yet. Items marked **IDEA** are proposals waiting for a yes.
 

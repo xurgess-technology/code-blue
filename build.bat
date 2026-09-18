@@ -50,10 +50,10 @@ echo.
 rem Not --headless: the shader baker needs a real GPU to pre-compile shaders into the .pck,
 rem so a Godot window flashes up for the ~30 seconds this takes. A windowed editor run re-saves
 rem project.godot in its own format on the way out, so it is put back untouched afterwards.
-copy /y project.godot "%TEMP%\codeblue_project.godot.bak" >nul
+copy /y project.godot "%TEMP%\malpractice_project.godot.bak" >nul
 "%GODOT%" --path . --export-%MODE% "Windows Desktop" "%OUT%\Malpractice.exe"
 set EXPORT_RC=%ERRORLEVEL%
-copy /y "%TEMP%\codeblue_project.godot.bak" project.godot >nul
+copy /y "%TEMP%\malpractice_project.godot.bak" project.godot >nul
 if not "%EXPORT_RC%"=="0" goto failed
 if not exist "%OUT%\Malpractice.exe" goto failed
 if not exist "%OUT%\Malpractice.pck" goto failed

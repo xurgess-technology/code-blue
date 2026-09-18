@@ -32,7 +32,7 @@ export class Menu {
     this.root.id = 'menu';
     this.root.innerHTML = `
       <div class="panel">
-        <h1>CODE BLUE</h1>
+        <h1>MALPRACTICE</h1>
         <p class="tag">Clock in. Find the tools. Save the patient. Try not to shove each other into the monsters.</p>
         <label>Your name <input id="m-name" maxlength="16" spellcheck="false"></label>
         <div class="row">

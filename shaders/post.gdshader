@@ -1,4 +1,4 @@
-// Code Blue — single-pass screen-space post stack.
+// Malpractice — single-pass screen-space post stack.
 //
 // One cheap fullscreen pass. Order matters and is chosen so the expensive-looking
 // bits (aberration) happen in UV space before we ever touch colour:

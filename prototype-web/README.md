@@ -1,4 +1,4 @@
-# Code Blue
+# Malpractice (web prototype)
 
 A co-op first-person horror game set in a dark, vaguely magical hospital. You and your friends clock in, a dying patient lands on the table (an elephant, a werewolf, a man who ate a stop sign), the tools you need are scattered through the wards, and the night shift is not entirely human.
 

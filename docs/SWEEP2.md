@@ -1,6 +1,6 @@
 # Sweep 2: brief for every worker
 
-Project: Code Blue, Godot 4.7.2, GDScript. Read `DESIGN.md`, `docs/CONTRACTS.md` and
+Project: Malpractice, Godot 4.7.2, GDScript. Read `DESIGN.md`, `docs/CONTRACTS.md` and
 `docs/KNOWN_ISSUES.md` first. Godot console binary:
 `"/c/Users/ZachBurgess/Desktop/Godot_v4.7.2-stable_win64.exe/Godot_v4.7.2-stable_win64_console.exe"`.
 

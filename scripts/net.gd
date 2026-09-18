@@ -335,7 +335,7 @@ func _on_lobby_created(result: int, new_lobby_id: int) -> void:
 		return
 	lobby_id = new_lobby_id
 	_steam.setLobbyJoinable(lobby_id, true)
-	_steam.setLobbyData(lobby_id, "game", "code_blue")
+	_steam.setLobbyData(lobby_id, "game", "malpractice")
 	_steam.setLobbyData(lobby_id, "host", local_name)
 	var peer: MultiplayerPeer = ClassDB.instantiate("SteamMultiplayerPeer")
 	var err: int = peer.call("host_with_lobby", lobby_id)

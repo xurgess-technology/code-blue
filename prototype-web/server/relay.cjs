@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Code Blue co-op relay.
+ * Malpractice co-op relay.
  *
  * A tiny star-topology WebSocket relay: exactly one host, any number of
  * clients. Clients only ever talk to the host; the host may talk to any

@@ -1,7 +1,6 @@
-# Malpractice (repo: code-blue)
+# Malpractice
 
-Co-op hospital horror in Godot 4.7 / GDScript. The folder and repo are still named `code-blue`; the
-game is **Malpractice** and the hospital is **St. Doe's General** ("Doe General" on faxes).
+Co-op hospital horror in Godot 4.7 / GDScript. The game is **Malpractice** and the hospital is **St. Doe's General** ("Doe General" on faxes).
 
 ## Read first
 - **[docs/FAILING_TESTS.md](docs/FAILING_TESTS.md)**: tests already failing on `main`, and how to run every test.
