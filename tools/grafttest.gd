@@ -28,6 +28,7 @@ func _ready() -> void:
 	main.menu.hide_menu()
 	Net.start_solo("Tester")
 	_data_checks()
+	_minigame_checks()
 	await _run()
 	_finish()
 
@@ -53,6 +54,72 @@ func _data_checks() -> void:
 	var packed := Eyes.pack("eye_surgeon", "Zach", 12.4, 45)
 	var u := Eyes.unpack(packed)
 	_check(String(u.get("kind", "")) == "eye_surgeon" and String(u.owner) == "Zach" and int(u.age) == 12 and int(u.value) == 45 and Eyes.unpack("").is_empty(), "vat contents round-trip")
+
+
+## The eye minigames' own rules, driven directly (no body): lowering, slipping, cutting, no_fail.
+func _minigame_checks() -> void:
+	var script: GDScript = load("res://scripts/surgery/games/eye_ops.gd")
+	var g = script.new()
+	var botches := [0]
+	var done := [false]
+	g.botched.connect(func(_a, _r): botches[0] += 1)
+	g.finished.connect(func(_r): done[0] = true)
+	g.setup({"variant": "cut", "patient_id": "hive", "step": Procedures.step("eye_extraction", 0), "body": null})
+	var ring: float = g.ring_r
+	g.handle_cursor(Vector2(0.0, -ring), 0, 1.0 / 60.0)
+	_check(not g.down, "the scalpel starts raised")
+	g.handle_cursor(Vector2(0.0, -ring), 1, 1.0 / 60.0)
+	g.handle_cursor(Vector2(0.0, -ring), 0, 1.0 / 60.0)
+	_check(g.down, "left click lowers it")
+	var a := 0.0
+	for i in 60:   # slowly round a quarter (0.05 m/s)
+		a += 0.05 / ring / 60.0
+		g.handle_cursor(Vector2(sin(a), -cos(a)) * ring, 0, 1.0 / 60.0)
+	_check(g.cut > 0.5 and g.down, "tracing the marking slowly cuts along it (%.2f rad)" % g.cut)
+	var kept: float = g.cut
+	for i in 6:   # now fast (0.4 m/s)
+		a += 0.4 / ring / 60.0
+		g.handle_cursor(Vector2(sin(a), -cos(a)) * ring, 0, 1.0 / 60.0)
+	_check(not g.down and g.slips == 1 and botches[0] == 0, "too fast: it slips out, and a slip costs nothing (slips %d, botches %d)" % [g.slips, botches[0]])
+	_check(g.cut >= kept - 0.001, "the cut so far stays after a slip (%.2f)" % g.cut)
+	g.handle_cursor(Vector2(0.0, 0.0), 1, 1.0 / 60.0)
+	g.handle_cursor(Vector2(0.0, 0.0), 0, 1.0 / 60.0)
+	_check(botches[0] == 1 and not g.down, "lowering it onto the eyeball itself nicks it (%d botch)" % botches[0])
+	g.free()
+	var h = script.new()
+	var nb := [0]
+	h.botched.connect(func(_a, _r): nb[0] += 1)
+	h.setup({"variant": "cut", "no_fail": true, "patient_id": "player", "step": {}, "body": null})
+	h.handle_cursor(Vector2.ZERO, 1, 1.0 / 60.0)
+	_check(nb[0] == 0 and h.eye_kind == "eye_surgeon", "no_fail never botches, and a surgeon gets a surgeon's eye")
+	h.free()
+	var sc = script.new()
+	sc.setup({"variant": "scoop", "step": {}, "body": null})
+	sc.handle_cursor(Vector2(0.012, 0.0), 1, 1.0 / 60.0)
+	sc.handle_cursor(Vector2(0.012, 0.0), 0, 1.0 / 60.0)
+	var b := 0.0
+	for i in 120:
+		b += 0.04 / 0.012 / 60.0
+		sc.handle_cursor(Vector2(cos(b), sin(b)) * 0.012, 0, 1.0 / 60.0)
+	_check(sc.down and sc.turns > 2.0, "circling the socket slowly builds turns (%.2f rad)" % sc.turns)
+	for i in 5:
+		b += 0.3 / 0.012 / 60.0
+		sc.handle_cursor(Vector2(cos(b), sin(b)) * 0.012, 0, 1.0 / 60.0)
+	_check(not sc.down and sc.turns > 2.0, "too fast: the spoon slips out and the turns stay")
+	sc.free()
+	var sn = script.new()
+	var sd := [false]
+	sn.finished.connect(func(_r): sd[0] = true)
+	sn.setup({"variant": "snip", "step": {}, "body": null})
+	sn.handle_cursor(Vector2(0.0, 0.004), 1, 1.0 / 60.0)
+	sn.handle_cursor(Vector2(0.0, 0.004), 0, 1.0 / 60.0)
+	_check(not sd[0] and sn.lift == 0.0, "no slicing before the eye is pulled up")
+	for i in 200:
+		sn.handle_cursor(Vector2(0.0, 0.004), 4, 1.0 / 60.0)   # W held
+	_check(sn.lift > 0.95, "holding W pulls the eye up (%.2f)" % sn.lift)
+	sn.handle_cursor(Vector2(0.0, 0.004), 5, 1.0 / 60.0)
+	_check(sd[0], "then a click on the nerve slices it")
+	sn.free()
 
 
 func _run() -> void:

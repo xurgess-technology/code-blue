@@ -609,6 +609,8 @@ func _drive(delta: float) -> void:
 			buttons |= MinigameBase.BUTTON_PRIMARY
 		if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
 			buttons |= MinigameBase.BUTTON_SECONDARY
+		if Input.is_action_pressed("move_forward"):
+			buttons |= MinigameBase.BUTTON_UP
 	var c := _cursor + _stir_tick(delta)
 	var ext: Vector2 = mg.plane_extent()
 	c = Vector2(clampf(c.x, -ext.x, ext.x), clampf(c.y, -ext.y, ext.y))

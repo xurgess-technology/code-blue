@@ -41,6 +41,9 @@ var done: bool = false
 
 const BUTTON_PRIMARY := 1
 const BUTTON_SECONDARY := 2
+## The forward key (W) held, for steps that use it (the eye steps' "pull the eyeball up"). Bots set it in
+## bot_input's `buttons` too.
+const BUTTON_UP := 4
 
 ## Render layer 20, reserved for a minigame's own props (tools, straps, raised wound models).
 ## Every decal, the patient's and the minigames', projects only onto layer 1 (cull_mask = 1),

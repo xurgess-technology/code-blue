@@ -672,7 +672,7 @@ static func animate(b, jolt: float, env: float, _fidget: float, _twitch: float, 
 				cap.transform = xf
 	var eye_node = parts.get("eye_node")   # GRAFTING part one: the socket is empty once the spoon has it out
 	if eye_node != null and is_instance_valid(eye_node):
-		(eye_node as Node3D).visible = not (bool(flags.get("eye_out", false)) or bool(flags.get("eye_removed", false)))
+		(eye_node as Node3D).visible = not (bool(flags.get("eye_out", false)) or bool(flags.get("eye_removed", false)) or bool(b.get_meta("eye_hidden", false)))
 	var rim: Node3D = parts.get("open_skull")
 	if rim != null:
 		rim.visible = open

@@ -2007,6 +2007,7 @@ game.vats: item_used(p, item) / hand_put(p) / take_out(p, aim_id) / set_down(p, 
   sedation, stirring and thrash botches are unchanged and vitals are the eye's condition: at 0 the
   eye bursts. The last step puts an `eye_hive` (value 120 x condition) in the operator's hand
   (`Dissection.last_operator`, else on the specimen tray); the Hive dies on the table.
+- **The eye minigames** (`eye_ops.gd`, reusable by the graft): cut = the saw-style violet marking ringed round the eye, left click lowers the scalpel, trace it and the cut opens along it, too fast or off the eye slips it out (click to lower again, cut kept, no damage); scoop = spoon on the cursor, click into the socket, circle it slowly (two turns), too fast slips; snip = eye resting over the socket seen from low, hold **W** (`Minigame.BUTTON_UP`, new bit in `buttons`) to pull it up and reveal the nerve, then click the nerve. ctx knobs: `no_fail` (never botches), `eye_kind`, `eye_radius`. Only a nick of the eyeball and a missed slice botch.
 - Tests: `tools/grafttest.tscn` (headless).
 
 ### Ability bar (HUD, local-only, sweep 4a)

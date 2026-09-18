@@ -105,24 +105,34 @@ func _run() -> void:
 	await _shot("07_wall_monitor")
 	_stand(pt + tb * Vector3(0, 0, 1.0))
 	_look_at(eye_at)
-	game.surgery_bot_skill = -1.0
 	var sys = game.surgery_for_table(table)
 	var n := 8
 	for step in ["scalpel", "eye_spoon", "scalpel"]:
 		game.give_hand(me, step, 1)
 		me.selected = _slot(step)
-		game._proxy_used(game.table_interact_id(table), me)
-		await _until(func(): return sys.mg != null, 5.0)
-		await _seconds(2.0)
-		await _shot("%02d_%s_minigame" % [n, String(sys.mg.get("variant"))])
-		n += 1
 		game.surgery_bot_skill = 1.0
+		game._proxy_used(game.table_interact_id(table), me)
+		await _until(func(): return sys.mg != null and sys.mg.get("variant") != null and sys.is_local_operating(), 8.0)
+		print("[graftshot] mg=", sys.mg, " ailment=", c.get("ailment_id"), " step=", c.get("step_index"), " held=", me.selected_stack())
+		var variant := String(sys.mg.get("variant")) if sys.mg != null else "none"
+		if variant == "cut":
+			game.surgery_bot_skill = 0.0   # a heavy hand: it slips out
+			await _until(func(): return int(sys.mg.get("slips")) > 0, 20.0)
+			await _seconds(0.15)
+			await _shot("%02d_cut_slip" % n)
+			n += 1
+			game.surgery_bot_skill = 1.0
+			var mgc = sys.mg
+			await _until(func(): return is_instance_valid(mgc) and float(mgc.get("cut")) > 2.6, 20.0)
+		elif variant == "scoop":
+			await _seconds(1.8)
+		else:
+			await _seconds(1.5)
+		await _shot("%02d_%s_midway" % [n, variant])
+		n += 1
 		var idx: int = int(c.get("step_index", 0)) + 1
 		await _until(func(): return int(c.get("step_index", 0)) >= idx or String(c.state) != "on_table", 60.0)
-		game.surgery_bot_skill = -1.0
 		await _seconds(1.0)
-		if n == 10:
-			await _shot("10b_after_scoop")
 
 
 func _slot(kind: String) -> int:
