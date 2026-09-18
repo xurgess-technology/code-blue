@@ -44,6 +44,7 @@ func _run() -> void:
 	await _scanner()
 	await _stances()
 	await _sprint_dive()
+	await _rocket_boots()
 
 
 # =========================================================================
@@ -260,6 +261,123 @@ func _sprint_dive() -> void:
 	ceiling.queue_free()
 	var stood := await _until(func(): return not me.crouching, 2.0)
 	_check(stood, "and stands the rest of the way once the ceiling is gone")
+
+
+## ROCKET BOOTS: the pharmacy sells them; taking a pair puts them on (hands stay free); a tapped
+## dive is still just a dive; holding crouch through the dive burns fuel flying level and fast, and
+## letting go drops you; fuel refills on the ground; flying head first into a wall ends the burn and
+## costs a heart.
+func _rocket_boots() -> void:
+	_say("---- rocket boots")
+	var found := false
+	for e in game.PHARMACY_CATALOG:
+		if String(e.kind) == "rocket_boots":
+			found = true
+	_check(found, "the pharmacy fax lists rocket boots")
+	game.money = game.ROCKET_BOOTS_PRICE + 5
+	_check(game.order_pharmacy(me, {"rocket_boots": 1}), "the team can order a pair")
+	_check(game.money == 5, "and it costs $%d (left $%d)" % [game.ROCKET_BOOTS_PRICE, game.money])
+	me.revive_full()
+	me.boots = false
+	# Taking a pair off the floor puts them on, with full hands.
+	game.give_hand(me, "gauze", 2)
+	game.give_hand(me, "forceps", 1)
+	var it: Node = game._spawn_item("rocket_boots", 2, Transform3D(Basis(), me.global_position + Vector3(0, 0.1, -0.5)), WorldItem.State.LOOSE)
+	_check(it.interact_prompt(me).begins_with("Put on"), "the prompt offers to put them on, hands full or not (%s)" % it.interact_prompt(me))
+	game.pickup_item(me, it)
+	_check(me.boots, "taking a pair puts them on")
+	_check(String(me.slots[0].kind) == "gauze" and String(me.slots[1].kind) == "forceps", "and the hands keep what they held")
+	_check(is_instance_valid(it) and int(it.count) == 1, "an order of two leaves the other pair behind")
+	_check(it.interact_prompt(me).begins_with("!"), "a second pair is refused (%s)" % it.interact_prompt(me))
+	game.world_items.erase(it.item_id)
+	it.queue_free()
+	me.slots = me.empty_slots()
+
+	# A tapped dive is still just a dive.
+	await _run_up()
+	me.bot_rocket_hold = false
+	me.bot_dive += 1
+	await _frames(20)
+	_check(me.diving and not me.rocketing and is_equal_approx(me.fuel, 1.0), "a tapped dive doesn't light them")
+	await _until(func(): return not me.diving, 2.0)
+
+	# Held: the boots light and carry you level and fast, burning fuel.
+	await _run_up()
+	var start: Vector3 = me.global_position
+	me.bot_rocket_hold = true
+	me.bot_dive += 1
+	var lit := await _until(func(): return me.rocketing, 0.5)
+	_check(lit, "holding crouch through the dive lights the boots")
+	await _frames(20)
+	var v: Vector3 = me.velocity
+	_check(Vector2(v.x, v.z).length() > me.ROCKET_SPEED * 0.9, "flying at rocket speed (%.2f m/s)" % Vector2(v.x, v.z).length())
+	_check(absf(v.y) < 0.5 and not me.is_on_floor(), "level, off the floor (vy %.2f)" % v.y)
+	_check(me.fuel < 0.9, "burning fuel (%.2f)" % me.fuel)
+	_check(me._capsule.height <= C.PRONE_HEIGHT + 0.01, "flying flat: the capsule is prone height")
+	me.bot_rocket_hold = false
+	await _frames(2)
+	_check(not me.rocketing, "letting go ends the burn")
+	var fuel_left: float = me.fuel
+	var landed := await _until(func(): return not me._dive_airborne, 1.5)
+	_check(landed, "and the dive falls and lands")
+	var flown := Vector2(me.global_position.x - start.x, me.global_position.z - start.z).length()
+	_check(flown > 6.0, "a short burn still covers ground (%.1f m)" % flown)
+	await _until(func(): return not me.diving, 2.0)
+	await _frames(60)
+	_check(me.fuel > fuel_left + 0.1, "fuel refills on the ground (%.2f -> %.2f)" % [fuel_left, me.fuel])
+
+	# Faceplant: a wall across the heading, a few metres out.
+	me.fuel = 1.0
+	await _run_up()
+	me.bot_invulnerable = false
+	me.invuln = 0.0
+	var hp0: int = me.hp
+	var wall := StaticBody3D.new()
+	wall.collision_layer = C.L_WORLD
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(6.0, 3.0, 0.3)
+	shape.shape = box
+	wall.add_child(shape)
+	game.add_child(wall)
+	wall.global_position = me.global_position + Vector3(0, 1.5, -6.0)
+	var fp0: int = me.faceplant_count
+	me.bot_rocket_hold = true
+	me.bot_dive += 1
+	var hit := await _until(func(): return me.faceplant_count > fp0, 1.5)
+	_check(hit, "flying into a wall is a faceplant")
+	_check(not me.rocketing, "which ends the burn")
+	await _frames(3)
+	_check(me.hp == hp0 - 1, "and costs a heart (%d -> %d)" % [hp0, me.hp])
+	me.bot_rocket_hold = false
+	await _until(func(): return not me.diving, 2.0)
+	_check(me.global_position.z > wall.global_position.z, "bounced back, not through (z %.2f, wall %.2f)" % [me.global_position.z, wall.global_position.z])
+	wall.queue_free()
+	me.bot_invulnerable = true
+
+	# A new run takes them away with the money.
+	game.reset_money()
+	_check(not me.boots, "a new run takes the boots off")
+	await _stand_up()
+
+
+## Stand, face north on the spine, and sprint.
+func _run_up() -> void:
+	await _stand_up()
+	var er: Rect2 = game.level_info.get("entrance_rect", Rect2())
+	var run_from: Vector3 = me.global_position
+	if er.size != Vector2.ZERO:
+		var t := er.position + Vector2(16.5, 18.5) * C.TILE
+		run_from = Vector3(t.x, 0.0, t.y)
+	me.teleport(game._floor_at(run_from))
+	me.bot_move = Vector2.ZERO
+	me.bot_sprint = false
+	me.bot_yaw = 0.0
+	me.stamina = 1.0
+	await _frames(5)
+	me.bot_move = Vector2(0, -1)
+	me.bot_sprint = true
+	await _until(func(): return me.sprinting, 2.0)
 
 
 ## Bot stance changes apply on change, so toggle bot_prone to request standing.

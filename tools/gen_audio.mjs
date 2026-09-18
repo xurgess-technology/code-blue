@@ -528,6 +528,17 @@ const SFX_BUILDERS = {
     b.noise(0, { dur: 0.12, vol: 0.25, freq: 140, type: 'lowpass', rnd });
     return t;
   },
+  // ROCKET BOOTS: the heel thrusters burning. A hissing roar over a low rumble, a quick light-off
+  // at the front, just longer than a full tank (1.5 s); the game stops it early when the burn ends.
+  rocket_burn: () => {
+    const rnd = rngFor('rocket_burn');
+    const t = sfxTrack(1.9), b = new Bus(t, null, 0);
+    b.noise(0, { dur: 0.12, vol: 0.35, freq: 900, type: 'lowpass', attack: 0.003, rnd });
+    b.noise(0.02, { dur: 1.8, vol: 0.32, freq: 1400, endFreq: 1100, q: 0.6, attack: 0.04, release: 0.2, rnd });
+    b.noise(0.02, { dur: 1.8, vol: 0.4, freq: 260, type: 'lowpass', attack: 0.05, release: 0.25, rnd });
+    b.tone(0.02, { freq: 62, end: 55, type: 'sawtooth', dur: 1.8, vol: 0.14, filter: 300, attack: 0.05, release: 0.25 });
+    return t;
+  },
   beep: () => {
     const t = sfxTrack(0.3), b = new Bus(t, null, 0);
     b.tone(0, { freq: 880, type: 'sine', dur: 0.1, vol: 0.1 });

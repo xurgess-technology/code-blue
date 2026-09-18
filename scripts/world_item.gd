@@ -172,6 +172,11 @@ func interact_prompt(player) -> String:
 		var ct = g.find_interactable(container_id) if g != null else null
 		if ct != null and ct.has_method("is_open") and not ct.is_open():
 			return ""
+	# ROCKET BOOTS: worn, not carried, so full hands don't matter.
+	if Items.is_worn(kind):
+		if player != null and bool(player.get("boots")):
+			return "!Already wearing rocket boots"
+		return "Put on %s" % Items.display_name(kind)
 	var label := Items.stack_label(kind, count)
 	var g2 := _game()
 	if g2 != null and g2.get("brains") != null and g2.brains.is_brain(kind):

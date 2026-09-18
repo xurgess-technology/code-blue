@@ -1369,6 +1369,9 @@ func _spawn_from_plan_inner(e: Dictionary) -> Node:
 func pickup_item(p: Node, it: Node) -> void:
 	if not is_host() or not is_instance_valid(it) or not world_items.has(it.item_id):
 		return
+	if Items.is_worn(String(it.kind)):
+		_put_on(p, it)   # ROCKET BOOTS
+		return
 	var i: int = p.take_into(it.kind, it.count, int(it.value))
 	if i < 0:
 		tell(p, "That needs two free hands." if Items.is_bulky(it.kind) else "Your hands are full.")
@@ -1382,6 +1385,39 @@ func pickup_item(p: Node, it: Node) -> void:
 	it.queue_free()
 	_sound("pickup", pos)
 	emit_noise(pos, 0.15, "pickup")
+
+
+## ROCKET BOOTS: taking a worn item puts one on (never into a hand). One pair each; a stack of
+## several (an order of two sets) loses one pair and stays on the tray.
+func _put_on(p: Node, it: Node) -> void:
+	if p.boots:
+		tell(p, "You're already wearing rocket boots.")
+		return
+	p.put_on_boots()
+	var pos: Vector3 = it.global_position
+	mark_db(String(it.kind), "sighted", p)
+	if int(it.count) > 1:
+		it.count = int(it.count) - 1
+	else:
+		world_items.erase(it.item_id)
+		it.queue_free()
+	_sound("pickup", pos)
+	emit_noise(pos, 0.15, "pickup")
+	tell(p, "Rocket boots on. Hold crouch through a sprint-dive to fly.", 4.0)
+
+
+## ROCKET BOOTS: host. A rocket dive ran head first into something solid (the client's own
+## movement noticed it and bumped faceplant_count). One heart, knocked back the way they came.
+const FACEPLANT_DAMAGE := 1
+
+
+func player_faceplanted(p: Node) -> void:
+	if not is_host() or p == null or not p.alive or p.downed or p.invuln > 0.0:
+		return
+	if dev_on() and dev.is_god(p):
+		return  # DEV HOOK: god mode
+	var back: Vector3 = p.global_basis.z
+	damage_player(p, FACEPLANT_DAMAGE, "faceplant", Vector3(back.x, 0.0, back.z).normalized())
 
 
 ## SWEEP 4A HOOK (pharmacy, chunk 3): a tap (charge ~0) still sets the selected stack down
@@ -1538,6 +1574,11 @@ func clear_storage() -> void:
 func give_hand(p: Node, kind: String, count: int) -> bool:
 	if not is_host():
 		return false
+	if Items.is_worn(kind):
+		if p.boots:
+			return false
+		p.put_on_boots()   # ROCKET BOOTS
+		return true
 	var i: int = p.take_into(kind, count, 0)
 	if i < 0:
 		return false
@@ -1626,6 +1667,8 @@ func reset_money() -> void:
 	if not is_host():
 		return
 	money = 0
+	for p in players.values():
+		p.boots = false   # ROCKET BOOTS: bought gear goes with the money
 	if economy != null:
 		economy.on_reset()
 	if brains != null:
@@ -1633,17 +1676,20 @@ func reset_money() -> void:
 
 
 ## SWEEP 4A HOOK (pharmacy, chunk 3): the flat price of one bottle of placebo pills. Never
-## climbs, unlike the old gold bar (there is nothing else to buy yet).
+## climbs, unlike the old gold bar.
 const PILL_PRICE := 15
 const PILL_COUNT := 10
+## ROCKET BOOTS: one pair.
+const ROCKET_BOOTS_PRICE := 100
 
 
-## Hub rebuild, chunk 3: what the pharmacy's fax order form offers, in order. Placebo pills are all
-## it stocks today; a new entry here shows up on the form. `count` and `price` are per set; the form
+## Hub rebuild, chunk 3: what the pharmacy's fax order form offers, in order. A new entry here
+## shows up on the form. `count` and `price` are per set; the form
 ## orders 1 to PHARMACY_MAX_QTY sets of each.
 const PHARMACY_MAX_QTY := 99
 const PHARMACY_CATALOG := [
 	{"kind": "placebo_pills", "name": "Placebo pills", "count": PILL_COUNT, "price": PILL_PRICE},
+	{"kind": "rocket_boots", "name": "Rocket boots", "count": 1, "price": ROCKET_BOOTS_PRICE},
 ]
 
 

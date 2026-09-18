@@ -68,4 +68,4 @@ The Godot binary is `C:\Users\ZachBurgess\Desktop\Godot_v4.7.2-stable_win64.exe\
 - Multiplayer, every scenario as real processes: `godot --headless --path . --script tools/nettest_run.gd`
   (`-- --only=wall,surgery` for a few)
 - Windowed screenshot tools write to `tools/game_shots/` and friends: `menushot`, `faxshot`,
-  `tipshot`, `database_shot` (`-- --wall`, `-- --wall2`), `gameshot`
+  `tipshot`, `database_shot` (`-- --wall`, `-- --wall2`), `gameshot`, `bootsshot` (rocket boots)

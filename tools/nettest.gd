@@ -51,6 +51,9 @@ extends Node
 ##                    clock-in, opens and closes a hinged door with E; client 2 joins mid-shift and
 ##                    sees the doors as they are and the same wings; at the next shift both clients
 ##                    rebuild the new wings (same layout as the host) and see the gates unlock
+##   rocket_boots     the host gives client 1 a pair of rocket boots; client 1 rocket-dives into a wall
+##                    it put up on its own machine and the host takes the heart; client 2 sees the
+##                    boots on client 1 and the burn
 ##   wall             (terminal redesign, chunk 4) the break room screen is shared: client 1 holds its
 ##                    laser on SIGN IN and its own database (not the host's) fills the cards, and a scan
 ##                    it makes while signed in reaches them too; it clicks MONSTERS and the host and
@@ -86,6 +89,7 @@ var _t0 := 0.0
 var _inbox: Array = []
 var _press_at_ms := 0
 var _t_joined := 0.0    # client: wall time the connection came up (0 before)
+var _hurtable := -1     # host: the one peer _physics_process leaves hurtable (rocket_boots)
 
 
 func _ready() -> void:
@@ -136,7 +140,8 @@ func _physics_process(_delta: float) -> void:
 	# remote ones (whose own bot flag only exists on their machine).
 	if role == "host" and game != null:
 		for p in game.players.values():
-			p.invuln = 9.0
+			if p.peer_id != _hurtable:
+				p.invuln = 9.0
 
 
 func _run() -> void:
@@ -159,12 +164,101 @@ func _run() -> void:
 		"pockets": await _sc_pockets()   # POCKETS
 		"doors": await _sc_doors()   # DOORS HOOK
 		"wall": await _sc_wall()   # terminal redesign, chunk 4
+		"rocket_boots": await _sc_rocket_boots()   # ROCKET BOOTS
 		_: _end(false, "unknown scenario " + scenario)
 
 
 # =========================================================================
 # scenarios
 # =========================================================================
+
+## ROCKET BOOTS: `boots` reaches the wearer and everyone else; the burn replicates (report bit 256
+## -> report_full "rk"); a client's own faceplant (faceplant_count, report_state[16]) costs a heart
+## on the host.
+func _sc_rocket_boots():
+	if role == "host":
+		if not await _until(func(): return Net.names.size() == clients + 1 and game.players.size() == clients + 1, 90.0, "everyone"):
+			return
+		await _wall_wait(1.0)
+		var c1 = game.players.get(_peer_of(1))
+		_hurtable = c1.peer_id
+		c1.invuln = 0.0
+		var hp0: int = c1.hp
+		if not game.give_hand(c1, "rocket_boots", 1) or not c1.boots:
+			return _end(false, "client 1 didn't get the boots on the host")
+		_send("boots_on", {})
+		var seen := {"burn": false}
+		if not await _until(func():
+			if c1.rocket_burning():
+				seen.burn = true
+			return c1.faceplant_count > 0, 90.0, "client 1's faceplant on the host"):
+			return
+		_say("host saw the burn: %s" % str(seen.burn))
+		if not await _until(func(): return c1.hp == hp0 - 1, 10.0, "the faceplant's heart (hp %d)" % c1.hp):
+			return
+		_say("client 1 faceplanted: hp %d -> %d" % [hp0, c1.hp])
+		_send("hurt", {"hp": c1.hp})
+		await _finish_together("client 1 wore the boots, flew and faceplanted; the host took the heart")
+		return
+	if not await _until(func(): return game.phase != Game.Phase.MENU and _me() != null and _count_msgs("boots_on") > 0, 90.0, "the boots"):
+		return
+	var me := _me()
+	me.bot_active = true
+	if index == 2:
+		var c1 = game.players.get(_peer_of(1))
+		if not await _until(func(): return c1 != null and c1.boots, 20.0, "client 1's boots on client 2"):
+			return
+		_send("watching", {})
+		if not await _until(func(): return c1.rocket_burning(), 60.0, "client 1's burn on client 2"):
+			return
+		await _finish_together("sees client 1 wearing the boots and burning")
+		return
+	if not await _until(func(): return me.boots, 20.0, "my boots from the host"):
+		return
+	if not await _until(func(): return _count_msgs("watching") > 0, 60.0, "client 2 to be watching"):
+		return
+	# Run up the hub's spine (as tools/controlstest.gd) into a wall put up on this machine only: the
+	# dive is this machine's movement, the host just hears about the faceplant.
+	var er: Rect2 = game.level_info.get("entrance_rect", Rect2())
+	var run_from: Vector3 = me.global_position
+	if er.size != Vector2.ZERO:
+		var t := er.position + Vector2(16.5, 18.5) * C.TILE
+		run_from = Vector3(t.x, 0.0, t.y)
+	me.teleport(game._floor_at(run_from))
+	me.bot_yaw = 0.0
+	me.bot_pitch = 0.0
+	me.stamina = 1.0
+	await _wall_wait(0.3)
+	me.bot_move = Vector2(0, -1)
+	me.bot_sprint = true
+	if not await _until(func(): return me.sprinting, 5.0, "sprinting"):
+		return
+	var wall := StaticBody3D.new()
+	wall.collision_layer = C.L_WORLD
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(6.0, 3.0, 0.3)
+	shape.shape = box
+	wall.add_child(shape)
+	game.add_child(wall)
+	wall.global_position = me.global_position + Vector3(0, 1.5, -7.0)
+	me.bot_rocket_hold = true
+	me.bot_dive += 1
+	if not await _until(func(): return me.rocketing, 3.0, "the boots to light"):
+		return
+	if not await _until(func(): return me.faceplant_count > 0, 5.0, "the faceplant"):
+		return
+	# Hold the landing a moment so client 2 has surely seen the burn, then wait for the host's heart.
+	me.bot_rocket_hold = false
+	me.bot_move = Vector2.ZERO
+	me.bot_sprint = false
+	if not await _until(func(): return _count_msgs("hurt") > 0, 30.0, "the host's hurt"):
+		return
+	if not await _until(func(): return me.hp == int(_msgs("hurt")[0].data.hp), 10.0, "my hp from the host"):
+		return
+	wall.queue_free()
+	await _finish_together("flew into the wall; hp now %d" % me.hp)
+
 
 ## Terminal redesign, chunk 4: the break room screen, shared.
 func _sc_wall():

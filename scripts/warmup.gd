@@ -84,6 +84,7 @@ static func run(game: Node, progress: Callable = Callable(), ready_to_draw: Call
 	_inert(shelf)
 	_report(progress, "items", Items.ITEMS.size())
 	EconomyScript.warm(shelf)
+	preload("res://scripts/rocket_boots.gd").warm(shelf)   # ROCKET BOOTS: the heel pods and the flame
 	ExteriorScript.warm(shelf)   # the front: concrete, window glass, sign letters
 	_inert(shelf)
 	_report(progress, "economy")

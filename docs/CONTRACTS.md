@@ -985,7 +985,30 @@ game.furnace_sell(kind, count, value, at)   # host; the furnace calls this once 
 game.furnace_can_sell(kind) -> bool  # loot (incl. brains) and placebo_pills; nothing else
 game.furnace_value(kind, slot) -> int  # brains: spoiled value; placebo_pills: 0; else slot.v
 game.PILL_PRICE / game.PILL_COUNT    # $15, 10 pills a bottle
+game.ROCKET_BOOTS_PRICE              # $100 a pair (catalog line "rocket_boots", count 1)
+game.player_faceplanted(p)           # host; a rocket dive hit a wall head on: damage_player(p, 1, "faceplant")
 ```
+
+- **Rocket boots** (`Items.is_worn(kind)`, def key `wear`): the one worn item. Taking a pair
+  (`game.pickup_item`, `game.give_hand`, the dev dispenser) calls `player.put_on_boots()` instead of
+  filling a hand, prompt "Put on Rocket boots", refused ("!Already wearing rocket boots") while
+  `player.boots`. A stack of several loses one pair per taker. `boots` is host authoritative
+  (report_full `"bt"`), survives death and respawn, and `game.reset_money()` (a new run) clears it.
+  The furnace doesn't take them (not sellable: they bounce back out).
+- **The rocket dive** (player.gd "ROCKET BOOTS", client-owned movement like the dive): crouch still
+  held `ROCKET_IGNITE_HOLD` after a sprint-dive fires lights the boots once per dive (a tap stays a
+  plain dive). While lit (`rocketing`, report bit 256 / report_full `"rk"`, `rocket_burning()`): flat
+  `ROCKET_SPEED` along the dive's locked heading, vertical speed eased to 0 (level flight), the
+  capsule at prone height until the dive ends, eye `ROCKET_EYE_H`, `fuel` (0..1, local like stamina)
+  drains over `FUEL_BURN_TIME`. It ends on letting go, running dry, going down or losing control;
+  the dive then falls and lands as usual. Fuel refills over `FUEL_REFILL_TIME` on the ground, not
+  diving. A slide collision after the move with a near-horizontal normal against the heading
+  (`FACEPLANT_DOT`) is a faceplant: burn over, bounced back, heading cleared (it just falls), and
+  `faceplant_count` (report_state index 16) bumps; the host's `_consume_actions` calls
+  `game.player_faceplanted` (skipped while invulnerable or in god mode). The look is
+  `scripts/rocket_boots.gd` (heel pods on `foot.L`/`foot.R`, top-level flames and a glow trailing
+  the travel direction, cue `rocket_burn`); HUD element `"fuel"` under stamina while wearing a pair
+  and it isn't full. Test: `tools/controlstest.tscn` ("rocket boots").
 
 - **The pharmacy** (`scripts/economy/economy_props.gd`, hub rebuild chunk 3): a wall of steel bars
   across the pharmacy (width 13.5 m in the hub, 3 m in the dev room) with a pickup drawer through a

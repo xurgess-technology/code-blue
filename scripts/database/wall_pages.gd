@@ -197,6 +197,15 @@ static func _other(kind: String) -> Dictionary:
 			"paragraphs": ["Sugar pills from the pharmacy. They do nothing. Probably.", "Order them on the lobby fax."],
 			"models": [{"item": kind, "count": 1}],
 		}
+	if kind == "rocket_boots":
+		return {
+			"title": "ROCKET BOOTS",
+			"subtitle": "PHARMACY",
+			"paragraphs": ["Surplus clogs with a thruster bolted to each heel. Taking a pair puts them on.",
+				"Hold crouch through a sprint-dive to burn fuel and fly straight ahead. Let go to drop. Fuel refills on the ground.",
+				"Anything solid, head on, costs you a heart.", "Order them on the lobby fax."],
+			"models": [{"item": kind, "count": 1}],
+		}
 	var def := LootTable.def(kind)
 	var value: Array = def.get("value", [0, 0])
 	var worth := "Sells for $%d to $%d at the furnace." % [int(value[0]), int(value[value.size() - 1])]

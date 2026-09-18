@@ -50,6 +50,7 @@ static func make(kind: String, count: int = 1) -> Node3D:
 		"bone_saw": _bone_saw(root)
 		"suture_kit": _suture_kits(root, clampi(count, 1, 4))
 		"placebo_pills": _placebo_bottle(root)   # SWEEP 4A HOOK (pharmacy, chunk 3)
+		"rocket_boots": _rocket_boots(root)   # ROCKET BOOTS
 		_:
 			if LootTable.has(kind):
 				LootModels.build(root, kind, count)
@@ -136,6 +137,7 @@ static func footprint(kind: String) -> Vector3:
 		"bone_saw": return Vector3(0.52, 0.05, 0.16)
 		"suture_kit": return Vector3(0.16, 0.05, 0.11)
 		"placebo_pills": return Vector3(0.045, 0.07, 0.045)
+		"rocket_boots": return Vector3(0.22, 0.1, 0.4)
 	if LootTable.has(kind):
 		return LootModels.footprint(kind)
 	return Vector3(0.15, 0.1, 0.15)
@@ -616,3 +618,18 @@ static func _placebo_bottle(root: Node3D) -> void:
 	_add(root, _cyl(0.017, 0.04, pills), Vector3(0, 0.022, 0))
 	_add(root, _cyl(0.0215, 0.03, label), Vector3(0, 0.036, 0))
 	_add(root, _cyl(0.023, 0.014, cap), Vector3(0, 0.077, 0))
+
+
+## ROCKET BOOTS: a pair of white clogs, each with a steel thruster can bolted to the heel (an orange
+## band round it), standing side by side, toes toward -Z.
+static func _rocket_boots(root: Node3D) -> void:
+	var steel := _mat(Color(0.32, 0.34, 0.36), 0.45)
+	steel.metallic = 0.7
+	var band := _mat(Color(0.85, 0.3, 0.12), 0.6)
+	var nozzle := _mat(Color(0.08, 0.08, 0.09), 0.7)
+	for x in [-0.065, 0.065]:
+		_add(root, _box(Vector3(0.09, 0.05, 0.24), Color(0.9, 0.9, 0.88), 0.7), Vector3(x, 0.025, 0.0))
+		_add(root, _box(Vector3(0.09, 0.05, 0.12), Color(0.9, 0.9, 0.88), 0.7), Vector3(x, 0.07, 0.05))
+		_add(root, _cyl(0.032, 0.1, steel), Vector3(x, 0.07, 0.14), Vector3(90, 0, 0))
+		_add(root, _cyl(0.034, 0.02, band), Vector3(x, 0.07, 0.12), Vector3(90, 0, 0))
+		_add(root, _cyl(0.024, 0.015, nozzle), Vector3(x, 0.07, 0.195), Vector3(90, 0, 0))
