@@ -156,7 +156,7 @@ static func assemble_steps(gen: Dictionary, info: Dictionary, prepared: Dictiona
 ## should read through it once inside.
 const FOG_BELT_PAD_M := 6.0
 ## Taller than volumetric fog is ever drawn (look.gd's volumetric_fog_length, 40 m), so the belt has
-## no top to see: at 8 m a flashlight lit its upper edge against the empty sky.
+## no top to see now that fog is drawn over the empty sky (look.gd, volumetric_fog_sky_affect).
 const FOG_BELT_HEIGHT_M := 60.0
 ## SWEEP 4A FOLLOW-UP: 9.0 scattered the ambulance's headlights into a blown-out white haze
 ## instead of a dark wall of fog (real Light3Ds scatter through a real FogVolume, unlike the

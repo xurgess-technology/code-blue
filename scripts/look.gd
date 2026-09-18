@@ -121,7 +121,10 @@ static func make_environment_resource() -> Environment:
 	env.volumetric_fog_detail_spread = 2.0
 	# Low ambient inject: we want the fog dark except where a light hits it.
 	env.volumetric_fog_ambient_inject = 0.35
-	env.volumetric_fog_sky_affect = 0.0
+	# 1.0: fog is drawn over the empty background too, out to volumetric_fog_length. At 0 it was only
+	# drawn in front of geometry, so outside a flashlight's lit fog (and the lot's fog belt) stopped
+	# in a hard line at the horizon. Indoors there is always a wall or ceiling behind it: no change.
+	env.volumetric_fog_sky_affect = 1.0
 	env.volumetric_fog_temporal_reprojection_enabled = true
 	env.volumetric_fog_temporal_reprojection_amount = 0.9
 
