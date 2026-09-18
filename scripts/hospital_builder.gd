@@ -155,7 +155,9 @@ static func assemble_steps(gen: Dictionary, info: Dictionary, prepared: Dictiona
 ## screen-space fog (see fog_ring.gd's own FOG_DENSITY note) that nothing including a flashlight
 ## should read through it once inside.
 const FOG_BELT_PAD_M := 6.0
-const FOG_BELT_HEIGHT_M := 8.0
+## Taller than volumetric fog is ever drawn (look.gd's volumetric_fog_length, 40 m), so the belt has
+## no top to see: at 8 m a flashlight lit its upper edge against the empty sky.
+const FOG_BELT_HEIGHT_M := 60.0
 ## SWEEP 4A FOLLOW-UP: 9.0 scattered the ambulance's headlights into a blown-out white haze
 ## instead of a dark wall of fog (real Light3Ds scatter through a real FogVolume, unlike the
 ## screen-space override). Lower, relying more on FogRing's own screen-space fog (which now has
