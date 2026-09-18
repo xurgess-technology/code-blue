@@ -86,6 +86,9 @@ const CAMERA_NODE_NAME := "Camera"
 # --- fog (SWEEP 4A HOOK, sweep 4A chunk 2) ---------------------------------
 ## Smoothing rate for fog depth, so stepping across the edge doesn't pop.
 @export var fog_rate := 3.0
+## Closing in is faster than clearing: the lot's fog turns you round only once your screen is all
+## fog (fog_covered), and at a sprint that must come within a couple of metres of going blind.
+@export var fog_rate_in := 10.0
 
 ## Below this, a channel is snapped to exactly zero so nothing can drift.
 const EPSILON := 0.00008
@@ -282,6 +285,11 @@ func set_fog(depth01: float) -> void:
 	_fog_target01 = clampf(depth01, 0.0, 1.0)
 
 
+## True once the fog on screen is thick enough that nothing shows through (FogRing.steer_yaw).
+func fog_covered() -> bool:
+	return _fog01 >= 0.97
+
+
 ## Immediately zero every channel. Use on respawn / teleport so the camera does
 ## not spring across the map.
 func reset() -> void:
@@ -369,7 +377,7 @@ func _process(delta: float) -> void:
 	_fov_cur = _dz(_fov_cur)
 	camera.fov = _base_fov + _fov_cur * fov_kick_max
 
-	_fog01 = _damp(_fog01, _fog_target01, fog_rate, delta)
+	_fog01 = _damp(_fog01, _fog_target01, fog_rate_in if _fog_target01 > _fog01 else fog_rate, delta)
 	_fog01 = 0.0 if _fog01 < EPSILON and _fog_target01 <= 0.0 else _fog01
 	FogRing.apply_camera_fog(camera, _fog01, _fog_cache)
 

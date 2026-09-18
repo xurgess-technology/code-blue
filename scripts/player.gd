@@ -251,6 +251,9 @@ var _shove_cd: float = 0.0
 var _yaw: float = 0.0
 ## Seconds left of walking out of the fog on arrival (game._arrive_at_start); any movement key ends it.
 var arrival_walk := 0.0
+## The fog ring: already moved along the belt on this trip into the fog (reset on coming out).
+var _fog_lost_done := false
+var _fog_rng := RandomNumberGenerator.new()
 const ARRIVAL_WALK_MAX := 8.0
 ## After stepping out of the fog, how much longer the walk carries on toward the doors.
 const ARRIVAL_WALK_TAIL := 0.7
@@ -718,7 +721,20 @@ func _local_step(delta: float) -> void:
 	# everything else in this function); a carried player needs nothing extra, since their body
 	# just follows whoever carries them, and that player is doing their own steering.
 	if g != null and FogRingScript.on_lot(global_position, g.level_info):
-		_yaw = FogRingScript.steer_yaw(global_position, _yaw, g.level_info, delta)
+		# 2026-09-17: a human is only turned round once their own screen is all fog, and the first
+		# time on each trip into it they are also moved along the belt: lost, they come out
+		# somewhere else. Bots and other machines' players steer on depth alone.
+		var depth := FogRingScript.depth_m(global_position, g.level_info)
+		var human := is_local and not bot_active
+		var covered: bool = not human or (fx != null and (fx as CameraFX).fog_covered())
+		if depth <= 0.0:
+			_fog_lost_done = false
+		elif human and covered and depth >= FogRingScript.BLIND_M and not _fog_lost_done:
+			_fog_lost_done = true
+			var to := FogRingScript.lost_shift(global_position, g.level_info, _fog_rng)
+			global_position = to
+			_target_pos = to
+		_yaw = FogRingScript.steer_yaw(global_position, _yaw, g.level_info, delta, covered)
 		rotation.y = _yaw
 		var fog01 := FogRingScript.visibility01(FogRingScript.depth_m(global_position, g.level_info))
 		if is_local:
@@ -1623,6 +1639,7 @@ func begin_arrival_walk() -> void:
 	_pitch = 0.0
 	rotation.y = _yaw
 	arrival_walk = ARRIVAL_WALK_MAX if is_local and not is_bot else 0.0
+	_fog_lost_done = true   # arriving out of the fog is not getting lost in it
 
 
 func revive_full() -> void:

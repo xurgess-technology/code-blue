@@ -167,40 +167,60 @@ const FOG_BELT_DENSITY := 4.0
 const FOG_BELT_EDGE_FADE := 0.8
 
 
+## 2026-09-17: the clear area is a half-oval now (FogRing.clear_oval), so the belt is one box over
+## the whole lot whose fog shader thins to nothing inside the oval, using the same distance the
+## blindness and steering use: the fog you see and the fog that blinds you start at the same curve.
+const FOG_BELT_SHADER := """
+shader_type fog;
+
+uniform vec2 centre;
+uniform vec2 semi;
+uniform float density = 4.0;
+uniform float fade = 0.8;
+uniform vec3 albedo : source_color;
+
+void fog() {
+	vec2 d = WORLD_POSITION.xz - centre;
+	d.y = max(d.y, 0.0);
+	vec2 q = d / semi;
+	float f = dot(q, q) - 1.0;
+	vec2 g = 2.0 * d / (semi * semi);
+	float depth = f / max(length(g), 0.0001);
+	DENSITY = density * clamp(depth / fade, 0.0, 1.0);
+	ALBEDO = albedo;
+}
+"""
+
+static var _fog_belt_shader: Shader = null
+
+
 static func _build_fog_belt(info: Dictionary, root: Node3D) -> void:
 	if not info.has("neutral_rect"):
 		return
 	var outer: Rect2 = info.neutral_rect
 	if outer.size == Vector2.ZERO:
 		return
-	var inner: Rect2 = FogRingScript.inner_rect(info)
-	var mat := FogMaterial.new()
-	mat.density = FOG_BELT_DENSITY
-	mat.albedo = FogRingScript.FOG_COLOR
-	mat.edge_fade = FOG_BELT_EDGE_FADE
-	var far_x0 := outer.position.x - FOG_BELT_PAD_M
-	var far_x1 := outer.end.x + FOG_BELT_PAD_M
-	var far_z1 := outer.end.y + FOG_BELT_PAD_M
-	# West strip: from the padded outer edge in to the clear area's own west edge, full depth.
-	_add_fog_strip(root, mat, far_x0, inner.position.x, outer.position.y, far_z1)
-	# East strip: clear area's east edge out to the padded outer edge, full depth.
-	_add_fog_strip(root, mat, inner.end.x, far_x1, outer.position.y, far_z1)
-	# South strip: clear area's south edge out past the padded outer edge, full width (overlaps
-	# the west/east strips at the corners so there is no gap to see through).
-	_add_fog_strip(root, mat, far_x0, far_x1, inner.end.y, far_z1)
-
-
-static func _add_fog_strip(root: Node3D, mat: FogMaterial, x0: float, x1: float, z0: float, z1: float) -> void:
-	var w := x1 - x0
-	var d := z1 - z0
-	if w <= 0.01 or d <= 0.01:
-		return
+	var oval: Array = FogRingScript.clear_oval(info)
+	if _fog_belt_shader == null:
+		_fog_belt_shader = Shader.new()
+		_fog_belt_shader.code = FOG_BELT_SHADER
+	var mat := ShaderMaterial.new()
+	mat.shader = _fog_belt_shader
+	mat.set_shader_parameter("centre", oval[0])
+	mat.set_shader_parameter("semi", oval[1])
+	mat.set_shader_parameter("density", FOG_BELT_DENSITY)
+	mat.set_shader_parameter("fade", FOG_BELT_EDGE_FADE)
+	mat.set_shader_parameter("albedo", FogRingScript.FOG_COLOR)
+	var x0 := outer.position.x - FOG_BELT_PAD_M
+	var x1 := outer.end.x + FOG_BELT_PAD_M
+	var z0 := outer.position.y
+	var z1 := outer.end.y + FOG_BELT_PAD_M
 	var vol := FogVolume.new()
 	vol.name = "FogBelt"
 	vol.shape = 3   # FogVolume box shape (this Godot build exposes no GDScript-visible enum constant for it)
 	vol.material = mat
-	vol.size = Vector3(w, FOG_BELT_HEIGHT_M, d)
-	vol.position = Vector3(x0 + w * 0.5, FOG_BELT_HEIGHT_M * 0.5, z0 + d * 0.5)
+	vol.size = Vector3(x1 - x0, FOG_BELT_HEIGHT_M, z1 - z0)
+	vol.position = Vector3((x0 + x1) * 0.5, FOG_BELT_HEIGHT_M * 0.5, (z0 + z1) * 0.5)
 	root.add_child(vol)
 
 
