@@ -23,60 +23,60 @@ extends RefCounted
 const LOOT := {
 	# ---- plain loot: it exists to be sold -----------------------------------------------------
 	"pill_bottle": {
-		"name": "Pill bottle", "short": "Pill bottles", "value": [26, 52], "tier": 0, "stack": true, "batch": [1, 3],
+		"name": "Pill bottle", "short": "Pill bottles", "value": [5, 12], "tier": 0, "stack": true, "batch": [1, 3],
 		"rooms": {"pharmacy": 2.72, "patient_room": 1.19, "nurse_station": 1.36, "restroom": 1.02, "supply_closet": 1.02, "janitor_closet": 0.68, "lab": 0.85, "cafeteria": 0.51, "*": 0.255},
 		"surfaces": ["counter", "tray"], "containers": {"med_fridge": 0.35, "station_drawers": 0.4},
 	},
 	"xray_film": {
-		"name": "X-ray film", "short": "X-ray films", "value": [50, 100], "tier": 0,
+		"name": "X-ray film", "short": "X-ray films", "value": [10, 20], "tier": 0,
 		"rooms": {"radiology": 3.2, "office": 0.64, "supply_closet": 0.4, "patient_room": 0.32, "lab": 0.32, "morgue": 0.32, "janitor_closet": 0.24, "*": 0.08},
 		"surfaces": ["counter", "gurney", "floor"], "containers": {"drawer_unit": 0.3},
 	},
 	"heart_monitor": {
-		"name": "Heart monitor", "short": "Heart monitors", "value": [130, 230], "tier": 2, "bulky": true, "fragile": true,
+		"name": "Heart monitor", "short": "Heart monitors", "value": [60, 110], "tier": 2, "bulky": true, "fragile": true,
 		"rooms": {"patient_room": 0.224, "nurse_station": 0.112, "supply_closet": 0.112, "janitor_closet": 0.09, "corridor": 0.067, "lab": 0.067, "*": 0.011},
 		"surfaces": ["counter", "gurney", "floor"], "containers": {},
 	},
 	"gold_watch": {
-		"name": "Gold watch", "short": "Gold watches", "value": [120, 280], "tier": 3,
+		"name": "Gold watch", "short": "Gold watches", "value": [50, 120], "tier": 3,
 		"rooms": {"office": 0.252, "waiting_room": 0.42, "morgue": 0.672, "restroom": 0.336, "cafeteria": 0.336, "lab": 0.168, "*": 0.063},
 		"surfaces": ["counter", "tray", "floor"], "containers": {"station_drawers": 0.3, "drawer_unit": 0.3},
 	},
 	"ultrasound": {
-		"name": "Portable ultrasound", "short": "Portable ultrasounds", "value": [260, 440], "tier": 3, "bulky": true, "fragile": true,
+		"name": "Portable ultrasound", "short": "Portable ultrasounds", "value": [120, 200], "tier": 3, "bulky": true, "fragile": true,
 		"rooms": {"radiology": 0.7, "patient_room": 0.14, "supply_closet": 0.14, "lab": 0.14, "*": 0.017},
 		"surfaces": ["counter", "gurney", "floor"], "containers": {},
 	},
 	# ---- trinkets: they sell, but each also does one thing (a later chunk). Rarer than plain loot.
 	"desk_phone": {
-		"name": "Desk phone", "short": "Desk phones", "value": [30, 60], "tier": 0, "trinket": true, "trinket_weight": 3.0,
+		"name": "Desk phone", "short": "Desk phones", "value": [12, 25], "tier": 0, "trinket": true, "trinket_weight": 3.0,
 		"rooms": {"office": 4.5, "nurse_station": 3.15, "waiting_room": 2.7, "cafeteria": 4.05, "patient_room": 1.05, "*": 0.225},
-		"surfaces": ["counter"], "containers": {},
+		"surfaces": ["counter"], "containers": {"station_drawers": 0.3, "drawer_unit": 0.2},
 	},
 	"laptop": {
-		"name": "Laptop", "short": "Laptops", "value": [110, 200], "tier": 2, "fragile": true, "trinket": true, "trinket_weight": 1.2,
+		"name": "Laptop", "short": "Laptops", "value": [50, 90], "tier": 2, "fragile": true, "trinket": true, "trinket_weight": 1.2,
 		"rooms": {"lab": 0.672, "office": 0.504, "nurse_station": 0.252, "radiology": 0.252, "cafeteria": 0.21, "*": 0.021},
-		"surfaces": ["counter"], "containers": {},
+		"surfaces": ["counter"], "containers": {"station_drawers": 0.3, "drawer_unit": 0.3},
 	},
 	"defibrillator": {
-		"name": "Defibrillator", "short": "Defibrillators", "value": [170, 310], "tier": 3, "bulky": true, "trinket": true, "trinket_weight": 1.0, "max_per_shift": 1,
+		"name": "Defibrillator", "short": "Defibrillators", "value": [80, 140], "tier": 3, "bulky": true, "trinket": true, "trinket_weight": 1.0, "max_per_shift": 1,
 		"rooms": {"corridor": 0.21, "nurse_station": 0.168, "patient_room": 0.105, "waiting_room": 0.126, "supply_closet": 0.084, "janitor_closet": 0.084, "*": 0.006},
 		"surfaces": ["floor", "counter", "gurney"], "containers": {},
 	},
 	"reflex_hammer": {
-		"name": "Reflex hammer", "short": "Reflex hammers", "value": [30, 60], "tier": 0, "trinket": true, "trinket_weight": 3.0,
+		"name": "Reflex hammer", "short": "Reflex hammers", "value": [12, 25], "tier": 0, "trinket": true, "trinket_weight": 3.0,
 		"rooms": {"office": 1.0, "patient_room": 0.5, "nurse_station": 0.5, "janitor_closet": 0.375, "supply_closet": 0.375, "morgue": 0.375, "*": 0.063},
-		"surfaces": ["counter", "tray"], "containers": {"drawer_unit": 0.4},
+		"surfaces": ["counter", "tray"], "containers": {"drawer_unit": 0.4, "pegboard": 0.3},
 	},
 	"epipen": {
-		"name": "EpiPen", "short": "EpiPens", "value": [40, 80], "tier": 1, "trinket": true, "trinket_weight": 1.2,
+		"name": "EpiPen", "short": "EpiPens", "value": [18, 35], "tier": 1, "trinket": true, "trinket_weight": 1.2,
 		"rooms": {"nurse_station": 0.307, "pharmacy": 0.307, "patient_room": 0.154, "supply_closet": 0.154, "restroom": 0.115, "cafeteria": 0.115, "*": 0.019},
-		"surfaces": ["counter", "tray"], "containers": {"station_drawers": 0.5, "med_fridge": 0.3},
+		"surfaces": ["counter", "tray"], "containers": {"station_drawers": 0.5, "med_fridge": 0.3, "trauma_bag": 0.4},
 	},
 	"pulse_oximeter": {
-		"name": "Pulse oximeter", "short": "Pulse oximeters", "value": [60, 110], "tier": 1, "trinket": true, "trinket_weight": 1.2,
+		"name": "Pulse oximeter", "short": "Pulse oximeters", "value": [25, 45], "tier": 1, "trinket": true, "trinket_weight": 1.2,
 		"rooms": {"patient_room": 0.072, "nurse_station": 0.096, "supply_closet": 0.036, "lab": 0.048, "morgue": 0.036, "*": 0.006},
-		"surfaces": ["counter", "tray"], "containers": {"station_drawers": 0.5},
+		"surfaces": ["counter", "tray"], "containers": {"station_drawers": 0.5, "trauma_bag": 0.3},
 	},
 	# BRAINS (sweep 3, scripts/brains): harvested from a dissected monster, never found. No rooms,
 	# surfaces or containers, so the loot spawner never picks them; `value` is the full price of a

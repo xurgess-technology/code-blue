@@ -5,6 +5,11 @@ patch per thing we did that day. How to add to it: [RULES.md](RULES.md#changelog
 
 **2026-09-18 (0.6.x)**
 
+- **0.6.14**: Slim pickings, full shelves
+    - Changed: Loot is scarce: 15 to 20 finds a shift instead of 70, and a shift pays about $1,000 instead of $11,000. Most rooms hold nothing, and a harvested brain is a real chunk of the pay.
+    - Changed: Pill bottles and X-ray film are cheap filler now; the ultrasound, heart monitor and gold watch are where the money is.
+    - Changed: Anything that fits can turn up in a drawer, bag or pegboard, desk phones and laptops included.
+    - Changed: About half again as many surgery supplies: three of every tool the case needs, more anesthetic and gauze, and more of the ones it doesn't.
 - **0.6.13**: GRAFTING!!! YOU CAN NOW HAVE A HIVE EYE!!!!!!
     - Added: Every OR table has a vat stand. Strap a surgeon down, put a vat with a Hive's eyeball on the stand, and a teammate swaps it in for one of their eyes: scalpel, eye spoon, eye spoon, stitches. The patient is awake for all of it.
     - Added: A grafted surgeon has one normal eye and one glowing orange Hive eye, on their own body, in the mirrors and on other players' screens, and gets Hive Eyes. Swap back and it's gone.

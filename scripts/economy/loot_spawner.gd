@@ -28,7 +28,8 @@ const DEPTH_CHANCE_GAIN := 0.45
 const CONTAINER_CHANCE_SCALE := 0.45
 const MAX_PER_UNIT := 1
 const MIN_LOOT := 6
-const MAX_LOOT := 70
+## Loot stacks a shift holds (inclusive range), trinkets included: few, so most rooms are empty.
+const LOOT_PER_SHIFT := [15, 20]
 ## Without wing data, metres of distance from the table per depth step.
 const METRES_PER_DEPTH := 22.0
 const MAX_DEPTH := 4
@@ -46,7 +47,8 @@ static func plan(seed_value: int, shift: int, info: Dictionary, occupied: Dictio
 		var tmp = locs[i]
 		locs[i] = locs[j]
 		locs[j] = tmp
-	var budget := clampi(roundi(locs.size() * 0.22), MIN_LOOT, MAX_LOOT)
+	var budget := clampi(roundi(locs.size() * 0.22), MIN_LOOT,
+			rng.randi_range(int(LOOT_PER_SHIFT[0]), int(LOOT_PER_SHIFT[1])))
 	var out: Array = []
 	var units := {}
 	var kinds := LootTable.kinds()

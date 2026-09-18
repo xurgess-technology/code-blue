@@ -185,8 +185,8 @@ func _check_plan(seed: int, ailment: String, info: Dictionary, p: Array, gen: Di
 	for kind in need.keys():
 		var have: int = int(totals.get(kind, 0))
 		if ItemsData.is_consumable(kind):
-			if have < int(need[kind]) * 2:
-				_fail("%s: %s totals %d, needs at least twice %d" % [tag, kind, have, need[kind]])
+			if have < int(need[kind]) * Spawner.CONSUMABLE_MULT:
+				_fail("%s: %s totals %d, needs at least %dx %d" % [tag, kind, have, Spawner.CONSUMABLE_MULT, need[kind]])
 			if units.get(kind, {}).size() < Spawner.CONSUMABLE_STACKS[0]:
 				_fail("%s: %s is in only %d places" % [tag, kind, units.get(kind, {}).size()])
 			_count("surplus " + kind + " (" + ailment + ")", have - int(need[kind]))

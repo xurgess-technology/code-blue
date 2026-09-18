@@ -3,9 +3,9 @@ extends RefCounted
 ## Decides where every item stack starts a shift (see docs/CONTRACTS.md, "Item spawning").
 ##
 ## Rules `plan()` guarantees, all checked by tools/spawncheck.gd:
-##   - every consumable the ailment needs totals at least twice Procedures.requirements(), in
-##     at least four stacks at different places (different container units / anchors);
-##   - every needed tool exists at least twice;
+##   - every consumable the ailment needs totals at least three times Procedures.requirements(), in
+##     at least six stacks at different places (different container units / anchors);
+##   - every needed tool exists at least three times;
 ##   - every wing holds at least one stack of something the case needs;
 ##   - nothing needed spawns in the entrance building (OR, scrub room, break room, locker room,
 ##     lobby, its halls) or the neutral area outside;
@@ -29,8 +29,13 @@ const FAR_M := 24.0
 ## Stacks of one kind try to stay at least this far apart.
 const SPREAD_M := 12.0
 ## Needed supply, as a multiple of the old amounts.
-const TOOL_COPIES := 2
-const CONSUMABLE_STACKS := [4, 6]
+const TOOL_COPIES := 3
+const CONSUMABLE_STACKS := [6, 9]
+## A needed consumable totals at least this many times what the procedure uses.
+const CONSUMABLE_MULT := 3
+## Red herrings: tool copies, and consumable stacks (inclusive range).
+const HERRING_TOOL_COPIES := 2
+const HERRING_STACKS := [2, 3]
 
 
 static func plan(seed_value: int, shift: int, ailment_id: String, info: Dictionary) -> Array:
@@ -100,9 +105,9 @@ static func plan(seed_value: int, shift: int, ailment_id: String, info: Dictiona
 		out.append(_entry(kind, int(s.count), loc))
 
 	for kind in herrings:
-		var copies := 1
+		var copies := HERRING_TOOL_COPIES
 		if ItemsData.is_consumable(kind):
-			copies = rng.randi_range(1, 2)
+			copies = rng.randi_range(HERRING_STACKS[0], HERRING_STACKS[1])
 		var pl: Array[Vector3] = []
 		var un := {}
 		for i in copies:
@@ -331,8 +336,8 @@ static func _batch(kind: String, rng: RandomNumberGenerator) -> int:
 	return rng.randi_range(int(b[0]), int(b[1]))
 
 
-## Stack sizes for a needed kind: tools come TOOL_COPIES times; consumables in 4 to 6 batches
-## totalling at least twice what the procedure uses.
+## Stack sizes for a needed kind: tools come TOOL_COPIES times; consumables in 6 to 9 batches
+## totalling at least CONSUMABLE_MULT times what the procedure uses.
 static func _needed_counts(kind: String, need: int, rng: RandomNumberGenerator) -> Array[int]:
 	var out: Array[int] = []
 	if not ItemsData.is_consumable(kind):
@@ -345,7 +350,7 @@ static func _needed_counts(kind: String, need: int, rng: RandomNumberGenerator) 
 		var c := _batch(kind, rng)
 		out.append(c)
 		total += c
-	while total < need * 2:
+	while total < need * CONSUMABLE_MULT:
 		var c := _batch(kind, rng)
 		out.append(c)
 		total += c

@@ -158,8 +158,9 @@ static func shortfall_plan(seed: int, need: Dictionary, have: Dictionary, info: 
 # `occupied` is {"ct_id:slot": true, "anchor:<i>": true}; `avoid` is an Array[Vector3] to stay far from.
 ```
 
-Rules (sweep 2): every needed consumable totals at least twice `Procedures.requirements()`, in
-4 to 6 stacks at different places; every needed tool exists twice; every wing holds at least one
+Rules (sweep 2, supply raised about 50%): every needed consumable totals at least three times
+`Procedures.requirements()`, in 6 to 9 stacks at different places; every needed tool exists three
+times; red herrings come as 2 tool copies or 2 to 3 consumable stacks; every wing holds at least one
 stack of something the case needs, and extra stacks lean toward deeper wings; nothing needed
 spawns in `ItemSpawner.SAFE_ROOMS` (the entrance building's rooms and halls, the neutral area);
 at least one needed item is far from the table; items the current ailment does not need also
@@ -1102,7 +1103,8 @@ Loot (`scripts/economy/`):
   `janitor_closet`, `lab`, ...); trinkets are kept rarer than plain loot;
   `weight(kind, room_kind, depth)`, `roll_value(kind, depth, roll)` (+20% per depth).
 - `loot_spawner.gd`: `plan(seed, shift, level_info, occupied) -> [{kind, count, value, container_id,
-  slot, anchor, position?}]`, deterministic. Depth per location from the entry's `depth`, then a
+  slot, anchor, position?}]`, deterministic. A shift holds `LOOT_PER_SHIFT` (15 to 20) stacks,
+  trinkets included (about $1,000 a shift); every non-bulky kind may also go in a container. Depth per location from the entry's `depth`, then a
   `level_info.rooms` or `level_info.wings` rect (tiles, or world metres when the rect is wider than
   the map in tiles, or `space: "world"`), else distance from the table. Safe rooms: `or`,
   `anteroom`, `clockin`, `break_room`, `entrance`, `lobby`, `neutral`, `outdoor`, `dev`.

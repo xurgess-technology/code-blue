@@ -5,7 +5,8 @@ extends SceneTree
 ##   godot --headless --path . -s tools/loottest.gd [-- --seeds=1,2,3 --report]
 ##
 ## Checks: no cut kind is left in the loot table or its models; every kept kind has a model; every
-## room kind that had loot before the cut still gets loot; trinkets are rarer than plain loot.
+## room kind that had loot before the cut still gets loot; trinkets are rarer than plain loot;
+## every shift holds LootSpawner.LOOT_PER_SHIFT stacks.
 ## --report also prints each seed's total loot value and the kinds and rooms it landed in.
 ## Exits 0 when every check passes.
 
@@ -47,6 +48,7 @@ func _initialize() -> void:
 	var trinket_stacks := 0
 	var trinket_kinds := {}
 	var shift_trinkets: Array = []   # trinkets in each planned shift
+	var shift_stacks: Array = []     # stacks in each planned shift
 	var shift_defibs_max := 0
 	var radiology_seeds := 0
 	for sd in seeds:
@@ -60,6 +62,7 @@ func _initialize() -> void:
 			var rooms_of := {}
 			var st := 0
 			var defibs := 0
+			var stacks := 0
 			for loc in LootSpawner._locations(info, {}):
 				places[loc.room_kind] = int(places.get(loc.room_kind, 0)) + 1
 				rooms_of[loc.key] = loc.room_kind
@@ -67,6 +70,7 @@ func _initialize() -> void:
 				var kind := String(e.kind)
 				seed_value += int(e.value)
 				seed_stacks += 1
+				stacks += 1
 				by_kind[kind] = int(by_kind.get(kind, 0)) + 1
 				if TRINKETS.has(kind):
 					trinket_stacks += 1
@@ -80,6 +84,7 @@ func _initialize() -> void:
 				if room == "radiology" and (kind == "xray_film" or kind == "ultrasound"):
 					rad_hit = true
 			shift_trinkets.append(st)
+			shift_stacks.append(stacks)
 			shift_defibs_max = maxi(shift_defibs_max, defibs)
 		if rad_hit:
 			radiology_seeds += 1
@@ -102,6 +107,12 @@ func _initialize() -> void:
 	for n in shift_trinkets:
 		in_range = in_range and n >= 3 and n <= 5
 	_check(in_range, "every shift has 3 to 5 trinkets in total %s" % str(shift_trinkets))
+	var lo := int(LootSpawner.LOOT_PER_SHIFT[0])
+	var hi := int(LootSpawner.LOOT_PER_SHIFT[1])
+	var counts_ok := true
+	for n in shift_stacks:
+		counts_ok = counts_ok and n >= lo and n <= hi
+	_check(counts_ok, "every shift holds %d to %d loot stacks %s" % [lo, hi, str(shift_stacks)])
 	_check(shift_defibs_max <= 1, "at most one defibrillator a shift (%d)" % shift_defibs_max)
 	_check(radiology_seeds * 2 > seeds.size(), "radiology gets X-ray film or an ultrasound on most seeds (%d of %d)" % [radiology_seeds, seeds.size()])
 	for r in OLD_ROOMS:

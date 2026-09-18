@@ -57,8 +57,9 @@ here, only the loot). Remove them from `scripts/economy/loot_table.gd`, their mo
 - **Room coverage:** no room kind that had loot before may end up with none. The lab, break room,
   cafeteria, maintenance and janitor's closet lose theirs in the cut; spread the kept items over
   them with the room weights (the laptop fits the lab, the desk phone the break room, and so on).
-- **Pay:** a shift's total loot value should come out within about 10% of today's. Measure before
-  and after on the same seeds, and adjust the price ranges.
+- **Pay:** (superseded) a shift once had to pay within about 10% of before. Loot is now scarce on
+  purpose: 15 to 20 stacks and about $1,000 a shift, so a harvested brain is a real share of the pay.
+  Room coverage is checked over several seeds, not every shift.
 - **Trinkets are rarer than plain loot,** so finding one feels like a find.
 
 ## The icon style (for anything drawn later too)
@@ -148,7 +149,7 @@ Replaces the text boxes in `scripts/hud.gd` `_draw_hands`.
 
 - Every kept item has its icon in the bar, the database and (for surgery items) the OR step.
 - No cut item is left anywhere (items, models, dev panel, database, tips, tests).
-- Every room kind that had loot still gets some; a shift pays within about 10% of before.
+- Every room kind that had loot still gets some over a few seeds; a shift holds 15 to 20 stacks, about $1,000.
 - Headless checks: each one-use trinket works once, then sells for scrap; the desk phone's pull-out
   ring happens at about its chance over many pulls; a tagged monster's heartbeat follows its mode
   and the pulse ox comes back when it's caught; the reflex hammer turns a Hive and it loses sight.
