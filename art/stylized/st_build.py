@@ -21,8 +21,8 @@ import bpy
 import numpy as np
 from mathutils import Vector, Matrix
 import hu_params, hu_body, hu_rig
-import st_sdf, st_char, st_clips, st_hive_clips
-for m in (st_sdf, st_char, st_clips, st_hive_clips):
+import st_sdf, st_char, st_clips, st_hive_clips, st_sono_clips
+for m in (st_sdf, st_char, st_clips, st_hive_clips, st_sono_clips):
     importlib.reload(m)
 
 ARGS = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
@@ -51,6 +51,15 @@ def body_for(V):
     P = hu_params.get('surgeon_a' if V['outfit'] == 'scrubs' else 'bob')
     P.update(height=V['height'], girth=V['girth'], head_scale=V['head_scale'], fem=V['fem'])
     b = hu_body.Body(P, 1)
+    ext = V.get('neck_ext', 0.0)
+    if ext:
+        # a long neck: push the head joint, the crown and the head centre straight up. The neck bone
+        # grows by exactly that much and the head's geometry (st_char.Head.neck_sdf_local) grows down
+        # to meet the shoulders again, so nothing below the collarbones moves.
+        up = Vector((0.0, 0.0, ext))
+        b.J['headj'] = b.J['headj'] + up
+        b.J['crown'] = b.J['crown'] + up
+        b.HC = b.HC + up
     b.spine_joints()
     b.build_arm()
     b.build_fingers()
@@ -145,7 +154,64 @@ def set_lock(v):
         m.node_tree.nodes['Lock'].outputs[0].default_value = v
 
 
+SONO_GLOW = (0.10, 0.60, 1.0)       # linear cold blue: the light inside the windpipe
+SONO_EMIT = 26.0                    # emission at a full charge (it idles at a twentieth of that)
+
+
+def sono_glow_material():
+    """The Sonographer's windpipe: pale cartilage lit from inside. The node 'Charge' ramps it,
+    0 quiet through 1 charging an echo; set_charge() drives it for the review shots."""
+    m = bpy.data.materials.get('ST_SonoGlow')
+    if m:
+        return m
+    m = bpy.data.materials.new('ST_SonoGlow')
+    m.use_nodes = True
+    nt = m.node_tree
+    b = nt.nodes['Principled BSDF']
+    ca = nt.nodes.new('ShaderNodeAttribute')
+    ca.attribute_name = 'Col'
+    nt.links.new(ca.outputs['Color'], b.inputs['Base Color'])
+    ch = nt.nodes.new('ShaderNodeValue')
+    ch.name = 'Charge'
+    ch.outputs[0].default_value = 0.0
+    ma = nt.nodes.new('ShaderNodeMath')
+    ma.operation = 'MULTIPLY_ADD'
+    nt.links.new(ch.outputs[0], ma.inputs[0])
+    ma.inputs[1].default_value = SONO_EMIT
+    ma.inputs[2].default_value = SONO_EMIT / 20.0
+    nt.links.new(ma.outputs[0], b.inputs['Emission Strength'])
+    b.inputs['Emission Color'].default_value = SONO_GLOW + (1.0,)
+    b.inputs['Roughness'].default_value = 0.22
+    return m
+
+
+def sono_pane_material():
+    """The thin skin over the throat: wet, and see-through enough that the rings show."""
+    m = bpy.data.materials.get('ST_SonoPane')
+    if m:
+        return m
+    m = attr_material('ST_SonoPane', spec=0.6)
+    b = m.node_tree.nodes['Principled BSDF']
+    b.inputs['Alpha'].default_value = 0.40
+    for attr, val in (('surface_render_method', 'BLENDED'), ('blend_method', 'BLEND'), ('show_transparent_back', False)):
+        try:
+            setattr(m, attr, val)
+        except Exception:
+            pass
+    return m
+
+
+def set_charge(v):
+    m = bpy.data.materials.get('ST_SonoGlow')
+    if m:
+        m.node_tree.nodes['Charge'].outputs[0].default_value = v
+
+
 def material_for(kind, hive_eye=False):
+    if kind == st_char.GLOW:
+        return sono_glow_material()
+    if kind == st_char.PANE:
+        return sono_pane_material()
     if kind == st_char.SKIN:
         return attr_material('ST_Skin', sss=0.12, spec=0.45)
     if kind == st_char.EYE:
@@ -381,6 +447,39 @@ def pose_hive(rig):
     return p
 
 
+def pose_sono(rig):
+    """Standing tall and straight, the long neck carrying the head out ahead of the chest and cocked
+    over one ear, both hands out in front where the cart's handle is. Never the Hive's hunch."""
+    from hu_rig import Pose, spine, arm_hang, hand_relax, planted, Rx, Ry, Rz
+    s = rig.body.s
+    p = Pose(rig)
+    p.hips = Vector((0.0, 0.0, -0.004 * s))
+    spine(p, lean=0.05, yaw=0.02, roll=0.01, neck_comp=0.0)
+    p.rel('neck', Rx(0.44) @ Rz(0.05))
+    p.rel('head', Rx(-0.30) @ Ry(0.26) @ Rz(0.06))
+    for side, sg in (('L', 1.0), ('R', -1.0)):
+        ball = Vector((rig.ball[side].x * 0.86, rig.ball[side].y, rig.ball[side].z))
+        planted(p, side, ball, 0.0, yaw=sg * 0.05)
+        arm_hang(p, side, swing=1.05, abduct=0.13, bend=0.62, wrist=-0.25, twist=0.30)
+        hand_relax(p, side, curl=0.75, thumb=0.35)
+    return p
+
+
+def pose_for(V):
+    if V.get('sono'):
+        return pose_sono
+    return pose_hive if V['outfit'] == 'gown' else pose_surgeon
+
+
+def clips_for(V):
+    """The variant's own clip module, or None for the shared human set."""
+    if V.get('hive'):
+        return st_hive_clips
+    if V.get('sono'):
+        return st_sono_clips
+    return None
+
+
 # ====================================================================== build
 def build_variant(name, x_off):
     V = st_char.get(name)
@@ -405,7 +504,7 @@ def build_variant(name, x_off):
             ob.hide_set(True)
         obs.append(ob)
     rig = hu_rig.Rig(arm, body)
-    pose = pose_hive(rig) if V['outfit'] == 'gown' else pose_surgeon(rig)
+    pose = pose_for(V)(rig)
     pose.apply(arm)
     arm.location = (x_off, 0, 0)
     return {'V': V, 'arm': arm, 'coll': coll, 'obs': obs, 'body': body, 'head': info['head'], 'rig': rig, 'pose': pose}
@@ -535,8 +634,7 @@ def anim_strips(c, frames_per=6, clips=None):
     """Every clip of the shared human set, played on this character: a row of frames per clip."""
     arm = c['arm']
     body = c['body']
-    is_hive = c['V'].get('hive', False)
-    clip_mods = (st_hive_clips,) if is_hive else (hu_rig, st_clips)
+    clip_mods = (clips_for(c['V']),) if clips_for(c['V']) else (hu_rig, st_clips)
     for mod in clip_mods:
         mod.build_actions(arm, body)
     scn = bpy.context.scene
@@ -611,10 +709,13 @@ def export_and_compare(c, name):
     os.makedirs(out_dir, exist_ok=True)
     orig = {o.name: list(o.data.materials) for o in c['obs']}
     is_hive = c['V'].get('hive', False)
+    cm = clips_for(c['V'])
     res = st_export.export(c, out_dir, variant, tex=int(arg('tex', '2048')), ao_samples=int(arg('ao', '24')),
-                           clips=(st_hive_clips,) if is_hive else None)
+                           clips=(cm,) if cm else None)
     if is_hive:
         game_dir = os.path.normpath(os.path.join(HERE, '..', '..', 'assets', 'models', 'monsters', 'hive'))
+    elif c['V'].get('sono'):
+        game_dir = os.path.normpath(os.path.join(HERE, '..', '..', 'assets', 'models', 'monsters', 'sonographer'))
     else:
         game_dir = os.path.normpath(os.path.join(HERE, '..', '..', 'assets', 'models', 'characters', 'human'))
     os.makedirs(game_dir, exist_ok=True)
@@ -633,7 +734,7 @@ def export_and_compare(c, name):
     arm = c['arm']
     arm.animation_data.action = None
     rig = hu_rig.Rig(arm, c['body'])
-    (pose_hive if is_hive else pose_surgeon)(rig).apply(arm)
+    pose_for(c['V'])(rig).apply(arm)
     bpy.context.view_layer.update()
     shots = []
     for tag, show_high in (('dense', True), ('game', False)):
@@ -687,7 +788,7 @@ def main():
         bpy.data.objects.remove(o, do_unlink=True)
     os.makedirs(OUT, exist_ok=True)
     chars = {}
-    layout = {'surgeon': -0.45, 'hive': 0.50, 'surgeon_graft': 3.0}
+    layout = {'surgeon': -0.45, 'hive': 0.50, 'surgeon_graft': 3.0, 'sonographer': 0.50}
     for name in ONLY:
         chars[name] = build_variant(name, layout[name])
     studio()
@@ -798,7 +899,43 @@ def main():
                 clear([cam, amb] + el)
                 bpy.context.scene.world.node_tree.nodes['Background'].inputs['Color'].default_value = (0.02, 0.025, 0.03, 1)
         set_lock(0.0)
-    for key, shot in (('surgeon', 'face_surgeon'), ('hive', 'face_hive'), ('hive', 'face_hive_lock'), ('surgeon_graft', 'face_graft')):
+    if 'sonographer' in chars:
+        show_only(chars, ('sonographer',))
+        c = chars['sonographer']
+        x0 = layout['sonographer']
+        for shot, cam_at, tgt, lens, res in (('sono_front', (x0, -5.6, 1.15), (x0, 0, 1.02), 70, (900, 1300)),
+                                             ('sono_side', (x0 + 5.0, -0.5, 1.15), (x0, 0, 1.02), 70, (900, 1300)),
+                                             ('sono_34', (x0 + 2.6, -4.8, 1.45), (x0, 0, 1.02), 70, (900, 1300)),
+                                             ('sono_back', (x0 - 1.7, 4.8, 1.60), (x0, 0, 1.05), 70, (900, 1300))):
+            if want(shot):
+                L = std_lights((x0, 0.0, 1.1))
+                cam = camera(cam_at, tgt, lens)
+                render(shot, res)
+                clear(L + [cam])
+        nz = 0.5 * (c['body'].J['neck'].z + c['body'].HC.z)
+        for charge in (0.0, 1.0):
+            set_charge(charge)
+            sfx = '_charge' if charge else ''
+            if want('sono_throat' + sfx):
+                # the long neck and the window in it, from the front and a little below
+                tgt = (x0, 0.0, nz)
+                L = std_lights(tgt, 0.3)
+                cam = camera((x0 + 0.10, -0.85, nz - 0.08), tgt, 85)
+                render('sono_throat' + sfx, (900, 1100))
+                clear(L + [cam])
+            if want('sono_dark' + sfx):
+                # the game's look: near dark, a teal ambient, a warm flashlight from the viewer
+                bpy.context.scene.world.node_tree.nodes['Background'].inputs['Color'].default_value = (0.004, 0.012, 0.012, 1)
+                tgt = (x0, 0, 1.35)
+                cam = camera((x0 + 0.3, -3.4, 1.70), tgt, 32)
+                fl = add_light('SPOT', (x0 + 0.5, -3.3, 1.58), tgt, 700, (1.0, 0.82, 0.58), 0.05, 'Flash', spot=(40, 0.6))
+                amb = add_light('AREA', (x0, 0, 3.4), (x0, 0, 0), 40, (0.35, 0.8, 0.75), 4.0, 'Amb')
+                render('sono_dark' + sfx, (1400, 1100))
+                clear([cam, fl, amb])
+                bpy.context.scene.world.node_tree.nodes['Background'].inputs['Color'].default_value = (0.02, 0.025, 0.03, 1)
+        set_charge(0.0)
+    for key, shot in (('surgeon', 'face_surgeon'), ('hive', 'face_hive'), ('hive', 'face_hive_lock'),
+                      ('sonographer', 'face_sono'), ('surgeon_graft', 'face_graft')):
         if key not in chars or not want(shot):
             continue
         show_only(chars, (key,))

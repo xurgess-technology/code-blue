@@ -591,6 +591,57 @@ HiveRig.WALK_SPEED 0.85      # rate = speed / WALK_SPEED (0.4..2.4x)
   fungus showing; the dissection head that opens is built hidden, only to place the `skull`, `brain`
   and `injection` sites, since the Hive has no brain (harvest waits on the grafting redesign).
 
+### The Sonographer's model and its cart (2026-09-18, chunk A of docs/SONOGRAPHER.md)
+
+The model only: the hunting, the echo, the rename and the sounds are chunk B (`sono-brain`). Asset
+`monster/sonographer` (`assets/models/monsters/sonographer/`, built in Blender from `art/stylized/`,
+variant `sonographer`, clips `art/stylized/st_sono_clips.py`): 2.05 m, feet at y 0, the human
+skeleton with a neck 0.17 m longer than everyone else's, and no eye pieces at all — the sockets are
+scarred flat. `MonsterModel.setup("sonographer")` builds it through
+`scripts/monsters/sonographer_rig.gd`; without the asset it falls back to the reshaped Kenney rig.
+
+**The look interface.** This is the whole surface between the model and whatever drives it, so a
+stand-in model can wear it too, and chunk B can hook the real one up by swapping the kind:
+
+```gdscript
+model.set_sono_look(suspicion, charge, mode, plugged)
+#   suspicion 0..1   a faint glow in the throat
+#   charge    0..1   the throat and the cable ramp up bright, with a band of light travelling
+#                    down the cable from the neck to the cart
+#   mode             "idle" | "suspicious" | "charging" | "echo" | "rush" | "wail" | "stagger" | "lying"
+#   plugged          false once it is sedated or killed: the cable lets go of its neck and goes dark
+model.cable_point()          # where the cable plugs into the back of its neck, in world space
+model.cart                   # the ultrasound cart (sono_cart.gd), top-level; free it and it is gone
+model.cart.offset            # SonoCart.PUSH in front of it while it walks, SonoCart.DRAG behind while it rushes
+model.cart.squeak_wheel      # the castor that squeaks, and model.cart.rolled the metres it has travelled
+model.sono                   # SonoPoser (SkeletonModifier3D) or null; it is also model.shaper
+model.shaper.lying / daze / rise / stagger / twitch / listen / listen_yaw   # the usual rig_shaper inputs
+model.set_ears(listen, yaw, delta)   # the two ears swivel, as the Discharged's do
+model.play(logical, rate, blend)
+#   "idle" SonoIdle, "walk" SonoWalk (1.05 m/s), "run" SonoRush (3.1 m/s), "attack" SonoWail,
+#   "listen" SonoListen, "charge" SonoCharge, "echo" SonoEcho, "stagger" SonoStagger, "lying" SonoLying
+SonoRig.WALK_SPEED 1.05 / RUSH_SPEED 3.10    # rate = speed / the clip's speed
+```
+
+`set_sono_look` is safe on any model: every other look ignores it.
+
+- **The pieces.** The ears (`Human_Ear_L` / `_R`) come off the skin at load and hang under pivots at
+  `Site_ear_L` / `_R` in the model's own axes, so they turn. The windpipe (`Human_Throat`) gets
+  `shaders/sono_glow.gdshader` and a small cold omni light; the pane of skin over it
+  (`Human_ThroatSkin`) goes translucent so the rings show through it. `Site_cable` at the nape is
+  where the cart plugs in.
+- **The cart** (`scripts/monsters/sono_cart.gd`) is top-level and follows like the Discharged's IV
+  pole: it eases to `offset` metres along the Sonographer's facing, turns to keep its handle, screen
+  and cable socket pointing at it, and rolls its castors. No collider, so it can never block a
+  hallway. The cable is twelve segments of the same glow shader, curved out over the shoulder so it
+  goes round the body instead of through it.
+- **Posture.** Upright, with a long neck carrying the head out in front of the chest and cocked over
+  one ear. Every clip keeps the spine lean near zero on purpose: in the dark it must never read like
+  the Hive's hunch.
+- Review: `tools/monster_lab.tscn -- --sono` walks it through every clip with the look interface
+  ramping and a caption; the shots `sono_4m`, `sono_cart`, `sono_back`, `sono_listen`, `sono_charge`,
+  `sono_throat`, `sono_face`, `sono_lying` are in `--shots`.
+
 ## Database terminal (terminal redesign, 2026-09-16: the break room projector screen)
 
 The guide binder, the desk computer, its E prompt and `main.terminal_ui` are gone. The database is

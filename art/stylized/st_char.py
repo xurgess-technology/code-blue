@@ -14,6 +14,8 @@ import numpy as np
 import st_sdf as S
 
 SKIN, CLOTH, EYE, SHOE, CAP, THREAD = 'skin', 'cloth', 'eye', 'shoe', 'cap', 'thread'
+# the Sonographer's two extra materials: the lit windpipe and the thin pane of skin over it
+GLOW, PANE = 'glow', 'pane'
 
 
 def srgb(c):
@@ -50,9 +52,24 @@ VARIANTS = {
         fungus=(0.87, 0.83, 0.71), glow=(1.0, 0.42, 0.06),
         jaw=0.70, cheek=0.25, nose=1.15, brow=0.0, jowl=0.35, sag=0.6, mouth_open=1.0, eye_open=0.92,
         outfit='gown', graft=False, seed=41),
+    # The Sonographer: blind, and it hears everything. Tall and straight, with a long neck carrying the
+    # head out in front of the chest and cocked over one ear, so in the dark it is the Hive's opposite.
+    # Where the eyes were is flat, smooth, slightly shiny scar tissue with a faint seam across it; no
+    # eye objects and no bandage. Big swivelling ears and the windpipe are separate pieces (the ears
+    # turn, the windpipe glows), and the throat's skin is a thin translucent window over the rings.
+    # `neck_ext` metres of extra neck: the head sits that much higher, so it stands `height` + that tall.
+    'sonographer': dict(
+        height=1.88, fem=0.0, girth=0.90, head_scale=1.02, shoulders=0.94, v2=True, sono=True,
+        neck_ext=0.17,
+        skin=(0.55, 0.55, 0.51), flush=(0.54, 0.41, 0.40), lip=(0.38, 0.31, 0.32),
+        hair=(0.10, 0.10, 0.10), iris=(0.2, 0.2, 0.2), cloth=(0.50, 0.57, 0.56),
+        scar=(0.66, 0.64, 0.60), glow=(0.38, 0.86, 1.0),
+        jaw=0.45, cheek=0.15, nose=0.85, brow=0.0, jowl=0.0, sag=0.30, mouth_open=0.45, eye_open=0.62,
+        outfit='gown', graft=False, seed=13),
 }
 
 FUNGUS = 'fungus'
+GLOW = 'glow'
 
 
 def get(name):
@@ -275,26 +292,128 @@ class Head:
         mouth = S.chain([np.array([-0.0195, -0.0885, -0.0440]), np.array([-0.009, -0.0955, -0.0458]),
                          np.array([0.009, -0.0955, -0.0458]), np.array([0.0195, -0.0885, -0.0440])], [0.0010, 0.0014, 0.0014, 0.0010])
         h = S.subtract(h, mouth, k=0.0018)
-        if self.V.get('hive'):
+        if self.V.get('hive') or self.V.get('sono'):
             # a slack jaw: the mouth hangs open in a dark gap
             mo = self.V['mouth_open']
             gap = E((0, -0.092, -0.0475 - 0.002 * mo), (0.0135, 0.016, 0.0028 + 0.0022 * mo))
             h = S.subtract(h, gap, k=0.0022)
-        # eyes: a spherical socket exactly round the ball, then lids as a shell on that same sphere
-        if eyes:
+        if self.V.get('sono') and eyes:
+            # no eyes and no sockets: a smooth pad of scar tissue fills each one flush with the face,
+            # with a faint seam where the lids used to meet scored across it
+            h = S.union(h, self.scar_pads(), k=0.016)
+            h = S.subtract(h, self.scar_seam(), k=0.0012)
+        elif eyes:
+            # eyes: a spherical socket exactly round the ball, then lids as a shell on that same sphere
             ball = S.mirror_x(S.sphere(ec, er + self.gap))
             sock = lambda P: np.maximum(ball(P), self.eye_opening(P)[0] - 0.0004)
             h = S.subtract(h, sock, k=0.0015)
             h = S.union(h, self.lids_v2(), k=0.0020)
         # ears: a flat plate blended into the side of the head, a rolled rim round the back and top,
-        # a lobe, and a shallow bowl in the middle
-        h = S.union(h, S.mirror_x(self.ear_v2()), k=0.009)
+        # a lobe, and a shallow bowl in the middle. The Sonographer's are their own pieces (they swivel),
+        # so the head only keeps the stub each one grows from.
+        if self.V.get('sono'):
+            h = S.union(h, S.mirror_x(self.ear_root_sono()), k=0.010)
+        else:
+            h = S.union(h, S.mirror_x(self.ear_v2()), k=0.009)
         if with_neck:
-            neck = S.round_cone((0, 0.024, -0.190), (0, 0.016, -0.055), 0.046, 0.043)
-            h = S.union(h, neck, k=0.016)
+            h = S.union(h, self.neck_sdf_local(), k=0.016)
+            if self.V.get('sono'):
+                h = S.subtract(h, self.throat_window(), k=0.004)
         if opened and self.V.get('hive'):
             h = self.open_skull(h)
         return h
+
+    # -------------------------------------------------------------- the neck (long, on the Sonographer)
+    def neck_ext(self):
+        """Extra neck, in head-local units. The skeleton's head joint is pushed up by the same amount
+        (st_build.body_for), so the neck's bottom stays where it always was: on the shoulders."""
+        return self.V.get('neck_ext', 0.0) / self.hs
+
+    def neck_sdf_local(self):
+        ext = self.neck_ext()
+        if self.V.get('sono'):
+            # thinner and much longer, tapering up to the jaw
+            return S.round_cone((0, 0.028, -0.190 - ext), (0, 0.012, -0.050), 0.042, 0.032)
+        return S.round_cone((0, 0.024, -0.190 - ext), (0, 0.016, -0.055), 0.046, 0.043)
+
+    # -------------------------------------------------------------- the Sonographer's face and throat
+    def scar_pads(self):
+        """Where each eye was: a shallow, smooth pad, a little proud of the socket, no lids, no lashes."""
+        ec = self.eye_c
+        return S.mirror_x(S.ellipsoid((ec[0], ec[1] + 0.0060, ec[2] - 0.0015), (0.0270, 0.0165, 0.0195)))
+
+    def scar_seam(self):
+        """The faint line where the lids used to meet: one shallow groove across each pad."""
+        ec = self.eye_c
+        pts = [np.array([ec[0] - 0.021, ec[1] - 0.0055, ec[2] - 0.0035]),
+               np.array([ec[0] - 0.006, ec[1] - 0.0115, ec[2] + 0.0005]),
+               np.array([ec[0] + 0.010, ec[1] - 0.0105, ec[2] + 0.0015]),
+               np.array([ec[0] + 0.022, ec[1] - 0.0035, ec[2] + 0.0025])]
+        return S.mirror_x(S.chain(pts, [0.0007, 0.0012, 0.0012, 0.0007]))
+
+    def ear_root_sono(self):
+        """The stub the big ear grows out of: it stays on the head so there is no hole behind the ear."""
+        x0, y0, z0 = self.EAR_ROOT - np.array([0.008, 0.0, 0.002])
+        return S.ellipsoid((x0, y0, z0), (0.012, 0.018, 0.028), S.rot((1, 0, 0), -10))
+
+    EAR_ROOT = np.array([0.0780, 0.010, 0.002])     # where the ear pivots (head-local)
+
+    def ear_sono(self):
+        """A big swivelling ear: a broad thin shell, taller than it is wide, rolled all round its back
+        edge, cupped deep in the middle, on a short stalk. Built round EAR_ROOT so it can turn there."""
+        x0, y0, z0 = self.EAR_ROOT
+        # turned out and back: the cup faces forward and a little away from the head
+        R = S.rot((0, 0, 1), -26) @ S.rot((1, 0, 0), -10)
+        stalk = S.ellipsoid((x0 - 0.008, y0 + 0.001, z0 - 0.006), (0.012, 0.015, 0.020), R)
+        plate = S.ellipsoid((x0 + 0.014, y0 + 0.004, z0 + 0.008), (0.0080, 0.0290, 0.0480), R)
+        lobe = S.ellipsoid((x0 + 0.010, y0 - 0.002, z0 - 0.040), (0.0065, 0.0105, 0.0120), R)
+
+        def rim(P):
+            Q = (P - np.array([x0 + 0.017, y0 + 0.005, z0 + 0.009])) @ R
+            u, v = Q[:, 1], Q[:, 2] / 1.62
+            q = np.sqrt(u * u + v * v) - 0.0255
+            d = np.sqrt(q * q + Q[:, 0] ** 2) - 0.0042
+            keep = -(u + 0.011)                      # open at the front, where the sound goes in
+            return S.smax(d, keep, 0.004)
+        ear = S.union(stalk, plate, k=0.008)
+        ear = S.union(ear, lobe, k=0.007)
+        ear = S.union(ear, rim, k=0.005)
+        bowl = S.ellipsoid((x0 + 0.0215, y0 - 0.002, z0 + 0.005), (0.0075, 0.0165, 0.0260), R)
+        ear = S.subtract(ear, bowl, k=0.004)
+        canal = S.sphere((x0 + 0.006, y0 - 0.004, z0 - 0.006), 0.0055)
+        return S.subtract(ear, canal, k=0.002)
+
+    def throat_window(self):
+        """The shallow lens carved out of the front of the neck, where the skin goes thin and
+        see-through over the windpipe."""
+        ext = self.neck_ext()
+        z0 = -0.092
+        z1 = -0.156 - ext
+        c = np.array([0.0, -0.026, 0.5 * (z0 + z1)])
+        return S.ellipsoid(c, (0.027, 0.024, 0.5 * (z0 - z1) + 0.002))
+
+    def windpipe(self):
+        """The rings: a stack of open cartilage hoops down the middle of the neck, on a soft tube.
+        They are what glows (scripts/monsters/sonographer_rig.gd)."""
+        ext = self.neck_ext()
+        z0, z1 = -0.094, -0.158 - ext
+        n = max(5, int(round((z0 - z1) / 0.0165)))
+        R = S.rot((1, 0, 0), 4)
+        fs = []
+        for i in range(n):
+            t = i / max(n - 1, 1)
+            z = z0 + (z1 - z0) * t
+            y = 0.016 - 0.008 * t
+            fs.append(S.torus((0.0, y, z), 0.0165 + 0.0025 * t, 0.0038, R))
+        tube = S.round_cone((0, 0.016, z0 + 0.008), (0, 0.008, z1 - 0.006), 0.0135, 0.0155)
+        f = S.union(*fs, k=0.0035)
+        return S.union(f, tube, k=0.004)
+
+    def throat_skin(self):
+        """The thin, translucent panel of skin lying in the window, over the rings."""
+        neck = self.neck_sdf_local()
+        shell = lambda P: np.maximum(neck(P) - 0.0007, -(neck(P) + 0.0024))
+        return S.intersect(shell, S.offset(self.throat_window(), -0.0012), k=0.0012)
 
     # -------------------------------------------------------------- the Hive's open skull and its fungus
     SKULL_C = np.array([0.0, 0.010, 0.030])       # the cranium's centre (head-local)
@@ -626,7 +745,10 @@ class Head:
         col = mix(col, col * np.array([0.97, 0.97, 1.0]), scalp)
         # lash line: dark edge where the lids meet the eye
         er = self.eye_r
-        if self.v2:
+        lash = np.zeros(len(P))
+        if self.V.get('sono'):
+            pass                      # nothing to lash: the lids are gone (paint_scar does that face)
+        elif self.v2:
             o, d = self.eye_opening(L)
             r = np.linalg.norm(d, axis=1)
             near = np.abs(r - (er + self.gap + self.lid_t * 0.5)) < self.lid_t * 1.6
@@ -641,6 +763,8 @@ class Head:
         if hive:
             rough = rough + 0.15
             col, rough = self.paint_opening(L, col, rough)
+        if V.get('sono'):
+            col, rough = self.paint_scar(L, col, rough)
         if graft:
             # the grafted (left, +X) eye: angry pink skin round a stitched socket, a faint bruise
             gx, gz = (x - ec[0]) / INC_RX, (z - ec[2]) / INC_RZ
@@ -678,6 +802,67 @@ class Head:
         col = np.where(wall[:, None] & ~on_cut[:, None], srgb((0.18, 0.05, 0.045)), col)
         rough = np.where(bone, 0.6, np.where(wall, 0.2, rough))
         return col, rough
+
+    # -------------------------------------------------------------- the Sonographer's paint
+    def paint_scar(self, L, col, rough):
+        """Where the eyes were: flat, smooth, slightly shiny scar tissue, a shade paler than the face
+        and drained of its warmth, with one faint seam across it where the lids used to meet. No
+        bandage, no lashes, nothing in the socket. Also the thin skin round the throat window."""
+        V = self.V
+        ec = self.eye_c
+        x, y, z = np.abs(L[:, 0]), L[:, 1], L[:, 2]
+        d = np.sqrt(((x - ec[0]) / 0.0245) ** 2 + ((z - ec[2]) / 0.0180) ** 2)
+        pad = smooth01((1.05 - d) / 0.30) * (y < ec[1] + 0.016)
+        sc = srgb(V.get('scar', (0.76, 0.74, 0.70))) * (0.96 + 0.07 * S.fbm(L, 220.0, 29, 2))[:, None]
+        # a faint web of old tension lines pulling in to the middle of each pad
+        web = smooth01(1 - np.abs(S.fbm(L, 150.0, 37, 2) - 0.5) / 0.03) * pad
+        sc = mix(sc, sc * 0.86, np.clip(web * 0.45, 0, 1))
+        col = mix(col, sc, np.clip(pad, 0, 1))
+        rough = rough * (1 - pad) + 0.18 * pad
+        # the seam: a thin line a little darker and pinker than the pad
+        sx, sz = (x - ec[0]) / 0.021, (z - ec[2] - 0.0025 + 0.004 * ((x - ec[0]) / 0.021)) / 0.0022
+        seam = smooth01(1 - np.abs(sz)) * smooth01((1.05 - np.abs(sx)) / 0.35) * pad
+        col = mix(col, srgb((0.48, 0.36, 0.36)), np.clip(seam * 0.75, 0, 1))
+        rough = rough + 0.20 * seam
+        # the throat window: the skin thins to a bruised, bluish pane over the windpipe
+        w = self.throat_window()(L)
+        win = smooth01((0.004 - w) / 0.006)
+        col = mix(col, srgb((0.42, 0.44, 0.46)), np.clip(win * 0.55, 0, 1))
+        rough = rough * (1 - 0.5 * win) + 0.22 * win
+        return col, rough
+
+    def paint_ear(self, P):
+        """The big ear: the same skin outside, thinner and warmer inside the cup where the light gets
+        through it, darkest down the canal."""
+        V = self.V
+        L = self.local(P)
+        col, rough = self.paint_skin(P)
+        x0, y0, z0 = self.EAR_ROOT
+        rx = np.abs(L[:, 0]) - x0
+        inside = smooth01((rx - 0.004) / 0.008)
+        warm = srgb(V['flush']) * np.array([1.05, 0.92, 0.90])
+        col = mix(col, warm, np.clip(inside * 0.55, 0, 1))
+        canal = np.exp(-((rx - 0.004) / 0.008) ** 2 - ((L[:, 1] - (y0 - 0.002)) / 0.007) ** 2 - ((L[:, 2] - (z0 - 0.004)) / 0.008) ** 2)
+        col = mix(col, srgb((0.10, 0.05, 0.05)), np.clip(canal * 1.1, 0, 1))
+        rough = rough - 0.10 * inside
+        return col, rough
+
+    def paint_windpipe(self, P):
+        """Cartilage: pale, wet, banded ring to ring. The light in it is the game's, not the paint's."""
+        L = self.local(P)
+        base = srgb((0.80, 0.84, 0.82))
+        col = np.tile(base, (len(P), 1)) * (0.92 + 0.14 * S.fbm(L, 260.0, 19, 2))[:, None]
+        band = 0.5 + 0.5 * np.sin(L[:, 2] / 0.0165 * math.tau)
+        col = mix(col, srgb((0.52, 0.60, 0.62)), np.clip(band * 0.35, 0, 1))
+        return col, np.full(len(P), 0.22)
+
+    def paint_throat_skin(self, P):
+        """The pane itself: bluish-grey, wet, and thin enough to see the rings through."""
+        L = self.local(P)
+        col = np.tile(srgb((0.70, 0.70, 0.68)), (len(P), 1)) * (0.94 + 0.10 * S.fbm(L, 180.0, 23, 2))[:, None]
+        vein = smooth01(1 - np.abs(S.fbm(L, 120.0, 41, 3) - 0.5) / 0.02)
+        col = mix(col, srgb((0.46, 0.40, 0.44)), np.clip(vein * 0.45, 0, 1))
+        return col, np.full(len(P), 0.18)
 
     def hair_mask(self, L):
         V = self.V
@@ -852,8 +1037,33 @@ def build(name, body):
         hsdf = S.union(hsdf, chest, k=0.03)
     parts.append(Part('Head', SKIN, hsdf, hl, hh, 0.0011, paint=lambda P: head.paint_skin(P, V['graft'])))
 
-    # eyes: separate balls in the sockets
-    for side, tag in ((1, 'L'), (-1, 'R')):
+    if V.get('sono'):
+        # the ears swivel and the windpipe glows, so each is its own piece on the head/neck bone
+        ear_local = head.ear_sono()
+
+        def ear_f(P, side):
+            L = head.local(P)
+            if side < 0:
+                L = L * np.array([-1.0, 1.0, 1.0])
+            return ear_local(L) * head.hs
+        for side, tag in ((1, 'L'), (-1, 'R')):
+            a = head.world(np.array([0.048 * side, -0.042, -0.064]))
+            b = head.world(np.array([0.115 * side, 0.060, 0.062]))
+            parts.append(Part('Ear_' + tag, SKIN, (lambda P, sd=side: ear_f(P, sd)),
+                              np.minimum(a, b), np.maximum(a, b), 0.0007,
+                              paint=head.paint_ear, rigid='head'))
+        ext = head.neck_ext()
+        tl = head.world(np.array([-0.032, -0.064, -0.200 - ext]))
+        th = head.world(np.array([0.032, 0.052, -0.058]))
+        wp = head.windpipe()
+        parts.append(Part('Throat', GLOW, (lambda P: wp(head.local(P)) * head.hs), tl, th, 0.0007,
+                          paint=head.paint_windpipe, rigid='neck'))
+        ts = head.throat_skin()
+        parts.append(Part('ThroatSkin', PANE, (lambda P: ts(head.local(P)) * head.hs), tl, th, 0.0006,
+                          paint=head.paint_throat_skin, rigid='neck'))
+
+    # eyes: separate balls in the sockets (the Sonographer has none: the sockets are scarred shut)
+    for side, tag in (() if V.get('sono') else ((1, 'L'), (-1, 'R'))):
         c, r = head.eye_world(side)
         kind = 'hive' if (V['outfit'] == 'gown' or (V['graft'] and side == 1)) else 'human'
         ep = Part('Eye_' + tag, EYE, S.sphere(c, r), c - r * 1.3, c + r * 1.3, r / 40.0,

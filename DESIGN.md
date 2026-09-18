@@ -202,7 +202,8 @@ exaggerated person", never chibi, never a doll.
 | Surgeon (players) | Stylized | Done: bald, short-sleeved scrubs, bare hands; the belly gash for the player table; a Dive clip |
 | The Hive | Stylized, in the game | On the surgeon's head and kit with its hunch and dragged leg; charcoal skin, open skull with shelf fungus, orange eyes (a pinpoint wandering, fully lit and the head up on you when locked on). Own clips: idle, a shamble dragging the right leg, a lunge (`art/stylized/st_hive_clips.py`, `scripts/monsters/hive_rig.gd`) |
 | Night Nurse | Stylized | Done: soft figurine face under the mask, long chunky hair, detailed painted grime and blood (`art/night_nurse/`); the first model is in `deprecated/` |
-| Discharged, Bob, paramedics | Older looks | To move over |
+| The Sonographer | Stylized | The model is done (chunk A): tall and straight, a long neck holding the head out in front and cocked over one ear (never the Hive's hunch), the eye sockets scarred flat, big swivelling ears, a glowing windpipe behind see-through throat skin, and an ultrasound cart on a cable. Own clips (`art/stylized/st_sono_clips.py`, `scripts/monsters/sonographer_rig.gd`). The hunting is docs/SONOGRAPHER.md chunk B |
+| Discharged, Bob, paramedics | Older looks | To move over (the Discharged becomes the Sonographer in chunk B) |
 
 How the models are built and rebuilt: `art/stylized/README.md`.
 

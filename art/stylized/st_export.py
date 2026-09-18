@@ -23,12 +23,17 @@ import st_clips
 BUDGET = {'Head': 7200, 'Eye_L': 480, 'Eye_R': 480, 'Arm_L': 2400, 'Arm_R': 2400,
           'Top': 3000, 'Pants': 2300, 'Shoe_L': 650, 'Shoe_R': 650, 'Belly': 1400, 'TopRolled': 800,
           # the Hive: gown, bare legs in grip socks, the wristband and the fungus in its open skull
-          'Gown': 3000, 'Leg_L': 1300, 'Leg_R': 1300, 'Wristband': 120, 'Fungus': 3600}
+          'Gown': 3000, 'Leg_L': 1300, 'Leg_R': 1300, 'Wristband': 120, 'Fungus': 3600,
+          # the Sonographer: the ears swivel and the windpipe glows, so each is its own piece
+          'Ear_L': 900, 'Ear_R': 900, 'Throat': 1100, 'ThroatSkin': 420}
 # parts baked into the Skin atlas; everything else shares the Cloth atlas (for the Hive that is the gown,
 # its legs and the fungus, so the head, hands and eyes keep the Skin atlas's resolution to themselves)
-SKIN_PARTS = ('Head', 'Eye_L', 'Eye_R', 'Arm_L', 'Arm_R', 'Belly')
+SKIN_PARTS = ('Head', 'Eye_L', 'Eye_R', 'Arm_L', 'Arm_R', 'Belly', 'Ear_L', 'Ear_R', 'Throat', 'ThroatSkin')
 # parts the game shows only on the player table: they must not occlude the rest in the bake
-HIDDEN_PIECES = ('TopRolled', 'Belly')
+HIDDEN_PIECES = ('TopRolled', 'Belly', 'ThroatSkin')
+# parts that stay their own object in the GLB instead of being joined into Human, because the game
+# moves them or lights them on their own: the eyes, the Sonographer's ears and its windpipe
+LOOSE_PARTS = ('Eye_L', 'Eye_R', 'Ear_L', 'Ear_R', 'Throat', 'ThroatSkin')
 
 
 def _log(*a):
@@ -300,6 +305,17 @@ def make_sites(c, arm):
     out = (out - fa * out.dot(fa)).normalized()
     p = el + fa * 0.03 + out * 0.036 * sk.s
     sites.append(site_empty(arm, 'injection', 'forearm.L', godot_frame(fa, out, p)))
+    if c['V'].get('sono'):
+        # where each ear turns, the middle of the throat's window, and where the cart's cable plugs in
+        for tag, sg in (('L', 1.0), ('R', -1.0)):
+            r = head.EAR_ROOT * np.array([sg, 1.0, 1.0])
+            ep = Vector(tuple(head.world(r)))
+            sites.append(site_empty(arm, 'ear_' + tag, 'head', godot_frame(Vector((sg, 0, 0)), Vector((0, 0, 1)), ep)))
+        ext = head.neck_ext()
+        thr = Vector(tuple(head.world(np.array([0.0, -0.030, -0.126 - 0.5 * ext]))))
+        sites.append(site_empty(arm, 'throat', 'neck', godot_frame(Vector((0, -1, 0)), Vector((0, 0, 1)), thr)))
+        cab = Vector(tuple(head.world(np.array([0.0, 0.050, -0.172 - ext]))))
+        sites.append(site_empty(arm, 'cable', 'neck', godot_frame(Vector((0, 1, 0)), Vector((0, 0, 1)), cab)))
     g = st_char.LAST_GASH.get(c['V']['name'])
     if g is not None:
         gc, gn = Vector(tuple(g[0])), Vector(tuple(g[1]))
@@ -413,16 +429,18 @@ def export(c, out_dir, variant, tex=2048, ao_samples=24, clips=None):
         tr = lows['TopRolled']
         tr.name = tr.data.name = 'Human_TopRolled'
         extra = [top_lower, gs, tr]
-    body_parts = [lows[p] for p in lows if not p.startswith('Eye_') and p not in ('Belly', 'TopRolled')]
+    body_parts = [lows[p] for p in lows if p not in LOOSE_PARTS and p not in ('Belly', 'TopRolled')]
     _select(body_parts, active=lows['Head'])
     bpy.ops.object.join()
     human = bpy.context.view_layer.objects.active
     human.name = human.data.name = 'Human'
     pieces = [human] + extra
-    for tag in ('L', 'R'):
-        e = lows['Eye_' + tag]
-        e.name = e.data.name = 'Human_Eye_' + tag
-        pieces.append(e)
+    for pname in LOOSE_PARTS:
+        lo = lows.get(pname)
+        if lo is None:
+            continue
+        lo.name = lo.data.name = 'Human_' + pname
+        pieces.append(lo)
     for ob in pieces:
         ob.parent = arm
         ob.matrix_parent_inverse = Matrix.Identity(4)

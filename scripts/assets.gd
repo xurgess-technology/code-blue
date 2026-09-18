@@ -151,6 +151,22 @@ const MODELS := {
 		"anims": {"idle": "HiveIdle", "walk": "HiveWalk", "run": "HiveWalk", "attack": "HiveAttack"},
 		"note": "The Hive, made for Malpractice with Blender scripts (art/stylized). No third-party licence.",
 	},
+	# The Sonographer (2026-09-18): the stylized kit (art/stylized, variant `sonographer`), 2.05 m,
+	# feet at y 0, facing +Z, on the human skeleton with its own clips. Blind: the sockets are scarred
+	# flat, and there are no eye pieces. Its big swivelling ears (Human_Ear_L / _R) and its glowing
+	# windpipe (Human_Throat) behind the thin skin of its throat (Human_ThroatSkin) are their own
+	# pieces; Site_ear_L/_R, Site_throat and Site_cable say where they go. No root motion.
+	# scripts/monsters/sonographer_rig.gd, and its cart is scripts/monsters/sono_cart.gd.
+	"monster/sonographer": {
+		"path": "res://assets/models/monsters/sonographer/sonographer_st.glb",
+		"scale": 1.0, "yaw": 180,
+		"anims": {
+			"idle": "SonoIdle", "walk": "SonoWalk", "run": "SonoRush", "attack": "SonoWail",
+			"listen": "SonoListen", "charge": "SonoCharge", "echo": "SonoEcho",
+			"stagger": "SonoStagger", "lying": "SonoLying",
+		},
+		"note": "The Sonographer, made for Malpractice with Blender scripts (art/stylized). No third-party licence.",
+	},
 	# ---- patients ---------------------------------------------------------
 	# The seal patient (2026-09-14): built in-house from Python in Blender (art/seal/), authored in the
 	# PatientBody frame (nose -X, belly on y 0, its left +Z), so no fix-ups. 16k triangles, 20 bones,

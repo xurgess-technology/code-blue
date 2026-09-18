@@ -357,6 +357,20 @@ replaces the arm meshes through `fp_arms.make_arm()` and the rig through `rig_ma
 
 ---
 
+## The Sonographer (made in-house, 2026-09-18) — `assets/models/monsters/sonographer/`
+
+| Key | File | Source | Author | Licence | size (m) | Fix-ups |
+| --- | --- | --- | --- | --- | --- | --- |
+| `monster/sonographer` | `sonographer_st.glb` + `textures/sonographer_st_{Cloth,Skin}_*.png` | Built for Malpractice from Python scripts in Blender 5.2 (`art/stylized/`, variant `sonographer`) | Malpractice (made with Claude) | None needed: original work of this project, no third-party content | 2.05 tall | scale 1.0, yaw 180 |
+
+- The stylized kit as the hospital's blind, listening monster: the eye sockets scarred flat with no
+  eye pieces at all, big swivelling ears and a glowing windpipe as their own pieces, and a neck
+  0.17 m longer than the kit's carrying the head out in front. Nine clips of its own
+  (`art/stylized/st_sono_clips.py`); rebuild with `st_build.py -- --only=sonographer --export`.
+  Its ultrasound cart is built in GDScript, not modelled (`scripts/monsters/sono_cart.gd`).
+
+---
+
 ## The Night Nurse (made in-house, 2026-09-14; the stylized model since 2026-09-18) — `assets/models/monsters/night_nurse/`
 
 | Key | File | Source | Author | Licence | size (m) | Fix-ups |
