@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+<defs><filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+<feGaussianBlur in="SourceAlpha" stdDeviation="9" result="b"/>
+<feFlood flood-color="#9b6bff" flood-opacity="0.95"/><feComposite in2="b" operator="in" result="g"/>
+<feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+<g stroke-linejoin="round" stroke-linecap="round">
+<g filter="url(#glow)" transform="rotate(28 128 128)">
+<rect x="98" y="48" width="60" height="160" rx="12" fill="#9b6bff" stroke="#1c2226" stroke-width="9"/>
+<g fill="none" stroke="#6a3fd6" stroke-width="7">
+<path d="M100 78 Q128 90 156 78"/><path d="M100 102 Q128 114 156 102"/><path d="M100 126 Q128 138 156 126"/>
+<path d="M100 150 Q128 162 156 150"/><path d="M100 174 Q128 186 156 174"/></g>
+<path d="M128 66 L128 198" stroke="#f3ecff" stroke-width="12" opacity="0.85"/>
+<ellipse cx="128" cy="48" rx="30" ry="10" fill="#2a1650" stroke="#1c2226" stroke-width="7"/></g></g>
+</svg>

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+<defs></defs>
+<rect x="6" y="6" width="244" height="244" rx="36" fill="#0b1416"/>
+<rect x="9" y="9" width="238" height="238" rx="33" fill="none" stroke="#f0b429" stroke-width="5"/><rect x="14" y="14" width="228" height="228" rx="28" fill="none" stroke="#fff1b8" stroke-width="2" opacity="0.8"/><path d="M40 12 L96 12" stroke="#fffbe6" stroke-width="4" stroke-linecap="round"/>
+<g stroke-linejoin="round" stroke-linecap="round">
+<path d="M24 134 L118 134 Q140 134 140 150 Q140 166 118 166 L24 166 Z" fill="#e8c4a8" stroke="#1c2226" stroke-width="8"/>
+<path d="M112 140 Q126 142 128 150" fill="none" stroke="#c9a088" stroke-width="4"/>
+<path d="M84 120 Q84 90 116 90 L196 90 Q220 90 220 114 L220 136 L84 136 Z" fill="#6aa8d8" stroke="#1c2226" stroke-width="9"/>
+<path d="M84 164 L220 164 L220 180 Q220 204 196 204 L116 204 Q84 204 84 180 Z" fill="#3f78aa" stroke="#1c2226" stroke-width="9"/>
+<rect x="124" y="54" width="84" height="48" rx="8" fill="#0d1216" stroke="#1c2226" stroke-width="7"/>
+<text x="166" y="90" text-anchor="middle" font-family="Consolas, monospace" font-weight="700" font-size="34" fill="#ff5a4a">98</text>
+<circle cx="204" cy="150" r="7" fill="#d9453a"/></g>
+
+</svg>

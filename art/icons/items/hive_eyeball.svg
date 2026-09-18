@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+<defs><filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+<feGaussianBlur in="SourceAlpha" stdDeviation="9" result="b"/>
+<feFlood flood-color="#ff8a2a" flood-opacity="0.95"/><feComposite in2="b" operator="in" result="g"/>
+<feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge></filter><clipPath id="ball"><circle cx="118" cy="128" r="56"/></clipPath></defs>
+<rect x="6" y="6" width="244" height="244" rx="36" fill="#0b1416"/>
+<rect x="9" y="9" width="238" height="238" rx="33" fill="none" stroke="#a3182c" stroke-width="5"/>
+<g stroke-linejoin="round" stroke-linecap="round">
+<path d="M172 136 Q196 134 200 152 Q204 170 218 176" fill="none" stroke="#1c2226" stroke-width="25"/><path d="M172 136 Q196 134 200 152 Q204 170 218 176" fill="none" stroke="#d98a8a" stroke-width="13"/>
+<g filter="url(#glow)">
+<circle cx="118" cy="128" r="58" fill="#ff8a2a"/>
+<g clip-path="url(#ball)" fill="none" stroke="#c0341c" stroke-width="5">
+<path d="M176 108 Q152 104 134 94"/><path d="M148 103 Q146 92 138 84"/><path d="M176 150 Q154 158 136 162"/><path d="M156 128 Q138 128 124 122"/></g>
+<circle cx="118" cy="128" r="58" fill="none" stroke="#4a1a06" stroke-width="9"/>
+<path d="M62 98 Q42 128 62 158" fill="#ffc45e" stroke="#4a1a06" stroke-width="7"/>
+<ellipse cx="58" cy="128" rx="5" ry="15" fill="#2a0e03"/>
+<ellipse cx="102" cy="100" rx="12" ry="7" fill="#ffd9a8" opacity="0.8" transform="rotate(-25 102 100)"/>
+</g></g>
+
+</svg>

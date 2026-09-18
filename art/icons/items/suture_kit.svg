@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+<defs></defs>
+<rect x="6" y="6" width="244" height="244" rx="36" fill="#0b1416"/>
+<rect x="9" y="9" width="238" height="238" rx="33" fill="none" stroke="#3f86d6" stroke-width="5"/>
+<g stroke-linejoin="round" stroke-linecap="round">
+<path d="M70 150 A62 62 0 1 1 186 118" fill="none" stroke="#1c2226" stroke-width="26"/><path d="M70 150 A62 62 0 1 1 186 118" fill="none" stroke="#b9c4c9" stroke-width="14"/>
+<path d="M72 146 A58 58 0 0 1 104 76" fill="none" stroke="#eef4f6" stroke-width="5"/>
+<path d="M186 118 L194 100 L176 108 Z" fill="#b9c4c9" stroke="#1c2226" stroke-width="6"/>
+<ellipse cx="70" cy="150" rx="6" ry="9" fill="#0b1416"/>
+<path d="M68 162 Q56 196 92 200 Q128 204 122 176 Q116 150 150 164 Q180 178 170 212" fill="none" stroke="#1c2226" stroke-width="14"/>
+<path d="M68 162 Q56 196 92 200 Q128 204 122 176 Q116 150 150 164 Q180 178 170 212" fill="none" stroke="#5b93d6" stroke-width="6"/></g>
+<circle cx="208" cy="208" r="28" fill="#1c2226" stroke="#f1f4f6" stroke-width="4"/>
+<text x="208" y="218" text-anchor="middle" font-family="Arial Black, Arial, sans-serif" font-weight="900" font-size="28" fill="#f1f4f6">x2</text>
+</svg>

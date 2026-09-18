@@ -151,9 +151,11 @@ database entry, tips, sound cue names, the roster, tests and nettest scenarios, 
 docs/CONTRACTS.md. The host's database is saved to disk and keyed by monster kind: map the old
 `discharged` key to the new one when loading, so nobody loses what they've learned.
 
-The player's **Echo ability stays** for now (from the Sonographer's brain, through the blender).
-Later, the **Sonographer's throat becomes its graft part** and Echo becomes the ping
-(docs/backlog/SWEEP4B.md). Don't build that now.
+**The Sonographer has no brain to harvest any more.** The player's Echo ability comes from
+grafting the **Sonographer's trachea** instead (docs/GRAFTING_TRACHEA.md), which also removes the
+brains and the blender. This brief doesn't build that; it only needs the monster renamed and the
+throat modelled so the trachea brief can use it. Echo turning into the ping is still later
+(docs/backlog/SWEEP4B.md).
 
 ## Chunks
 

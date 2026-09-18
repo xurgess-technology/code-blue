@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+<defs></defs>
+<g stroke-linejoin="round" stroke-linecap="round">
+<g transform="rotate(-32 128 128) translate(4 0)">
+<path d="M96 104 L222 104 L222 136 L212 146 L202 136 L192 146 L182 136 L172 146 L162 136 L152 146 L142 136 L132 146 L122 136 L112 146 L96 140 Z" fill="#b9c4c9" stroke="#1c2226" stroke-width="8"/>
+<path d="M104 112 L214 112" stroke="#eef4f6" stroke-width="5"/>
+<path d="M32 98 Q32 88 44 88 L100 88 Q108 88 108 98 L108 150 Q108 160 98 160 L44 160 Q32 160 32 148 Z" fill="#e8742a" stroke="#1c2226" stroke-width="9"/>
+<ellipse cx="70" cy="124" rx="18" ry="14" fill="#0b1416" stroke="#1c2226" stroke-width="6"/>
+</g></g>
+</svg>

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+<defs><clipPath id="ball2"><circle cx="118" cy="120" r="56"/></clipPath></defs>
+<g stroke-linejoin="round" stroke-linecap="round">
+<path d="M172 128 Q196 126 200 146 Q202 158 196 170" fill="none" stroke="#1c2226" stroke-width="25"/><path d="M172 128 Q196 126 200 146 Q202 158 196 170" fill="none" stroke="#d98a8a" stroke-width="13"/>
+<circle cx="118" cy="120" r="58" fill="#f6f1ea"/>
+<g clip-path="url(#ball2)" fill="none" stroke="#d98a8a" stroke-width="4">
+<path d="M176 100 Q152 96 134 86"/><path d="M176 142 Q154 150 136 154"/></g>
+<circle cx="118" cy="120" r="58" fill="none" stroke="#1c2226" stroke-width="9"/>
+<path d="M62 90 Q42 120 62 150" fill="#5a8fc8" stroke="#1c2226" stroke-width="7"/>
+<ellipse cx="58" cy="120" rx="5" ry="15" fill="#10161a"/>
+<ellipse cx="102" cy="92" rx="12" ry="7" fill="#fff" opacity="0.9" transform="rotate(-25 102 92)"/></g>
+</svg>

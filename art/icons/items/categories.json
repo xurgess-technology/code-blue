@@ -1,0 +1,142 @@
+{
+  "borders": {
+    "surgery": "#3f86d6",
+    "shop": "#3fa860",
+    "monster": "#a3182c",
+    "equipment": "#c9b98f",
+    "loot": "#c9b98f",
+    "trinket": "#f0b429"
+  },
+  "items": {
+    "anesthetic": {
+      "name": "Anesthetic",
+      "category": "surgery",
+      "glow": null
+    },
+    "gauze": {
+      "name": "Gauze",
+      "category": "surgery",
+      "glow": null
+    },
+    "suture_kit": {
+      "name": "Suture kit",
+      "category": "surgery",
+      "glow": null
+    },
+    "forceps": {
+      "name": "Forceps",
+      "category": "surgery",
+      "glow": null
+    },
+    "tourniquet": {
+      "name": "Tourniquet",
+      "category": "surgery",
+      "glow": null
+    },
+    "bone_saw": {
+      "name": "Bone saw",
+      "category": "surgery",
+      "glow": null
+    },
+    "scalpel": {
+      "name": "Scalpel",
+      "category": "surgery",
+      "glow": null
+    },
+    "eye_spoon": {
+      "name": "Eye spoon",
+      "category": "surgery",
+      "glow": null
+    },
+    "placebo_pills": {
+      "name": "Placebo pills",
+      "category": "shop",
+      "glow": null
+    },
+    "rocket_boots": {
+      "name": "Rocket boots",
+      "category": "shop",
+      "glow": null
+    },
+    "hive_eyeball": {
+      "name": "Hive's eyeball",
+      "category": "monster",
+      "glow": "#ff8a2a"
+    },
+    "surgeon_eyeball": {
+      "name": "Surgeon's eyeball",
+      "category": "monster",
+      "glow": null
+    },
+    "sonographer_trachea": {
+      "name": "Sonographer's trachea",
+      "category": "monster",
+      "glow": "#9b6bff"
+    },
+    "surgeon_trachea": {
+      "name": "Surgeon's trachea",
+      "category": "monster",
+      "glow": null
+    },
+    "specimen_vat": {
+      "name": "Specimen vat",
+      "category": "loot",
+      "glow": null
+    },
+    "pill_bottle": {
+      "name": "Pill bottle",
+      "category": "loot",
+      "glow": null
+    },
+    "xray_film": {
+      "name": "X-ray film",
+      "category": "loot",
+      "glow": null
+    },
+    "heart_monitor": {
+      "name": "Heart monitor",
+      "category": "loot",
+      "glow": null
+    },
+    "gold_watch": {
+      "name": "Gold watch",
+      "category": "loot",
+      "glow": null
+    },
+    "ultrasound": {
+      "name": "Portable ultrasound",
+      "category": "loot",
+      "glow": null
+    },
+    "desk_phone": {
+      "name": "Desk phone",
+      "category": "trinket",
+      "glow": null
+    },
+    "laptop": {
+      "name": "Laptop",
+      "category": "trinket",
+      "glow": null
+    },
+    "defibrillator": {
+      "name": "Defibrillator",
+      "category": "trinket",
+      "glow": null
+    },
+    "pulse_oximeter": {
+      "name": "Pulse oximeter",
+      "category": "trinket",
+      "glow": null
+    },
+    "reflex_hammer": {
+      "name": "Reflex hammer",
+      "category": "trinket",
+      "glow": null
+    },
+    "epipen": {
+      "name": "EpiPen",
+      "category": "trinket",
+      "glow": null
+    }
+  }
+}

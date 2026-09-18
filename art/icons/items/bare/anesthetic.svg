@@ -1,7 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
 <defs></defs>
-<rect x="6" y="6" width="244" height="244" rx="36" fill="#0b1416"/>
-<rect x="9" y="9" width="238" height="238" rx="33" fill="none" stroke="#3f86d6" stroke-width="5"/>
 <g stroke-linejoin="round" stroke-linecap="round">
 <g transform="translate(0 10) rotate(-12 128 128)" stroke="#1c2226" stroke-width="8">
 <rect x="88" y="68" width="80" height="148" rx="20" fill="#dfeef6"/>
@@ -12,6 +10,4 @@
 <rect x="96" y="30" width="64" height="42" rx="9" fill="#5b93d6"/>
 <path d="M104 152 L104 196" stroke="#fff" stroke-width="7" opacity="0.8"/>
 </g></g>
-<circle cx="208" cy="208" r="28" fill="#1c2226" stroke="#f1f4f6" stroke-width="4"/>
-<text x="208" y="218" text-anchor="middle" font-family="Arial Black, Arial, sans-serif" font-weight="900" font-size="28" fill="#f1f4f6">x3</text>
 </svg>
