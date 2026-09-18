@@ -292,23 +292,20 @@ Fix-ups and conversions (all derived files stay CC0):
 
 - **Baked** (`items/baked/*.glb`): the source was loaded, its parts merged into one mesh with one
   surface per material (`ItemModels.merge_parts`), decimated with meshoptimizer to a budget
-  (pocket watch 16 098 -> 2 012 triangles, multimeter 8 948 -> 4 474, classic laptop 13 906 ->
-  3 496, microscope 16 598 -> 3 986), textures resized to 512 px and exported as GLB (JPEG images;
+  (pocket watch 16 098 -> 2 012 triangles, classic laptop 13 906 ->
+  3 496), textures resized to 512 px and exported as GLB (JPEG images;
   the importer writes them next to the GLB as `*_albedo.jpg` etc.). The red phone was an FBX with
   loose 2048 px PNGs: its four materials were wired by hand (base colour, normal, ORM), the
-  16 224-triangle coiled cord decimated to 226, textures at 512 / 256. The wheel is every
-  wheelchair_01 triangle outboard of x = -0.30 m within the tyre's radius (1 801 triangles).
+  16 224-triangle coiled cord decimated to 226, textures at 512 / 256.
   The converter was a throwaway Godot script; its steps are exactly the ones listed here.
 - **Paramedic colormaps**: Kenney Mini Characters' shared 512 px `colormap.png` with two palette
   blocks recoloured to paramedic green (`3c6e4a` shirt, `26332f` trousers), keeping each block's
   shading: red and blue blocks for character-male-b, yellow and purple for character-female-b.
   `crew.gd` swaps the texture in a copy of the material; the imported files are unchanged.
 - **X-ray**: the 1929 x 2207 radiograph downscaled to 224 x 256 JPEG.
-- Kenney characters, the defibrillator, the lab rack and tube, the thermometer, the bottle, the
-  folder and television_02 are unmodified.
+- Kenney characters, the defibrillator, the bottle and television_02 are unmodified.
 
-Kinds with no CC0 model, still primitives: `stethoscope`, `pulse_oximeter`, `bp_cuff`,
-`reflex_hammer`, `otoscope`, `wedding_ring`. Searched: poly.pizza (only CC-BY stethoscopes by
+Kinds with no CC0 model, still primitives: `pulse_oximeter`, `epipen`, `reflex_hammer`. Searched: poly.pizza (only CC-BY stethoscopes by
 Poly by Google), Poly Haven, Kenney, Quaternius, OpenGameArt CC0 3D (nothing for any of them;
 the ring models there are `.blend` only or have no model file), Smithsonian Open Access 3D (no
 results). Not a CC0 source, not used: Atomic Realm's "Hospital Assets" (no redistribution),

@@ -18,6 +18,7 @@ const DEFAULT_SEED := 4242
 
 const SETUPS := {
 	"icons": {"seed": 4242, "stage": "_icons"},
+	"items": {"seed": 1, "stage": "_items"},
 }
 
 
@@ -50,6 +51,8 @@ static func stage(setup: String, game: Game) -> void:
 		return
 	print("[review] setup '%s' (seed %d)" % [setup, seed_of(setup)])
 	await Callable(ReviewSetups, String(SETUPS[setup].stage)).call(game)
+	for n in game.get_tree().get_nodes_in_group("review_bar"):
+		n.staged()
 
 
 # ---------------------------------------------------------------------------
@@ -139,3 +142,40 @@ static func _icons(game: Game) -> void:
 	game.local_player().selected = 0
 	floor_item(game, "heart_monitor", t + Vector3(0.1, 0, 2.3), 1, 200)
 	floor_item(game, "defibrillator", t + Vector3(1.1, 0, 2.3), 1, 300)
+
+
+## ITEMS (docs/ITEMS_AND_ICONS.md chunk A): a normal shift; you start in the room with the most loot near
+## it, an EpiPen in hand and the other trinkets (desk phone, laptop, pulse oximeter, reflex hammer,
+## defibrillator) laid out on the floor in front of you. The log has the shift's loot count per kind.
+## Walk the wings and see what turns up.
+static func _items(game: Game) -> void:
+	var loot: Array = []
+	var counts := {}
+	for it in game.world_items.values():
+		if Items.is_loot(it.kind) and it.state == WorldItem.State.LOOSE:
+			loot.append(it)
+			counts[it.kind] = int(counts.get(it.kind, 0)) + 1
+	print("[review] items: %d loot stacks lying out, by kind: %s" % [loot.size(), str(counts)])
+	# The loose loot with the most other loot within 14 m.
+	var best: Node3D = null
+	var best_n := -1
+	for it in loot:
+		var n := 0
+		for o in loot:
+			if it.global_position.distance_to(o.global_position) < 14.0:
+				n += 1
+		if n > best_n:
+			best_n = n
+			best = it
+	var base: Vector3 = game.clock_pos() if best == null else game._floor_at(best.global_position)
+	var out := open_direction(game, base + Vector3.UP * 1.2, 3.0)
+	var side := out.cross(Vector3.UP).normalized()
+	place(game, base + out * 0.8, base + out * 3.0 + Vector3(0, 0.5, 0))
+	clear_hands(game)
+	give(game, "epipen", 1, 60)
+	game.local_player().selected = 0
+	var row := ["desk_phone", "laptop", "pulse_oximeter", "reflex_hammer", "defibrillator"]
+	for i in row.size():
+		floor_item(game, row[i], base + out * 2.0 + side * (float(i) - 2.0) * 0.55, 1, 100)
+	print("[review] items: standing among %d loot stacks; trinkets on the floor ahead, an EpiPen in hand" % best_n)
+

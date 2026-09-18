@@ -78,6 +78,7 @@ All items are physical 3D objects: on shelves, in containers, in hands, on the O
 | Tourniquet | AM | no | red trauma bags (corridors, nurse stations); sometimes dropped |
 | Bone saw | AM | no | pegboards (maintenance, storage); sometimes leaning on a gurney |
 
+- **Loot** is what you find to sell at the furnace: five plain kinds (pill bottle, X-ray film, heart monitor, gold watch, portable ultrasound) and six trinkets (desk phone, laptop, defibrillator, reflex hammer, EpiPen, pulse oximeter), which sell too but are rarer and are meant to do one thing each (their jobs come later; see docs/ITEMS_AND_ICONS.md). Every room kind still gets some.
 - **Aim and press E** for everything: take items, open and close containers, put things on the OR's storage shelves, clock in, revive, operate.
 - **Two hands.** A batch fills one hand; picking up more of the same consumable merges into it. 1, 2 or the mouse wheel switch hands; G sets the selected stack down gently.
 - **Getting hit or shoved** drops both hands; fragile stacks lose about a third, never all of it.

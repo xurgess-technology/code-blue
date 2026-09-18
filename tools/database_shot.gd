@@ -128,7 +128,7 @@ func _pose_scan_nurse() -> void:
 
 
 ## Chunk 2: stand square to the screen with the projector on and open `to` (a scanned Hive with
-## Hive Eyes at level 1, a stethoscope picked up).
+## Hive Eyes at level 1, an X-ray film picked up).
 func _pose_wall2(to: Dictionary, quirk := "") -> void:
 	var wt: Node3D = _level_wall_terminal()
 	if wt == null:
@@ -142,7 +142,7 @@ func _pose_wall2(to: Dictionary, quirk := "") -> void:
 	game.database.clear()
 	game.mark_db("hive", "sighted")
 	game.mark_db("hive", "scanned")
-	game.mark_db("stethoscope", "sighted")
+	game.mark_db("xray_film", "sighted")
 	game.brains.set_level(bot.peer_id, "hive_in", 1)
 	bot.set_flashlight(false)
 	var glass: Node3D = wt.glass

@@ -35,7 +35,7 @@ const FLAG_STEP := 0.05
 const BRAIN_KINDS := {"hive": "brain_hive", "discharged": "brain_discharged"}
 const LootTable := preload("res://scripts/economy/loot_table.gd")
 ## Fallback when the brains system has no spawn_brain: a plain loot item worth this much at quality 1.
-const FALLBACK_KIND := "sample_rack"
+const FALLBACK_KIND := "gold_watch"
 const FALLBACK_VALUE := {"hive": 150, "discharged": 350}
 
 var game: Node = null

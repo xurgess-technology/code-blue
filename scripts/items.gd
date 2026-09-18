@@ -6,11 +6,11 @@ extends RefCounted
 ## Where an item can turn up. Container types are built by the containers system;
 ## "loose" means sitting on a counter, tray, gurney or floor edge.
 const CONTAINER_TYPES := {
-	"med_fridge": {"name": "medicine fridge", "rooms": ["pharmacy", "storage"]},
-	"drawer_unit": {"name": "steel drawer unit", "rooms": ["storage", "maintenance"]},
-	"station_drawers": {"name": "nurse station drawers", "rooms": ["nurse_station", "ward"]},
-	"trauma_bag": {"name": "trauma bag", "rooms": ["corridor", "nurse_station"]},
-	"pegboard": {"name": "pegboard", "rooms": ["maintenance", "storage"]},
+	"med_fridge": {"name": "medicine fridge", "rooms": ["pharmacy", "supply_closet", "lab"]},
+	"drawer_unit": {"name": "steel drawer unit", "rooms": ["supply_closet", "janitor_closet", "lab", "morgue"]},
+	"station_drawers": {"name": "nurse station drawers", "rooms": ["nurse_station"]},
+	"trauma_bag": {"name": "trauma bag", "rooms": ["corridor", "nurse_station", "patient_room"]},
+	"pegboard": {"name": "pegboard", "rooms": ["janitor_closet", "supply_closet", "morgue"]},
 }
 
 const SURGICAL := ["anesthetic", "gauze", "forceps", "tourniquet", "bone_saw"]
@@ -26,7 +26,7 @@ const ITEMS := {
 		"found": {"med_fridge": 0.85, "loose": 0.15},
 		"loose_surfaces": ["counter", "tray"],
 		"real_use": "A general anesthetic puts a patient into a controlled, reversible unconsciousness so they feel nothing during surgery. The dose depends on body weight: too little and they can wake mid-procedure, too much and breathing and heart rate crash.",
-		"where": "Almost always in the medicine fridges of pharmacy and storage rooms. Now and then a vial or two left out on a counter or a bedside tray.",
+		"where": "Almost always in the medicine fridges of pharmacies, supply closets and labs. Now and then a vial or two left out on a counter or a bedside tray.",
 		"handling": "Consumable. Found in batches of 2 to 3. Glass: dropping the batch smashes some of it.",
 	},
 	"gauze": {
@@ -39,7 +39,7 @@ const ITEMS := {
 		"found": {"station_drawers": 0.7, "loose": 0.3},
 		"loose_surfaces": ["counter", "tray", "gurney"],
 		"real_use": "Gauze is a loose woven cotton dressing. Packed into a wound it applies pressure from the inside and helps blood clot; wrapped around a limb or stump it holds that pressure and keeps the wound covered.",
-		"where": "Usually in the drawers of nurse stations and ward counters. Often a few rolls left loose on counters, trays or gurneys.",
+		"where": "Usually in the drawers of nurse stations and patient room counters. Often a few rolls left loose on counters, trays or gurneys.",
 		"handling": "Consumable. Found in rolls of 2 to 4. Survives being dropped.",
 	},
 	"forceps": {
@@ -52,7 +52,7 @@ const ITEMS := {
 		"found": {"drawer_unit": 0.8, "loose": 0.2},
 		"loose_surfaces": ["tray", "counter"],
 		"real_use": "Surgical forceps are long, hinged tweezers used to grip tissue or remove foreign objects without putting fingers into a wound. In a gunshot wound they are how a surgeon reaches in and draws out the bullet or its fragments.",
-		"where": "Sealed in sterile packs inside the steel drawer units of storage and maintenance rooms. Occasionally abandoned on an instrument tray.",
+		"where": "Sealed in sterile packs inside the steel drawer units of supply closets, janitor closets, labs and the morgue. Occasionally abandoned on an instrument tray.",
 		"handling": "Reusable. One pair. Stays in the OR once delivered.",
 	},
 	"tourniquet": {
@@ -78,7 +78,7 @@ const ITEMS := {
 		"found": {"pegboard": 0.75, "loose": 0.25},
 		"loose_surfaces": ["gurney", "counter", "floor"],
 		"real_use": "An amputation saw cuts through bone once skin and muscle have been opened. It is worked in long, steady strokes: rushing it tears tissue and leaves a ragged edge that heals badly.",
-		"where": "Hung on pegboards in maintenance and storage rooms. Sometimes left leaning against a gurney somewhere it has no business being.",
+		"where": "Hung on pegboards in janitor closets, supply closets and the morgue. Sometimes left leaning against a gurney somewhere it has no business being.",
 		"handling": "Reusable. Heavy. Stays in the OR once delivered.",
 	},
 	# downed (sweep 2 wave 3): closes a downed teammate's wound on the OR's player table. Not in
@@ -93,7 +93,7 @@ const ITEMS := {
 		"found": {"trauma_bag": 0.4, "station_drawers": 0.35, "drawer_unit": 0.25},
 		"loose_surfaces": [],
 		"real_use": "A sterile pack with a curved needle already threaded with suture. Each bite goes in on one side of a gash and out the other, and pulling the thread snug draws the edges together so the bleeding stops and the wound can heal.",
-		"where": "In trauma bags on corridor walls, in nurse station drawers and in the steel drawer units of storage rooms.",
+		"where": "In trauma bags on corridor walls, in nurse station drawers and in the steel drawer units of supply closets.",
 		"handling": "Consumable. Found in packs of 1 or 2. Put one on the OR supply shelf, carry a downed teammate to a free OR table and stitch them up.",
 	},
 	# SWEEP 4A HOOK (pharmacy, chunk 3): does nothing mechanically. Only ever bought at the
