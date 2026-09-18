@@ -158,6 +158,20 @@ func _run() -> void:
 	_check(eye_node != null and (eye_node as Node3D).visible, "its left eye is in the socket")
 	me.teleport(game._floor_at(game.table_position(table) + Vector3(0, 0, 1.0).rotated(Vector3.UP, game.table_yaw_of(table))))
 	me.bot_move = Vector2.ZERO
+	_clear_hands()
+	var p0 := String(game._table_prompt(me, table))
+	_check(p0.begins_with("!Hold the bone saw") and p0.contains("scalpel"), "empty-handed at a fresh Hive the prompt says what to hold ('%s')" % p0)
+	game.give_hand(me, "bone_saw", 1)
+	var p1 := String(game._table_prompt(me, table))
+	_check(p1.begins_with("Operate: Saw open the skull"), "the bone saw offers dissection ('%s')" % p1)
+	_clear_hands()
+	var panels: Array = load("res://scripts/orscreen/or_screen_model.gd").build(game).panels
+	var kinds := []
+	for pn in panels:
+		if String(pn.get("patient_id", "")) == "hive":
+			for sp in pn.supplies:
+				kinds.append(String(sp.kind))
+	_check(not panels.is_empty() and (kinds.has("scalpel") and kinds.has("eye_spoon") and kinds.has("bone_saw")), "the OR screen lists both plans' tools for a fresh Hive (%s)" % str(kinds))
 	game.give_hand(me, "scalpel", 1)
 	await _frames(2)
 	var prompt := String(game._table_prompt(me, table))
