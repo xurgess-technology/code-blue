@@ -357,13 +357,13 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 
 ## Brains (sweep 3, brains worker)
 
-- **Hive Eyes was built against a stand-in Walk-In.** On the brains branch `Monster.WALK_IN` does
-  not exist, so `brains.spawn_walk_in` makes a Discharged body with `kind = "walk_in"` (it still
+- **Hive Eyes was built against a stand-in Hive.** On the brains branch `Monster.HIVE` does
+  not exist, so `brains.spawn_hive` makes a Discharged body with `kind = "hive"` (it still
   hunts by sound). The camera sits at `m.height * 0.93` and 0.34 m in front of the monster's origin
-  along its facing; the real Walk-In model may need a different eye point (its head can block the
-  view, or the camera can poke through a wall the Walk-In faces). The sedation end is only reached
+  along its facing; the real Hive model may need a different eye point (its head can block the
+  view, or the camera can poke through a wall the Hive faces). The sedation end is only reached
   through `has_method("is_sedated")` and was not exercised (no `sedate` on this branch).
-- **The HUD stays up during Hive Eyes** (crosshair, slots, messages): the view is the Walk-In's
+- **The HUD stays up during Hive Eyes** (crosshair, slots, messages): the view is the Hive's
   but the HUD is yours. No HUD hook was added.
 - **Echo's veil does not fully hide a lit flashlight cone** (volumetric fog and the post layer draw
   after it), so the spot on the nearest wall stays faintly visible under the outlines. Outlines of
@@ -387,7 +387,7 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
   change, so the gold rim overlay keeps fitting).
 - **Perf** (`perfprobe -- --brains`, 1600x900 medium, two passes): pharmacy baseline 188-201 fps
   (1% low 134-150), Echo at level 3 with 66 outlines 180-192 (132-150); corridor baseline 88-94
-  (75-82), Echo 93-96 (81-86); Hive Eyes depends on what the Walk-In looks at (131-236); five brains
+  (75-82), Echo 93-96 (81-86); Hive Eyes depends on what the Hive looks at (131-236); five brains
   in view 102-108 (89-96). Starting Echo takes 1.8-2.8 ms (it walks every container once).
 - **One lagged `nettest --only=brains` run never connected** (port 7941; the client timed out
   before joining); the same run passed on another port, lagged and unlagged. Probably a port clash
@@ -395,7 +395,7 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 
 ## Monsters (sweep 3, monsters worker)
 
-- **Spawning a Walk-In costs about 6-8 ms** on the machine that builds it (the rig, its animation
+- **Spawning a Hive costs about 6-8 ms** on the machine that builds it (the rig, its animation
   library copy, a few dozen primitives and materials; the baked part meshes are cached after the
   first one, which the warmup builds), about what a Discharged (9 ms) or Night Nurse (8 ms) costs.
   Clock-in now spawns 4-8 of them in the same frame on the host, and a client builds them as the
@@ -412,11 +412,11 @@ problems it did find were in the test bot, and are fixed. Resolved items are lis
 - **Lying down picks a clear facing with 12 rays**, but only against walls: furniture without a
   collider, other lying monsters and the patient tables are not checked. The fall also slides the
   model back half its height while it tips, which reads a little like being pulled.
-- **Walk-Ins do not avoid each other** (navigation avoidance is off for every monster), so a group
+- **Hives do not avoid each other** (navigation avoidance is off for every monster), so a group
   chasing the same player bunches into one silhouette at the end of a corridor.
 - **The danger heartbeat and music count sedated monsters** by distance (`game._update_danger`).
-- **Walk-In placement is deterministic per shift but not tuned**: every group sits within 12 m of
-  its wing's first hallway tile, so on small wings the Walk-Ins can be visible from the entrance
+- **Hive placement is deterministic per shift but not tuned**: every group sits within 12 m of
+  its wing's first hallway tile, so on small wings the Hives can be visible from the entrance
   doorway. `MIN_ENTRANCE_DIST` (5 m) and `SHALLOW_BAND` (12 m) in `monster.gd` are the knobs.
 - **wake() while dragged hits the dragger itself** (the contract says combat drops the monster and
   it hits the dragger); combat must not add its own hit, or the dragger takes two.
@@ -531,7 +531,7 @@ Players, Bob, the paramedics and the downed player on the table use the Blender 
   off the body: `tools/dissectiontest` fails its head-bone check (2 cm) and the table-fit check, but
   the straps have no check, so look at `tools/dissection_shots/01*`, `02*` after such a change.
 - **The openable head is one ellipsoid**, not the walking look's two skull pieces, so the skull is a
-  little rounder, and the face pieces are copied from `discharged_look.gd` / `walk_in_look.gd` (edits
+  little rounder, and the face pieces are copied from `discharged_look.gd` / `hive_look.gd` (edits
   there do not reach the table). The Discharged's brow sits 6 mm further out so it does not sink into
   the ellipsoid; it keeps the walking head's bright, fine-noise band look, which under the OR lamp
   (plus the saw's guide glow on the forehead) reads a bit like a bandage. From beside the table the
@@ -592,7 +592,7 @@ Players, Bob, the paramedics and the downed player on the table use the Blender 
   after a build may get a hospital-only path.
 - **Things the mirrors do not carry across a seam**: a player's head glow, held-item models' own lights,
   monster sounds (a Discharged's rattle is heard where it really is), the Echo outlines and Hive Eyes. A
-  Walk-In does not see a player on the other side of a seam (its sight rays go to the real position), and
+  Hive does not see a player on the other side of a seam (its sight rays go to the real position), and
   the danger heartbeat counts only monsters in the same space. Hearing does cross: a noise within 26 m of
   a seam is mirrored into the other copy, pulled into the stub (the Discharged comes through and then
   hears the real noise).
@@ -1022,22 +1022,22 @@ Players, Bob, the paramedics and the downed player on the table use the Blender 
 
 - **Hive Eyes cycling and the hold-to-exit key (level 2+) were not built.** `docs/SWEEP4A.md`
   asks for: at level 1 tapping the slot ends it (built, unchanged from sweep 3); at level 2+
-  tapping cycles to another Walk-In in range and holding the slot ~0.4 s ends it. Cycling needs
-  `brains.ability_slot()` to pick a different Walk-In and retarget the same hive session instead
+  tapping cycles to another Hive in range and holding the slot ~0.4 s ends it. Cycling needs
+  `brains.ability_slot()` to pick a different Hive and retarget the same hive session instead
   of ending it, and holding-vs-tapping needs real key-hold timing, not just the existing discrete
   press counter (`Player.ability_slot_press`, incremented once per press with no duration). Both
   would mean widening the replicated ability-press protocol; judged out of proportion to this
   chunk's budget. What *is* built: `hive_view.gd`'s state machine already has a `_begin_cycle()`
-  path (a short fly-through between two Walk-Ins) ready for whoever wires the trigger up, and
+  path (a short fly-through between two Hives) ready for whoever wires the trigger up, and
   ending Hive Eyes still works today exactly as it did in sweep 3 (the slot again, or Esc, both via
-  `ability_slot_press`). At any level, only the nearest Walk-In in range is ever picked.
+  `ability_slot_press`). At any level, only the nearest Hive in range is ever picked.
 - **The fly-through's "no path" straight-line glide was exercised, but only informally**: the test
-  hospital's break room to a nearby Walk-In always has a navmesh path in practice, so
+  hospital's break room to a nearby Hive always has a navmesh path in practice, so
   `databasetest`/`braintest` never hit the `NavigationServer3D.map_get_path` returning empty case
   in a real level. `hive_view._path_from` falls back to a straight line correctly by inspection
   (and the fallback branch is exercised by construction whenever the map iteration id is 0, e.g.
   the very first physics frame after a level loads), but nobody has watched it happen on a level
-  where the Walk-In truly has no path to the player (e.g. across a locked door).
+  where the Hive truly has no path to the player (e.g. across a locked door).
 - **The database terminal's Monsters section is a fixed, hand-written list**
   (`scripts/database/monster_pages.gd`), not derived from any shared "monster kind" registry --
   there isn't one yet. Adding a new monster kind means adding an entry there by hand; nothing
@@ -1110,7 +1110,7 @@ Players, Bob, the paramedics and the downed player on the table use the Blender 
 - **Crew door-pushing was deliberately scoped to just the OR's own doors** (`doors.gd`:
   `kind == "double" and data.base`), not every hinged/double door in the hospital. The naive first
   pass (removing the old blanket "crews never push doors" exclusion for every door) worked for the
-  OR but let a real, independently-spawned Walk-In monster wandering the live shift push open an
+  OR but let a real, independently-spawned Hive monster wandering the live shift push open an
   unrelated room door mid-test, corrupting later doortest checks that assumed it was untouched.
   Scoping crew pushes to the OR's doors specifically fixed it and matches the fact that crews never
   walk anywhere else in the hospital. If crews ever gain other destinations (e.g. a second delivery
@@ -1279,7 +1279,7 @@ are still no raster HUD icons anywhere). Each slot is a filled circle with a per
 drawn in a new `_draw_ability_icon()`: Echo is three concentric partial arcs plus a centre dot (a
 sound pulse), Hive Eyes is an almond eye outline with a pupil. The old bottom cooldown bar is now
 a radial arc that drains clockwise from the top; level pips sit in a row just under the circle;
-the Hive Eyes "Walk-In in range" border pulse is now a ring drawn with `draw_arc` instead of
+the Hive Eyes "Hive in range" border pulse is now a ring drawn with `draw_arc` instead of
 `draw_rect`; empty/unusable slots dim the same way as before, just on a circle. `_draw_ability_card`
 (the unlock popup) doesn't reference the bar's shape and was left alone.
 
@@ -1497,7 +1497,7 @@ into an ordinary crouch-walk. Client-owned local movement throughout, same as th
   so mouse-turning mid-dive doesn't curve it -- this was a deliberate design choice ("keeps its
   launch heading fixed" per the code comment), not a bug, but worth a second look if a playtest
   wants steerable dives. `tools/controlstest.gd`'s pre-existing scanner checks
-  (`_scanner()`, holding R aimed at a Walk-In) fail on this branch (`holding R aimed at it builds
+  (`_scanner()`, holding R aimed at a Hive) fail on this branch (`holding R aimed at it builds
   progress`, `looking away resets progress`, `a full hold marks the species scanned`) -- confirmed
   unrelated to this work (nothing in this change touches `_update_scan_progress` or the scanner
   path, and `tools/databasetest.tscn`'s own scanner-adjacent checks pass clean); most likely the
@@ -1567,7 +1567,7 @@ stays at full height on the way up and sinks toward prone height in step with th
 Touchdown adds a camera shake (`DIVE_LAND_SHAKE` 0.35, trauma ~0.46 measured) and the existing
 "thud" sound on top of the landing dip. `controlstest` 50/50. Its scanner block now clears the
 database first: `user://database.save` is shared with any open copy of the game, and a live
-playtest running alongside the test left the Walk-In already scanned.
+playtest running alongside the test left the Hive already scanned.
 
 ## Loading screen (2026-09-16, user request)
 
@@ -1882,7 +1882,7 @@ Rebuilt around that:
 - Failing on main before this work too (checked on e1c63e4 in a separate worktree, 2026-09-17):
   doortest "the crew pushed the OR's doors open to bring the gurney through" (every run), looptest
   "the bot threw the loot into the furnace and sold it for $52" (every run), braintest "nobody is
-  left looking through a Walk-In" after a game over (flaky, about 1 in 2), mapcheck seed 1's morgue
+  left looking through a Hive" after a game over (flaky, about 1 in 2), mapcheck seed 1's morgue
   tray (known).
 
 ## Right-shoulder carry camera, load on the left shoulder (2026-09-17)

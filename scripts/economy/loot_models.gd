@@ -12,7 +12,7 @@ const BrainModel := preload("res://scripts/brains/brain_model.gd")   # brains, s
 
 static func build(root: Node3D, kind: String, count: int) -> void:
 	match kind:
-		"brain_walk_in", "brain_discharged": BrainModel.build(root, kind)
+		"brain_hive", "brain_discharged": BrainModel.build(root, kind)
 		"stethoscope": _stethoscope(root)
 		"pulse_oximeter": _pulse_oximeter(root)
 		"bp_cuff": _bp_cuff(root)
@@ -92,7 +92,7 @@ const HEART_SCREEN := Vector3(-0.03, 0.22, 0.175)
 ## Rough footprint (x, height, z) so the pickup box and shelves can size themselves.
 static func footprint(kind: String) -> Vector3:
 	match kind:
-		"brain_walk_in", "brain_discharged": return BrainModel.footprint(kind)
+		"brain_hive", "brain_discharged": return BrainModel.footprint(kind)
 		"stethoscope": return Vector3(0.2, 0.04, 0.2)
 		"pulse_oximeter": return Vector3(0.07, 0.05, 0.05)
 		"bp_cuff": return Vector3(0.24, 0.06, 0.14)

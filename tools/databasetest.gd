@@ -65,7 +65,7 @@ func _scan_unlocks_tier2() -> void:
 	me.teleport(game.table_pos() + Vector3(0, 0, -2.0))
 	await _frames(3)
 	var here: Vector3 = me.global_position
-	var wi: Node3D = game.brains.spawn_walk_in(game._floor_at(here + Vector3(0, 0, 4))) as Node3D
+	var wi: Node3D = game.brains.spawn_hive(game._floor_at(here + Vector3(0, 0, 4))) as Node3D
 	await _frames(2)
 	var to: Vector3 = wi.global_position - me.global_position
 	me.bot_yaw = atan2(-to.x, -to.z)
@@ -86,11 +86,11 @@ func _scan_unlocks_tier2() -> void:
 		me.bot_yaw += yaw_err
 		var pitch_err := atan2(d.y, Vector2(d.x, d.z).length()) - atan2(fwd.y, Vector2(fwd.x, fwd.z).length())
 		me.bot_pitch = clampf(me.bot_pitch + pitch_err, -1.2, 1.2)
-		return game.db_record("walk_in").scanned
+		return game.db_record("hive").scanned
 	var done := await _until(track, 8.0)
 	me.bot_scan = false
-	_check(done and game.db_record("walk_in").sighted, "tier 1 (sighted) and tier 2 (scanned) both set")
-	_check(not game.db_record("walk_in").harvested, "tier 3 (harvested) is still locked")
+	_check(done and game.db_record("hive").sighted, "tier 1 (sighted) and tier 2 (scanned) both set")
+	_check(not game.db_record("hive").harvested, "tier 3 (harvested) is still locked")
 	game.kill_monster(wi)
 
 
@@ -111,7 +111,7 @@ func _harvest_unlocks_tier3() -> void:
 
 func _guest_scan_stays_theirs() -> void:
 	_say("---- another player's scan goes in their database, not this one")
-	game.database.erase("walk_in")
+	game.database.erase("hive")
 	var guest: Player = Player.new_player(-501, "Guest", false)
 	guest.is_bot = true
 	guest.bot_active = true
@@ -120,7 +120,7 @@ func _guest_scan_stays_theirs() -> void:
 	game.get_node("Entities").add_child(guest)
 	guest.teleport(game.table_pos() + Vector3(2.0, 0.0, -2.0))   # open OR floor, see _scan_unlocks_tier2
 	await _frames(3)
-	var wi: Node3D = game.brains.spawn_walk_in(game._floor_at(guest.global_position + Vector3(0, 0, 4))) as Node3D
+	var wi: Node3D = game.brains.spawn_hive(game._floor_at(guest.global_position + Vector3(0, 0, 4))) as Node3D
 	await _frames(2)
 	# This machine's own player looks away, so only the guest sights and scans it.
 	me.bot_yaw = atan2(-(guest.global_position - wi.global_position).x, -(guest.global_position - wi.global_position).z)
@@ -137,7 +137,7 @@ func _guest_scan_stays_theirs() -> void:
 	var scanning := await _until(track, 8.0)
 	await _frames(20)
 	_check(scanning, "the guest's scan ran on the host")
-	_check(not game.db_record("walk_in").scanned, "the guest's scan did not land in this player's database")
+	_check(not game.db_record("hive").scanned, "the guest's scan did not land in this player's database")
 	guest.bot_scan = false
 	game.kill_monster(wi)
 	game.players.erase(-501)
@@ -192,15 +192,15 @@ func _wall_sign_in_and_out() -> void:
 		return
 	game._set_projector(true)
 	game.database.clear()
-	game.mark_own_db("walk_in", "sighted")
-	game.mark_own_db("walk_in", "scanned")
+	game.mark_own_db("hive", "sighted")
+	game.mark_own_db("hive", "scanned")
 	wt.ui.go_home()
 	var glass: Node3D = wt.glass
 	var out: Vector3 = glass.global_basis.z.normalized()
 	var stand: Vector3 = glass.global_position + out * 4.6
 	me.teleport(game._floor_at(Vector3(stand.x, 0.0, stand.z)))
 	await _frames(3)
-	_check(not _walk_in_known(), "signed out: the Walk-In is ??? on the screen")
+	_check(not _hive_known(), "signed out: the Hive is ??? on the screen")
 	var aim := func(px: Vector2):
 		var at: Vector3 = glass.global_transform * Vector3((px.x / wt.TEX.x - 0.5) * wt.SIZE.x, (0.5 - px.y / wt.TEX.y) * wt.SIZE.y, 0.0)
 		var d: Vector3 = at - me.camera.global_position
@@ -222,7 +222,7 @@ func _wall_sign_in_and_out() -> void:
 		await _frames(1)
 	me.bot_laser_hold = false
 	_check(int(game.wall.user) == me.peer_id, "a 1.5 s hold on HOLD TO SIGN IN signs in")
-	_check(_walk_in_known(), "signed in: my scanned Walk-In fills its card")
+	_check(_hive_known(), "signed in: my scanned Hive fills its card")
 	game.mark_own_db("discharged", "scanned")
 	_check(int(game.wall.view().db.get("discharged", 0)) & 2 != 0, "a scan while signed in reaches the screen")
 	# SIGN OUT is a click.
@@ -255,10 +255,10 @@ func _wall_sign_in_and_out() -> void:
 	me.bot_scan = false
 
 
-func _walk_in_known() -> bool:
+func _hive_known() -> bool:
 	var wt: Node3D = game.wall_terminal()
 	for e in wt.ui.Pages.entries("monsters", game.wall.view()):
-		if String(e.key) == "walk_in":
+		if String(e.key) == "hive":
 			return bool(e.known)
 	return false
 

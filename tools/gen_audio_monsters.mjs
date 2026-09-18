@@ -15,10 +15,10 @@
 //   monsters_squeak      the Night Nurse's shoe squeaks, one per footfall
 //   monsters_lullaby     a faint, slightly wrong humming the Nurse breathes when unobserved
 //   monsters_grab        the hit / grab when a monster connects
-//   monsters_walkin_groan    sweep 3: the Walk-In's occasional groan, louder when it sees you
-//   monsters_walkin_shuffle  sweep 3: a dragged bare foot, one per Walk-In step
+//   monsters_hive_groan    sweep 3: the Hive's occasional groan, louder when it sees you
+//   monsters_hive_shuffle  sweep 3: a dragged bare foot, one per Hive step
 //   monsters_flesh_hit       sweep 3: a monster struck by the saw
-//   monsters_walkin_death    sweep 3: the Walk-In killed
+//   monsters_hive_death    sweep 3: the Hive killed
 //   monsters_sedated_breath  sweep 3: a sedated monster's slow snoring breath
 
 import fs from 'node:fs';
@@ -278,7 +278,7 @@ function grab(v) {
   return fadeEdges(room(out, 0.22));
 }
 
-// ---------------------------------------------------------------- sweep 3: the Walk-In, hits, sedation
+// ---------------------------------------------------------------- sweep 3: the Hive, hits, sedation
 
 /** A voiced vowel through a slack jaw: a sawtooth-ish glottal source into two formants. */
 function voice(out, at, len, f0From, f0To, formants, gain, r, rough = 0.3) {
@@ -298,9 +298,9 @@ function voice(out, at, len, f0From, f0To, formants, gain, r, rough = 0.3) {
   }
 }
 
-/** The Walk-In's groan: low, wet, falling, half a word. Not loud. */
-function walkinGroan(v) {
-  const r = rngFor('walkin_groan' + v);
+/** The Hive's groan: low, wet, falling, half a word. Not loud. */
+function hiveGroan(v) {
+  const r = rngFor('walkin' + '_groan' + v);   // seeded by the old name: the same sound
   const len = r.range(1.1, 1.7);
   const out = buf(len + 0.5);
   const base = r.range(78, 98);
@@ -317,8 +317,8 @@ function walkinGroan(v) {
 }
 
 /** One heavy bare foot dragged across lino, then set down. */
-function walkinShuffle(v) {
-  const r = rngFor('walkin_shuffle' + v);
+function hiveShuffle(v) {
+  const r = rngFor('walkin' + '_shuffle' + v);   // seeded by the old name: the same sound
   const drag = r.range(0.22, 0.36);
   const out = buf(drag + 0.3);
   const bp = biquad('bandpass', 1.1), lp = biquad('lowpass', 0.7);
@@ -362,9 +362,9 @@ function fleshHit(v) {
   return fadeEdges(room(out, 0.2, 0.9));
 }
 
-/** The Walk-In goes down: a long collapsing exhale that breaks into a rattle. */
-function walkinDeath(v) {
-  const r = rngFor('walkin_death' + v);
+/** The Hive goes down: a long collapsing exhale that breaks into a rattle. */
+function hiveDeath(v) {
+  const r = rngFor('walkin' + '_death' + v);   // seeded by the old name: the same sound
   const len = r.range(1.4, 1.8);
   const out = buf(len + 0.7);
   const base = r.range(95, 115);
@@ -419,10 +419,10 @@ const CUES = [
   ['monsters_lullaby', 2, lullaby, -12],
   ['monsters_grab', 2, grab, -4],
   // sweep 3
-  ['monsters_walkin_groan', 3, walkinGroan, -7],
-  ['monsters_walkin_shuffle', 4, walkinShuffle, -12],
+  ['monsters_hive_groan', 3, hiveGroan, -7],
+  ['monsters_hive_shuffle', 4, hiveShuffle, -12],
   ['monsters_flesh_hit', 3, fleshHit, -3],
-  ['monsters_walkin_death', 2, walkinDeath, -5],
+  ['monsters_hive_death', 2, hiveDeath, -5],
   ['monsters_sedated_breath', 2, sedatedBreath, -14],
 ];
 

@@ -439,7 +439,7 @@ func _run_orscreen() -> void:
 
 ## SWEEP 3 HOOK (brains, --brains): what Echo and Hive Eyes cost at medium. The pharmacy with its
 ## containers open and the long corridor, each with nothing, Echo at level 3 (30 m, as many outlines
-## as it allows, held on for the whole measurement) and Hive Eyes through a Walk-In standing there;
+## as it allows, held on for the whole measurement) and Hive Eyes through a Hive standing there;
 ## plus five brains on the floor in view. Twice, so the noise shows.
 ## DOORS HOOK (`-- --doors`): a hallway of doors, the longest corridor and the OR, each with every
 ## door shut, every door open (the automatic ones held open), and shut without the doors' occluders.
@@ -518,7 +518,7 @@ func _run_brains() -> void:
 				await get_tree().process_frame
 			await _measure("%s: Echo L3 (%d outlines) %d" % [scen.name, b.echo_view.ghosts.size(), pass_i + 1], 1)
 			b.echo_view.stop()
-			var wi: Node = b.spawn_walk_in(bot.global_position - bot.global_transform.basis.z * 3.0)
+			var wi: Node = b.spawn_hive(bot.global_position - bot.global_transform.basis.z * 3.0)
 			wi.set_physics_process(false)
 			b._hive[bot.peer_id] = [int(wi.monster_id), game.world_time + 600.0]
 			b._hive_hp[bot.peer_id] = bot.hp
@@ -531,7 +531,7 @@ func _run_brains() -> void:
 		var placed := []
 		var fwd: Vector3 = -bot.global_transform.basis.z
 		for i in 5:
-			var it: Node = b.spawn_brain("brain_walk_in" if i % 2 == 0 else "brain_discharged", 1.0, bot.global_position + fwd * (1.2 + i * 0.25) + Vector3.UP * 0.5)
+			var it: Node = b.spawn_brain("brain_hive" if i % 2 == 0 else "brain_discharged", 1.0, bot.global_position + fwd * (1.2 + i * 0.25) + Vector3.UP * 0.5)
 			it.bt = game.world_time - i * 50.0
 			placed.append(it)
 		bot.bot_pitch = -0.5

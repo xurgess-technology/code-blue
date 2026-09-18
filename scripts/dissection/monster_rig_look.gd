@@ -1,7 +1,7 @@
 extends RefCounted
 ## How a strapped monster wears the walking monster's rig (`make_lying`): the fit on the OR table
 ## and the face of the openable head, copied from scripts/monsters/discharged_look.gd and
-## walk_in_look.gd so the one on the table is the one from the halls.
+## hive_look.gd so the one on the table is the one from the halls.
 ##
 ## Lying-root coordinates are make_lying's frame (along X, head -X, face up, unscaled). The model head
 ## frame is the walking look's head part: +Y up the head, +Z the face, X ear to ear, origin at the head
@@ -21,7 +21,7 @@ const Shapes := preload("res://scripts/monsters/shapes.gd")
 ##   injection    top of the upper arm, lying root
 ##   shoulder_x, arm_reach, hip_x   where the limbs pivot (lying root), for the straps pulled taut
 const RIG := {
-	"walk_in": {
+	"hive": {
 		"scale": 1.0, "offset": Vector3(-0.01, 0.05, 0.0), "head_bone": Vector3(-0.648, 0.1204, 0.0),
 		"centre": Vector3(0.0, 0.12, -0.008), "radii": Vector3(0.095, 0.11, 0.108), "spread": 2.0,
 		"straps": [[-0.42, 0.29, 0.15], [0.12, 0.3, 0.27], [0.42, 0.19, 0.13], [0.68, 0.18, 0.12]],
@@ -67,20 +67,20 @@ static func face(kind: String, skin: Material) -> Node3D:
 	if kind == "discharged":
 		_discharged_face(head, skin)
 	else:
-		_walk_in_face(head, skin)
+		_hive_face(head, skin)
 	return head
 
 
 static func hair_material(kind: String) -> Material:
-	if kind != "walk_in":
+	if kind != "hive":
 		return null
-	return _mat("walk_in_hair", func(): return Shapes.mat(Color("3a3530"), {"mottle": 0.4, "stain_scale": 60.0, "rough": 0.9, "weave": 0.4}))
+	return _mat("hive_hair", func(): return Shapes.mat(Color("3a3530"), {"mottle": 0.4, "stain_scale": 60.0, "rough": 0.9, "weave": 0.4}))
 
 
-## Whether a point of the head shell (head-local, scaled) has hair: the Walk-In's thin fringe round
-## the back and sides (walk_in_look.gd's hair ellipsoid, a little larger so it shows on the shell).
+## Whether a point of the head shell (head-local, scaled) has hair: the Hive's thin fringe round
+## the back and sides (hive_look.gd's hair ellipsoid, a little larger so it shows on the shell).
 static func has_hair(kind: String, p: Vector3) -> bool:
-	if kind != "walk_in":
+	if kind != "hive":
 		return false
 	var d: Dictionary = RIG[kind]
 	var m := (d.centre as Vector3) + TO_HEAD.inverse() * (p / float(d.scale))
@@ -166,9 +166,9 @@ static func _discharged_face(head: Node3D, skin: Material) -> void:
 		Shapes.bake(ear, "dx_discharged|ear%d" % int(sx))
 
 
-# ------------------------------------------------------------------------------------ Walk-In
+# ------------------------------------------------------------------------------------ Hive
 
-static func _walk_in_face(head: Node3D, skin: Material) -> void:
+static func _hive_face(head: Node3D, skin: Material) -> void:
 	var dark := _mat("wi_dark", func(): return Shapes.flat(Color("120908"), 0.9))
 	var lid := _mat("wi_lid", func(): return Shapes.mat(Color("7f7766"), {"mottle": 0.2, "vein": 0.5, "stain_col": Color("574a48"), "stain_amt": 0.35, "stain_scale": 40.0, "rough": 0.5}))
 	var eye := _mat("wi_eye", func():

@@ -12,7 +12,7 @@
 //   brains_blend     the blender: motor spin-up, a chunky grind, a wet whirr, spin-down (1.6 s)
 //   brains_gulp      drinking it: three thick gulps and a shudder
 //   brains_shriek    Echo: a rising, throat-tearing shriek with a ringing tail
-//   brains_hive_in   into a Walk-In's eyes: a sucking whoosh into a sick low drone
+//   brains_hive_in   into a Hive's eyes: a sucking whoosh into a sick low drone
 //   brains_hive_out  back into your body: a snap and a falling breath
 
 import fs from 'node:fs';

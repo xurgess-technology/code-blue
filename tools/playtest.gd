@@ -380,16 +380,16 @@ func _walk_to(target: Vector3) -> void:
 
 
 func _flee_if_hunted() -> bool:
-	return _shove_close_walk_in() or _stare_down_nurse() or _flee_discharged()
+	return _shove_close_hive() or _stare_down_nurse() or _flee_discharged()
 
 
-## Sweep 3: Walk-Ins crowd the wing entrances the bot walks through. Any awake one within arm's
+## Sweep 3: Hives crowd the wing entrances the bot walks through. Any awake one within arm's
 ## reach (calm after a hit or not; they come straight back) gets shoved off, like a player would.
-func _shove_close_walk_in() -> bool:
+func _shove_close_hive() -> bool:
 	if bot.operating:
 		return false
 	for m in game.monsters.values():
-		if m.kind != "walk_in" or m.mode == Monster.Mode.STUNNED or (m.has_method("is_sedated") and m.is_sedated()):
+		if m.kind != "hive" or m.mode == Monster.Mode.STUNNED or (m.has_method("is_sedated") and m.is_sedated()):
 			continue
 		var to: Vector3 = m.global_position - bot.global_position
 		to.y = 0.0

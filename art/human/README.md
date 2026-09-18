@@ -128,7 +128,7 @@ Pieces share positions and custom normals along their seams, so there is no visi
 | Clip | Frames | Loop | Speed | Notes |
 |---|---|---|---|---|
 | `Idle` | 120 | yes | 0 | breathing, weight shifts, a slow look round |
-| `Walk` | 32 | yes | 1.40 m/s | crew and patients; the Walk-In's 0.8-1.8 m/s |
+| `Walk` | 32 | yes | 1.40 m/s | crew and patients; the Hive's 0.8-1.8 m/s |
 | `Jog` | 22 | yes | 3.40 m/s | the players' `C.WALK_SPEED` |
 | `Sprint` | 18 | yes | 5.60 m/s | `C.SPRINT_SPEED` |
 | `Push` | 34 | yes | 1.25 m/s | hands on a bar 0.98·s up, 0.50·s ahead, 0.44·s apart (the crew's gurney speed) |
@@ -219,12 +219,12 @@ the arms at the sides, inside a 1.1 m table. `Crawl` is a prone pull with the ch
 head up. None of them self-intersect badly; the gown does not drape when lying (it keeps its
 standing shape a few centimetres above the belly).
 
-## Deriving the Walk-In and the Discharged
+## Deriving the Hive and the Discharged
 
 - Start from `hu_params.py`: a new entry (or a new `outfit`) covers most changes, and the whole
   pipeline (skin, rig, clips, bake, GLB, sites JSON) comes for free. Keep the skeleton: the clips,
   weights and sites all depend on the bone names and the A-pose.
-- **Walk-In (a diseased, broken human)**: Bob's gown or torn scrubs; `age` and `girth` for gaunt or
+- **Hive (a diseased, broken human)**: Bob's gown or torn scrubs; `age` and `girth` for gaunt or
   bloated; the skin material already has mottling, vein and bruise inputs (push them, and add
   necrosis like the Nurse's). A limp or a dragged foot is a change to `gait_pose` in `hu_rig.py`,
   as the Nurse's drag was. Filmed eyes, jowls and an open mouth are head features in

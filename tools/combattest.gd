@@ -459,7 +459,7 @@ func _windups() -> void:
 		"the jab lands at the end of its %.2f s wind-up (%.2f s): sedated, one vial" % [float(WindupScript.WINDUP_TIME.jab), jab_t])
 	game.kill_monster(m)
 	# ---- a jab on a monster that got up during the wind-up fails
-	var m2 := await _monster("walk_in", o + Vector3(12.0, 0, 12.0))
+	var m2 := await _monster("hive", o + Vector3(12.0, 0, 12.0))
 	await _seconds(CombatScript.JAB_COOLDOWN)
 	_face(m2)
 	await _frames(2)

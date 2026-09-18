@@ -493,7 +493,7 @@ func _pose_ability_bar_idle() -> void:
 
 
 ## The same ability bar with Alt held: big circles centred at the bottom, names and reasons shown.
-## Hive Eyes is kept ready but out of range (no Walk-In nearby) so its "No Walk-In in range" reason
+## Hive Eyes is kept ready but out of range (no Hive nearby) so its "No Hive in range" reason
 ## renders; Echo is kept on a partial cooldown so its radial sweep and pip levels are visible.
 func _pose_ability_bar_alt() -> void:
 	_ensure_shift()
@@ -672,7 +672,7 @@ func _pose_teammate(kind: String, k: String) -> void:
 			game.combat.pose_at(mate, k, WindupScript.WINDUP, float(WindupScript.WINDUP_TIME[k]))
 
 
-## A Walk-In just shoved (`rising` false: down in the window; true: the closing warning).
+## A Hive just shoved (`rising` false: down in the window; true: the closing warning).
 func _pose_stun(rising: bool) -> void:
 	if not rising:
 		_hands_spot()
@@ -681,7 +681,7 @@ func _pose_stun(rising: bool) -> void:
 		if _mate != null and is_instance_valid(_mate):
 			_mate.teleport(game.table_pos() + Vector3(0, 0, -30))
 		var at := game._floor_at(eye + Vector3(-0.3, 0, -1.6))
-		_shot_monster = game._add_monster("walk_in", at)
+		_shot_monster = game._add_monster("hive", at)
 		_shot_monster.rotation.y = -PI * 0.4
 		_shot_monster.brain.stun(Vector3.ZERO, 99.0, 0.0)
 		game.combat.stun_window.host_stunned(_shot_monster, 99.0)
@@ -728,7 +728,7 @@ func _pose_carry(what: String, corridor: bool) -> void:
 		game.down_player(mate, "test")
 		game.start_carry(bot, mate)
 	else:
-		_shot_monster = game._add_monster("walk_in", game._floor_at(from - dir * 1.0))
+		_shot_monster = game._add_monster("hive", game._floor_at(from - dir * 1.0))
 		_shot_monster.sedate(75.0)
 		game.combat.start_drag(bot, _shot_monster)
 

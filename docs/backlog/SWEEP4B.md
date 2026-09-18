@@ -20,7 +20,7 @@ living parasitic mass. It's what turned the patients into monsters, and its powe
 theirs. Rename every brain item kind, string, model, dissection target and dev tool. The blender
 is **removed**.
 
-Today brains are item kinds `brain_walk_in` / `brain_discharged` (`dissection.gd`
+Today brains are item kinds `brain_hive` / `brain_discharged` (`dissection.gd`
 `BRAIN_KINDS`), with meshes from `brain_model.gd`, spoiling in `brains.gd`, the break-room
 blender in `blender.gd`, and the harvest minigame in `scripts/dissection/brain_forceps.gd`.
 
@@ -41,7 +41,7 @@ blender in `blender.gd`, and the harvest minigame in `scripts/dissection/brain_f
 A dead Growth is useless and can't be grafted. Smaller botches cost vitals, as surgery does
 today.
 
-**Hive Knot (Walk-In)**
+**Hive Knot (Hive)**
 - **Look:** a grape-cluster knot of 6–10 marble-sized eyeball nodules fused at the base, with
   cloudy lenses and dark pupils that **drift and look around** even after harvest. A tail of pale
   threads hangs off the back. Yellow-white glow.

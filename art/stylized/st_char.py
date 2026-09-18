@@ -1,4 +1,4 @@
-"""Stylized humans: the surgeon and the Walk-In as smooth blended shapes on the human pipeline's skeleton.
+"""Stylized humans: the surgeon and the Hive as smooth blended shapes on the human pipeline's skeleton.
 
 Style rules (the start of the style guide):
 - People, not dolls: normal-ish proportions, a little heavier in the head and hands.
@@ -40,7 +40,7 @@ VARIANTS = {
         jaw=0.55, cheek=0.5, nose=1.0, brow=1.0, jowl=0.0, sag=0.0, mouth_open=0.0, eye_open=0.62,
         outfit='scrubs', graft=False, seed=5),
     'surgeon_graft': dict(base='surgeon', graft=True),
-    'walk_in': dict(
+    'hive': dict(
         height=1.75, fem=0.0, girth=1.12, head_scale=1.13, shoulders=1.0,
         skin=(0.60, 0.61, 0.53), flush=(0.52, 0.44, 0.44), lip=(0.44, 0.38, 0.40),
         hair=(0.30, 0.28, 0.26), iris=(0.60, 0.60, 0.52), cloth=(0.56, 0.66, 0.74),
@@ -621,7 +621,7 @@ def build(name, body):
     # eyes: separate balls in the sockets
     for side, tag in ((1, 'L'), (-1, 'R')):
         c, r = head.eye_world(side)
-        kind = 'walk_in' if (V['outfit'] == 'gown' or (V['graft'] and side == 1)) else 'human'
+        kind = 'hive' if (V['outfit'] == 'gown' or (V['graft'] and side == 1)) else 'human'
         parts.append(Part('Eye_' + tag, EYE, S.sphere(c, r), c - r * 1.3, c + r * 1.3, r / 40.0,
                           paint=(lambda P, c=c, r=r, kind=kind: eye_paint(V, P, c, r, kind)), rigid='head'))
 

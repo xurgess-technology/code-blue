@@ -7,8 +7,8 @@ extends RefCounted
 ## silhouette/X-ray drawing), behaviour, senses, threat, doses, brain_site, ability, growth_site}
 
 const ENTRIES := {
-	"walk_in": {
-		"name": "The Walk-In",
+	"hive": {
+		"name": "The Hive",
 		"height": 1.75,
 		"hunch": 0.12,
 		"behaviour": "Wanders the wings until it hears something. Investigates noise, loses interest if nothing follows.",
@@ -26,8 +26,8 @@ const ENTRIES := {
 		"behaviour": "Slower, heavier, hunts by scent and sound both. Does not lose interest once it has your trail.",
 		"senses": "Hearing and scent. Standing still and stone quiet is the only way to lose it once it is close.",
 		"threat": "High. Hits hard, keeps coming. Sedate it before it closes the distance.",
-		"doses": "About 3 doses of anesthetic; it fights the sedative longer than a Walk-In.",
-		"brain_site": "Skull, set slightly further back than a Walk-In's.",
+		"doses": "About 3 doses of anesthetic; it fights the sedative longer than a Hive.",
+		"brain_site": "Skull, set slightly further back than a Hive's.",
 		"ability": "Echo",
 		"growth_site": "",
 	},
@@ -45,7 +45,7 @@ const ENTRIES := {
 	},
 }
 
-const ORDER := ["walk_in", "discharged", "night_nurse"]
+const ORDER := ["hive", "discharged", "night_nurse"]
 
 
 static func entry(kind: String) -> Dictionary:

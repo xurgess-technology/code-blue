@@ -5,7 +5,7 @@ extends Node3D
 ##   godot --headless --fixed-fps 60 --path . tools/monster_lab.tscn            # scenarios
 ##   godot --path . tools/monster_lab.tscn -- --shots                             # screenshots
 ##   godot --path . tools/monster_lab.tscn -- --shots --only=nurse_door           # one shot
-##   godot --path . --resolution 1600x900 tools/monster_lab.tscn -- --perf              # Walk-In frame cost
+##   godot --path . --resolution 1600x900 tools/monster_lab.tscn -- --perf              # Hive frame cost
 ##   options: --dist=<m> overrides the camera distance, --nopost drops the post layer
 ##
 ## Exit code 0 only when every scenario passed.
@@ -242,7 +242,7 @@ func _run_scenarios() -> void:
 	await _scenario_contact()
 	_scenario_roster()
 	await _scenario_client()
-	await _scenario_walk_in()
+	await _scenario_hive()
 	await _scenario_combat()
 	await _scenario_drag_and_lying()
 	_scenario_placement()
@@ -512,20 +512,20 @@ func _scenario_roster() -> void:
 			var r: Array[String] = MonsterScript.roster(shift, pc)
 			var dd := r.count("discharged")
 			var nn := r.count("night_nurse")
-			var ww := r.count("walk_in")
+			var ww := r.count("hive")
 			line += "  %dp D%d N%d W%d" % [pc, dd, nn, ww]
 			if dd + nn > MonsterScript.MAX_MONSTERS or dd < 1 or (shift == 1 and nn != 0) or (shift >= 2 and nn < 1):
 				ok = false
-			if ww < 2 or ww > MonsterScript.MAX_WALK_INS or ww != MonsterScript.walk_in_count(shift, pc):
+			if ww < 2 or ww > MonsterScript.MAX_HIVES or ww != MonsterScript.hive_count(shift, pc):
 				ok = false
-			if (shift > 1 or pc > 1) and ww < MonsterScript.roster(maxi(1, shift - 1), maxi(1, pc - 1)).count("walk_in"):
+			if (shift > 1 or pc > 1) and ww < MonsterScript.roster(maxi(1, shift - 1), maxi(1, pc - 1)).count("hive"):
 				ok = false
 		print("[monster_lab]", line)
 	var s1: Array[String] = MonsterScript.roster(1, 1)
-	check("shift 1 solo is one Discharged and Walk-Ins", s1.count("discharged") == 1 and s1.count("night_nurse") == 0 and s1.count("walk_in") == 4, str(s1))
-	check("roster rules hold for shifts 1-6, 1-4 players (cap 5 + Walk-In cap 8, nurse from shift 2, Walk-Ins grow)", ok)
-	check("the Walk-In cap is reached late (shift 6, 4 players: %d)" % MonsterScript.roster(6, 4).count("walk_in"), MonsterScript.roster(6, 4).count("walk_in") == MonsterScript.MAX_WALK_INS)
-	check("capturable: walk_in, discharged; not the Night Nurse", MonsterScript.is_capturable("walk_in") and MonsterScript.is_capturable("discharged") and not MonsterScript.is_capturable("night_nurse"))
+	check("shift 1 solo is one Discharged and Hives", s1.count("discharged") == 1 and s1.count("night_nurse") == 0 and s1.count("hive") == 4, str(s1))
+	check("roster rules hold for shifts 1-6, 1-4 players (cap 5 + Hive cap 8, nurse from shift 2, Hives grow)", ok)
+	check("the Hive cap is reached late (shift 6, 4 players: %d)" % MonsterScript.roster(6, 4).count("hive"), MonsterScript.roster(6, 4).count("hive") == MonsterScript.MAX_HIVES)
+	check("capturable: hive, discharged; not the Night Nurse", MonsterScript.is_capturable("hive") and MonsterScript.is_capturable("discharged") and not MonsterScript.is_capturable("night_nurse"))
 
 
 ## A client copy fed only report() must animate the same state.
@@ -562,13 +562,13 @@ func _scenario_client() -> void:
 	await clear_monsters()
 
 
-func _scenario_walk_in() -> void:
-	print("[monster_lab] --- 7. the Walk-In sees ---")
+func _scenario_hive() -> void:
+	print("[monster_lab] --- 7. the Hive sees ---")
 	set_all_lights(false)
 	# Facing east (+X) down the dark corridor, a player 8 m ahead, flashlight off.
 	place_player(cor(18.0), cor(0.0) + Vector3.UP * 1.5, false)
 	p1.invuln = 99.0
-	var w: Node = spawn("walk_in", cor(10.0), -PI * 0.5)
+	var w: Node = spawn("hive", cor(10.0), -PI * 0.5)
 	await wait(0.5)
 	check("it sees a player 8 m ahead in the dark and comes (mode RUSH, state CHASE)", w.mode == Modes.Mode.RUSH and w.state == Modes.State.CHASE, "mode=%d" % w.mode)
 	var eyes: Transform3D = w.eye_transform()
@@ -584,7 +584,7 @@ func _scenario_walk_in() -> void:
 	# Behind it: not seen.
 	await clear_monsters()
 	place_player(cor(4.0), cor(30.0) + Vector3.UP * 1.5, false)
-	w = spawn("walk_in", cor(10.0), -PI * 0.5)
+	w = spawn("hive", cor(10.0), -PI * 0.5)
 	w.brain.home = cor(10.0)
 	w.brain.timer = 30.0   # stands still
 	var chased := false
@@ -602,7 +602,7 @@ func _scenario_walk_in() -> void:
 	# Beyond range: 14 m ahead.
 	await clear_monsters()
 	place_player(cor(24.0), cor(0.0) + Vector3.UP * 1.5, false)
-	w = spawn("walk_in", cor(10.0), -PI * 0.5)
+	w = spawn("hive", cor(10.0), -PI * 0.5)
 	w.brain.home = cor(10.0)
 	w.brain.timer = 30.0
 	await wait(1.0)
@@ -611,7 +611,7 @@ func _scenario_walk_in() -> void:
 	# Loses interest behind a wall.
 	await clear_monsters()
 	place_player(cor(17.0), cor(0.0) + Vector3.UP * 1.5, false)
-	w = spawn("walk_in", cor(10.0), -PI * 0.5)
+	w = spawn("hive", cor(10.0), -PI * 0.5)
 	await wait(1.0)
 	var chasing: bool = w.mode == Modes.Mode.RUSH
 	# The player ducks into the top room (doorway at tile 16,4) and stands behind its wall.
@@ -642,12 +642,12 @@ func _scenario_walk_in() -> void:
 	await clear_monsters()
 	place_player(cor(13.0), cor(0.0) + Vector3.UP * 1.5, false)
 	p1.invuln = 0.0
-	w = spawn("walk_in", cor(10.0), -PI * 0.5)
+	w = spawn("hive", cor(10.0), -PI * 0.5)
 	for i in 5 * 60:
 		await get_tree().physics_frame
 		if not game.hits.is_empty():
 			break
-	check("it walks into a player standing still and hits for 1", game.hits.size() == 1 and game.hits[0].damage == 1 and game.hits[0].kind == "walk_in", "hits=%s" % [game.hits])
+	check("it walks into a player standing still and hits for 1", game.hits.size() == 1 and game.hits[0].damage == 1 and game.hits[0].kind == "hive", "hits=%s" % [game.hits])
 	check("after the hit it backs off and is calm", w.mode == Modes.Mode.RETREAT and w.calm > 0.0, "mode=%d" % w.mode)
 	p1.invuln = 99.0
 
@@ -656,13 +656,13 @@ func _scenario_walk_in() -> void:
 	w.shoved(Vector3.RIGHT)
 	var st: Vector3 = w.global_position
 	await wait(1.8)
-	check("a shove stuns the Walk-In for ~2 s (can_sedate %s)" % w.can_sedate(), w.mode == Modes.Mode.STUNNED and w.global_position.distance_to(st) < 0.05 and w.can_sedate())
+	check("a shove stuns the Hive for ~2 s (can_sedate %s)" % w.can_sedate(), w.mode == Modes.Mode.STUNNED and w.global_position.distance_to(st) < 0.05 and w.can_sedate())
 	await wait(0.4)
 	check("then it recovers (can_sedate false again)", w.mode != Modes.Mode.STUNNED and not w.can_sedate(), "mode=%d" % w.mode)
 
 	# Cost of building one (the parts are baked once per session, then reused).
 	var tb := Time.get_ticks_usec()
-	var built: Node = MonsterScript.new_monster(990, "walk_in", cor(40.0))
+	var built: Node = MonsterScript.new_monster(990, "hive", cor(40.0))
 	var build_ms := float(Time.get_ticks_usec() - tb) / 1000.0
 	built.free()
 	var others := ""
@@ -671,14 +671,14 @@ func _scenario_walk_in() -> void:
 		var o: Node = MonsterScript.new_monster(991, k, cor(40.0))
 		others += " %s %.1f ms" % [k, float(Time.get_ticks_usec() - tk) / 1000.0]
 		o.free()
-	check("building another Walk-In takes %.1f ms (parts baked once and cached;%s)" % [build_ms, others], build_ms < 15.0)
+	check("building another Hive takes %.1f ms (parts baked once and cached;%s)" % [build_ms, others], build_ms < 15.0)
 
-	# Cost: several Walk-Ins in sight of the player, rays per second.
+	# Cost: several Hives in sight of the player, rays per second.
 	await clear_monsters()
 	place_player(cor(20.0), cor(0.0) + Vector3.UP * 1.5, false)
 	var crowd: Array = []
 	for i in 6:
-		var c: Node = spawn("walk_in", cor(8.0 + i * 1.5, -0.8 + (i % 2) * 1.6), -PI * 0.5)
+		var c: Node = spawn("hive", cor(8.0 + i * 1.5, -0.8 + (i % 2) * 1.6), -PI * 0.5)
 		crowd.append(c)
 	await wait(0.3)
 	for c in crowd:
@@ -687,7 +687,7 @@ func _scenario_walk_in() -> void:
 	var total := 0
 	for c in crowd:
 		total += int(c.brain.rays)
-	check("6 Walk-Ins cast %.1f rays/s each (sight at 5 Hz, <= 12)" % (total / 3.0 / 6.0), total / 3.0 / 6.0 <= 12.0)
+	check("6 Hives cast %.1f rays/s each (sight at 5 Hz, <= 12)" % (total / 3.0 / 6.0), total / 3.0 / 6.0 <= 12.0)
 	var t_us := Time.get_ticks_usec()
 	for i in 200:
 		crowd[0].brain._look()
@@ -701,16 +701,16 @@ func _scenario_combat() -> void:
 	set_all_lights(false)
 	place_player(cor(40.0), cor(0.0) + Vector3.UP * 1.5, false)
 	p1.invuln = 99.0
-	var w: Node = spawn("walk_in", cor(10.0), -PI * 0.5)
+	var w: Node = spawn("hive", cor(10.0), -PI * 0.5)
 	var d: Node = spawn("discharged", cor(20.0), -PI * 0.5)
 	var n: Node = spawn("night_nurse", cor(30.0), -PI * 0.5)
 	await wait(0.2)
-	check("hp: walk_in 2, discharged 4, night_nurse 0", w.hp == 2 and w.max_hp == 2 and d.hp == 4 and d.max_hp == 4 and n.hp == 0 and n.max_hp == 0)
+	check("hp: hive 2, discharged 4, night_nurse 0", w.hp == 2 and w.max_hp == 2 and d.hp == 4 and d.max_hp == 4 and n.hp == 0 and n.max_hp == 0)
 	check("can_be_hurt: not the Night Nurse", w.can_be_hurt() and d.can_be_hurt() and not n.can_be_hurt())
 	var before: Vector3 = w.global_position
 	var r1: String = w.take_hit(Vector3.RIGHT, 1, "saw:lab")
 	await get_tree().physics_frame
-	check("a first saw hit staggers the Walk-In (%s, knocked %.2f m, hp %d)" % [r1, w.global_position.distance_to(before), w.hp], r1 == "stagger" and w.mode == Modes.Mode.STUNNED and w.hp == 1 and w.global_position.distance_to(before) > 0.2)
+	check("a first saw hit staggers the Hive (%s, knocked %.2f m, hp %d)" % [r1, w.global_position.distance_to(before), w.hp], r1 == "stagger" and w.mode == Modes.Mode.STUNNED and w.hp == 1 and w.global_position.distance_to(before) > 0.2)
 	check("the hit bumps hit_count for every machine (%d)" % w.hit_count, w.hit_count == 1 and int(w.report().hc) == 1)
 	await wait(1.0)
 	check("after the stagger it goes after the hitter (mode RUSH)", w.mode == Modes.Mode.RUSH, "mode=%d" % w.mode)
@@ -728,7 +728,7 @@ func _scenario_combat() -> void:
 	# Sedation.
 	place_player(cor(13.0), cor(0.0) + Vector3.UP * 1.5, false)
 	p1.invuln = 0.0
-	w = spawn("walk_in", cor(12.0), -PI * 0.5)
+	w = spawn("hive", cor(12.0), -PI * 0.5)
 	await wait(0.1)
 	check("not stunned: can_sedate is false", not w.can_sedate())
 	w.shoved(Vector3.LEFT)
@@ -777,7 +777,7 @@ func _scenario_drag_and_lying() -> void:
 	var lc := LabCombat.new()
 	game.add_child(lc)
 	game.combat = lc
-	var w: Node = spawn("walk_in", cor(10.0), -PI * 0.5)
+	var w: Node = spawn("hive", cor(10.0), -PI * 0.5)
 	await wait(0.1)
 	w.shoved(Vector3.LEFT)
 	w.sedate(30.0)
@@ -792,7 +792,7 @@ func _scenario_drag_and_lying() -> void:
 	client_game.players = game.players
 	client_game.level_info = game.level_info
 	client_game.combat = lc
-	var cw: Node = MonsterScript.new_monster(997, "walk_in", cor(30.0))
+	var cw: Node = MonsterScript.new_monster(997, "hive", cor(30.0))
 	add_child(cw)
 	cw.game = client_game
 	cw.apply_remote(w.report())
@@ -824,7 +824,7 @@ func _scenario_drag_and_lying() -> void:
 	p1.invuln = 99.0
 
 	# make_lying: a still copy along X, head toward -X, origin at the middle of the back.
-	for k in ["walk_in", "discharged"]:
+	for k in ["hive", "discharged"]:
 		var copy: Node3D = MonsterScript.make_lying(k)
 		copy.position = cor(20.0) + Vector3.UP * 1.0
 		add_child(copy)
@@ -846,9 +846,9 @@ func _scenario_drag_and_lying() -> void:
 	await get_tree().physics_frame
 
 
-## Walk-In placement in generated hospitals (no physics space: the tile rules only).
+## Hive placement in generated hospitals (no physics space: the tile rules only).
 func _scenario_placement() -> void:
-	print("[monster_lab] --- 10. Walk-In placement ---")
+	print("[monster_lab] --- 10. Hive placement ---")
 	var MG = load("res://scripts/mapgen.gd")
 	var ok_zone := true
 	var ok_room := true
@@ -865,7 +865,7 @@ func _scenario_placement() -> void:
 			var rng := RandomNumberGenerator.new()
 			rng.seed = seed
 			var t0 := Time.get_ticks_msec()
-			var spots: Array[Vector3] = MonsterScript.walk_in_spots(info, count, rng)
+			var spots: Array[Vector3] = MonsterScript.hive_spots(info, count, rng)
 			t_ms = maxi(t_ms, Time.get_ticks_msec() - t0)
 			if spots.size() != count:
 				ok_count = false
@@ -884,7 +884,7 @@ func _scenario_placement() -> void:
 						ok_room = false
 						detail = "seed %d spot %s in room %s" % [seed, p, r.kind]
 				per_wing[z] = per_wing.get(z, []) + [p]
-			var cands: Dictionary = MonsterScript._walk_in_candidates(info, null)
+			var cands: Dictionary = MonsterScript._hive_candidates(info, null)
 			for z in per_wing:
 				var dmin: float = cands[z][0].d
 				for p in per_wing[z]:
@@ -897,14 +897,14 @@ func _scenario_placement() -> void:
 					detail = "seed %d wing %s has %d" % [seed, z, (per_wing[z] as Array).size()]
 			if count == 8 and per_wing.size() < mini(4, info.wings.size()) - 1:
 				ok_groups = false
-				detail = "seed %d: 8 Walk-Ins in only %d of %d wings" % [seed, per_wing.size(), info.wings.size()]
-			print("[monster_lab]   seed %d, %d Walk-Ins: %s" % [seed, count, str(per_wing.keys().map(func(k): return "%s x%d" % [k, per_wing[k].size()]))])
+				detail = "seed %d: 8 Hives in only %d of %d wings" % [seed, per_wing.size(), info.wings.size()]
+			print("[monster_lab]   seed %d, %d Hives: %s" % [seed, count, str(per_wing.keys().map(func(k): return "%s x%d" % [k, per_wing[k].size()]))])
 		lvl.free()
-	check("Walk-In spots: the requested count", ok_count)
-	check("Walk-In spots: all in wings, never the entrance or neutral area", ok_zone, detail)
-	check("Walk-In spots: hallways, not rooms", ok_room, detail)
-	check("Walk-In spots: the shallow part of each wing", ok_shallow, detail)
-	check("Walk-In spots: groups of 2-4 spread over the wings (worst %d ms)" % t_ms, ok_groups, detail)
+	check("Hive spots: the requested count", ok_count)
+	check("Hive spots: all in wings, never the entrance or neutral area", ok_zone, detail)
+	check("Hive spots: hallways, not rooms", ok_room, detail)
+	check("Hive spots: the shallow part of each wing", ok_shallow, detail)
+	check("Hive spots: groups of 2-4 spread over the wings (worst %d ms)" % t_ms, ok_groups, detail)
 
 # =========================================================================
 # screenshots
@@ -928,11 +928,11 @@ func _run_shots() -> void:
 		["nurse_lunge", _shot_nurse_lunge],
 		["nurse_face", _shot_head.bind("night_nurse", false, 0.9, 0.35)],
 		["nurse_corpse", _shot_nurse_corpse],
-		["walk_in_4m", _shot_walk_in.bind(4.0, false)],
-		["walk_in_1_5m", _shot_walk_in.bind(1.5, false)],
-		["walk_in_face", _shot_head.bind("walk_in", false, 0.75, 0.45)],
-		["walk_in_sees_you", _shot_walk_in_rush],
-		["walk_in_group", _shot_walk_in_group],
+		["hive_4m", _shot_hive.bind(4.0, false)],
+		["hive_1_5m", _shot_hive.bind(1.5, false)],
+		["hive_face", _shot_head.bind("hive", false, 0.75, 0.45)],
+		["hive_sees_you", _shot_hive_rush],
+		["hive_group", _shot_hive_group],
 		["discharged_head", _shot_head.bind("discharged", false, 0.8, 0.2)],
 		["discharged_side", _shot_head.bind("discharged", false, 0.7, 1.35)],
 		["discharged_ears_listen", _shot_head.bind("discharged", true, 0.8, 0.5)],
@@ -1091,11 +1091,11 @@ func _shot_nurse_corpse() -> void:
 	await wait(0.2)
 
 
-func _shot_walk_in(dist: float, _unused: bool) -> void:
+func _shot_hive(dist: float, _unused: bool) -> void:
 	if dist_override > 0.0:
 		dist = dist_override
 	var pos := cor(20.0, -0.2)
-	var w: Node = spawn("walk_in", pos, -PI * 0.5)
+	var w: Node = spawn("hive", pos, -PI * 0.5)
 	var yaw := -PI * 0.5 + 0.25
 	_pose(w, pos, yaw, Modes.Mode.WANDER, true, 0.8)
 	var look_h := 1.0 if dist > 2.0 else (1.3 if dist > 1.0 else 1.45)
@@ -1106,10 +1106,10 @@ func _shot_walk_in(dist: float, _unused: bool) -> void:
 	w.model.anim.speed_scale = 0.0
 
 
-func _shot_walk_in_rush() -> void:
+func _shot_hive_rush() -> void:
 	# It has seen the camera and comes: head up, 2 m away, a fixture behind it.
 	var pos := cor(21.0, -0.2)
-	var w: Node = spawn("walk_in", pos, -PI * 0.5)
+	var w: Node = spawn("hive", pos, -PI * 0.5)
 	set_light(1, true)
 	for f in 90:
 		await get_tree().physics_frame
@@ -1118,12 +1118,12 @@ func _shot_walk_in_rush() -> void:
 	place_player(pos + Vector3(2.0, 0, 0.25), pos + Vector3.UP * 1.45, true)
 
 
-func _shot_walk_in_group() -> void:
+func _shot_hive_group() -> void:
 	var yaws := [-PI * 0.5 + 0.4, -PI * 0.5 - 0.2, -PI * 0.5 + 0.1]
 	var spots := [cor(18.0, -0.7), cor(16.5, 0.6), cor(14.5, -0.2)]
 	var ws: Array = []
 	for i in 3:
-		ws.append(spawn("walk_in", spots[i], yaws[i]))
+		ws.append(spawn("hive", spots[i], yaws[i]))
 	set_light(1, true)
 	place_player(cor(25.0, 0.2), cor(16.0) + Vector3.UP * 1.1, true)
 	for f in 50:
@@ -1164,7 +1164,7 @@ func _shot_head(kind: String, listen: bool, dist: float, view: float) -> void:
 
 
 func _shot_height() -> void:
-	# Left to right: the Discharged, a surgeon, a Walk-In, side by side across the corridor.
+	# Left to right: the Discharged, a surgeon, a Hive, side by side across the corridor.
 	var d: Node = spawn("discharged", cor(21.0, -1.0), -PI * 0.5)
 	_pose(d, cor(21.0, -1.0), -PI * 0.5, Modes.Mode.IDLE, false, 0.0)
 	var surgeon: Node = PlayerScript.new_player(2, "Surgeon", false)
@@ -1173,7 +1173,7 @@ func _shot_height() -> void:
 	surgeon.rotation.y = -PI * 0.5
 	surgeon._target_yaw = -PI * 0.5
 	surgeon.add_to_group("monster")   # cleared with the monsters after the shot
-	var w: Node = spawn("walk_in", cor(21.0, 1.0), -PI * 0.5)
+	var w: Node = spawn("hive", cor(21.0, 1.0), -PI * 0.5)
 	_pose(w, cor(21.0, 1.0), -PI * 0.5, Modes.Mode.IDLE, false, 0.0)
 	set_light(1, true)
 	place_player(cor(27.5, 0.0), cor(21.0, 0.0) + Vector3.UP * 1.1, true)
@@ -1181,12 +1181,12 @@ func _shot_height() -> void:
 	var head: Node3D = d.model.find_child("Head", true, false)
 	print("[monster_lab] Discharged head bone at %.2f m (top of skull about %.2f)" % [head.global_position.y, head.global_position.y + 0.25])
 	var wh: Node3D = w.model.find_child("Head", true, false)
-	print("[monster_lab] Walk-In head bone at %.2f m (top of skull about %.2f)" % [wh.global_position.y, wh.global_position.y + 0.22])
+	print("[monster_lab] Hive head bone at %.2f m (top of skull about %.2f)" % [wh.global_position.y, wh.global_position.y + 0.22])
 
 
 func _shot_sedated() -> void:
 	var pos := cor(21.0, -0.5)
-	var w: Node = spawn("walk_in", pos, PI * 0.5 + 0.3)
+	var w: Node = spawn("hive", pos, PI * 0.5 + 0.3)
 	var d: Node = spawn("discharged", cor(18.0, 0.6), -PI * 0.5 - 0.2)
 	for f in 120:
 		await get_tree().physics_frame
@@ -1197,7 +1197,7 @@ func _shot_sedated() -> void:
 
 
 func _shot_lying() -> void:
-	var a: Node3D = MonsterScript.make_lying("walk_in")
+	var a: Node3D = MonsterScript.make_lying("hive")
 	a.position = cor(21.0, -0.7) + Vector3.UP * 0.9
 	add_child(a)
 	a.add_to_group("monster")
@@ -1369,9 +1369,9 @@ func _run_real() -> void:
 
 
 # =========================================================================
-# frame time with Walk-Ins (windowed, vsync off)
+# frame time with Hives (windowed, vsync off)
 #   godot --path . --resolution 1600x900 tools/monster_lab.tscn -- --perf [--seed=4242] [--frames=300]
-# Same session, same view, alternating: no Walk-Ins, the shift's roster, 8 Walk-Ins in view.
+# Same session, same view, alternating: no Hives, the shift's roster, 8 Hives in view.
 # =========================================================================
 
 var _perf_rows: Array = []
@@ -1405,10 +1405,10 @@ func _run_perf() -> void:
 	bot.bot_invulnerable = true
 	print("[perf] gpu=%s window=%s monsters=%s" % [RenderingServer.get_video_adapter_name(), str(get_viewport().get_visible_rect().size), str(g.monsters.values().map(func(m): return m.kind))])
 
-	# The view: from 9 m down the most open line from the first Walk-In, looking back at it.
+	# The view: from 9 m down the most open line from the first Hive, looking back at it.
 	var first: Vector3 = Vector3.ZERO
 	for m in g.monsters.values():
-		if m.kind == "walk_in":
+		if m.kind == "hive":
 			first = m.global_position
 			break
 	var space: PhysicsDirectSpaceState3D = bot.get_world_3d().direct_space_state
@@ -1436,28 +1436,28 @@ func _run_perf() -> void:
 		await _perf_nurses(g, bot, first, best_dir, look, frames)
 		return
 	for pass_i in 2:
-		# A: no Walk-Ins at all (what the game had before).
+		# A: no Hives at all (what the game had before).
 		g._spawn_monsters()
 		for m in g.monsters.values().duplicate():
-			if m.kind == "walk_in":
+			if m.kind == "hive":
 				g.monsters.erase(m.monster_id)
 				m.queue_free()
 		look.call()
-		await _perf_measure("no Walk-Ins (%d monsters) #%d" % [g.monsters.size(), pass_i + 1], frames, bot)
+		await _perf_measure("no Hives (%d monsters) #%d" % [g.monsters.size(), pass_i + 1], frames, bot)
 		# B: the shift's roster.
 		g._spawn_monsters()
 		look.call()
 		await _perf_measure("shift 1 roster (%d monsters) #%d" % [g.monsters.size(), pass_i + 1], frames, bot)
-		# C: 8 Walk-Ins right in view, chasing the camera.
+		# C: 8 Hives right in view, chasing the camera.
 		for m in g.monsters.values().duplicate():
-			if m.kind == "walk_in":
+			if m.kind == "hive":
 				g.monsters.erase(m.monster_id)
 				m.queue_free()
 		for i in 8:
 			var p: Vector3 = first + best_dir * (1.0 + i * 0.7) + best_dir.cross(Vector3.UP) * (0.6 if i % 2 == 0 else -0.6)
-			g._add_monster("walk_in", p)
+			g._add_monster("hive", p)
 		look.call()
-		await _perf_measure("8 Walk-Ins in view (%d monsters) #%d" % [g.monsters.size(), pass_i + 1], frames, bot)
+		await _perf_measure("8 Hives in view (%d monsters) #%d" % [g.monsters.size(), pass_i + 1], frames, bot)
 	print("[perf] ============================================================================")
 	print("[perf] %-40s avg fps  1%%low  worst ms  phys ms  proc ms  draws" % "scenario")
 	for r in _perf_rows:

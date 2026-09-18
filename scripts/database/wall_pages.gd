@@ -29,10 +29,10 @@ const SECTIONS := [
 ]
 
 ## Which brain path a monster's ability grows on, and its name.
-const ABILITY := {"walk_in": "Hive Eyes", "discharged": "Echo"}
+const ABILITY := {"hive": "Hive Eyes", "discharged": "Echo"}
 
 const MONSTER_TEXT := {
-	"walk_in": ["Wanders the wings until it hears something. It can't see: running, dropping things and shoving give you away.", "About 2 doses of anesthetic put it under."],
+	"hive": ["Wanders the wings until it hears something. It can't see: running, dropping things and shoving give you away.", "About 2 doses of anesthetic put it under."],
 	"discharged": ["Big, slow and relentless. It hunts by sound and smell, and once it has your trail it doesn't let go.", "It takes about 3 doses to put it under."],
 	"night_nurse": ["She only moves when nobody is looking at her. Keep your eyes on her.", "Nobody knows what happens if she reaches you."],
 }
@@ -75,7 +75,7 @@ const LOOT_BLURBS := {
 	"defibrillator": "A portable defibrillator. Takes both hands.",
 	"microscope": "A lab microscope. Fragile, takes both hands.",
 	"ultrasound": "A portable ultrasound. The best find in the wings.",
-	"brain_walk_in": "A Walk-In's brain. Drink it to grow Hive Eyes.",
+	"brain_hive": "A Hive's brain. Drink it to grow Hive Eyes.",
 	"brain_discharged": "A Discharged brain. Drink it to grow Echo.",
 }
 
@@ -147,7 +147,7 @@ static func _monster(kind: String, view: Dictionary) -> Dictionary:
 		for n in range(1, 4):
 			var brains = view.get("brains")
 			if lvl >= n and brains != null:
-				if kind == "walk_in":
+				if kind == "hive":
 					levels[n - 1] = "Reach %.0f m, watch for %.1f s" % [brains.hive_range(n), brains.hive_seconds(n)]
 				else:
 					levels[n - 1] = "Radius %.0f m, lasts %.1f s" % [brains.echo_radius(n), brains.echo_seconds(n)]

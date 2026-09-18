@@ -1,15 +1,15 @@
 extends Node
 ## Hive Eyes, on the watching player's machine only (brains, sweep 3; the fly-through is sweep 4a
-## chunk 4): a camera riding in a Walk-In's eyes and a grainy, sickly, night-sight screen over it.
-## main.gd renders through `camera` while `active` (game.brains.camera()). Walk-Ins see in the
+## chunk 4): a camera riding in a Hive's eyes and a grainy, sickly, night-sight screen over it.
+## main.gd renders through `camera` while `active` (game.brains.camera()). Hives see in the
 ## dark, so the screen lifts the shadows a lot; everything is a washed-out yellow-green with
 ## grain, scan lines and a slow wobble.
 ##
 ## The brains system (host) says which monster and until when; everything about the flight -- the
-## camera leaving the player's own head, gliding along the navmesh to the Walk-In (or a straight
+## camera leaving the player's own head, gliding along the navmesh to the Hive (or a straight
 ## line when there is no path) and settling into its eyes over FLIGHT_IN seconds, then a quick
 ## FLIGHT_OUT glide back on a normal end -- is local and purely cosmetic (docs/SWEEP4A.md "Hive
-## Eyes"). A hit, the Walk-In dying or going under snap back instantly instead (no fly-back):
+## Eyes"). A hit, the Hive dying or going under snap back instantly instead (no fly-back):
 ## this file decides that itself, by comparing the local player's hp/state to what it was when
 ## the flight started, since only the local machine can react to its own hit instantly.
 
@@ -58,7 +58,7 @@ var _label: Label
 var _t := 0.0
 var _fade := 0.0
 
-## "in" (flying to the Walk-In), "settled" (riding its eyes) or "out" (flying back to the body).
+## "in" (flying to the Hive), "settled" (riding its eyes) or "out" (flying back to the body).
 var _phase := "in"
 var _phase_t := 0.0
 var _path: PackedVector3Array = PackedVector3Array()
@@ -163,7 +163,7 @@ func _begin_cycle(id: int) -> void:
 
 
 func _begin_end() -> void:
-	# A hit, the Walk-In dying/going under, or the player going down/being carried snap back
+	# A hit, the Hive dying/going under, or the player going down/being carried snap back
 	# instantly (docs/SWEEP4A.md "Hive Eyes"); a quiet end (the slot again, or time running out)
 	# gets the quick fly-back.
 	var me := _local_me()
@@ -216,7 +216,7 @@ func _path_from(from: Vector3, to: Vector3) -> PackedVector3Array:
 func _process(delta: float) -> void:
 	if not active or game == null:
 		return
-	# The Walk-In gone mid fly-back (a new run clears the monsters the same frame game over ends the
+	# The Hive gone mid fly-back (a new run clears the monsters the same frame game over ends the
 	# view): snap back, as when it dies while you look through it, instead of gliding across the
 	# new hospital.
 	if _phase == "out" and not game.monsters.has(monster_id):
@@ -281,7 +281,7 @@ func _along_path(path: PackedVector3Array, e: float) -> Vector3:
 	return path[path.size() - 1]
 
 
-## Ride the Walk-In's eyes once the flight has landed (unchanged from sweep 3's version).
+## Ride the Hive's eyes once the flight has landed (unchanged from sweep 3's version).
 func _settled(delta: float) -> void:
 	var m = game.monsters.get(monster_id)
 	if m == null or not is_instance_valid(m):
@@ -307,7 +307,7 @@ func _eye_transform(m: Node) -> Transform3D:
 	var eye: Vector3 = (m as Node3D).global_position + Vector3.UP * (eye_h + bob) + fwd * 0.34
 	var pitch := -0.1 + bob
 	if m.has_method("eye_transform"):
-		# Integration: ride the Walk-In's animated head (Monster.eye_transform, -Z forward), a little in
+		# Integration: ride the Hive's animated head (Monster.eye_transform, -Z forward), a little in
 		# front of the face so its own head never fills the view; keep the horizon level.
 		var ex: Transform3D = m.eye_transform()
 		var look := -ex.basis.z

@@ -127,7 +127,7 @@ levels are earned: something like `add_ability(peer, id)`, `set_level(peer, id, 
 - **Each slot icon shows:** the key (Alt+N), the ability name on hover while the bar is open, a
   cooldown sweep, and level pips.
 - **When it can't be used,** the icon greys out and pressing it shows a short reason, like
-  "No Walk-In in range", "Hands busy" or "Cooling down (12 s)".
+  "No Hive in range", "Hands busy" or "Cooling down (12 s)".
 - **Costs** appear on the icon, for example a small "LOUD" tag on Echo.
 - **First ability card:** the first time an ability lands in a slot, show a short card with its
   name, what it does, its key and its cost. It closes itself after a few seconds or on any key.
@@ -406,14 +406,14 @@ the chunk 1 scan record, `scripts/brains/hive_view.gd`, `scripts/brains/echo_vie
 
 ### 4b. Hive Eyes
 - **Fly-through camera on activation:** the local camera leaves the player's head and flies
-  **along the navmesh path** to the Walk-In, then settles into its eyes.
+  **along the navmesh path** to the Hive, then settles into its eyes.
   - The flight takes about 1–1.5 s no matter the distance, speeding up on long paths. If there's
     no path, it glides in a straight line.
   - It's local only. The host's duration timer starts **after** the flight lands.
 - **Normal exit:** a quick fly back to the body. **Taking a hit:** an instant snap back with no
   fly-back.
-- **Range pulse:** a subtle pulse or tick on the Hive Eyes slot while a Walk-In is within range.
-- **Cycling:** at level 2 and up, pressing the slot during Hive Eyes switches to another Walk-In
+- **Range pulse:** a subtle pulse or tick on the Hive Eyes slot while a Hive is within range.
+- **Cycling:** at level 2 and up, pressing the slot during Hive Eyes switches to another Hive
   in range, with a short fly-through between them. At level 1 you only get the nearest one.
   **Keys:** at level 1, tapping the slot again ends Hive Eyes. At level 2 and up, tapping cycles
   and **holding the slot key for about 0.4 s** ends it. Show this on the ability card.

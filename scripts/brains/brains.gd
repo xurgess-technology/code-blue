@@ -1,10 +1,10 @@
 extends Node
 ## Brains (sweep 3, docs/SWEEP3.md "Brains"): harvested brains and their spoilage, the dumpster
 ## price, the break-room blender, per-player absorbed brains, and the two abilities they teach on R:
-## Echo (Discharged brains) and Hive Eyes (Walk-In brains). A child "Brains" of Game on every machine.
+## Echo (Discharged brains) and Hive Eyes (Hive brains). A child "Brains" of Game on every machine.
 ##
 ## Authority: the host decides everything (spoil clocks, blending, points, abilities, who is looking
-## through which Walk-In). Clients get it through `net_state()` (global snapshot field `br`), the
+## through which Hive). Clients get it through `net_state()` (global snapshot field `br`), the
 ## Player field `hive_view` (report key `hv`), the world item / hand slot key `bt`, and reliable
 ## events `br_echo`, `br_drink`, `br_hive`. The visuals (rot, the blender, the Echo view, the Hive
 ## Eyes camera) run on every machine from that state.
@@ -20,20 +20,20 @@ const HiveViewScript := preload("res://scripts/brains/hive_view.gd")
 const LootTable := preload("res://scripts/economy/loot_table.gd")
 
 ## Brain kind -> the path it teaches.
-const PATH_OF := {"brain_walk_in": "walk_in", "brain_discharged": "discharged"}
-const KIND_OF := {"walk_in": "brain_walk_in", "discharged": "brain_discharged"}
-const PATHS := ["walk_in", "discharged"]
-const ABILITY_NAME := {"walk_in": "Hive Eyes", "discharged": "Echo"}
+const PATH_OF := {"brain_hive": "hive", "brain_discharged": "discharged"}
+const KIND_OF := {"hive": "brain_hive", "discharged": "brain_discharged"}
+const PATHS := ["hive", "discharged"]
+const ABILITY_NAME := {"hive": "Hive Eyes", "discharged": "Echo"}
 ## SWEEP 4A HOOK (controls): ability ids, and the ability-slot cap. add_ability()/set_level()/
 ## slot_of() are independent of how a level is earned (today: brains + blender points; grafting
 ## will source them later, docs/backlog/SWEEP4B.md), so slot code never reads `_points` directly
 ## except through level()/points().
-const ABILITY_ID := {"discharged": "echo", "walk_in": "hive_in"}
-const ABILITY_ID_TO_PATH := {"echo": "discharged", "hive_in": "walk_in"}
+const ABILITY_ID := {"discharged": "echo", "hive": "hive_in"}
+const ABILITY_ID_TO_PATH := {"echo": "discharged", "hive_in": "hive"}
 const MAX_SLOTS := 4
 ## A spoil time at or below this means "none" (WorldItem.bt defaults to -1e6; a real one can be negative).
 const NO_BT := -100000.0
-const WALK_IN := "walk_in"   # Monster.WALK_IN (monsters worker); the string, so this runs without it
+const HIVE := "hive"   # Monster.HIVE (monsters worker); the string, so this runs without it
 
 const FRESH_SECONDS := 45.0
 const ROTTEN_SECONDS := 225.0
@@ -65,7 +65,7 @@ const HIVE_PRESS_GRACE := 0.5
 
 var game: Node = null
 
-## Replicated. peer id -> [walk_in points, discharged points] (floats, multiples of 0.25).
+## Replicated. peer id -> [hive points, discharged points] (floats, multiples of 0.25).
 var _points: Dictionary = {}
 ## Replicated. peer id -> [monster id, world_time it ends].
 var _hive: Dictionary = {}
@@ -195,7 +195,7 @@ func spawn_brain(kind: String, quality: float, pos: Vector3) -> Node:
 	if game == null or not game.is_host():
 		return null
 	if not is_brain(kind):
-		kind = "brain_walk_in"
+		kind = "brain_hive"
 	var q := clampf(quality, 0.0, 1.0)
 	var at: Vector3 = game._surface_below(pos + Vector3.UP * 0.6, pos)
 	var it: Node = game._spawn_item(kind, 1, Transform3D(Basis(Vector3.UP, randf() * TAU), at + Vector3.UP * 0.01), WorldItem.State.LOOSE)
@@ -302,7 +302,7 @@ func hive_seconds(lvl: int) -> float:
 
 ## Host: seconds until an ability is ready for this player (0 = ready).
 func cooldown_left(peer_id: int, path: String) -> float:
-	var key := ("hive:%d" if path == "walk_in" else "echo:%d") % peer_id
+	var key := ("hive:%d" if path == "hive" else "echo:%d") % peer_id
 	return maxf(0.0, float(_cd.get(key, -1.0)) - float(game.world_time))
 
 
@@ -442,12 +442,12 @@ func _echo(p: Node, lvl: int) -> void:
 	last_result = "echo"
 
 
-## The nearest Walk-In within range of p, through walls; null if none. Sedated ones do not count.
-func nearest_walk_in(p: Node, range_m: float) -> Node:
+## The nearest Hive within range of p, through walls; null if none. Sedated ones do not count.
+func nearest_hive(p: Node, range_m: float) -> Node:
 	var best: Node = null
 	var best_d := range_m
 	for m in game.monsters.values():
-		if m == null or not is_instance_valid(m) or String(m.kind) != WALK_IN:
+		if m == null or not is_instance_valid(m) or String(m.kind) != HIVE:
 			continue
 		if m.has_method("is_sedated") and m.is_sedated():
 			continue
@@ -463,10 +463,10 @@ func _start_hive(p: Node, lvl: int) -> void:
 		last_result = "busy"
 		game.tell(p, "Not now: your hands are busy.", 1.5)
 		return
-	var m := nearest_walk_in(p, hive_range(lvl))
+	var m := nearest_hive(p, hive_range(lvl))
 	if m == null:
-		last_result = "no_walk_in"
-		game.tell(p, "No Walk-In close enough to see through.", 2.0)
+		last_result = "no_hive"
+		game.tell(p, "No Hive close enough to see through.", 2.0)
 		return
 	var peer: int = p.peer_id
 	# SWEEP 4A HOOK (Hive Eyes fly-through, chunk 4): the duration only starts once the local
@@ -503,16 +503,16 @@ func _tick_hive() -> void:
 			continue
 		var m = game.monsters.get(int(_hive[peer][0]))
 		if m == null or not is_instance_valid(m):
-			_end_hive(peer, "The Walk-In is gone. You snap back into your body.")
+			_end_hive(peer, "The Hive is gone. You snap back into your body.")
 		elif m.has_method("is_sedated") and m.is_sedated():
-			_end_hive(peer, "The Walk-In goes under. You are back in your body.")
+			_end_hive(peer, "The Hive goes under. You are back in your body.")
 		elif not p.alive or p.downed or int(p.hp) < int(_hive_hp.get(peer, p.hp)) or float(p.stun) > 0.0 or p.carried_by != 0:
 			_end_hive(peer, "Something hits you. You snap back into your body.")
 		elif float(game.world_time) >= float(_hive[peer][1]):
 			_end_hive(peer, "")
 
 
-## Every machine: is the LOCAL player looking through a Walk-In right now?
+## Every machine: is the LOCAL player looking through a Hive right now?
 func local_hive_active() -> bool:
 	return hive_view != null and hive_view.active
 
@@ -831,32 +831,32 @@ func dev_request(sender: int, action: String, a: Dictionary) -> void:
 		front = who.global_position + fwd * 1.2 + Vector3.UP * 0.8
 	match action:
 		"br_spawn_brain":
-			var it := spawn_brain(String(a.get("kind", "brain_walk_in")), float(a.get("quality", 1.0)), front)
+			var it := spawn_brain(String(a.get("kind", "brain_hive")), float(a.get("quality", 1.0)), front)
 			if it != null and a.has("age"):
 				it.bt = float(game.world_time) - float(a.age)
 		"br_levels":
 			var id := int(a.get("id", sender))
 			for path in PATHS:
 				add_points(id, path, float(a.get("amount", 1.0)))
-			game.say("Brain levels: Hive Eyes %d, Echo %d." % [level(id, "walk_in"), level(id, "discharged")], 2.5)
+			game.say("Brain levels: Hive Eyes %d, Echo %d." % [level(id, "hive"), level(id, "discharged")], 2.5)
 		"br_reset":
 			on_reset()
 			game.say("Absorbed brains reset.", 2.0)
-		"br_walk_in":
-			spawn_walk_in(who.global_position - who.global_transform.basis.z * 4.0 if who != null else Vector3.ZERO)
+		"br_spawn_hive":
+			spawn_hive(who.global_position - who.global_transform.basis.z * 4.0 if who != null else Vector3.ZERO)
 
 
-## Host (dev and tests): a Walk-In at `pos`. Until the monsters worker's Walk-In exists this is a
-## stand-in: a Discharged body with kind "walk_in" (Hive Eyes only reads the kind).
-func spawn_walk_in(pos: Vector3) -> Node:
+## Host (dev and tests): a Hive at `pos`. Until the monsters worker's Hive exists this is a
+## stand-in: a Discharged body with kind "hive" (Hive Eyes only reads the kind).
+func spawn_hive(pos: Vector3) -> Node:
 	if not game.is_host():
 		return null
 	var ms: GDScript = load("res://scripts/monster.gd")
-	var real: bool = ms.get_script_constant_map().has("WALK_IN")
-	var m: Node = game._add_monster(WALK_IN if real else "discharged", pos)
+	var real: bool = ms.get_script_constant_map().has("HIVE")
+	var m: Node = game._add_monster(HIVE if real else "discharged", pos)
 	if m != null and not real:
-		m.kind = WALK_IN
-		m.name = "Monster_%d_walk_in_standin" % int(m.monster_id)
+		m.kind = HIVE
+		m.name = "Monster_%d_hive_standin" % int(m.monster_id)
 	return m
 
 

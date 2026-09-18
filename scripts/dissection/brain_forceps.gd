@@ -142,7 +142,7 @@ func setup(owner, context: Dictionary) -> void:
 		open_z = float(info.half_z) * (1.0 - Head.BONE_T)
 		brain_r = Head.brain_radii(info)
 		brain_y = -(brain_r.y * 0.55 + 0.004)
-		brain_seed = hash(String(ctx.get("patient_id", "walk_in"))) & 0xffff
+		brain_seed = hash(String(ctx.get("patient_id", "hive"))) & 0xffff
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash("brain_cords|%d" % int(ctx.get("seed", 0)))
 	var n := 3 if float(ctx.get("difficulty", 1.0)) < 1.2 else 4
@@ -863,7 +863,7 @@ func _sfx(cue: String, vol_db := 0.0) -> void:
 static func self_test(parent: Node) -> Dictionary:
 	var fscript: GDScript = load("res://scripts/surgery/games/forceps.gd")
 	var out := {}
-	for pid in ["walk_in", "discharged"]:
+	for pid in ["hive", "discharged"]:
 		for mode in [["skill1.0", 1.0, false], ["skill0.5", 0.5, false], ["skill0.0", 0.0, false], ["skill1.0+jolts", 1.0, true], ["skill0.0+jolts", 0.0, true]]:
 			var runs := 4
 			var agg := {"done": 0, "time": 0.0, "botch": 0.0, "n": 0, "max_botch": 0.0, "tears": 0, "scrapes": 0, "drops": 0}

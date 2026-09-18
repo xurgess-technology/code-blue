@@ -1,5 +1,5 @@
 extends RefCounted
-## The Walk-In, host side. It only has eyes, and it forgets fast (the hive mind).
+## The Hive, host side. It only has eyes, and it forgets fast (the hive mind).
 ##
 ##   IDLE     stands swaying near where it was left, for a few seconds
 ##   WANDER   shuffles to a spot a few metres from its home at 0.8 m/s
@@ -13,8 +13,8 @@ extends RefCounted
 ##
 ## Sight: a cone of SIGHT_DEG degrees, SIGHT_RANGE metres, a clear line from its eyes to the
 ## player's head or chest (walls block, darkness does not matter). Checked SIGHT_HZ times a
-## second, staggered per Walk-In, and only for players already inside range and cone, so a
-## crowd of Walk-Ins costs a handful of rays a second. It ignores noise completely.
+## second, staggered per Hive, and only for players already inside range and cone, so a
+## crowd of Hives costs a handful of rays a second. It ignores noise completely.
 
 const M := preload("res://scripts/monsters/modes.gd")
 
@@ -55,7 +55,7 @@ var rays := 0
 
 func _init(monster: CharacterBody3D) -> void:
 	m = monster
-	rng.seed = hash("walk_in%d" % monster.monster_id)
+	rng.seed = hash("hive%d" % monster.monster_id)
 	sight_timer = rng.randf_range(0.0, SIGHT_INTERVAL)
 	m.mode = M.Mode.IDLE
 	timer = rng.randf_range(0.5, 3.0)

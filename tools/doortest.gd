@@ -9,9 +9,9 @@ extends Node
 ## left); the main entrance's sliding doors still open automatically for a player and close after;
 ## the OR's doors are a manual "double" pair (polish-or-doors: they used to be automatic) that a
 ## player opens and closes with E and that the paramedic crew pushes open by walking into them with
-## the gurney, staying open where the crew leaves them; a Walk-In pushes a door open slowly, a
+## the gurney, staying open where the crew leaves them; a Hive pushes a door open slowly, a
 ## rushing Discharged bursts through, the Night Nurse opens one only while unobserved; closed doors
-## block sight (perception, the Walk-In's eyes) and attenuate noise; gates are locked in the lobby
+## block sight (perception, the Hive's eyes) and attenuate noise; gates are locked in the lobby
 ## and open after clock-in; the wings regenerate between two shifts with a different layout while
 ## the entrance stays identical; the rebuild is spread over frames; a jammed gate frees itself.
 
@@ -196,7 +196,7 @@ func _bot_pushes() -> void:
 	await _seconds(1.2)
 
 
-## Dragging a sedated Walk-In through a closed door: the door opens for the dragger and the body
+## Dragging a sedated Hive through a closed door: the door opens for the dragger and the body
 ## follows through the doorway.
 func _drag_through() -> void:
 	_say("---- dragging a monster through a door")
@@ -204,7 +204,7 @@ func _drag_through() -> void:
 	game.doors.set_all(false)
 	await _seconds(1.2)
 	game.doors.agents_open_doors = true
-	var w: Node = game._add_monster("walk_in", d.global_position + d.normal * 3.0)
+	var w: Node = game._add_monster("hive", d.global_position + d.normal * 3.0)
 	await _frames(3)
 	w.sedate(90.0)
 	await _seconds(0.8)
@@ -213,7 +213,7 @@ func _drag_through() -> void:
 	if game.combat.has_method("start_drag"):
 		game.combat.start_drag(me, w)
 	await _frames(3)
-	_check(int(me.get("dragging_monster")) >= 0, "the bot drags the sedated Walk-In")
+	_check(int(me.get("dragging_monster")) >= 0, "the bot drags the sedated Hive")
 	var to: Vector3 = d.global_position - d.normal * 3.2
 	var start := t
 	var through := false
@@ -366,7 +366,7 @@ func _or_doors_and_crew() -> void:
 	game.doors.agents_open_doors = false
 	game.doors.set_all(false)
 	# This section runs long enough (clock-in plus a full gurney delivery) for the shift's own
-	# monster spawner to have put a real Walk-In or two on the map; clear them so the deterministic
+	# monster spawner to have put a real Hive or two on the map; clear them so the deterministic
 	# sight/noise and monster sub-tests below aren't quietly nudged by a stray one wandering into
 	# whichever door they pick.
 	for m in game.monsters.values().duplicate():
@@ -389,7 +389,7 @@ func _pick_or_doors() -> Node:
 	return best
 
 
-## Closed doors block the Night Nurse's watchers, the Walk-In's eyes and muffle noise.
+## Closed doors block the Night Nurse's watchers, the Hive's eyes and muffle noise.
 func _sight_and_noise() -> void:
 	_say("---- sight and noise through doors")
 	var d := _pick_hinged()
@@ -416,8 +416,8 @@ func _sight_and_noise() -> void:
 	await _frames(4)
 	var seen := Percept.is_observed(game, target)
 	_check(seen, "perception: the lit point is seen through the open door")
-	# The Walk-In's eyes: it stands in the room facing the doorway, the player outside.
-	var wi: Node = game._add_monster("walk_in", inside)
+	# The Hive's eyes: it stands in the room facing the doorway, the player outside.
+	var wi: Node = game._add_monster("hive", inside)
 	await _frames(2)
 	var to_door: Vector3 = outside - wi.global_position
 	wi.rotation.y = atan2(-to_door.x, -to_door.z)
@@ -432,7 +432,7 @@ func _sight_and_noise() -> void:
 	wi.rotation.y = atan2(-to_door.x, -to_door.z)
 	wi.brain._look()
 	var saw_open: bool = wi.brain.seeing
-	_check(not saw_closed and saw_open, "a Walk-In sees the player through the open door, not the closed one (closed %s, open %s)" % [str(saw_closed), str(saw_open)])
+	_check(not saw_closed and saw_open, "a Hive sees the player through the open door, not the closed one (closed %s, open %s)" % [str(saw_closed), str(saw_open)])
 	game.kill_monster(wi)
 	await _frames(2)
 	# Noise: a closed door on the line.
@@ -474,12 +474,12 @@ func _monsters_and_doors() -> void:
 	me.bot_invulnerable = true
 	game.doors.set_all(false)
 	await _seconds(1.5)
-	# The Walk-In: slow push.
+	# The Hive: slow push.
 	var d := _pick_hinged()
 	var inside: Vector3 = d.global_position + d.normal * 2.4
 	var outside: Vector3 = d.global_position - d.normal * 3.0
 	_stand(inside + d.normal * 0.6)
-	var w: Node = game._add_monster("walk_in", outside)
+	var w: Node = game._add_monster("hive", outside)
 	await _frames(2)
 	w.brain._hunt(inside)
 	var first_move := -1.0
@@ -493,10 +493,10 @@ func _monsters_and_doors() -> void:
 		if opened_at < 0.0 and absf(d.amount) > 0.85:
 			opened_at = t
 			break
-	_check(first_move > 0.0 and opened_at > 0.0, "a Walk-In pushes a closed door open")
+	_check(first_move > 0.0 and opened_at > 0.0, "a Hive pushes a closed door open")
 	if first_move > 0.0 and opened_at > 0.0:
 		_check(opened_at - first_move > 1.4, "slowly (%.1f s from first give to open)" % (opened_at - first_move))
-	_check(int(game.doors.stats.get("walk_in", 0)) >= 1, "counted as the Walk-In's push")
+	_check(int(game.doors.stats.get("hive", 0)) >= 1, "counted as the Hive's push")
 	game.kill_monster(w)
 	game.doors.set_all(false)
 	await _seconds(1.5)
@@ -794,12 +794,12 @@ func _take_shots() -> void:
 	var outside: Vector3 = md.global_position + md.normal * 2.2
 	_stand(inside)
 	_look_at(md.centre)
-	var w: Node = game._add_monster("walk_in", outside)
+	var w: Node = game._add_monster("hive", outside)
 	await _frames(2)
 	w.brain._hunt(inside)
 	await _until(func(): return absf(md.amount) > 0.45, 12.0)
 	await _seconds(0.5)
-	await _shot("13_walk_in_pushing_through")
+	await _shot("13_hive_pushing_through")
 	game.kill_monster(w)
 	# 7. A hallway of closed doors.
 	doors.set_all(false)

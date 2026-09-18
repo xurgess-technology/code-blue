@@ -43,15 +43,15 @@ and this file first. Godot console binary:
   anesthetic, drag, strap to a patient table) and dissect for the **brain** (the money / upgrades).
 - The bone saw is a weapon with a chance to break on each hit. It is the same item surgery needs.
 - The Night Nurse stays unfightable: the saw and the needle do nothing to her. No brain.
-- New monster **The Walk-In** (sight only, slow, loses interest fast, weak, common near wing
+- New monster **The Hive** (sight only, slow, loses interest fast, weak, common near wing
   starts). **The Discharged** redesign: eyeless, somewhat taller than a surgeon (not extremely),
   ears clear and on the large side of normal (not comical), ears react to sound.
 - Strapped monsters cannot hurt anyone. They wake up (stir, then thrash) and need more anesthetic;
   each extra dose works for less time (tolerance).
-- Both the Walk-In and the Discharged carry a brain. Brains spoil fast. The **dumpster** (the
+- Both the Hive and the Discharged carry a brain. Brains spoil fast. The **dumpster** (the
   existing sell bin in the neutral area) is the only sell point.
 - The break-room **blender**: blend and drink a brain to absorb it. Per player; reset on game over
-  with the money. Walk-In brains teach **Hive Eyes**, Discharged brains teach **Echo** (R key).
+  with the money. Hive brains teach **Hive Eyes**, Discharged brains teach **Echo** (R key).
 - No tackle move: shove (Q, or left mouse with nothing usable in hand) opens the capture window.
 - Not in this sweep: Puppet, Rise, side effects, strap breaks.
 
@@ -79,7 +79,7 @@ and this file first. Godot console binary:
 
 | Worker | Builds | Owns |
 | --- | --- | --- |
-| `monsters` | The Walk-In; the Discharged redesign; monster hp, hits, stun, sedation, lying and dragged states; roster and spawn placement | `scripts/monster.gd`, `scripts/monsters/**`, `scripts/perception.gd`, `tools/monster_lab.*`, `tools/gen_audio_monsters.mjs`, `audio/sfx/monsters_*`; hooks: `game._spawn_monsters`, dev panel monster spawn list, `warmup.gd` |
+| `monsters` | The Hive; the Discharged redesign; monster hp, hits, stun, sedation, lying and dragged states; roster and spawn placement | `scripts/monster.gd`, `scripts/monsters/**`, `scripts/perception.gd`, `tools/monster_lab.*`, `tools/gen_audio_monsters.mjs`, `audio/sfx/monsters_*`; hooks: `game._spawn_monsters`, dev panel monster spawn list, `warmup.gd` |
 | `combat` | Saw swings and breaking, anesthetic jabs (monsters and teammates), dragging a sedated monster, strapping it to a patient table, first-person swing/jab animation | `scripts/combat/**`, `tools/combattest.*`, `tools/gen_audio_combat.mjs`; hooks: `player.gd` (drag field, speed, busy flags, aim prompt, held-item animation), `game.gd` (strap path), dev room dispensers if needed |
 | `dissection` | Monster patients and bodies on the table, the `dissection` ailment, sedation decay / stir / thrash, re-dosing with tolerance, brain condition, handing over the brain | `scripts/dissection/**`, `scripts/procedures.gd`, `scripts/patient_body.gd` (create dispatch only), new variants in `scripts/surgery/games/saw.gd` and `forceps.gd`, `tools/dissectiontest.*`, `tools/gen_audio_dissection.mjs`; hooks: `game._table_prompt` / `_proxy_used`, `game.finish_case` wording, OR screen labels, dev panel "strap a monster" |
 | `brains` | Brain items and spoilage, the dumpster wording, the blender, per-player brain levels, Echo, Hive Eyes | `scripts/brains/**`, brain entries in `scripts/economy/loot_table.gd` and `loot_models.gd`, `economy.gd` prompts, `tools/braintest.*`, `tools/gen_audio_brains.mjs`; hooks: `world_item.gd` / `game.gd` pickup, drop and sell paths (spoil time), `player.gd` (Hive Eyes freeze, report key), `main.gd` camera choice |
@@ -89,12 +89,12 @@ and this file first. Godot console binary:
 ### Monsters (`monsters`)
 
 ```gdscript
-const WALK_IN := "walk_in"                       # Monster; DISCHARGED, NIGHT_NURSE stay
-static func roster(shift, player_count) -> Array[String]   # now also Walk-Ins (their own cap, see below)
-static func is_capturable(kind: String) -> bool  # walk_in, discharged
+const HIVE := "hive"                       # Monster; DISCHARGED, NIGHT_NURSE stay
+static func roster(shift, player_count) -> Array[String]   # now also Hives (their own cap, see below)
+static func is_capturable(kind: String) -> bool  # hive, discharged
 enum State { WANDER, CHASE, STUNNED, SEDATED }   # SEDATED appended
 enum Mode { ..., SEDATED }                       # appended at the end (ints stay stable)
-var hp: int; var max_hp: int                     # walk_in 2, discharged 4, night_nurse 0
+var hp: int; var max_hp: int                     # hive 2, discharged 4, night_nurse 0
 func can_be_hurt() -> bool                        # false for the Night Nurse
 func take_hit(dir: Vector3, amount: int, source: String) -> String
 	# host: "stagger" (a short stun, knocked back), "killed" (hp reached 0; the CALLER then calls
@@ -110,22 +110,22 @@ static func make_lying(kind: String) -> Node3D    # monster_model.gd: a still co
 	# X, head toward -X, origin at the middle of its back (the PatientBody convention); primitives OK
 ```
 
-- Shove stuns the Walk-In (2 s) as it does the Discharged. A sedated monster never hits anyone and
+- Shove stuns the Hive (2 s) as it does the Discharged. A sedated monster never hits anyone and
   is not solid to players (still on the navigation mesh).
 - `report()` adds `sd` (sedated), `db` (dragged_by) and `hp` only if clients need it. Clients show
   the lying pose while `sd`.
-- The Walk-In: sight only (ignores noise). Cone about 110 degrees, 12 m, clear line (walls block;
+- The Hive: sight only (ignores noise). Cone about 110 degrees, 12 m, clear line (walls block;
   darkness does not matter). Wander 0.8 m/s, chase 1.8 m/s (a surgeon walks 3.4). It lumbers
   straight at a player it sees; 2.5 s without sight it walks to where it last saw them, looks around
   about 3 s, and gives up. Hits for 1 on contact, then backs off like the Discharged. Line-of-sight
-  checks staggered (a few Hz), never per frame for every Walk-In.
-- Roster: Walk-Ins from shift 1 in small groups (2-3) placed on hallway spawn points of the
+  checks staggered (a few Hz), never per frame for every Hive.
+- Roster: Hives from shift 1 in small groups (2-3) placed on hallway spawn points of the
   shallowest part of each wing (nearest the entrance building), more with shifts and players, own cap
-  (`MAX_WALK_INS`, about 8); the Discharged and the Night Nurse keep `MAX_MONSTERS`. Never in the
+  (`MAX_HIVES`, about 8); the Discharged and the Night Nurse keep `MAX_MONSTERS`. Never in the
   entrance building or neutral area.
 - The Discharged redesign as in `DESIGN.md`; ears swivel toward `listen_yaw` and flare while
   listening. Height about 2.1 m. Keep the IV pole rattle.
-- Sounds: Walk-In groan (occasional, not constant), shuffle, hit, death; sedated breathing.
+- Sounds: Hive groan (occasional, not constant), shuffle, hit, death; sedated breathing.
 
 ### Combat (`combat`)
 
@@ -159,12 +159,12 @@ SEDATE_SECONDS := 75.0     JAB_COOLDOWN := 1.0      JAB_REACH := 1.8
 
 ### Dissection (`dissection`)
 
-- `Procedures.PATIENTS` gains `walk_in` and `discharged` with `monster: true` (name, weight,
+- `Procedures.PATIENTS` gains `hive` and `discharged` with `monster: true` (name, weight,
   blurbs). `roll()` never picks a monster. `AILMENTS.dissection` has `monster_only: true` (not in
   `patient_ailments()`), steps: `{id "open", label "Saw open the skull", item "bone_saw", uses 0,
   game "saw", variant "skull", site "skull"}`, `{id "harvest", label "Pull out the brain", item
   "forceps", uses 0, game "forceps", variant "brain", site "brain"}`.
-- `PatientBody.create("walk_in" | "discharged")` returns a monster body (in `scripts/dissection/`)
+- `PatientBody.create("hive" | "discharged")` returns a monster body (in `scripts/dissection/`)
   with the full PatientBody surface (see CONTRACTS.md "Patient body"), sites `injection`, `skull`,
   `brain`, straps over chest, arms and legs, `make_lying` for the look when present. Flags
   `skull_open`, `brain_removed`, `sedation`. `set_sedation` low = twitching, very low = thrashing
@@ -181,7 +181,7 @@ SEDATE_SECONDS := 75.0     JAB_COOLDOWN := 1.0      JAB_REACH := 1.8
   it is.
 - Vitals of a monster case = brain condition: botches lower it, nothing drains it. At 0 the case is
   lost ("The brain is ruined."). The last step wins the case: the brain appears by the table via
-  `game.brains.spawn_brain(kind, quality, pos)` (`kind` `brain_walk_in` / `brain_discharged`,
+  `game.brains.spawn_brain(kind, quality, pos)` (`kind` `brain_hive` / `brain_discharged`,
   `quality` = condition / 100; fall back to a plain loot item when the method is missing), the
   monster flatlines, and the case is removed about 6 s later to free the table.
 
@@ -191,11 +191,11 @@ SEDATE_SECONDS := 75.0     JAB_COOLDOWN := 1.0      JAB_REACH := 1.8
 game.brains.spawn_brain(kind: String, quality: float, pos: Vector3) -> Node   # host
 game.brains.spoil_factor(age_seconds: float) -> float    # 1.0 for 45 s, down to 0.15 at 225 s
 game.brains.current_value(stack_or_item) -> int          # base value * spoil factor
-game.brains.level(peer_id: int, path: String) -> int     # path "walk_in" | "discharged", 0..3
+game.brains.level(peer_id: int, path: String) -> int     # path "hive" | "discharged", 0..3
 game.brains.points(peer_id: int, path: String) -> float
 ```
 
-- Loot kinds `brain_walk_in` (base about $150) and `brain_discharged` (about $350), scaled by
+- Loot kinds `brain_hive` (base about $150) and `brain_discharged` (about $350), scaled by
   `quality`; fragile; never spawned by the loot spawner. Spoil start time travels with the item
   (WorldItem and the hand slot, key `bt`, world_time) through pickups and drops. A spoiling brain
   looks worse (darker, greener). The dumpster pays `current_value`; its prompts say dumpster.
@@ -210,9 +210,9 @@ game.brains.points(peer_id: int, path: String) -> float
   darkens and monsters (red), players (white), surgical items (teal), loot (gold) and containers
   (dim) within 12 m (+6 per level) show as outlines through walls. Cheap: only while active,
   bounded node count.
-- Hive Eyes: the nearest Walk-In within 20 m (+10 per level), through walls; that player's view
+- Hive Eyes: the nearest Hive within 20 m (+10 per level), through walls; that player's view
   jumps to its eyes for 5 s (+2 per level) with a grainy sickly look; R, E or Esc ends it early; it
-  ends if the Walk-In dies or is sedated or the player is hit. The body stands still and helpless
+  ends if the Hive dies or is sedated or the player is hit. The body stands still and helpless
   (Player field `hive_view`, report key `hv`; others see the head droop).
 
 ## After the workers

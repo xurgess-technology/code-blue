@@ -126,7 +126,7 @@ const DIVE_STAMINA_COST := 0.2
 ## Not replicated: every machine computes its own from its own aim, same as aim_id/aim_prompt.
 var scan_progress: float = 0.0
 var scan_target_id: int = -1
-## SWEEP 3 HOOK (brains): looking through a Walk-In's eyes (Hive Eyes). Host authoritative, report
+## SWEEP 3 HOOK (brains): looking through a Hive's eyes (Hive Eyes). Host authoritative, report
 ## key `hv`. The body stands still and helpless: no moving, looking, using or picking up; E or R
 ## (or Esc, main.gd) ends it; others see the head droop.
 var hive_view: bool = false
@@ -569,7 +569,7 @@ func _input(event: InputEvent) -> void:
 	if not is_local or not alive:
 		return
 	if hive_view or dev_input_held:
-		return   # SWEEP 3 HOOK (brains): the mouse is not yours while you look through a Walk-In
+		return   # SWEEP 3 HOOK (brains): the mouse is not yours while you look through a Hive
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		# Settings hook: "sensitivity" multiplies the base look speed.
 		var sens: float = MOUSE_SENS * float(Settings.get_value("sensitivity"))

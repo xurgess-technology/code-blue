@@ -210,7 +210,7 @@ static func run(game: Node, progress: Callable = Callable(), ready_to_draw: Call
 	# builds her Blender model (monster/night_nurse: its two skinned materials, shadow mesh and the
 	# first load of its six maps), so the first Night Nurse of a session does not hitch.
 	var mx := -1.0
-	for kind in ["discharged", "night_nurse", "walk_in"]:  # SWEEP 3 HOOK (monsters): the Walk-In
+	for kind in ["discharged", "night_nurse", "hive"]:  # SWEEP 3 HOOK (monsters): the Hive
 		var model: Node3D = MonsterModel.new()
 		shelf.add_child(model)
 		model.setup(kind)

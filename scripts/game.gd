@@ -2076,14 +2076,14 @@ func _spawn_monsters() -> void:
 	var roster: Array = MonsterScript.roster(shift, players.size())
 	var spots: Array = level_info.get("monster_spawns", []).duplicate()
 	_shuffle(spots, _rng)
-	# SWEEP 3 HOOK (monsters): Walk-Ins go in groups near the start of each wing (Monster.walk_in_spots).
-	var others: Array = roster.filter(func(k): return k != MonsterScript.WALK_IN)
+	# SWEEP 3 HOOK (monsters): Hives go in groups near the start of each wing (Monster.hive_spots).
+	var others: Array = roster.filter(func(k): return k != MonsterScript.HIVE)
 	for i in others.size():
 		var pos: Vector3 = spots[i % maxi(1, spots.size())] if spots.size() > 0 else Vector3.ZERO
 		_add_monster(others[i], pos)
-	var walk_ins: Array[Vector3] = MonsterScript.walk_in_spots(level_info, roster.size() - others.size(), _rng, get_world_3d().direct_space_state)
-	for pos in walk_ins:
-		_add_monster(MonsterScript.WALK_IN, pos)
+	var hives: Array[Vector3] = MonsterScript.hive_spots(level_info, roster.size() - others.size(), _rng, get_world_3d().direct_space_state)
+	for pos in hives:
+		_add_monster(MonsterScript.HIVE, pos)
 
 
 ## loop: may a wandering monster pick this point? Not inside the entrance building or the neutral
@@ -2470,7 +2470,7 @@ func knock_down_monster(m: Node, dir: Vector3 = Vector3.ZERO, seconds: float = 4
 		return
 	m.shoved(dir)
 	m.lunge_t = 0.0
-	if m.brain != null and "timer" in m.brain and MonsterScript.is_capturable(m.kind):   # SWEEP 3 HOOK (monsters): the Walk-In too
+	if m.brain != null and "timer" in m.brain and MonsterScript.is_capturable(m.kind):   # SWEEP 3 HOOK (monsters): the Hive too
 		m.brain.timer = seconds   # the Discharged's shove stun, lengthened
 	else:
 		m.calm = maxf(m.calm, seconds)   # the Night Nurse ignores shoves: make it stand down

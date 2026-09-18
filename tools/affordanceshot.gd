@@ -70,7 +70,7 @@ func _ready() -> void:
 	if blender != null and is_instance_valid(blender):
 		for i in bot.slots.size():
 			bot.clear_slot(i)
-		bot.take_into("brain_walk_in", 1)
+		bot.take_into("brain_hive", 1)
 		bot.selected = 0
 		var bout: Vector3 = blender.global_basis.z.normalized()
 		_look_from(blender.global_position + bout * 1.5 + Vector3(0, 1.05, 0), blender.global_position + Vector3(0, 0.95, 0))

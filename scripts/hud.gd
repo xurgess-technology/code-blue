@@ -40,7 +40,7 @@ const ABILITY_LABEL := {"echo": "Echo", "hive_in": "Hive Eyes"}
 const ABILITY_COST := {"echo": "LOUD", "hive_in": ""}
 const ABILITY_DESC := {
 	"echo": "A shriek that outlines everything nearby through walls for a few seconds.",
-	"hive_in": "See through a nearby Walk-In's eyes for a few seconds.",
+	"hive_in": "See through a nearby Hive's eyes for a few seconds.",
 }
 
 
@@ -311,9 +311,9 @@ func _draw_ability_bar(w: float, h: float, me) -> void:
 		var usable := id != "" and reason == ""
 		draw_circle(c, rad, Color(0, 0, 0, 0.55))
 		var ready_pulse := 0.0
-		# SWEEP 4A HOOK (Hive Eyes, chunk 4): a subtle pulse on the ring while a Walk-In is in range
+		# SWEEP 4A HOOK (Hive Eyes, chunk 4): a subtle pulse on the ring while a Hive is in range
 		# and the slot is otherwise idle, so you know it is worth pressing.
-		if id == "hive_in" and cd <= 0.0 and not me.get("hive_view") and b.nearest_walk_in(me, b.hive_range(lvl)) != null:
+		if id == "hive_in" and cd <= 0.0 and not me.get("hive_view") and b.nearest_hive(me, b.hive_range(lvl)) != null:
 			ready_pulse = 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.006)
 			draw_arc(c, rad + 3.0, 0.0, TAU, 28, Color("9fe8a0", 0.35 + 0.35 * ready_pulse), 2.0 + ready_pulse * 1.5)
 		var border := Color("f0e6c8", 0.85) if id != "" else Color(0.5, 0.55, 0.6, 0.4)
@@ -383,9 +383,9 @@ func _slot_reason(me, id: String, cd: float) -> String:
 		return "Hands busy"
 	if id == "hive_in" and not me.get("hive_view"):
 		var b = game.brains
-		var lvl: int = b.level(me.peer_id, "walk_in")
-		if b.nearest_walk_in(me, b.hive_range(lvl)) == null:
-			return "No Walk-In in range"
+		var lvl: int = b.level(me.peer_id, "hive")
+		if b.nearest_hive(me, b.hive_range(lvl)) == null:
+			return "No Hive in range"
 	return ""
 
 

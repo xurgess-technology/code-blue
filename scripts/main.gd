@@ -460,7 +460,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 
-	# SWEEP 3 HOOK (brains): Esc while looking through a Walk-In's eyes comes back instead of pausing.
+	# SWEEP 3 HOOK (brains): Esc while looking through a Hive's eyes comes back instead of pausing.
 	if event.is_action_pressed("pause") and not game.paused and game.brains != null and game.brains.local_hive_active():
 		game.brains.local_exit()
 		get_viewport().set_input_as_handled()
@@ -541,7 +541,7 @@ func _process(_delta: float) -> void:
 	_invite_button.visible = game.paused and Net.backend == "steam" and game.phase != Game.Phase.MENU
 	# While operating, the surgery view's camera wins; otherwise whoever we are watching.
 	var surgery_cam: Camera3D = game.surgery_camera() if game.phase != Game.Phase.MENU else null  # downed hook: either table
-	# SWEEP 3 HOOK (brains): Hive Eyes renders through the Walk-In's eyes.
+	# SWEEP 3 HOOK (brains): Hive Eyes renders through the Hive's eyes.
 	var brain_cam: Camera3D = game.brains.camera() if game.phase != Game.Phase.MENU and game.brains != null else null
 	if brain_cam != null:
 		surgery_cam = brain_cam

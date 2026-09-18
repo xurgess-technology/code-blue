@@ -7,7 +7,7 @@ const Shaper := preload("res://scripts/monsters/rig_shaper.gd")
 const Shapes := preload("res://scripts/monsters/shapes.gd")
 const DischargedLook := preload("res://scripts/monsters/discharged_look.gd")
 const NurseLook := preload("res://scripts/monsters/night_nurse_look.gd")
-const WalkInLook := preload("res://scripts/monsters/walk_in_look.gd")
+const HiveLook := preload("res://scripts/monsters/hive_look.gd")
 const NurseRig := preload("res://scripts/monsters/night_nurse_rig.gd")
 
 const RIG_KEY := "patient/human"
@@ -57,8 +57,8 @@ func setup(monster_kind: String) -> void:
 	match kind:
 		"night_nurse":
 			NurseLook.build(self)
-		"walk_in":
-			WalkInLook.build(self)
+		"hive":
+			HiveLook.build(self)
 		_:
 			DischargedLook.build(self)
 	play("idle")
@@ -98,7 +98,7 @@ static func make_lying(monster_kind: String) -> Node3D:
 		m.iv = null
 	if m.shaper != null:
 		m.shaper.lying = 1.0
-	var back := 0.12 if monster_kind == "walk_in" else 0.09
+	var back := 0.12 if monster_kind == "hive" else 0.09
 	if m.nurse != null:
 		# Her rest pose is the lying pose: straight, arms at her sides. No clip plays.
 		m.anim.stop()
@@ -167,7 +167,7 @@ func attack_length() -> float:
 
 func add_part(node: Node3D, bone: String, offset := Transform3D.IDENTITY, tip := 0.0) -> void:
 	if shaper != null:
-		# One draw call per material per part instead of one per primitive (a Walk-In was ~90).
+		# One draw call per material per part instead of one per primitive (a Hive was ~90).
 		_parts += 1
 		Shapes.bake(node, "%s|%d" % [kind, _parts])
 		shaper.attach(node, bone, offset, tip)
@@ -190,8 +190,8 @@ func _build_fallback() -> void:
 	anim = null
 	_fallback = Node3D.new()
 	add_child(_fallback)
-	var tall := 2.25 if kind == "night_nurse" else (1.7 if kind == "walk_in" else 2.1)
-	var col := Color("dcd8cc") if kind == "night_nurse" else (Color("8fa3b5") if kind == "walk_in" else Color("9aa39c"))
+	var tall := 2.25 if kind == "night_nurse" else (1.7 if kind == "hive" else 2.1)
+	var col := Color("dcd8cc") if kind == "night_nurse" else (Color("8fa3b5") if kind == "hive" else Color("9aa39c"))
 	var body := Shapes.cylinder(0.16, tall * 0.62, Shapes.flat(col, 0.9), Vector3(0, tall * 0.45, 0), 0.12)
 	_fallback.add_child(body)
 	_fallback.add_child(Shapes.ellipsoid(Vector3(0.1, 0.13, 0.11), Shapes.flat(Color("b8b3a6")), Vector3(0, tall - 0.13, 0)))

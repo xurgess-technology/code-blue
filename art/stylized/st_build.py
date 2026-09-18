@@ -1,6 +1,6 @@
 """Build the stylized test characters in Blender, pose them and render review shots.
 
-blender --background --factory-startup --python st_build.py -- [--only=surgeon,walk_in,surgeon_graft] [--shots=pair,face_surgeon,...] [--fast]
+blender --background --factory-startup --python st_build.py -- [--only=surgeon,hive,surgeon_graft] [--shots=pair,face_surgeon,...] [--fast]
 
 Geometry comes from st_char (smooth blended distance fields meshed with surface nets), coloured per
 vertex; the skeleton, bone layout and posing helpers are the human pipeline's (art/human/blender_src),
@@ -36,7 +36,7 @@ def arg(name, default):
 
 
 FAST = '--fast' in ARGS
-ONLY = arg('only', 'surgeon,walk_in,surgeon_graft').split(',')
+ONLY = arg('only', 'surgeon,hive,surgeon_graft').split(',')
 SHOTS = arg('shots', 'all')
 OUT = os.path.join(HERE, 'renders')
 T0 = time.time()
@@ -292,7 +292,7 @@ def pose_surgeon(rig):
     return p
 
 
-def pose_walk_in(rig):
+def pose_hive(rig):
     """Hunched forward, head hung and tipped to one side, the left arm dangling ahead of the body,
     the right leg trailing (it drags that leg), knees soft."""
     from hu_rig import Pose, spine, arm_hang, hand_relax, planted, Rx, Ry, Rz
@@ -337,7 +337,7 @@ def build_variant(name, x_off):
             ob.hide_set(True)
         obs.append(ob)
     rig = hu_rig.Rig(arm, body)
-    pose = pose_walk_in(rig) if V['outfit'] == 'gown' else pose_surgeon(rig)
+    pose = pose_hive(rig) if V['outfit'] == 'gown' else pose_surgeon(rig)
     pose.apply(arm)
     arm.location = (x_off, 0, 0)
     return {'V': V, 'arm': arm, 'coll': coll, 'obs': obs, 'body': body, 'head': info['head'], 'rig': rig, 'pose': pose}
@@ -608,7 +608,7 @@ def main():
         bpy.data.objects.remove(o, do_unlink=True)
     os.makedirs(OUT, exist_ok=True)
     chars = {}
-    layout = {'surgeon': -0.45, 'walk_in': 0.50, 'surgeon_graft': 3.0}
+    layout = {'surgeon': -0.45, 'hive': 0.50, 'surgeon_graft': 3.0}
     for name in ONLY:
         chars[name] = build_variant(name, layout[name])
     studio()
@@ -631,8 +631,8 @@ def main():
             add_light('AREA', (target[0] + 1.5, target[1] + 2.5, 2.8), target, 700 * spread, (0.75, 0.88, 1.0), 1.5, 'Rim'),
         ]
 
-    if 'surgeon' in chars and 'walk_in' in chars:
-        show_only(chars, ('surgeon', 'walk_in'))
+    if 'surgeon' in chars and 'hive' in chars:
+        show_only(chars, ('surgeon', 'hive'))
         if want('pair'):
             L = std_lights((0.0, 0.0, 1.0))
             cam = camera((1.2, -4.3, 1.25), (0.02, 0, 0.92), 50)
@@ -663,13 +663,13 @@ def main():
             cam = camera(cam_at, (x0, 0, 0.93), 70)
             render(shot, (900, 1200))
             clear(L + [cam])
-    if 'walk_in' in chars and want('walk_in_side'):
-        show_only(chars, ('walk_in',))
+    if 'hive' in chars and want('hive_side'):
+        show_only(chars, ('hive',))
         L = std_lights((0.5, 0.0, 1.0))
         cam = camera((3.9, -1.2, 1.1), (0.5, 0, 0.9), 50)
-        render('walk_in_side', (1000, 1000))
+        render('hive_side', (1000, 1000))
         clear(L + [cam])
-    for key, shot in (('surgeon', 'face_surgeon'), ('walk_in', 'face_walk_in'), ('surgeon_graft', 'face_graft')):
+    for key, shot in (('surgeon', 'face_surgeon'), ('hive', 'face_hive'), ('surgeon_graft', 'face_graft')):
         if key not in chars or not want(shot):
             continue
         show_only(chars, (key,))

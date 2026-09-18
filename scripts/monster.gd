@@ -2,7 +2,7 @@ class_name Monster
 extends CharacterBody3D
 ## Three creatures, three rules you can learn: eyes, then ears, then being watched.
 ##
-##   The Walk-In     sight only; lumbers slowly after anyone it sees, forgets them fast.
+##   The Hive     sight only; lumbers slowly after anyone it sees, forgets them fast.
 ##   The Discharged  eyeless; hunts by sound. Freezes to listen, ears turning, then rushes.
 ##   The Night Nurse moves only while nobody is looking at it with light on it.
 ##
@@ -20,12 +20,12 @@ enum Mode { IDLE, WANDER, LISTEN, RUSH, SEARCH, STALK, STUNNED, RETREAT, SEDATED
 
 const DISCHARGED := "discharged"
 const NIGHT_NURSE := "night_nurse"
-const WALK_IN := "walk_in"
-const KINDS := [WALK_IN, DISCHARGED, NIGHT_NURSE]
+const HIVE := "hive"
+const KINDS := [HIVE, DISCHARGED, NIGHT_NURSE]
 ## The Discharged and the Night Nurse together.
 const MAX_MONSTERS := 5
-## Walk-Ins have their own cap.
-const MAX_WALK_INS := 8
+## Hives have their own cap.
+const MAX_HIVES := 8
 
 ## A saw blow knocks it back and off balance this long.
 const STAGGER_SECONDS := 0.7
@@ -35,7 +35,7 @@ const WAKE_STAGGER := 1.2
 const Model := preload("res://scripts/monsters/monster_model.gd")
 const DischargedBrain := preload("res://scripts/monsters/discharged_brain.gd")
 const NurseBrain := preload("res://scripts/monsters/night_nurse_brain.gd")
-const WalkInBrain := preload("res://scripts/monsters/walk_in_brain.gd")
+const HiveBrain := preload("res://scripts/monsters/hive_brain.gd")
 const Zones := preload("res://scripts/hospital_builder.gd")
 const NurseRig := preload("res://scripts/monsters/night_nurse_rig.gd")
 
@@ -101,7 +101,7 @@ var _rng := RandomNumberGenerator.new()
 ##   The Discharged / the Night Nurse (cap MAX_MONSTERS): shift 1 is one Discharged; the Night
 ##   Nurse joins on shift 2; one more of each every two shifts after that; one extra Discharged
 ##   per two players beyond the first.
-##   Walk-Ins (cap MAX_WALK_INS), from shift 1: 4 solo on shift 1, one more per shift and per
+##   Hives (cap MAX_HIVES), from shift 1: 4 solo on shift 1, one more per shift and per
 ##   extra player. They come last in the list; game._spawn_monsters places them in groups.
 static func roster(shift: int, player_count: int) -> Array[String]:
 	var extra := maxi(0, (shift - 2) / 2) if shift >= 2 else 0
@@ -122,30 +122,30 @@ static func roster(shift: int, player_count: int) -> Array[String]:
 			out.append(NIGHT_NURSE)
 			n -= 1
 		i += 1
-	for w in walk_in_count(shift, player_count):
-		out.append(WALK_IN)
+	for w in hive_count(shift, player_count):
+		out.append(HIVE)
 	return out
 
 
-static func walk_in_count(shift: int, player_count: int) -> int:
-	return clampi(3 + maxi(1, shift) + maxi(0, player_count - 1), 0, MAX_WALK_INS)
+static func hive_count(shift: int, player_count: int) -> int:
+	return clampi(3 + maxi(1, shift) + maxi(0, player_count - 1), 0, MAX_HIVES)
 
 
 ## Can it be sedated, strapped and dissected (it has a brain)?
 static func is_capturable(monster_kind: String) -> bool:
-	return monster_kind == WALK_IN or monster_kind == DISCHARGED
+	return monster_kind == HIVE or monster_kind == DISCHARGED
 
 
 static func max_hp_for(monster_kind: String) -> int:
 	match monster_kind:
-		WALK_IN: return 2
+		HIVE: return 2
 		DISCHARGED: return 4
 	return 0
 
 
 static func display_name(monster_kind: String) -> String:
 	match monster_kind:
-		WALK_IN: return "Walk-In"
+		HIVE: return "Hive"
 		NIGHT_NURSE: return "Night Nurse"
 	return "Discharged"
 
@@ -177,12 +177,12 @@ func _build() -> void:
 			body_radius = 0.34
 			height = 2.3
 			brain = NurseBrain.new(self)
-		WALK_IN:
+		HIVE:
 			damage = 1
 			knockback = 7.0
 			body_radius = 0.36
 			height = 1.75
-			brain = WalkInBrain.new(self)
+			brain = HiveBrain.new(self)
 		_:
 			damage = 1
 			knockback = 9.0
@@ -384,7 +384,7 @@ func wake() -> void:
 
 
 ## Every machine: where its eyes are and which way they look (-Z forward), following the
-## animated head (for a camera riding a Walk-In). Falls back to a fixed height on the body.
+## animated head (for a camera riding a Hive). Falls back to a fixed height on the body.
 func eye_transform() -> Transform3D:
 	var head: Node3D = model.find_child("Head", true, false) as Node3D if model != null else null
 	if head != null and head.is_inside_tree():
@@ -393,7 +393,7 @@ func eye_transform() -> Transform3D:
 		var eo: Vector3 = model.eye_offset() if model.has_method("eye_offset") else Vector3(0.0, 0.13, 0.1)
 		var origin := head.global_transform.origin + hb.x * eo.x + hb.y * eo.y + hb.z * eo.z
 		return Transform3D(Basis(-hb.x, hb.y, -hb.z), origin)
-	var eye_h := 1.5 if kind == WALK_IN else height - 0.25
+	var eye_h := 1.5 if kind == HIVE else height - 0.25
 	return Transform3D(global_transform.basis.orthonormalized(), global_position + Vector3.UP * eye_h)
 
 
@@ -552,15 +552,15 @@ func try_contact(lunge_range: float) -> bool:
 # spawn placement (host; game._spawn_monsters)
 # =========================================================================
 
-## Where `count` Walk-Ins stand: small groups (2-3) on hallway tiles of the shallowest part of
+## Where `count` Hives stand: small groups (2-3) on hallway tiles of the shallowest part of
 ## each wing (nearest the entrance building), never in the entrance building, the neutral area
 ## or a room. Without hospital data (the dev room, the lab) they group around monster_spawns.
 ## `space` (optional) rejects spots blocked by furniture.
-static func walk_in_spots(info: Dictionary, count: int, rng: RandomNumberGenerator, space: PhysicsDirectSpaceState3D = null) -> Array[Vector3]:
+static func hive_spots(info: Dictionary, count: int, rng: RandomNumberGenerator, space: PhysicsDirectSpaceState3D = null) -> Array[Vector3]:
 	var out: Array[Vector3] = []
 	if count <= 0:
 		return out
-	var by_wing := _walk_in_candidates(info, space)
+	var by_wing := _hive_candidates(info, space)
 	var wings: Array = by_wing.keys()
 	if wings.is_empty():
 		var spawns: Array = info.get("monster_spawns", [])
@@ -608,7 +608,7 @@ const GROUP_RADIUS := 3.5
 
 
 ## wing id -> [{pos, d}] hallway tiles sorted by distance to the entrance building.
-static func _walk_in_candidates(info: Dictionary, space: PhysicsDirectSpaceState3D) -> Dictionary:
+static func _hive_candidates(info: Dictionary, space: PhysicsDirectSpaceState3D) -> Dictionary:
 	var out := {}
 	var rows: PackedStringArray = info.get("rows", PackedStringArray())
 	var wings: Array = info.get("wings", [])
@@ -739,7 +739,7 @@ func _update_visual(delta: float) -> void:
 		sh.twitch = sh.twitch.lerp(Vector3.ZERO, clampf(delta * 6.0, 0.0, 1.0))
 		return
 
-	if kind == WALK_IN:
+	if kind == HIVE:
 		# Sluggish head lolls; it looks around slowly while it searches.
 		_twitch_timer -= delta
 		if _twitch_timer <= 0.0:
@@ -831,15 +831,15 @@ func _update_sound(delta: float) -> void:
 	if mode != _last_mode:
 		if mode == Mode.LISTEN and near_viewer:
 			Audio.play("monsters_inhale", global_position + Vector3.UP * 1.5, -2.0, 0.08)
-		elif kind == WALK_IN and mode == Mode.RUSH and _last_mode != Mode.RUSH and near_viewer:
+		elif kind == HIVE and mode == Mode.RUSH and _last_mode != Mode.RUSH and near_viewer:
 			# It has seen you: the groan is the tell.
-			Audio.play("monsters_walkin_groan", global_position + Vector3.UP * 1.5, 0.0, 0.1)
+			Audio.play("monsters_hive_groan", global_position + Vector3.UP * 1.5, 0.0, 0.1)
 			_groan_timer = _rng.randf_range(6.0, 11.0)
 		_last_mode = mode
 	var lunging := lunge_t > 0.0
 	if lunging and not _last_lunge and near_viewer:
-		if kind == WALK_IN:
-			Audio.play("monsters_walkin_groan", global_position + Vector3.UP * 1.5, 2.0, 0.15)
+		if kind == HIVE:
+			Audio.play("monsters_hive_groan", global_position + Vector3.UP * 1.5, 2.0, 0.15)
 		else:
 			Audio.play("monsters_shriek", global_position + Vector3.UP * 1.6, -3.0 if kind == DISCHARGED else -6.0, 0.1)
 	_last_lunge = lunging
@@ -857,16 +857,16 @@ func _update_sound(delta: float) -> void:
 			_breath_timer = _rng.randf_range(3.2, 4.4)
 			Audio.play("monsters_sedated_breath", global_position + Vector3.UP * 0.3, -8.0, 0.1)
 		return
-	if kind == WALK_IN:
+	if kind == HIVE:
 		if moving and _sound_timer <= 0.0:
 			# One dragging step per footfall; slow feet, slow shuffle.
 			_sound_timer = clampf(1.05 - speed * 0.25, 0.5, 0.95) * _rng.randf_range(0.9, 1.1)
-			Audio.play("monsters_walkin_shuffle", global_position + Vector3.UP * 0.05, -7.0, 0.1)
+			Audio.play("monsters_hive_shuffle", global_position + Vector3.UP * 0.05, -7.0, 0.1)
 		_groan_timer -= delta
 		if _groan_timer <= 0.0:
 			_groan_timer = _rng.randf_range(9.0, 20.0)
 			if viewer == null or viewer.global_position.distance_to(global_position) < 18.0:
-				Audio.play("monsters_walkin_groan", global_position + Vector3.UP * 1.5, -7.0, 0.12)
+				Audio.play("monsters_hive_groan", global_position + Vector3.UP * 1.5, -7.0, 0.12)
 	elif kind == DISCHARGED:
 		# The rattle only while it walks. When it stops to listen, the silence is the tell.
 		if moving and mode != Mode.LISTEN and _sound_timer <= 0.0:

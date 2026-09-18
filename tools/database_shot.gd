@@ -65,7 +65,7 @@ func _ready() -> void:
 			{"name": "79_wall_signed_in", "fn": _pose_wall_sign_in.bind(1.2), "settle": 10},
 			{"name": "80_wall_home", "fn": _pose_wall2.bind({"kind": "home"}), "settle": 30},
 			{"name": "81_wall_monsters", "fn": _pose_wall2.bind({"kind": "section", "id": "monsters", "index": 0}), "settle": 20},
-			{"name": "82_wall_walk_in", "fn": _pose_wall2.bind({"kind": "entry", "section": "monsters", "key": "walk_in"}), "settle": 45},
+			{"name": "82_wall_hive", "fn": _pose_wall2.bind({"kind": "entry", "section": "monsters", "key": "hive"}), "settle": 45},
 			{"name": "83_wall_other", "fn": _pose_wall2.bind({"kind": "section", "id": "other", "index": 1}), "settle": 20},
 			{"name": "84_wall_gunshot", "fn": _pose_wall2.bind({"kind": "entry", "section": "procedures", "key": "amputation"}), "settle": 45},
 			{"name": "85_wall_tool_hover", "fn": _pose_wall2_tool.bind(false), "settle": 4},
@@ -92,7 +92,7 @@ func _ready() -> void:
 func _pose_scan_ring() -> void:
 	var here: Vector3 = game.table_pos() + Vector3(0, 0, -2.0)
 	bot.teleport(here)
-	var wi: Node3D = game.brains.spawn_walk_in(game._floor_at(here + Vector3(0, 0, 4))) as Node3D
+	var wi: Node3D = game.brains.spawn_hive(game._floor_at(here + Vector3(0, 0, 4))) as Node3D
 	await get_tree().process_frame
 	var pin: Vector3 = wi.global_position
 	var eye: Vector3 = pin + Vector3.UP * 1.0
@@ -127,7 +127,7 @@ func _pose_scan_nurse() -> void:
 	bot.bot_scan = false
 
 
-## Chunk 2: stand square to the screen with the projector on and open `to` (a scanned Walk-In with
+## Chunk 2: stand square to the screen with the projector on and open `to` (a scanned Hive with
 ## Hive Eyes at level 1, a stethoscope picked up).
 func _pose_wall2(to: Dictionary, quirk := "") -> void:
 	var wt: Node3D = _level_wall_terminal()
@@ -140,8 +140,8 @@ func _pose_wall2(to: Dictionary, quirk := "") -> void:
 	bot.bot_scan = false
 	bot.bot_laser_hold = false
 	game.database.clear()
-	game.mark_db("walk_in", "sighted")
-	game.mark_db("walk_in", "scanned")
+	game.mark_db("hive", "sighted")
+	game.mark_db("hive", "scanned")
 	game.mark_db("stethoscope", "sighted")
 	game.brains.set_level(bot.peer_id, "hive_in", 1)
 	bot.set_flashlight(false)
@@ -295,7 +295,7 @@ func _pose_wall_surge() -> void:
 	await get_tree().process_frame
 
 
-## Keep scanning the Walk-In from _pose_scan_ring until it completes, a few frames into the ring.
+## Keep scanning the Hive from _pose_scan_ring until it completes, a few frames into the ring.
 func _pose_scan_complete() -> void:
 	var hud: Node = get_tree().get_first_node_in_group("hud")
 	var wi: Node3D = null
@@ -332,18 +332,18 @@ func _pose_scan_nothing() -> void:
 	bot.bot_scan = true
 
 
-## Mid fly-through: the camera should be somewhere between the player's head and the Walk-In.
+## Mid fly-through: the camera should be somewhere between the player's head and the Hive.
 func _pose_hive_flight() -> void:
 	bot.bot_scan = false
 	var b: Node = game.brains
 	b.on_reset()
 	b.set_level(bot.peer_id, "hive_in", 1)
 	var here: Vector3 = bot.global_position
-	var wi: Node3D = game.brains.spawn_walk_in(game._floor_at(here + Vector3(0, 0, 8))) as Node3D
+	var wi: Node3D = game.brains.spawn_hive(game._floor_at(here + Vector3(0, 0, 8))) as Node3D
 	await get_tree().process_frame
 	bot.bot_ability_slot = 0
 	bot.bot_ability += 1
 	# Land the screenshot partway through FLIGHT_IN (1.2 s): a few frames in is early enough that
-	# the camera has visibly left the player's head but not yet reached the Walk-In's eyes.
+	# the camera has visibly left the player's head but not yet reached the Hive's eyes.
 	for i in 20:
 		await get_tree().process_frame

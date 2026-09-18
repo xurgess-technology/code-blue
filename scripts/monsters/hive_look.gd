@@ -1,5 +1,5 @@
 extends RefCounted
-## The Walk-In: an ordinary patient who walked in and never left. Heavy-set, about 1.75 m,
+## The Hive: an ordinary patient who walked in and never left. Heavy-set, about 1.75 m,
 ## grey-yellow skin, a faded blue print gown tied wrong, bare legs, one slipper sock, a
 ## wristband. The head hangs forward and to one side; the eyes are wide open, filmed over,
 ## with a faint wet shine: this is the one that looks at you. It drags its right leg.

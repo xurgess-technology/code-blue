@@ -20,7 +20,7 @@ carrying a body sees almost nothing of it. This sweep covers three things:
 - Swing and jab (`combat.gd` `animate_held` / `anim_pose`) move the held pivot through keyframes
   with no anticipation. `use()` resolves the hit on the host the moment the click arrives.
 - The shove (`player.gd` Q → `shove_count` → `game.player_shoved`) resolves instantly: a cone
-  check, then `m.shoved()` (2 s stun for the Walk-In and the Discharged). It has no animation.
+  check, then `m.shoved()` (2 s stun for the Hive and the Discharged). It has no animation.
 - A jab only sedates a monster that is already down ("It shrugged off the needle. Shove it
   first."), so **the shove's stun is the jab window**. Right now nobody can see that window.
 - Carrying keeps the carrier in first person. The carried player's view already hangs 1 m behind

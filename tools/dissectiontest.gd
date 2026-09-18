@@ -6,7 +6,7 @@ extends Node
 ##
 ## Headless checks, solo in a normal hospital (seed 4242) with dev mode on, clocked in with the phone
 ## quiet and no roaming monsters, on the entrance building's OR patient tables and shelf: the
-## procedures data (monsters never roll), a Walk-In strapped through the dev request, its body (sites,
+## procedures data (monsters never roll), a Hive strapped through the dev request, its body (sites,
 ## straps, flags), sedation wearing off and 2.5x faster while the saw bites, the local surgeon
 ## operating both steps through the real surgery system with bot_input, the brain's condition never
 ## going up, the brain handed over with condition -> quality, the flatline and the case clearing
@@ -64,7 +64,7 @@ func _physics_process(delta: float) -> void:
 
 func _data_checks() -> void:
 	_check(Procedures.patient_ailments() == ["amputation", "gunshot"], "patient_ailments has no dissection (%s)" % str(Procedures.patient_ailments()))
-	_check(Procedures.human_patients() == ["bob", "seal"] and Procedures.monster_patients() == ["discharged", "walk_in"], "human and monster patients")
+	_check(Procedures.human_patients() == ["bob", "seal"] and Procedures.monster_patients() == ["discharged", "hive"], "human and monster patients")
 	var monster_rolled := false
 	for s in 400:
 		var r := Procedures.roll(s * 7 + 3, 1 + s % 5)
@@ -116,12 +116,12 @@ func _dev_mode() -> void:
 		return
 	var dx: Node = game.dissection
 
-	# ---- strap a Walk-In through the dev request
-	dev.request("strap_monster", {"kind": "walk_in", "sedation": 1.0})
+	# ---- strap a Hive through the dev request
+	dev.request("strap_monster", {"kind": "hive", "sedation": 1.0})
 	await _frames(3)
-	var c := _monster_case("walk_in")
+	var c := _monster_case("hive")
 	_check(not c.is_empty() and bool(c.get("monster", false)) and String(c.ailment_id) == "dissection" and String(c.state) == "on_table",
-		"the dev request straps a Walk-In to a table (%s)" % str(c))
+		"the dev request straps a Hive to a table (%s)" % str(c))
 	if c.is_empty():
 		return
 	var table := int(c.table)
@@ -131,7 +131,7 @@ func _dev_mode() -> void:
 		and not body.has_site("gunshot"), "the monster body is a PatientBody with sites injection, skull and brain")
 	_check(body != null and body.find_child("Straps", true, false) != null and body.find_child("Strap", true, false) != null, "the body has straps")
 	_check(body != null and not body.site_section("skull").is_empty() and body.site_section("brain").has("tray"), "site sections for the skull and the brain")
-	await _check_rig_body(body, "walk_in")
+	await _check_rig_body(body, "hive")
 	_check(dx.owns_case(c) and dx.owns_table(table), "dissection owns the case and its table")
 	_check(game.loop.pay_for(c, 1) == 0, "a monster case pays nothing")
 
@@ -187,7 +187,7 @@ func _dev_mode() -> void:
 	var ok2 := await _until(func(): return String(c.get("state", "")) != "on_table", 40.0)
 	_check(ok2 and String(c.state) == "stable" and bool(c.flags.get("brain_removed", false)), "the brain step wins the case (state %s)" % String(c.get("state", "")))
 	var lb: Dictionary = dx.last_brain
-	_check(not lb.is_empty() and String(lb.kind) == "brain_walk_in" and absf(float(lb.quality) - cond_before / 100.0) < 0.011,
+	_check(not lb.is_empty() and String(lb.kind) == "brain_hive" and absf(float(lb.quality) - cond_before / 100.0) < 0.011,
 		"the brain is handed over: %s quality %.2f (condition %.1f)" % [str(lb.get("kind", "")), float(lb.get("quality", -1.0)), cond_before])
 	var node = lb.get("node")
 	_check(node != null and is_instance_valid(node) and (node as Node3D).global_position.distance_to(game.table_position(table)) < 1.6,
@@ -349,11 +349,11 @@ func _shots() -> void:
 	var tables: Array = game.patient_tables
 	var t0 := int(tables[0].index)
 	var t1 := int(tables[1].index) if tables.size() > 1 else t0
-	var wid: int = dx.dev_strap("walk_in", 1.0, t0)
+	var wid: int = dx.dev_strap("hive", 1.0, t0)
 	var did: int = dx.dev_strap("discharged", 0.15, t1)
 	await _seconds(1.5)
 	# 01/02: each monster from beside its table.
-	for pair in [[t0, "01_walk_in_strapped"], [t1, "02_discharged_thrashing"]]:
+	for pair in [[t0, "01_hive_strapped"], [t1, "02_discharged_thrashing"]]:
 		var tb := int(pair[0])
 		var tp: Vector3 = game.table_position(tb)
 		var yaw: float = game.table_yaw_of(tb)

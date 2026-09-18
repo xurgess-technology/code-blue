@@ -3,12 +3,12 @@
 importer="wav"
 type="AudioStreamWAV"
 uid="uid://c7vh8avffn0gh"
-path="res://.godot/imported/monsters_walkin_groan_01.wav-bb3bfa6cf2bc818c14d92523c5fb3025.sample"
+path="res://.godot/imported/monsters_hive_groan_01.wav-308f527b994afbff3dafe04a0b8304b7.sample"
 
 [deps]
 
-source_file="res://audio/sfx/monsters_walkin_groan_01.wav"
-dest_files=["res://.godot/imported/monsters_walkin_groan_01.wav-bb3bfa6cf2bc818c14d92523c5fb3025.sample"]
+source_file="res://audio/sfx/monsters_hive_groan_01.wav"
+dest_files=["res://.godot/imported/monsters_hive_groan_01.wav-308f527b994afbff3dafe04a0b8304b7.sample"]
 
 [params]
 

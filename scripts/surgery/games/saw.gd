@@ -522,7 +522,7 @@ static func self_test() -> Array:
 	# dissection (sweep 3): the skull variant on both monsters, sedated, stirring and awake (the
 	# awake thrashing botches come from the dissection system, not from here).
 	for sed in [1.0, 0.5, 0.2]:
-		for pid in ["walk_in", "discharged"]:
+		for pid in ["hive", "discharged"]:
 			for skill in [1.0, 0.5, 0.0]:
 				var g = script.new()
 				var tally := {"n": 0, "v": 0.0, "done": false, "q": 0.0, "flag": false, "reasons": {}}

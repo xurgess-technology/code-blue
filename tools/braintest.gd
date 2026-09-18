@@ -1,8 +1,8 @@
 extends Node
 ## Headless checks for brains (sweep 3): spoilage over time, value through pickup, drop, a violent
 ## drop and the dumpster, the rot shown on the model, the blender (points, levels, the cap), R with
-## nothing absorbed, Echo (noise, the view, cooldown), Hive Eyes (needs a Walk-In in range, freezes
-## the body, ends on R, on time, on a hit and when the Walk-In dies), and the reset on game over.
+## nothing absorbed, Echo (noise, the view, cooldown), Hive Eyes (needs a Hive in range, freezes
+## the body, ends on R, on time, on a hit and when the Hive dies), and the reset on game over.
 ##
 ##   godot --headless --fixed-fps 60 --path . tools/braintest.tscn [-- --seed=N]
 ##
@@ -60,10 +60,10 @@ func _run() -> void:
 
 func _data_and_math() -> void:
 	_say("---- loot data and spoil math")
-	for kind in ["brain_walk_in", "brain_discharged"]:
+	for kind in ["brain_hive", "brain_discharged"]:
 		_check(Items.is_loot(kind) and Items.is_fragile(kind) and not Items.stacks(kind) and not Items.is_bulky(kind),
 			"%s is fragile, single, one-handed loot" % kind)
-	_check(Brains.base_value("brain_walk_in") == 150 and Brains.base_value("brain_discharged") == 350, "base values $150 / $350")
+	_check(Brains.base_value("brain_hive") == 150 and Brains.base_value("brain_discharged") == 350, "base values $150 / $350")
 	var spawned := false
 	for s in [seed_value, 4242, 777, 90210]:
 		for sh in [1, 3]:
@@ -89,11 +89,11 @@ func _items() -> void:
 	_clear()
 	var b: Node = game.brains
 	var at: Vector3 = me.global_position + Vector3(0.8, 0.0, 0.0)
-	var it = b.spawn_brain("brain_walk_in", 0.8, at)
-	_check(it != null and it.kind == "brain_walk_in" and int(it.value) == 120, "spawn_brain: a Walk-In brain at quality 0.8 is worth $120 (%s)" % (str(it.value) if it != null else "null"))
+	var it = b.spawn_brain("brain_hive", 0.8, at)
+	_check(it != null and it.kind == "brain_hive" and int(it.value) == 120, "spawn_brain: a Hive brain at quality 0.8 is worth $120 (%s)" % (str(it.value) if it != null else "null"))
 	_check(absf(float(it.bt) - game.world_time) < 0.05, "its spoil clock starts now")
 	_check(it.find_children("Brain", "MeshInstance3D", true, false).size() == 1, "it has the brain model")
-	_check(_overlay_of(it) == ItemModels.tint_material("brain_walk_in"), "and wears the gold loot rim")
+	_check(_overlay_of(it) == ItemModels.tint_material("brain_hive"), "and wears the gold loot rim")
 	_check(it.interact_prompt(me).contains("$120") and it.interact_prompt(me).contains("fresh"), "its prompt tells value and condition: '%s'" % it.interact_prompt(me))
 	_check(int(it.report().get("bt", -1)) >= 0, "the item report carries bt")
 	# Age it: 135 s old is worth 57.5%.
@@ -105,7 +105,7 @@ func _items() -> void:
 	_check(rot_shown != null and float(rot_shown) > 0.4 and float(rot_shown) < 0.6, "the model shows the rot (%s)" % str(rot_shown))
 	var bt0 := float(it.bt)
 	game.pickup_item(me, it)
-	var i := _slot_of("brain_walk_in")
+	var i := _slot_of("brain_hive")
 	_check(i >= 0 and absf(float(me.slots[i].get("bt", -1.0)) - bt0) < 0.001 and int(me.slots[i].v) == 120, "picked up: the hand slot keeps bt and the value (%s)" % (str(me.slots[i]) if i >= 0 else "none"))
 	_check(b.current_value(me.slots[i]) == roundi(120 * 0.575), "the stack in hand is worth the same")
 	_check(me.report_full().sl[i].has("bt"), "the player report carries bt in the slot")
@@ -115,7 +115,7 @@ func _items() -> void:
 	_check(not hm.is_empty() and float(hm[0].get_instance_shader_parameter("rot")) > 0.4, "the held brain shows its rot too")
 	me.selected = i
 	game.drop_selected(me)
-	var dropped = _newest("brain_walk_in")
+	var dropped = _newest("brain_hive")
 	_check(dropped != null and absf(float(dropped.bt) - bt0) < 0.001 and int(dropped.value) == 120, "set down with G: bt and value stay")
 	game.pickup_item(me, dropped)
 	# A hit: fragile, it cracks (keeps LOOT_CRACK_KEEPS of its value) and still spoils from the same time.
@@ -123,7 +123,7 @@ func _items() -> void:
 	me.take_into("brain_discharged", 1, 300)
 	me.slots[_slot_of("brain_discharged")]["bt"] = game.world_time - 10.0
 	var bt1: float = game.world_time - 10.0
-	i = _slot_of("brain_walk_in")
+	i = _slot_of("brain_hive")
 	me.slots[i]["bt"] = bt0
 	me.invuln = 0.0
 	game.damage_player(me, 1, "test")
@@ -182,22 +182,22 @@ func _blender() -> void:
 	b.on_reset()
 	_clear()
 	_check(b.blender.interact_prompt(me).begins_with("!"), "without a brain it says why: '%s'" % b.blender.interact_prompt(me))
-	me.take_into("brain_walk_in", 1, 150)
-	me.slots[_slot_of("brain_walk_in")]["bt"] = game.world_time
-	me.selected = _slot_of("brain_walk_in")
+	me.take_into("brain_hive", 1, 150)
+	me.slots[_slot_of("brain_hive")]["bt"] = game.world_time
+	me.selected = _slot_of("brain_hive")
 	_check(b.blender.interact_prompt(me).begins_with("Hold E") and b.blender.interact_hold() > 1.0, "holding a brain: '%s'" % b.blender.interact_prompt(me))
 	await _stand_at_blender()
 	# A short hold does nothing.
 	me.bot_interact = true
 	await _frames(40)
 	me.bot_interact = false
-	_check(me.holding("brain_walk_in") and b.points(me.peer_id, "walk_in") == 0.0 and b.blend_progress(me.peer_id) > 0.0, "a short hold blends a little and keeps the brain (progress %.2f)" % b.blend_progress(me.peer_id))
+	_check(me.holding("brain_hive") and b.points(me.peer_id, "hive") == 0.0 and b.blend_progress(me.peer_id) > 0.0, "a short hold blends a little and keeps the brain (progress %.2f)" % b.blend_progress(me.peer_id))
 	await _frames(40)
 	_check(b.blend_progress(me.peer_id) == 0.0, "letting go winds the blend back down")
 	me.bot_interact = true
-	var drunk := await _until(func(): return not me.holding("brain_walk_in"), 3.0)
+	var drunk := await _until(func(): return not me.holding("brain_hive"), 3.0)
 	me.bot_interact = false
-	_check(drunk and b.points(me.peer_id, "walk_in") == 1.0 and b.level(me.peer_id, "walk_in") == 1, "a full 1.5 s hold drinks it: +1.0 fresh, Hive Eyes 1 (%.2f)" % b.points(me.peer_id, "walk_in"))
+	_check(drunk and b.points(me.peer_id, "hive") == 1.0 and b.level(me.peer_id, "hive") == 1, "a full 1.5 s hold drinks it: +1.0 fresh, Hive Eyes 1 (%.2f)" % b.points(me.peer_id, "hive"))
 	# Spoiling +0.75, rotten +0.5.
 	for e in [[160.0, 0.75], [300.0, 0.5]]:
 		me.take_into("brain_discharged", 1, 350)
@@ -211,11 +211,11 @@ func _blender() -> void:
 		await _frames(2)
 		_check(absf(b.points(me.peer_id, "discharged") - before - float(e[1])) < 0.001, "a brain %d s old adds %.2f" % [int(e[0]), float(e[1])])
 	_check(b.level(me.peer_id, "discharged") == 1, "1.25 points is Echo level 1")
-	b.add_points(me.peer_id, "walk_in", 9.0)
-	_check(b.points(me.peer_id, "walk_in") == 3.0 and b.level(me.peer_id, "walk_in") == Brains.MAX_LEVEL, "points cap at level 3")
+	b.add_points(me.peer_id, "hive", 9.0)
+	_check(b.points(me.peer_id, "hive") == 3.0 and b.level(me.peer_id, "hive") == Brains.MAX_LEVEL, "points cap at level 3")
 	var ns: Dictionary = b.net_state()
 	(ns.p[me.peer_id] as Array)[0] = 99.0
-	_check(b.points(me.peer_id, "walk_in") == 3.0, "net_state is a copy")
+	_check(b.points(me.peer_id, "hive") == 3.0, "net_state is a copy")
 	_check(game._global_fields().has("br"), "br rides in the global snapshot")
 	b.on_reset()
 
@@ -273,30 +273,30 @@ func _hive_eyes() -> void:
 	var b: Node = game.brains
 	b.on_reset()
 	me.revive_full()
-	# The stand-in Walk-In is a Discharged body that hunts by sound: keep it from ending the view by
+	# The stand-in Hive is a Discharged body that hunts by sound: keep it from ending the view by
 	# hitting me, except where the test hits me on purpose.
 	me.bot_invulnerable = true
-	b.add_points(me.peer_id, "walk_in", 1.0)
+	b.add_points(me.peer_id, "hive", 1.0)
 	b.add_points(me.peer_id, "discharged", 0.5)
-	_check(b.slot_of(me.peer_id, "hive_in") == 0 and b.slot_of(me.peer_id, "echo") == -1, "Walk-In reached level 1 (0.5 points is not): Hive Eyes took the first slot, Echo has none yet")
+	_check(b.slot_of(me.peer_id, "hive_in") == 0 and b.slot_of(me.peer_id, "echo") == -1, "Hive reached level 1 (0.5 points is not): Hive Eyes took the first slot, Echo has none yet")
 	me.bot_ability_slot = 0
 	me.bot_ability += 1
 	await _frames(3)
-	_check(b.last_result == "no_walk_in" and not me.hive_view, "no Walk-In nearby: nothing happens but a hint (%s)" % b.last_result)
+	_check(b.last_result == "no_hive" and not me.hive_view, "no Hive nearby: nothing happens but a hint (%s)" % b.last_result)
 	var here: Vector3 = me.global_position
-	var far: Node = b.spawn_walk_in(game._floor_at(here + Vector3(0, 0, 0)) + Vector3(80, 0, 0))
+	var far: Node = b.spawn_hive(game._floor_at(here + Vector3(0, 0, 0)) + Vector3(80, 0, 0))
 	await _frames(2)
 	me.bot_ability += 1
 	await _frames(3)
-	_check(b.last_result == "no_walk_in", "a Walk-In 80 m away is out of range (level 1: 30 m)")
-	var wi: Node = b.spawn_walk_in(game._floor_at(here + Vector3(0, 0, 12)))
-	_check(wi != null and String(wi.kind) == "walk_in", "a Walk-In to borrow (%s)" % (wi.name if wi != null else "null"))
+	_check(b.last_result == "no_hive", "a Hive 80 m away is out of range (level 1: 30 m)")
+	var wi: Node = b.spawn_hive(game._floor_at(here + Vector3(0, 0, 12)))
+	_check(wi != null and String(wi.kind) == "hive", "a Hive to borrow (%s)" % (wi.name if wi != null else "null"))
 	await _frames(2)
 	me.bot_ability += 1
 	await _frames(3)
-	_check(b.last_result == "hive" and me.hive_view and b.local_hive_active() and b.camera() != null, "Hive Eyes: my view jumps into the Walk-In (%s)" % b.last_result)
+	_check(b.last_result == "hive" and me.hive_view and b.local_hive_active() and b.camera() != null, "Hive Eyes: my view jumps into the Hive (%s)" % b.last_result)
 	# SWEEP 4A HOOK (Hive Eyes fly-through, chunk 4): the camera leaves my head and flies along the
-	# navmesh (or a straight line) before settling; it should not already be at the Walk-In's eyes.
+	# navmesh (or a straight line) before settling; it should not already be at the Hive's eyes.
 	await _frames(6)
 	var mid_cam: Camera3D = b.camera()
 	var mid_d := mid_cam.global_position.distance_to(wi.global_position + Vector3.UP * 1.7) if mid_cam != null else 0.0
@@ -306,7 +306,7 @@ func _hive_eyes() -> void:
 	await _frames(int(b.hive_view.FLIGHT_IN * 60) + 6)
 	var cam: Camera3D = b.camera()
 	var eye_d := cam.global_position.distance_to(wi.global_position + Vector3.UP * 1.7) if cam != null else 99.0
-	_check(eye_d < 0.7, "the camera lands at the Walk-In's eyes after the flight (%.2f m off)" % eye_d)
+	_check(eye_d < 0.7, "the camera lands at the Hive's eyes after the flight (%.2f m off)" % eye_d)
 	_check(bool(me.report_full().get("hv", false)), "the player report carries hv")
 	# Helpless: the body does not move.
 	var p0 := me.global_position
@@ -319,7 +319,7 @@ func _hive_eyes() -> void:
 	me.bot_ability += 1
 	await _frames(3)
 	_check(not me.hive_view, "R ends Hive Eyes on the host at once")
-	_check(b.cooldown_left(me.peer_id, "walk_in") > 10.0, "Hive Eyes cooldown about 12 s after it ends")
+	_check(b.cooldown_left(me.peer_id, "hive") > 10.0, "Hive Eyes cooldown about 12 s after it ends")
 	await _frames(int(b.hive_view.FLIGHT_OUT * 60) + 6)
 	_check(not b.local_hive_active() and b.camera() == null, "and the quick fly-back finishes shortly after")
 	me.bot_ability += 1
@@ -343,11 +343,11 @@ func _hive_eyes() -> void:
 	b._press_grace.clear()
 	me.bot_ability += 1
 	await _frames(3)
-	_check(me.hive_view, "back in the Walk-In's eyes")
+	_check(me.hive_view, "back in the Hive's eyes")
 	game.damage_player(me, 1, "test")
 	await _frames(3)
 	_check(not me.hive_view and not b.local_hive_active(), "getting hit snaps me back")
-	# The Walk-In dies: it ends.
+	# The Hive dies: it ends.
 	me.revive_full()
 	b._cd.clear()
 	b._press_grace.clear()
@@ -356,9 +356,9 @@ func _hive_eyes() -> void:
 	_check(me.hive_view, "looking through it again")
 	game.kill_monster(wi)
 	await _frames(3)
-	_check(not me.hive_view and b.camera() == null, "the Walk-In dies: back in my body")
+	_check(not me.hive_view and b.camera() == null, "the Hive dies: back in my body")
 	# Sedated (when the monsters worker's sedation exists): the same rule, checked through the method.
-	var wi2: Node = b.spawn_walk_in(game._floor_at(here + Vector3(0, 0, 8)))
+	var wi2: Node = b.spawn_hive(game._floor_at(here + Vector3(0, 0, 8)))
 	b._cd.clear()
 	b._press_grace.clear()
 	await _frames(2)
@@ -367,14 +367,14 @@ func _hive_eyes() -> void:
 	if wi2.has_method("sedate"):
 		wi2.sedate(30.0)
 		await _frames(3)
-		_check(not me.hive_view, "the Walk-In is sedated: back in my body")
+		_check(not me.hive_view, "the Hive is sedated: back in my body")
 	else:
 		me.bot_ability += 1
 		await _frames(3)
 		_say("(no Monster.sedate on this branch: the sedation end is covered by has_method only)")
 	# Both paths at once: each gets its own slot, independent of order.
 	b.on_reset()
-	b.add_points(me.peer_id, "walk_in", 1.0)
+	b.add_points(me.peer_id, "hive", 1.0)
 	b.add_points(me.peer_id, "discharged", 1.0)
 	_check(b.slot_of(me.peer_id, "hive_in") == 0 and b.slot_of(me.peer_id, "echo") == 1, "Hive Eyes and Echo each land in their own slot")
 	game.kill_monster(wi2)
@@ -408,21 +408,21 @@ func _reset_on_game_over() -> void:
 	var b: Node = game.brains
 	b.on_reset()
 	me.revive_full()
-	b.add_points(me.peer_id, "walk_in", 2.0)
+	b.add_points(me.peer_id, "hive", 2.0)
 	b.add_points(me.peer_id, "discharged", 1.0)
-	var wi: Node = b.spawn_walk_in(game._floor_at(me.global_position + Vector3(0, 0, 6)))
+	var wi: Node = b.spawn_hive(game._floor_at(me.global_position + Vector3(0, 0, 6)))
 	await _frames(2)
 	me.bot_ability += 1
 	await _frames(3)
-	_check(me.hive_view, "(looking through a Walk-In when the run ends)")
+	_check(me.hive_view, "(looking through a Hive when the run ends)")
 	if game.phase == Game.Phase.LOBBY:
 		game.begin_shift()
 		await _frames(3)
 	game._end_shift(false, "Test: everyone is out.")
 	var ok := await _until(func(): return game.phase == Game.Phase.LOBBY, 30.0)
 	await _frames(5)
-	_check(ok and b.points(me.peer_id, "walk_in") == 0.0 and b.points(me.peer_id, "discharged") == 0.0 and b.net_state().p.is_empty(), "after game over every absorbed brain is gone")
-	_check(not me.hive_view and not b.local_hive_active(), "and nobody is left looking through a Walk-In")
+	_check(ok and b.points(me.peer_id, "hive") == 0.0 and b.points(me.peer_id, "discharged") == 0.0 and b.net_state().p.is_empty(), "after game over every absorbed brain is gone")
+	_check(not me.hive_view and not b.local_hive_active(), "and nobody is left looking through a Hive")
 	if is_instance_valid(wi):
 		game.kill_monster(wi)
 	await _until(func(): return b.blender != null, 5.0)

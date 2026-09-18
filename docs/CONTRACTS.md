@@ -385,17 +385,17 @@ Noise the game already emits on the host: footsteps (walk 0.25, sprint 0.8), con
 pickups 0.15, drops 0.4, breaking glass 0.9, shoves 0.6, surgery monitors 0.6 while someone
 operates.
 
-### Monsters, sweep 3 (monsters worker): the Walk-In, fighting and capturing
+### Monsters, sweep 3 (monsters worker): the Hive, fighting and capturing
 
-Kinds: `Monster.WALK_IN` `"walk_in"`, `DISCHARGED`, `NIGHT_NURSE` (`Monster.KINDS`).
+Kinds: `Monster.HIVE` `"hive"`, `DISCHARGED`, `NIGHT_NURSE` (`Monster.KINDS`).
 
 ```gdscript
-static func roster(shift, player_count) -> Array[String]  # Discharged/Nurse first (MAX_MONSTERS 5), then Walk-Ins
-static func walk_in_count(shift, player_count) -> int     # 3 + shift + (players - 1), cap MAX_WALK_INS 8
-static func walk_in_spots(level_info, count, rng, space = null) -> Array[Vector3]   # game._spawn_monsters uses it
-static func is_capturable(kind) -> bool                    # walk_in, discharged
-static func max_hp_for(kind) -> int                        # walk_in 2, discharged 4, night_nurse 0
-static func display_name(kind) -> String                   # "Walk-In", "Discharged", "Night Nurse"
+static func roster(shift, player_count) -> Array[String]  # Discharged/Nurse first (MAX_MONSTERS 5), then Hives
+static func hive_count(shift, player_count) -> int     # 3 + shift + (players - 1), cap MAX_HIVES 8
+static func hive_spots(level_info, count, rng, space = null) -> Array[Vector3]   # game._spawn_monsters uses it
+static func is_capturable(kind) -> bool                    # hive, discharged
+static func max_hp_for(kind) -> int                        # hive 2, discharged 4, night_nurse 0
+static func display_name(kind) -> String                   # "Hive", "Discharged", "Night Nurse"
 static func make_lying(kind) -> Node3D                     # = monster_model.gd make_lying (below)
 enum State { WANDER, CHASE, STUNNED, SEDATED }             # modes.gd mirrors both enums; append only
 enum Mode { IDLE, WANDER, LISTEN, RUSH, SEARCH, STALK, STUNNED, RETREAT, SEDATED }
@@ -415,7 +415,7 @@ func eye_transform() -> Transform3D                         # every machine: eye
 - **take_hit**: hp -= amount; hp 0 returns `"killed"` and does nothing else (the caller calls
   `game.kill_monster(m)`). Otherwise a 0.7 s stagger (mode STUNNED, pushed 0.45 m along `dir`),
   after which it goes for whoever hit it (the nearest player within 3.5 m, else the side the blow
-  came from): the Walk-In walks at them, the Discharged rushes the spot. A sedated monster takes
+  came from): the Hive walks at them, the Discharged rushes the spot. A sedated monster takes
   the damage and stays down (`"stagger"`). The Night Nurse returns `"immune"` and nothing changes.
   Any stagger opens `can_sedate()` for its duration, like a shove (2 s).
 - **sedate(seconds)**: mode and state SEDATED, the brain stops, it never hits anyone, it does not
@@ -424,7 +424,7 @@ func eye_transform() -> Transform3D                         # every machine: eye
   `sedation_left` reaches 0 it calls `wake()`. Players never collide with monsters (their mask is
   the world only), so a sedated monster is not solid to them. Its collision capsule (layer
   `C.L_MONSTER`) lies down with it on every machine: along local Z, centred on the origin.
-- **wake()**: stands up over 1.2 s (mode STUNNED), then hunts the nearest player (Walk-In: walks
+- **wake()**: stands up over 1.2 s (mode STUNNED), then hunts the nearest player (Hive: walks
   to where they are; Discharged: rushes them). If `dragged_by` is set it calls
   `game.combat.drop_dragged(dragger)` when combat has it, clears `dragged_by`, and hits the dragger
   (`game.monster_hit_player`) when they are within 3 m. Combat should not hit them a second time.
@@ -440,11 +440,11 @@ func eye_transform() -> Transform3D                         # every machine: eye
   `sedation_left` stay on the host. Clients flinch and play `monsters_flesh_hit` when `hc` changes.
 - **make_lying(kind)** (`scripts/monsters/monster_model.gd`, static): a still copy lying on its back
   along X, head toward -X, face up (+Y), origin at the middle of its back (the PatientBody
-  convention). Lengths: Walk-In about 1.7 m, Discharged about 2.1 m. No IV pole. Rig-less
+  convention). Lengths: Hive about 1.7 m, Discharged about 2.1 m. No IV pole. Rig-less
   fallback: primitives. Its node named `Head` follows the head bone. It keeps an AnimationPlayer
   frozen on the idle pose; do not free the skeleton. The shaper's optional cfg `lying_spread`
   (degrees, default 11) sets how far the arms lie out from the sides.
-- **The Walk-In**: sight only (110 degree cone, 12 m, rays to the player's head then chest, walls
+- **The Hive**: sight only (110 degree cone, 12 m, rays to the player's head then chest, walls
   block, light does not matter; 5 Hz, staggered; the ray count is in `brain.rays`). Wanders 0.8 m/s
   within 7 m of where it spawned, chases at 1.8 m/s straight at whoever it sees, keeps walking to
   the last sighting for up to 2.5 s after losing them, looks around about 3 s, gives up. Ignores
@@ -453,24 +453,24 @@ func eye_transform() -> Transform3D                         # every machine: eye
 - **The Discharged**: about 2.1 m (collision capsule 2.1 m, radius 0.36), eyeless, ears on the
   large side of normal; `MonsterModel.set_ears(listen, yaw, delta)` swivels them toward `listen_yaw`
   and flares them while listening (every machine, from the report's mode and `ly`).
-- **Placement** (`walk_in_spots`, host): hallway tiles (`.`/`M`, outside every room rect grown by a
+- **Placement** (`hive_spots`, host): hallway tiles (`.`/`M`, outside every room rect grown by a
   tile, not in a doorway's mouth) of each wing (`zone_of` == the wing id), at least 5 m from the
   entrance building and within 12 m of the wing's shallowest such tile; blocked tiles rejected
   with a sphere query when a physics space is given. Groups of 2-3 (4 when there are more
-  Walk-Ins than wings can take), one group per wing while wings last, each within 3.5 m of a
+  Hives than wings can take), one group per wing while wings last, each within 3.5 m of a
   random shallow centre. Levels without `wings`/`zones`/`entrance_rect` (dev room, lab) group
   them around `monster_spawns`.
 - **Shapes.bake(root, key)**: every part added through `MonsterModel.add_part` is merged into one
-  mesh per material, cached per kind and part for the session (a Walk-In went from about 90 draw
+  mesh per material, cached per kind and part for the session (a Hive went from about 90 draw
   calls to about 6). Parts that move on their own must carry meta `no_bake` (the ears).
-- Sounds (`tools/gen_audio_monsters.mjs`): `monsters_walkin_groan` (occasional, and when it first
-  sees someone), `monsters_walkin_shuffle` (per step), `monsters_flesh_hit` (any struck monster),
-  `monsters_walkin_death` (played by the dev room's `monster_died_fx` for a Walk-In),
+- Sounds (`tools/gen_audio_monsters.mjs`): `monsters_hive_groan` (occasional, and when it first
+  sees someone), `monsters_hive_shuffle` (per step), `monsters_flesh_hit` (any struck monster),
+  `monsters_hive_death` (played by the dev room's `monster_died_fx` for a Hive),
   `monsters_sedated_breath` (every 3-4 s near a sedated monster).
 - Tests: `tools/monster_lab.tscn` (headless scenarios 1-10: hearing, darkness, the Nurse, contact,
-  roster, client mirrors, the Walk-In, hits/sedation/waking, dragging/lying copies, placement over
+  roster, client mirrors, the Hive, hits/sedation/waking, dragging/lying copies, placement over
   generated hospitals), `-- --shots` (windowed close-ups into `tools/monster_shots/`), `-- --perf`
-  (Walk-In frame cost, windowed; `-- --perf --nurses`: 0, 1 and 4 Night Nurses in view), `-- --real`
+  (Hive frame cost, windowed; `-- --perf --nurses`: 0, 1 and 4 Night Nurses in view), `-- --real`
   (a bot in a generated hospital), and the nettest scenario `monsters`.
 
 ### The Night Nurse's model (2026-09-14)
@@ -1545,7 +1545,7 @@ HumanModel.sample_clip(skel, anim, t) / bone_global(skel, bone) / chain_to(node,
 
 - Assets keys (made in-house): `char/human_surgeon_a|b|c`, `patient/human_bob`, `crew/human_paramedic_a|b`
   (`assets/models/characters/human/<variant>.glb`, scale 1, yaw 180). The Discharged keeps the Kenney
-  `patient/human` rig; the Walk-In and the Discharged get their own models later.
+  `patient/human` rig; the Hive and the Discharged get their own models later.
 - Materials: `shaders/human_cloth.gdshader` (`tint` recolours the scrubs by luminance from mask R,
   `baked_tint` #3d8f80; mask G reflective strips) and `shaders/human_skin.gdshader` (`pallor`, `grey`,
   `infect` / `infect_from` / `infect_full` on UV2, `gash`, `wound`, `vein_glow`). Players share one skin
@@ -1555,19 +1555,19 @@ HumanModel.sample_clip(skel, anim, t) / bone_global(skel, bone) / chain_to(node,
 ## Dissection (dissection worker, sweep 3)
 
 Strapped monsters on the patient tables (`scripts/dissection/`, `game.dissection`). A monster case is
-an ordinary `game.cases` entry: `{table, patient_id: "walk_in" | "discharged", ailment_id: "dissection",
+an ordinary `game.cases` entry: `{table, patient_id: "hive" | "discharged", ailment_id: "dissection",
 monster: true, flags: {sedation}}` plus `doses` (re-doses given). The surgery systems operate it like
 any patient; everything below is host authoritative.
 
 ```gdscript
 # Procedures (scripts/procedures.gd)
-PATIENTS.walk_in / .discharged        # monster: true (name, full_name, weight, blurbs.dissection)
+PATIENTS.hive / .discharged        # monster: true (name, full_name, weight, blurbs.dissection)
 AILMENTS.dissection                   # monster_only: true; steps
     # {id "open", "Saw open the skull", bone_saw, uses 0, game "saw", variant "skull", site "skull"}
     # {id "harvest", "Pull out the brain", forceps, uses 0, game "forceps", variant "brain", site "brain"}
 Procedures.is_monster(patient_id) / is_monster_only(ailment_id)
 Procedures.human_patients() -> ["bob", "seal"]    # roll(), the dev panel, the loop's extra call, the guide
-Procedures.monster_patients() -> ["discharged", "walk_in"]
+Procedures.monster_patients() -> ["discharged", "hive"]
 # roll() and patient_ailments() never return a monster or dissection (same results as before).
 
 # game.dissection (scripts/dissection/dissection.gd), child "Dissection" of Game
@@ -1575,7 +1575,7 @@ owns_case(c) -> bool / owns_table(table) -> bool      # every machine
 sedation(c) -> float                                    # host: precise; clients: replicated (hundredths)
 static sedation_state(s) -> "under" | "stirring" | "awake"   # STIR 0.75, AWAKE 0.35
 static dose_amount(n) -> float                          # DOSE * DOSE_FALLOFF^n = 0.6 * 0.6^n
-static brain_kind(patient_id) -> "brain_walk_in" | "brain_discharged"
+static brain_kind(patient_id) -> "brain_hive" | "brain_discharged"
 table_prompt(p, table) -> String                        # game._table_prompt hands monster tables here
 table_used(p, table) -> bool                            # host, from game._proxy_used: true = it was a re-dose
 redose(p, table) -> float                               # host: one vial from p's hands; returns the sedation added
@@ -1618,11 +1618,11 @@ SEDATION_SECONDS 120, SAW_MULT 2.5, THRASH_BOTCH 1.5, THRASH_EVERY 3.0, SHRIEK_N
   Discharged 0.9), arms in at the sides (RigShaper cfg `lying_spread`), the rig's `Head` node hidden.
   The openable head sits at the rig's head bone, face up, wearing the body's own skin material and
   the walking look's face (`scripts/dissection/monster_rig_look.gd`: the Discharged's sealed, stitched
-  sockets, brow and large ears; the Walk-In's filmed eyes, jowls, open mouth and fringe of hair);
+  sockets, brow and large ears; the Hive's filmed eyes, jowls, open mouth and fringe of hair);
   face pieces past the cut ride the cap. Fit constants (scale, head bone, straps) live in
   `RigLook.RIG`; `tools/dissectiontest` checks the head bone against them. Thrashing turns the rig's
   arm and leg bones (`strap_thrash.gd`, a SkeletonModifier3D after the shaper), heaves the body and
-  pulls the straps over the lifting limbs taut. Without the rig: primitives (the Walk-In a greenish
+  pulls the straps over the lifting limbs taut. Without the rig: primitives (the Hive a greenish
   patient in a teal gown, the Discharged taller, grey, eyeless, large ears, an IV line taped on).
 - **Minigames:** `saw.gd` variant `skull` (layers Scalp/Bone/Dura, no tourniquet, steady scalp bleed,
   finishes `{skull_open: true, cut_quality}`; the saw model is hidden until someone saws). `forceps.gd`
@@ -1728,14 +1728,14 @@ for anything that changes what crosses the wire.
 ```gdscript
 game.brains.spawn_brain(kind: String, quality: float, pos: Vector3) -> Node   # host: a WorldItem on
     # whatever is under pos; value = base * quality (min $1); spoil clock starts now; squelch sound
-Brains.is_brain(kind) -> bool              # "brain_walk_in", "brain_discharged" (static)
+Brains.is_brain(kind) -> bool              # "brain_hive", "brain_discharged" (static)
 Brains.spoil_factor(age_seconds) -> float  # 1.0 for 45 s, linear to 0.15 at 225 s, then 0.15 (static)
 Brains.condition(factor) -> String         # "fresh" (>= 0.6), "spoiling" (>= 0.3), "rotten" (static)
 Brains.base_value(kind) -> int             # 150 / 350 (loot_table.gd "value")
 game.brains.current_value(stack_or_item) -> int   # a hand slot {kind, v, bt} or a WorldItem: v * factor
     # for brains (min $1), the plain value for any other kind
 game.brains.factor_of(stack_or_item) / age_of(stack_or_item)
-game.brains.points(peer_id, path) -> float # path "walk_in" | "discharged"; 0..3, steps of 0.25
+game.brains.points(peer_id, path) -> float # path "hive" | "discharged"; 0..3, steps of 0.25
 game.brains.level(peer_id, path) -> int    # floor(points), 0..3
 game.brains.add_points(peer_id, path, amount)   # host (the blender, dev, tests); the moment a path
     # first reaches level 1 it also grants that ability's slot (add_ability, below)
@@ -1744,7 +1744,7 @@ game.brains.on_reset()                     # host, from game.reset_money (game o
 # SWEEP 4A (docs/SWEEP4A.md "Ability slots"): 4 ability slots per player, independent of how a
 # level is earned (today: points/level above; grafting will source levels later, docs/backlog/
 # SWEEP4B.md), so nothing here reads `_points` except through level()/points().
-Brains.ABILITY_ID := {"discharged": "echo", "walk_in": "hive_in"}   # path -> ability id (static)
+Brains.ABILITY_ID := {"discharged": "echo", "hive": "hive_in"}   # path -> ability id (static)
 game.brains.slots_for(peer_id) -> Array    # this player's 4 slots, ability id or "" (host authoritative,
     # replicated: net_state()["ab"]; the ability bar is local-only, so a client only really needs its own)
 game.brains.add_ability(peer_id, id) -> bool    # host: id into the first empty slot; true if it was
@@ -1759,15 +1759,15 @@ game.brains.ability_slot(p, slot_idx)      # host, from game.player_ability_slot
 game.brains.blender                        # the placed blender node (interact_id "blender") or null
 game.brains.blend_progress(peer_id) -> float    # 0..1 while that player holds E on the blender
 game.brains.camera() -> Camera3D           # every machine: the Hive Eyes camera while the LOCAL
-                                           # player looks through a Walk-In (main.gd renders it), else null
+                                           # player looks through a Hive (main.gd renders it), else null
 game.brains.local_hive_active() / local_exit()  # main.gd: Esc during Hive Eyes
-game.brains.spawn_walk_in(pos) -> Node     # host (dev, tests): a Walk-In; a stand-in Discharged body
-                                           # with kind "walk_in" while Monster.WALK_IN does not exist
+game.brains.spawn_hive(pos) -> Node     # host (dev, tests): a Hive; a stand-in Discharged body
+                                           # with kind "hive" while Monster.HIVE does not exist
 game.brains.dev_request(sender, action, args)   # "br_spawn_brain" {kind, quality, age}, "br_levels"
-                                           # {amount, id}, "br_reset", "br_walk_in" (dev_room forwards br_*)
+                                           # {amount, id}, "br_reset", "br_spawn_hive" (dev_room forwards br_*)
 ```
 
-- **Brain items.** Loot kinds `brain_walk_in` ($150) and `brain_discharged` ($350) in
+- **Brain items.** Loot kinds `brain_hive` ($150) and `brain_discharged` ($350) in
   `loot_table.gd` with `brain: true`, fragile, not stackable, not bulky, no rooms / surfaces /
   containers (the loot spawner never picks them). The model is one merged mesh with the gold rim.
 - **Spoil time `bt`** (world_time of the harvest): `WorldItem.bt` (default -1e6 = none; any value
@@ -1805,7 +1805,7 @@ game.brains.dev_request(sender, action, args)   # "br_spawn_brain" {kind, qualit
   (`Brains._echo_pose_until[shrieker peer] = world_time + 0.5`, not replicated -- every machine
   sets it the same way from the same reliable event) that leans the shrieker's `body_visual` back
   briefly (`Player._update_down_pose`'s tilt calc), so the shriek visibly comes from them too.
-- **Hive Eyes** (host): the nearest `kind == "walk_in"` monster within range (through walls, not
+- **Hive Eyes** (host): the nearest `kind == "hive"` monster within range (through walls, not
   `is_sedated()`); `Player.hive_view = true` (report key `hv`), `br.hv[peer] = [monster id, end
   world_time]`, event `br_hive {id, on}`. Ends on time, its slot / E / Esc, the monster leaving
   `game.monsters` (killed, strapped) or `is_sedated()`, and the player's hp dropping, being downed,
@@ -1817,16 +1817,16 @@ game.brains.dev_request(sender, action, args)   # "br_spawn_brain" {kind, qualit
   now carries `HiveView.FLIGHT_IN` (1.2 s) on top of `hive_seconds(lvl)`, so the duration timer
   only really starts once the flight lands. The local camera leaves the player's own camera
   transform and glides along `NavigationServer3D.map_get_path` (the default map; a straight line
-  when none is found) to the Walk-In's eyes over `FLIGHT_IN`, looking ahead along the path;
+  when none is found) to the Hive's eyes over `FLIGHT_IN`, looking ahead along the path;
   `hive_view._phase` is `"in"` (flying), `"settled"` (riding the eyes, the original sweep 3
   behaviour) or `"out"` (a `FLIGHT_OUT`, 0.3 s, glide back to wherever the body currently is).
   Ending is instant (no `"out"` phase) when the monster is gone, or when the local player's hp
   dropped since the flight started, or they are downed/carried (`hive_view._begin_end`'s own
   comparison against `_start_hp`, captured client-side -- nothing new was added to the wire for
   this). A quiet end (the slot again, or time running out) gets the `"out"` glide instead.
-  **Known gap:** cycling between Walk-Ins at level 2+ and the hold-to-exit key are not wired up
+  **Known gap:** cycling between Hives at level 2+ and the hold-to-exit key are not wired up
   this pass (`hive_view._begin_cycle` exists but nothing calls it) -- see KNOWN_ISSUES.md.
-- **Replication:** `net_state()` = `{"p": {peer: [walk_in, discharged]}, "hv": {peer: [id, end]},
+- **Replication:** `net_state()` = `{"p": {peer: [hive, discharged]}, "hv": {peer: [id, end]},
   "bh": {peer: progress}, "ab": {peer: [4 ability ids]}}` (copies, quantized; empty dictionaries
   when idle).
 - Sounds `brains_squelch`, `brains_blend`, `brains_gulp`, `brains_shriek`, `brains_hive_in`,
@@ -1844,7 +1844,7 @@ game.brains.dev_request(sender, action, args)   # "br_spawn_brain" {kind, qualit
 `ability_alt` (Alt) grows them into the bar over ~0.12 s (`Hud._alt_t`) while the item icons shrink
 to a small row where the abilities were. Each icon: `Alt+N`, a cooldown sweep, level pips, a cost
 tag (`Hud.ABILITY_COST`, e.g. Echo's "LOUD"), and while Alt is held, the ability's name and (greyed
-out) why it cannot fire right now (`Hud._slot_reason`: cooling down, hands busy, no Walk-In in
+out) why it cannot fire right now (`Hud._slot_reason`: cooling down, hands busy, no Hive in
 range, downed). The first time an ability lands in a slot, a short card names it, what it does, its
 key and its cost, and closes itself after 5 s or on any key (`Hud._card_until` / `_card_seen`).
 
@@ -1967,11 +1967,11 @@ door.is_closed() / is_hinged() / is_automatic() / limit(side) / leaf_xform(i, a)
   opened it is not in its way.
 - **Monsters**: agents walking into a hinged or double door (including the OR's, now that they are
   `double`) open it by kind while wandering or rushing: the
-  Walk-In pushes slowly (0.42/s, a creak, noise 0.5), the Discharged rushing bursts it (7/s, a slam,
+  Hive pushes slowly (0.42/s, a creak, noise 0.5), the Discharged rushing bursts it (7/s, a slam,
   0.95) and otherwise creaks it open, the Night Nurse opens it silently (2.2/s) only while she is not
   observed and nobody is watching the doorway (`Perception.observed_any` at the door, 5 Hz). Doors
   never close by themselves, so a door left shut can be open later.
-- **Sight and light**: leaves are on `C.L_WORLD`, so every sight ray (perception, the Walk-In's eyes,
+- **Sight and light**: leaves are on `C.L_WORLD`, so every sight ray (perception, the Hive's eyes,
   the flashlight check) and the flashlight's shadow stop at a closed door. A leaf folded open past
   90% stops colliding (its aim area stays). The Discharged's hearing multiplies a noise's reach by
   `sound_factor` (a hook in `discharged_brain.gd`).

@@ -1,5 +1,5 @@
 extends RefCounted
-## A strapped monster on a patient table: the PatientBody builder for `walk_in` and `discharged`
+## A strapped monster on a patient table: the PatientBody builder for `hive` and `discharged`
 ## (PatientBody.create dispatches here). Same builder interface as scripts/patients/*_builder.gd:
 ## build(b), animate(b, jolt, env, fidget, twitch, t), set_limb_removed(b, removed),
 ## make_severed_limb(b, parent), plus skull_cap_rest(b) for the saw's skull variant.
@@ -29,7 +29,7 @@ const STIR := 0.75
 
 ## Per kind: body length, head radii, widths, colours.
 const LOOKS := {
-	"walk_in": {
+	"hive": {
 		"length": 1.74, "head": Vector3(0.14, 0.125, 0.112), "width": 1.0, "thin": 1.0,
 		"skin": Color(0.5, 0.55, 0.38), "scalp": Color(0.14, 0.12, 0.1), "hair": 0.9,
 		"gown": Color(0.34, 0.56, 0.6), "gown_dark": Color(0.28, 0.32, 0.2), "eyeless": false,
@@ -47,7 +47,7 @@ static var _vc_mats := {}
 
 
 static func look_of(id: String) -> Dictionary:
-	return LOOKS.get(id, LOOKS["walk_in"])
+	return LOOKS.get(id, LOOKS["hive"])
 
 
 static func build(b) -> bool:
@@ -433,7 +433,7 @@ static func _primitive_body(b, rig: Node3D, lk: Dictionary, d: Dictionary, seed_
 				Transform3D(Basis(Vector3(0, 0, 1), -0.35), Vector3(0.03, -0.01, (float(f) - 1.5) * 0.014)), "Finger")
 		b.parts["arm_%s" % ("l" if side > 0 else "r")] = arm
 		b.parts["fingers_%s" % ("l" if side > 0 else "r")] = fingers
-	# The Walk-In's wristband; the Discharged's IV line taped to the forearm.
+	# The Hive's wristband; the Discharged's IV line taped to the forearm.
 	if String(b.patient_id) == "discharged":
 		var arm_n: Node3D = b.parts["arm_r"]
 		Kit.add_mesh(arm_n, Kit.box(Vector3(0.05, 0.004, 0.03)), Kit.mat("mb_tape", Color(0.85, 0.82, 0.7), 0.9), Transform3D(Basis(), Vector3(0.45 * s, 0.02, 0)), "Tape")

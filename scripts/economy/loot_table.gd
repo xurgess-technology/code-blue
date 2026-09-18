@@ -126,8 +126,8 @@ const LOOT := {
 	# BRAINS (sweep 3, scripts/brains): harvested from a dissected monster, never found. No rooms,
 	# surfaces or containers, so the loot spawner never picks them; `value` is the full price of a
 	# perfect brain (scaled by its condition when harvested, then by spoilage, see brains.gd).
-	"brain_walk_in": {
-		"name": "Walk-In brain", "short": "Walk-In brains", "value": [150, 150], "tier": 3, "fragile": true,
+	"brain_hive": {
+		"name": "Hive brain", "short": "Hive brains", "value": [150, 150], "tier": 3, "fragile": true,
 		"brain": true, "rooms": {}, "surfaces": [], "containers": {},
 	},
 	"brain_discharged": {

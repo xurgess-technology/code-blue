@@ -37,10 +37,10 @@ const PATIENTS := {
 	# panel's patient list and anything else that means a human patient (human_patients()). Their
 	# bodies are built by scripts/dissection/monster_builder.gd; the only ailment they take is
 	# `dissection`.
-	"walk_in": {
-		"name": "The Walk-In",
-		"full_name": "Walk-In, unregistered",
-		"body": "walk_in",
+	"hive": {
+		"name": "The Hive",
+		"full_name": "Hive, unregistered",
+		"body": "hive",
 		"monster": true,
 		"weight_kg": 70.0,
 		"limb_name": "",
@@ -151,7 +151,7 @@ static func is_monster_only(ailment_id: String) -> bool:
 	return bool(AILMENTS.get(ailment_id, {}).get("monster_only", false))
 
 
-## dissection (sweep 3): a monster patient (walk_in, discharged).
+## dissection (sweep 3): a monster patient (hive, discharged).
 static func is_monster(patient_id: String) -> bool:
 	return bool(PATIENTS.get(patient_id, {}).get("monster", false))
 

@@ -74,7 +74,7 @@ func _brain_shots() -> void:
 	var bl: Node3D = b.blender
 	var room_c := _break_room_centre()
 	var base: Vector3 = game._floor_at(room_c)
-	var row := [["brain_walk_in", 0.0], ["brain_walk_in", 150.0], ["brain_walk_in", 260.0], ["brain_discharged", 0.0], ["brain_discharged", 260.0]]
+	var row := [["brain_hive", 0.0], ["brain_hive", 150.0], ["brain_hive", 260.0], ["brain_discharged", 0.0], ["brain_discharged", 260.0]]
 	var placed := []
 	for i in row.size():
 		var it: Node = b.spawn_brain(row[i][0], 1.0, base + Vector3((i - 2) * 0.24, 0.2, 0.0))
@@ -106,7 +106,7 @@ func _brain_shots() -> void:
 	# In hand, first person.
 	for e in [["fresh", 0.0], ["rotten", 260.0]]:
 		_clear()
-		bot.take_into("brain_walk_in", 1, 150)
+		bot.take_into("brain_hive", 1, 150)
 		bot.slots[0]["bt"] = game.world_time - float(e[1])
 		bot.selected = 0
 		_look_from(room_c, room_c + Vector3(2.0, 0.6, 0.0))
@@ -157,7 +157,7 @@ func _dumpster_shot() -> void:
 	var out: Vector3 = furn.global_transform.basis.z
 	var f: Vector3 = furn.global_position + out * 4.5
 	_clear()
-	bot.take_into("brain_walk_in", 1, 150)
+	bot.take_into("brain_hive", 1, 150)
 	bot.slots[0]["bt"] = game.world_time - 120.0
 	_look_from(f, furn.global_position + Vector3.UP * 1.5)
 	await _frames(30)
@@ -186,13 +186,13 @@ func _echo_shots() -> void:
 	var stand: Vector3 = game._floor_at(best)
 	var map := get_viewport().world_3d.navigation_map
 	stand = NavigationServer3D.map_get_closest_point(map, stand + Vector3(2.0, 0, 0))
-	# Company: a Discharged and a Walk-In stand-in behind walls, and a teammate dummy.
+	# Company: a Discharged and a Hive stand-in behind walls, and a teammate dummy.
 	var yaw := _open_direction(stand)
 	var dirv := Vector3(-sin(yaw), 0, -cos(yaw))
 	var side := Vector3(cos(yaw), 0, -sin(yaw))
 	# In front but off to the sides, where walls are likely to hide them.
 	var m1: Node = game._add_monster("discharged", NavigationServer3D.map_get_closest_point(map, stand + dirv * 9.0 + side * 5.0))
-	var m2: Node = b.spawn_walk_in(NavigationServer3D.map_get_closest_point(map, stand + dirv * 7.0 - side * 5.0))
+	var m2: Node = b.spawn_hive(NavigationServer3D.map_get_closest_point(map, stand + dirv * 7.0 - side * 5.0))
 	var mate := _dummy(NavigationServer3D.map_get_closest_point(map, stand + dirv * 12.0 - side * 1.0))
 	_look_from(stand, stand + dirv * 6.0 + Vector3.UP * 1.2)
 	await _frames(20)
@@ -223,14 +223,14 @@ func _echo_shots() -> void:
 
 func _hive_shots() -> void:
 	var b: Node = game.brains
-	# Stand in a corridor; a Walk-In a room or two away looks down its own hallway.
+	# Stand in a corridor; a Hive a room or two away looks down its own hallway.
 	var spots: Array = game.level_info.get("monster_spawns", [])
 	var map := get_viewport().world_3d.navigation_map
 	var stand: Vector3 = spots[0] if not spots.is_empty() else game.table_pos()
 	var sy := _open_direction(stand)
-	# The Walk-In a room away: 12 m down the longest open line from where I stand, then a few metres aside.
+	# The Hive a room away: 12 m down the longest open line from where I stand, then a few metres aside.
 	var wpos: Vector3 = stand + Vector3(-sin(sy), 0, -cos(sy)) * 12.0 + Vector3(cos(sy), 0, -sin(sy)) * 3.0
-	var wi: Node = b.spawn_walk_in(NavigationServer3D.map_get_closest_point(map, wpos))
+	var wi: Node = b.spawn_hive(NavigationServer3D.map_get_closest_point(map, wpos))
 	await _frames(5)
 	wi.set_physics_process(false)
 	var yaw := _open_direction(wi.global_position)
@@ -238,13 +238,13 @@ func _hive_shots() -> void:
 	var dirv := Vector3(-sin(yaw), 0, -cos(yaw))
 	_look_from(stand, stand + Vector3(1, 1.5, 0))
 	await _frames(10)
-	b.add_points(bot.peer_id, "walk_in", 2.0)
-	_say("hive: me %s, walk-in %s (%s), %.1f m, monsters %d" % [str(bot.global_position), str(wi.global_position), wi.kind, bot.global_position.distance_to(wi.global_position), game.monsters.size()])
+	b.add_points(bot.peer_id, "hive", 2.0)
+	_say("hive: me %s, hive %s (%s), %.1f m, monsters %d" % [str(bot.global_position), str(wi.global_position), wi.kind, bot.global_position.distance_to(wi.global_position), game.monsters.size()])
 	bot.bot_ability += 1
 	await _frames(30)
 	_say("hive: result %s" % b.last_result)
 	await _shot("16_hive_eyes")
-	# Looking at a teammate from the Walk-In's eyes: put a dummy in front of it.
+	# Looking at a teammate from the Hive's eyes: put a dummy in front of it.
 	var dummy := _dummy(wi.global_position + dirv * 4.0)
 	await _frames(20)
 	await _shot("17_hive_eyes_teammate_in_view")

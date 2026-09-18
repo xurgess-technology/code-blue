@@ -3,12 +3,12 @@
 importer="wav"
 type="AudioStreamWAV"
 uid="uid://1f3rwpyycso7"
-path="res://.godot/imported/monsters_walkin_death_02.wav-8c1111ba54764bbb6b5c9090239ad444.sample"
+path="res://.godot/imported/monsters_hive_death_02.wav-a5b75f288e0d95727de9e3b111563e3f.sample"
 
 [deps]
 
-source_file="res://audio/sfx/monsters_walkin_death_02.wav"
-dest_files=["res://.godot/imported/monsters_walkin_death_02.wav-8c1111ba54764bbb6b5c9090239ad444.sample"]
+source_file="res://audio/sfx/monsters_hive_death_02.wav"
+dest_files=["res://.godot/imported/monsters_hive_death_02.wav-a5b75f288e0d95727de9e3b111563e3f.sample"]
 
 [params]
 

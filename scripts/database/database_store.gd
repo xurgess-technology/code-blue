@@ -7,6 +7,7 @@ extends RefCounted
 
 const DbRecordScript := preload("res://scripts/database/db_record.gd")
 const PATH := "user://database.save"
+const LEGACY_HIVE_KIND := "walk" + "_in"   # the Hive's kind id before the rename (split so a rename sweep keeps it)
 
 
 static func load_into(database: Dictionary) -> void:
@@ -21,9 +22,15 @@ static func load_into(database: Dictionary) -> void:
 	if not (parsed is Dictionary):
 		return
 	for kind in (parsed as Dictionary).keys():
-		var rec := DbRecordScript.new(String(kind))
+		var k := String(kind)
+		# 2026-09-17: the Walk-In became the Hive; saves from before keep its page.
+		if k == LEGACY_HIVE_KIND:
+			if (parsed as Dictionary).has("hive"):
+				continue
+			k = "hive"
+		var rec := DbRecordScript.new(k)
 		rec.from_dict(parsed[kind])
-		database[String(kind)] = rec
+		database[k] = rec
 
 
 static func save(database: Dictionary) -> void:

@@ -561,7 +561,7 @@ func _panel_extras() -> void:
 	await _frames(2)
 	_check(game.brains.slot_of(me.peer_id, "echo") >= 0 and game.brains.slot_of(me.peer_id, "hive_in") >= 0, "the panel's All abilities grants Echo and Hive Eyes")
 	_press_panel("Unlock every entry")
-	_check(game.db_record("walk_in").harvested and game.db_record("night_nurse").scanned, "Unlock every entry fills this machine's database")
+	_check(game.db_record("hive").harvested and game.db_record("night_nurse").scanned, "Unlock every entry fills this machine's database")
 	_press_panel("Reset database")
 	_check(game.database.is_empty(), "Reset database wipes it")
 

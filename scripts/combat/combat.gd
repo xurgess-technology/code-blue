@@ -462,8 +462,8 @@ func _fallback_wake(m: Node) -> void:
 
 static func monster_name(kind: String) -> String:
 	match kind:
-		"walk_in":
-			return "Walk-In"
+		"hive":
+			return "Hive"
 		"night_nurse":
 			return "Night Nurse"
 		"discharged":

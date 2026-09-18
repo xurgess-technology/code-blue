@@ -3,12 +3,12 @@
 importer="wav"
 type="AudioStreamWAV"
 uid="uid://brlc7wstmkcbw"
-path="res://.godot/imported/monsters_walkin_shuffle_03.wav-ec2dffe4a66302247b95d123d45a53d3.sample"
+path="res://.godot/imported/monsters_hive_shuffle_03.wav-43da89bb81d97cf35e4f90676225f22a.sample"
 
 [deps]
 
-source_file="res://audio/sfx/monsters_walkin_shuffle_03.wav"
-dest_files=["res://.godot/imported/monsters_walkin_shuffle_03.wav-ec2dffe4a66302247b95d123d45a53d3.sample"]
+source_file="res://audio/sfx/monsters_hive_shuffle_03.wav"
+dest_files=["res://.godot/imported/monsters_hive_shuffle_03.wav-43da89bb81d97cf35e4f90676225f22a.sample"]
 
 [params]
 

@@ -161,11 +161,11 @@ func _run() -> void:
 	game.dev.remove_bot(did)
 	await _frames(2)
 
-	# ---- drag a sedated Walk-In and strap it down
+	# ---- drag a sedated Hive and strap it down
 	var ti: int = game.free_patient_table()
 	var tpos: Vector3 = game.table_position(ti)
 	var tside: Vector3 = Basis(Vector3.UP, game.table_yaw_of(ti)) * Vector3(0, 0, 1)
-	var m = game._add_monster("walk_in", game._floor_at(tpos + tside * 3.2))
+	var m = game._add_monster("hive", game._floor_at(tpos + tside * 3.2))
 	await _frames(3)
 	m.sedate(75.0)
 	await _frames(2)
@@ -180,7 +180,7 @@ func _run() -> void:
 	await _aim_camera(tpos + Vector3(0, 0.9, 0))
 	await _frames(4)
 	var tid: String = game.table_interact_id(ti)
-	_check(me.aim_id == tid and me.aim_prompt.begins_with("Strap the Walk-In"), "over the shoulder the aim ray finds the patient table ('%s' / '%s')" % [me.aim_id, me.aim_prompt])
+	_check(me.aim_id == tid and me.aim_prompt.begins_with("Strap the Hive"), "over the shoulder the aim ray finds the patient table ('%s' / '%s')" % [me.aim_id, me.aim_prompt])
 	me.bot_press += 1
 	await _frames(3)
 	_check(bool(game.case_on_table(ti).get("monster", false)) and game.combat.dragging(me) < 0, "E from the shoulder straps the monster to the table")

@@ -10,7 +10,7 @@ extends Node
 ##   hinged/double (E)  players press E: it swings away from them (into the tunnel when the other
 ##       side has no room) and stays where it is left. Bots, paramedic crews wheeling the gurney,
 ##       and players carrying someone or dragging a monster (E is taken), push it open by walking
-##       into it. The Walk-In pushes it open slowly, the Discharged bursts through when it rushes (a
+##       into it. The Hive pushes it open slowly, the Discharged bursts through when it rushes (a
 ##       slam), otherwise opens it with a creak, the Night Nurse opens it silently and only while
 ##       nobody is looking at her or at the door. The OR's doors are a "double" pair, same as the
 ##       cafeteria/radiology/morgue (polish-or-doors: they used to be automatic).
@@ -38,7 +38,7 @@ const OUT_MIN_DEG := 80.0
 const SPEED_OPEN := 1.9
 const SPEED_CLOSE := 1.6
 const SPEED_SLAM := 5.5
-const SPEED_WALK_IN := 0.42
+const SPEED_HIVE := 0.42
 const SPEED_BURST := 7.0
 const SPEED_NURSE := 2.2
 const SPEED_AUTO_OPEN := 1.5
@@ -77,7 +77,7 @@ var _locked_sound_at := {}
 var _hold_open := {}        # id -> seconds a gate stays open after unlocking
 var _cl_locked := true
 var _applied_once := {}
-## Counters for tests: opens by who ("player", "bot", "walk_in", "discharged", "night_nurse",
+## Counters for tests: opens by who ("player", "bot", "hive", "discharged", "night_nurse",
 ## "crew", "auto"), slams, jams.
 var stats := {}
 
@@ -447,11 +447,11 @@ func _push_check(d: Node, a: Dictionary) -> void:
 			_drive(d, want, SPEED_OPEN, m)
 			_count("bot" if kind != "crew" else "crew")
 			_fx(d, "doors_creak", NOISE_OPEN, "door")
-		"walk_in":
+		"hive":
 			if m == null or not _monster_wants_through(m):
 				return
-			_drive(d, want, SPEED_WALK_IN)
-			_count("walk_in")
+			_drive(d, want, SPEED_HIVE)
+			_count("hive")
 			_fx(d, "doors_creak", NOISE_CREAK, "door")
 		"discharged":
 			if m == null or not _monster_wants_through(m):

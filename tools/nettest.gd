@@ -33,13 +33,13 @@ extends Node
 ##   combat           sweep 3: client 1 kills a monster with the bone saw, shoves and jabs another,
 ##                    drags it and straps it to a free patient table; the host checks the case and
 ##                    client 2 watches the swings, the drag and the strapped case
-##   brains           (sweep 3) the client picks up a Walk-In brain (its spoil clock replicated),
-##                    blends and drinks it at the blender, looks through a Walk-In with Hive Eyes and
+##   brains           (sweep 3) the client picks up a Hive brain (its spoil clock replicated),
+##                    blends and drinks it at the blender, looks through a Hive with Hive Eyes and
 ##                    comes back, then drinks a Discharged brain and shrieks Echo; the host sees the
 ##                    points, the hive view and the echo noise
-##   monsters         host + 1 client: a Walk-In sedated, hit, dragged and woken on the host; the
+##   monsters         host + 1 client: a Hive sedated, hit, dragged and woken on the host; the
 ##                    client sees each (sweep 3)
-##   dissection       a Walk-In strapped to a table: client 1 saws the skull and pulls the brain,
+##   dissection       a Hive strapped to a table: client 1 saws the skull and pulls the brain,
 ##                    client 2 re-doses it meanwhile; sedation replicates within 0.05
 ##   pockets          (--pocket=factory) client 1 walks through a seam into the pocket holding gauze
 ##                    (the host sees it arrive and stay, client 2 sees it jump, never slide across the
@@ -177,9 +177,9 @@ func _sc_wall():
 		var c1 := _peer_of(1)
 		if not await _until(func(): return int(game.wall.user) == c1, 60.0, "client 1 signed in on the host"):
 			return
-		if not await _until(func(): return int(game.wall.view().db.get("walk_in", 0)) & 2 != 0 and int(game.wall.view().db.get("discharged", 0)) & 2 != 0, 30.0, "client 1's database (walk_in, then a discharged scan) on the host: %s" % str(game.wall.view().db)):
+		if not await _until(func(): return int(game.wall.view().db.get("hive", 0)) & 2 != 0 and int(game.wall.view().db.get("discharged", 0)) & 2 != 0, 30.0, "client 1's database (hive, then a discharged scan) on the host: %s" % str(game.wall.view().db)):
 			return
-		if game.database.has("walk_in"):
+		if game.database.has("hive"):
 			return _end(false, "client 1's scan landed in the host's own database")
 		_say("client 1 signed in, its database on the host: %s" % str(game.wall.view().db))
 		var wt: Node3D = game.wall_terminal()
@@ -212,8 +212,8 @@ func _sc_wall():
 		me.bot_pitch = clampf(me.bot_pitch + atan2(d.y, Vector2(d.x, d.z).length()) - atan2(fwd.y, Vector2(fwd.x, fwd.z).length()), -1.2, 1.2)
 	if index == 1:
 		game.database.clear()
-		game.mark_own_db("walk_in", "sighted")
-		game.mark_own_db("walk_in", "scanned")
+		game.mark_own_db("hive", "sighted")
+		game.mark_own_db("hive", "scanned")
 		# Hold the laser on HOLD TO SIGN IN.
 		var sign_px: Vector2 = wt.ui._sign.position + wt.ui._sign.size * 0.5
 		me.bot_scan = true
@@ -250,12 +250,12 @@ func _sc_wall():
 			return false
 		var known := false
 		for e in wt.ui.Pages.entries("monsters", game.wall.view()):
-			if String(e.key) == "walk_in":
+			if String(e.key) == "hive":
 				known = bool(e.known)
 		return known and wt.ui._remote.size() >= 1
-	if not await _until(sees, 60.0, "MONSTERS with client 1's Walk-In and its laser dot (page %s user %d dots %d)" % [str(wt.ui.page), int(game.wall.user), wt.ui._remote.size()]):
+	if not await _until(sees, 60.0, "MONSTERS with client 1's Hive and its laser dot (page %s user %d dots %d)" % [str(wt.ui.page), int(game.wall.user), wt.ui._remote.size()]):
 		return
-	_say("I see MONSTERS, client 1's Walk-In and its laser dot")
+	_say("I see MONSTERS, client 1's Hive and its laser dot")
 	_send("wall_seen", {})
 	if not await _until(func(): return _count_msgs("wall_out") > 0 and int(game.wall.user) == 0 and String(wt.ui.page.kind) == "home", 60.0, "everyone signed out and HOME"):
 		return
@@ -766,18 +766,18 @@ func _sc_brains():
 		var c1 = game.players.get(_peer_of(1))
 		var at: Vector3 = c1.global_position
 		var map := get_viewport().world_3d.navigation_map
-		var b1: Node = game.brains.spawn_brain("brain_walk_in", 1.0, at + Vector3(1.0, 0.3, 0.0))
+		var b1: Node = game.brains.spawn_brain("brain_hive", 1.0, at + Vector3(1.0, 0.3, 0.0))
 		var b2: Node = game.brains.spawn_brain("brain_discharged", 0.5, at + Vector3(-1.0, 0.3, 0.0))
 		var b3: Node = game.brains.spawn_brain("brain_discharged", 0.3, at + Vector3(0.0, 0.3, 1.0))
 		b3.bt = game.world_time - 400.0   # rotten long ago (fresh / spoiling depend on how fast the bot is)
-		var wi: Node = game.brains.spawn_walk_in(NavigationServer3D.map_get_closest_point(map, at + Vector3(0, 0, 9)))
-		wi.set_physics_process(false)   # a still Walk-In: the test is about the view, not the chase
-		_send("brains", {"items": [b1.item_id, b2.item_id, b3.item_id], "bts": [b1.bt, b2.bt, b3.bt], "walk_in": wi.monster_id})
+		var wi: Node = game.brains.spawn_hive(NavigationServer3D.map_get_closest_point(map, at + Vector3(0, 0, 9)))
+		wi.set_physics_process(false)   # a still Hive: the test is about the view, not the chase
+		_send("brains", {"items": [b1.item_id, b2.item_id, b3.item_id], "bts": [b1.bt, b2.bt, b3.bt], "hive": wi.monster_id})
 		var seen := {"hive": false, "echo": false}
 		var watch := func():
 			if c1.hive_view and not seen.hive:
 				seen.hive = true
-				_say("the client is looking through a Walk-In (hv)")
+				_say("the client is looking through a Hive (hv)")
 			for n in game.recent_noises(1.5):
 				if String(n.kind) == "echo" and is_equal_approx(float(n.loudness), 1.2) and (n.pos as Vector3).distance_to(c1.global_position) < 4.0:
 					if not seen.echo:
@@ -785,13 +785,13 @@ func _sc_brains():
 					seen.echo = true
 		if not await _do_until(watch, func(): return seen.hive and seen.echo and _count_msgs("ok") >= 1, 200.0, "the client's hive view and echo (hive %s echo %s)" % [str(seen.hive), str(seen.echo)]):
 			return
-		var w: float = game.brains.points(c1.peer_id, "walk_in")
+		var w: float = game.brains.points(c1.peer_id, "hive")
 		var d: float = game.brains.points(c1.peer_id, "discharged")
-		# Walk-In fresh 1.0; the second Discharged brain was fresh or spoiling by the time it was drunk
+		# Hive fresh 1.0; the second Discharged brain was fresh or spoiling by the time it was drunk
 		# (1.0 or 0.75), the third rotten (0.5).
 		if w != 1.0 or not (is_equal_approx(d, 1.25) or is_equal_approx(d, 1.5)):
-			return _end(false, "host points for the client: walk_in %.2f discharged %.2f, expected 1.00 / 1.25..1.5" % [w, d])
-		await _finish_together("the client drank three brains (%.2f / %.2f), looked through a Walk-In and shrieked Echo" % [w, d])
+			return _end(false, "host points for the client: hive %.2f discharged %.2f, expected 1.00 / 1.25..1.5" % [w, d])
+		await _finish_together("the client drank three brains (%.2f / %.2f), looked through a Hive and shrieked Echo" % [w, d])
 		return
 	if not await _until(func(): return game.phase != Game.Phase.MENU and _me() != null and _count_msgs("brains") > 0 and game.brains.blender != null, 90.0, "the brains"):
 		return
@@ -801,7 +801,7 @@ func _sc_brains():
 	var ids: Dictionary = _msgs("brains")[0].data
 	var bs := game.brains
 	for pass_i in 3:
-		var kind := "brain_walk_in" if pass_i == 0 else "brain_discharged"
+		var kind := "brain_hive" if pass_i == 0 else "brain_discharged"
 		var item_id := int(ids.items[pass_i])
 		if not await _until(func(): return game.world_items.has(item_id), 20.0, "the %s on my machine" % kind):
 			return
@@ -821,7 +821,7 @@ func _sc_brains():
 		me.selected = _slot_of(kind)
 		if not await _until(func(): return me.slots[_slot_of(kind)].has("bt"), 10.0, "bt in my hand slot"):
 			return
-		var path := "walk_in" if pass_i == 0 else "discharged"
+		var path := "hive" if pass_i == 0 else "discharged"
 		var blend := func():
 			var i := _slot_of(kind)
 			if i >= 0:
@@ -832,35 +832,35 @@ func _sc_brains():
 			return
 		me.bot_interact = false
 		me.bot_aim_id = ""
-		_say("drank the %s: walk_in %.2f discharged %.2f" % [kind, bs.points(Net.my_id(), "walk_in"), bs.points(Net.my_id(), "discharged")])
+		_say("drank the %s: hive %.2f discharged %.2f" % [kind, bs.points(Net.my_id(), "hive"), bs.points(Net.my_id(), "discharged")])
 		if pass_i == 0:
 			# Hive Eyes: R, then R again to come back.
-			me.teleport(_stand_spot(game.monsters[int(ids.walk_in)].global_position + Vector3(0, 0, -8)))
+			me.teleport(_stand_spot(game.monsters[int(ids.hive)].global_position + Vector3(0, 0, -8)))
 			await _wall_wait(0.5)
 			me.bot_ability += 1
 			if not await _until(func(): return me.hive_view and bs.local_hive_active() and bs.camera() != null, 20.0, "Hive Eyes on my machine"):
 				return
 			_say("hive view on at t=%.1f: %s" % [game.world_time, str(bs._hive)])
 			# SWEEP 4A HOOK (Hive Eyes fly-through, chunk 4): the camera doesn't land at the
-			# Walk-In the instant hive_view turns on -- it flies there over FLIGHT_IN seconds
+			# Hive the instant hive_view turns on -- it flies there over FLIGHT_IN seconds
 			# first (docs/SWEEP4A.md, "the flight takes about 1-1.5s"). 30 frames (0.5s) was
 			# timed for the old instant-snap behaviour; wait out the flight the same way
 			# braintest.gd does before checking where the camera actually is.
 			await _frames(int(bs.hive_view.FLIGHT_IN * 60) + 6)
 			var cam: Camera3D = bs.camera()
-			var wm = game.monsters.get(int(ids.walk_in))
+			var wm = game.monsters.get(int(ids.hive))
 			if cam == null or wm == null or cam.global_position.distance_to(wm.global_position) > 2.5:
-				return _end(false, "the Hive Eyes camera is not at the Walk-In: cam %s, walk-in %s, target %d, hive %s" % [str(cam.global_position if cam != null else null), str(wm.global_position if wm != null else null), int(bs.hive_view.monster_id), str(bs._hive)] + " msg=" + game.message + " t=%.1f" % game.world_time)
+				return _end(false, "the Hive Eyes camera is not at the Hive: cam %s, hive %s, target %d, hive %s" % [str(cam.global_position if cam != null else null), str(wm.global_position if wm != null else null), int(bs.hive_view.monster_id), str(bs._hive)] + " msg=" + game.message + " t=%.1f" % game.world_time)
 			me.bot_ability += 1
 			if not await _until(func(): return not me.hive_view and not bs.local_hive_active(), 20.0, "coming back from Hive Eyes"):
 				return
-			_say("looked through the Walk-In and came back")
-	# 1.00 Walk-In against 1.25+ Discharged: Hive Eyes landed in the first slot (walk_in drunk
+			_say("looked through the Hive and came back")
+	# 1.00 Hive against 1.25+ Discharged: Hive Eyes landed in the first slot (hive drunk
 	# first), Echo in the second (SWEEP 4A HOOK, chunk 1: best_path()/single-R-ability is gone,
 	# replaced by fixed per-slot abilities -- Alt+2 fires whichever landed second, not "whichever
 	# path has more points").
-	if bs.points(Net.my_id(), "discharged") <= bs.points(Net.my_id(), "walk_in"):
-		return _end(false, "expected discharged points ahead of walk_in (walk_in %.2f discharged %.2f)" % [bs.points(Net.my_id(), "walk_in"), bs.points(Net.my_id(), "discharged")])
+	if bs.points(Net.my_id(), "discharged") <= bs.points(Net.my_id(), "hive"):
+		return _end(false, "expected discharged points ahead of hive (hive %.2f discharged %.2f)" % [bs.points(Net.my_id(), "hive"), bs.points(Net.my_id(), "discharged")])
 	var echo_slot: int = bs.slot_of(Net.my_id(), "echo")
 	if echo_slot < 0:
 		return _end(false, "Echo never landed in a slot")
@@ -950,7 +950,7 @@ func _sc_two_patients():
 	await _finish_together("operated table %d while watching %d tool states at table %d" % [mine, st.states.size(), other])
 
 
-## Dissection (sweep 3): a Walk-In strapped to the free table (already waking, sedation 0.45).
+## Dissection (sweep 3): a Hive strapped to the free table (already waking, sedation 0.45).
 ## Client 1 saws the skull open and pulls the brain out; client 2, holding anesthetic, re-doses
 ## it while client 1 operates. Every client's sedation stays within 0.05 of the host's; the host
 ## sees the dose (one vial used), the brain handed over and the monster flatline.
@@ -962,9 +962,9 @@ func _sc_dissection():
 		if table < 0:
 			return _end(false, "no free table for the monster")
 		var dx: Node = game.dissection
-		var cid: int = dx.dev_strap("walk_in", 0.45, table)
+		var cid: int = dx.dev_strap("hive", 0.45, table)
 		if cid < 0:
-			return _end(false, "could not strap a Walk-In to table %d" % table)
+			return _end(false, "could not strap a Hive to table %d" % table)
 		game.shelf["bone_saw"] = maxi(1, game.shelf_count("bone_saw"))
 		game.shelf["forceps"] = maxi(1, game.shelf_count("forceps"))
 		game.shelf_node.show_stock(game.shelf)
@@ -1633,28 +1633,28 @@ func _nav_point(pos: Vector3) -> Vector3:
 	return game._floor_at(pos)
 
 
-## SWEEP 3 HOOK (monsters): the combat surface crosses the wire. The host sedates a Walk-In, hits
-## it, marks it dragged by the client and wakes it; the client sees the Walk-Ins of the roster,
+## SWEEP 3 HOOK (monsters): the combat surface crosses the wire. The host sedates a Hive, hits
+## it, marks it dragged by the client and wakes it; the client sees the Hives of the roster,
 ## the lying pose, the hit, who drags it, and it standing up again.
 func _sc_monsters():
 	if role == "host":
 		if not await _start_shift_when_full():
 			return
 		var w: Node = null
-		var walk_ins := 0
+		var hives := 0
 		for m in game.monsters.values():
-			if m.kind == "walk_in":
-				walk_ins += 1
+			if m.kind == "hive":
+				hives += 1
 				if w == null:
 					w = m
 		if w == null:
-			return _end(false, "no Walk-Ins in the shift's roster (%s)" % str(game.monsters.values().map(func(m): return m.kind)))
-		_send("mo_start", {"id": w.monster_id, "walk_ins": walk_ins})
+			return _end(false, "no Hives in the shift's roster (%s)" % str(game.monsters.values().map(func(m): return m.kind)))
+		_send("mo_start", {"id": w.monster_id, "hives": hives})
 		w.shoved(Vector3.FORWARD)
 		if not w.can_sedate() or not w.sedate(60.0):
-			return _end(false, "could not sedate a shoved Walk-In")
+			return _end(false, "could not sedate a shoved Hive")
 		if w.take_hit(Vector3.FORWARD, 1, "nettest") != "stagger":
-			return _end(false, "a hit on a sedated Walk-In (hp 2) did not stagger")
+			return _end(false, "a hit on a sedated Hive (hp 2) did not stagger")
 		if not await _until(func(): return _count_msgs("mo_sedated") > 0 or _count_msgs("fail") > 0, 30.0, "the client to see it sedated"):
 			return
 		# Integration: combat owns dragging (it clears a dragged_by nobody's dragging_monster backs).
@@ -1668,7 +1668,7 @@ func _sc_monsters():
 		w.wake()
 		if not await _until(func(): return _count_msgs("mo_awake") > 0 or _count_msgs("fail") > 0, 30.0, "the client to see it wake"):
 			return
-		await _finish_together("sedated, hit, dragged and woke a Walk-In; the client saw each")
+		await _finish_together("sedated, hit, dragged and woke a Hive; the client saw each")
 		return
 	if not await _wait_shift_as_client():
 		return
@@ -1676,19 +1676,19 @@ func _sc_monsters():
 		return
 	var d: Dictionary = _msgs("mo_start")[0].data
 	var id: int = d.id
-	if not await _until(func(): return game.monsters.values().filter(func(m): return m.kind == "walk_in").size() == int(d.walk_ins) and game.monsters.has(id), 20.0, "%d Walk-Ins on my machine" % int(d.walk_ins)):
+	if not await _until(func(): return game.monsters.values().filter(func(m): return m.kind == "hive").size() == int(d.hives) and game.monsters.has(id), 20.0, "%d Hives on my machine" % int(d.hives)):
 		return
 	var w: Node = game.monsters[id]
-	if not await _until(func(): return is_instance_valid(w) and w.is_sedated() and w.model.rotation.x > 1.4 and w.hit_count >= 1, 20.0, "the Walk-In lying sedated, hit once"):
+	if not await _until(func(): return is_instance_valid(w) and w.is_sedated() and w.model.rotation.x > 1.4 and w.hit_count >= 1, 20.0, "the Hive lying sedated, hit once"):
 		return
 	_send("mo_sedated", {})
 	if not await _until(func(): return int(w.dragged_by) == Net.my_id(), 20.0, "dragged_by = me"):
 		return
 	_send("mo_dragged", {})
-	if not await _until(func(): return not w.is_sedated() and w.model.rotation.x < 0.3, 20.0, "the Walk-In getting up"):
+	if not await _until(func(): return not w.is_sedated() and w.model.rotation.x < 0.3, 20.0, "the Hive getting up"):
 		return
 	_send("mo_awake", {})
-	await _finish_together("saw the Walk-Ins, one sedated (lying), hit, dragged by me and waking")
+	await _finish_together("saw the Hives, one sedated (lying), hit, dragged by me and waking")
 
 
 ## One frame of a simple co-op bot through the loop: clock in, answer the phone, bring what the

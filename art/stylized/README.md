@@ -1,7 +1,7 @@
 # Stylized characters
 
 The players' surgeon (`assets/models/characters/human/surgeon_st.glb`, key `char/human_surgeon_st`) and the
-start of the Walk-In, in one stylized look, built entirely from Python in Blender 5.2 (headless). No
+start of the Hive, in one stylized look, built entirely from Python in Blender 5.2 (headless). No
 downloaded or generated models. Replaces the realistic `art/human` surgeons for players (2026-09-18).
 
 ## Style rules
@@ -37,7 +37,7 @@ godot --path . --resolution 1280x720 tools/style_lab/style_lab.tscn             
 ```
 
 `--fast` meshes at a coarser resolution for quick iteration. Variants: `surgeon`, `surgeon_graft` (the left eye
-swapped for a Walk-In eye, stitched), `walk_in` (still on the first-pass head; next up).
+swapped for a Hive eye, stitched), `hive` (still on the first-pass head; next up).
 
 ## Game pieces (the human contract)
 
