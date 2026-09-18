@@ -128,6 +128,7 @@ const P := {
 	"lab_microscope": {"size": Vector3(1.5, 2.3, 0.75), "block": true},
 	"lab_analyzer": {"size": Vector3(1.5, 2.3, 0.75), "block": true},
 	"lab_specimens": {"size": Vector3(1.5, 2.3, 0.75), "block": true},
+	"lab_vat_bench": {"size": Vector3(1.5, 2.3, 0.75), "block": true},   # GRAFTING part one: three vat spots, jars of heads
 	"lab_sink": {"size": Vector3(1.5, 2.3, 0.75), "block": true},
 	# The square of counter where two lab runs meet in a corner (the OR, 2026-09-18). Claims no tile:
 	# the stations either side already hold them.

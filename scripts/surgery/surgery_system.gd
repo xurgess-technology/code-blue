@@ -166,7 +166,7 @@ func _reset() -> void:
 func can_begin(player) -> String:
 	if game == null or _case().is_empty():
 		return "Nobody is on the table."
-	var s := _step()
+	var s := _step_for(player)
 	if s.is_empty():
 		return "Nothing left to do."
 	if operator_id != 0 and operator_id == player.peer_id:
@@ -393,6 +393,18 @@ func _monitor(delta: float) -> void:
 
 # =============================================================================== minigame lifecycle
 
+## GRAFTING part one: the step `player` would begin. A strapped Hive at its first step takes the ailment
+## their tool asks for (scalpel: Eyeball Extraction; bone saw: Dissection), see Dissection.ailment_for.
+func _step_for(player) -> Dictionary:
+	var c := _case()
+	var d = game.get("dissection") if game != null else null
+	if not c.is_empty() and d != null and d.has_method("ailment_for"):
+		var a: String = d.ailment_for(c, player)
+		if a != String(c.get("ailment_id", "")):
+			return Procedures.step(a, int(c.get("step_index", 0)))
+	return _step()
+
+
 func _step() -> Dictionary:
 	var c := _case()
 	if c.is_empty():
@@ -614,6 +626,8 @@ func _drive(delta: float) -> void:
 			buttons |= MinigameBase.BUTTON_PRIMARY
 		if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
 			buttons |= MinigameBase.BUTTON_SECONDARY
+		if Input.is_action_pressed("move_forward"):
+			buttons |= MinigameBase.BUTTON_UP
 	var c := _cursor + _stir_tick(delta)
 	var ext: Vector2 = mg.plane_extent()
 	c = Vector2(clampf(c.x, -ext.x, ext.x), clampf(c.y, -ext.y, ext.y))

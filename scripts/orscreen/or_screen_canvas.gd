@@ -190,7 +190,7 @@ func _header(r: Rect2, p: Dictionary, name_px: int, sub_px: int) -> void:
 func _monster_labels(box: Rect2, p: Dictionary, px: int) -> void:
 	if not bool(p.get("monster", false)):
 		return
-	_txt(Vector2(box.position.x + 10, box.position.y + px + 2), "BRAIN", px, Color(TEXT, 0.7))
+	_txt(Vector2(box.position.x + 10, box.position.y + px + 2), "EYE" if bool(p.get("eye", false)) else "BRAIN", px, Color(TEXT, 0.7))
 	if String(p.state) != "on_table":
 		return
 	var s := float(p.get("sedation", 1.0))
@@ -367,10 +367,10 @@ func _status_line(at: Vector2, p: Dictionary, width: float, px: int) -> void:
 	var col := GREEN
 	match String(p.state):
 		"dead":
-			text = ("BRAIN RUINED" if bool(p.get("monster", false)) else "FLATLINE") if _blink(1.0) else ""   # SWEEP 3 HOOK (dissection)
+			text = (("EYE BURST" if bool(p.get("eye", false)) else "BRAIN RUINED") if bool(p.get("monster", false)) else "FLATLINE") if _blink(1.0) else ""   # SWEEP 3 HOOK (dissection)
 			col = RED
 		"stable":
-			text = "BRAIN HARVESTED" if bool(p.get("monster", false)) else "STABLE"   # SWEEP 3 HOOK (dissection)
+			text = ("EYE OUT" if bool(p.get("eye", false)) else "BRAIN HARVESTED") if bool(p.get("monster", false)) else "STABLE"   # SWEEP 3 HOOK (dissection)
 		_:
 			if String(p.operator) != "":
 				text = "%s OPERATING  %d%%" % [String(p.operator).to_upper(), roundi(float(p.progress) * 100.0)]

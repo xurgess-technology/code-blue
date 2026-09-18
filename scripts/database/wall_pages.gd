@@ -42,6 +42,7 @@ const PROCEDURE_TEXT := {
 	"amputation": "An infected limb that can't be saved. Take it off before the infection spreads.",
 	"stitches": "A downed teammate with a deep gash. Stitch it shut and they get back up.",
 	"dissection": "A sedated monster on the table. Open the skull and pull out the brain.",
+	"eye_extraction": "A strapped Hive on the table. Hold the scalpel to start: cut round the eye, scoop it out, snip the nerve. Then get the eye into a vat before it spoils.",
 }
 
 const SURGERY_TEXT := {
@@ -51,6 +52,8 @@ const SURGERY_TEXT := {
 	"tourniquet": ["A strap that cuts off the blood to a limb before you saw.", "Found in trauma bags. Kept after use."],
 	"bone_saw": ["Cuts through bone: infected limbs, and monster skulls.", "Found on pegboards. Kept after use."],
 	"suture_kit": ["Needle and thread for closing a downed teammate's wound.", "Found in trauma bags and drawers."],
+	"scalpel": ["A small blade for the careful cuts: around an eye, and through its nerve.", "Starts on the OR's storage shelves. Kept after use."],
+	"eye_spoon": ["A shallow spoon that slides behind an eye and lifts it out.", "Starts on the OR's storage shelves. Kept after use."],
 }
 
 const LOOT_BLURBS := {
@@ -77,6 +80,8 @@ const LOOT_BLURBS := {
 	"ultrasound": "A portable ultrasound. The best find in the wings.",
 	"brain_hive": "A Hive's brain. Drink it to grow Hive Eyes.",
 	"brain_discharged": "A Discharged brain. Drink it to grow Echo.",
+	"eye_hive": "The eyeball of a strapped Hive. It clouds over and spoils in a minute or two unless it goes in a vat.",
+	"eye_surgeon": "A surgeon's own eye, labelled with whose it is. It spoils outside a vat, too.",
 }
 
 
@@ -206,11 +211,21 @@ static func _other(kind: String) -> Dictionary:
 				"Anything solid, head on, costs you a heart.", "Order them on the lobby fax."],
 			"models": [{"item": kind, "count": 1}],
 		}
+	if kind == "specimen_vat":
+		return {
+			"title": "SPECIMEN VAT",
+			"subtitle": "LAB",
+			"paragraphs": ["A glass jar of cloudy fluid. An eye floating in it stops spoiling. Three empty ones stand on the lab wall in the OR.",
+				"E with an eye in hand puts it in. V reaches an eye back out. E on a lab bench sets a carried vat down. Takes both hands."],
+			"models": [{"item": kind, "count": 1}],
+		}
 	var def := LootTable.def(kind)
 	var value: Array = def.get("value", [0, 0])
 	var worth := "Sells for $%d to $%d at the furnace." % [int(value[0]), int(value[value.size() - 1])]
 	if kind.begins_with("brain_"):
 		worth = "Or sell it at the furnace, before it spoils."
+	elif kind.begins_with("eye_"):
+		worth = "Sells for less every second it spends out of a vat."
 	return {
 		"title": ItemsDB.display_name(kind).to_upper(),
 		"subtitle": "SALVAGE",

@@ -103,6 +103,13 @@ static func run(game: Node, progress: Callable = Callable(), ready_to_draw: Call
 	_inert(shelf)
 	_report(progress, "terminal")
 	BrainsScript.warm(shelf)  # SWEEP 3 HOOK (brains): the blender, Echo's ghosts and veil, Hive Eyes' screen
+	# GRAFTING part one: a vat with each eye floating in it (the glass, the fluid and the eye shader).
+	for ek in Eyes.KINDS:
+		var vm := ItemModels.make("specimen_vat")
+		shelf.add_child(vm)
+		vm.position = Vector3(x, 0.05, 0.6)
+		x += 0.2
+		Vats.set_contents(vm, Eyes.pack(ek, "", 60.0, 1))
 	_inert(shelf)
 	_report(progress, "brains")
 	# POCKETS HOOK: the Factory's and the Restaurant's meshes, textures and materials, and a stub copy.
@@ -170,6 +177,7 @@ static func run(game: Node, progress: Callable = Callable(), ready_to_draw: Call
 			mb.set_bleeding("skull", 0.6)
 			if opened:
 				bodies["%s|dissection" % mpid] = mb
+				bodies["%s|eye_extraction" % mpid] = mb   # GRAFTING part one: the eye steps work on the same body (site "eye")
 			bx += 0.4
 			await _slice(slice)
 	# DOWNED HOOK: the lying player on the player table (bleeding and stitched) and the table itself.

@@ -13,6 +13,7 @@ const BrainModel := preload("res://scripts/brains/brain_model.gd")   # brains, s
 static func build(root: Node3D, kind: String, count: int) -> void:
 	match kind:
 		"brain_hive", "brain_discharged": BrainModel.build(root, kind)
+		"eye_hive", "eye_surgeon": Eyes.build(root, kind)
 		"stethoscope": _stethoscope(root)
 		"pulse_oximeter": _pulse_oximeter(root)
 		"bp_cuff": _bp_cuff(root)
@@ -93,6 +94,7 @@ const HEART_SCREEN := Vector3(-0.03, 0.22, 0.175)
 static func footprint(kind: String) -> Vector3:
 	match kind:
 		"brain_hive", "brain_discharged": return BrainModel.footprint(kind)
+		"eye_hive", "eye_surgeon": return Eyes.footprint()
 		"stethoscope": return Vector3(0.2, 0.04, 0.2)
 		"pulse_oximeter": return Vector3(0.07, 0.05, 0.05)
 		"bp_cuff": return Vector3(0.24, 0.06, 0.14)

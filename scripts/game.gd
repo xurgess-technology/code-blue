@@ -207,8 +207,11 @@ var _call_at: Dictionary = {}   # peer id -> world_time of their last call for h
 const CombatScript := preload("res://scripts/combat/combat.gd")
 const DissectionScript := preload("res://scripts/dissection/dissection.gd")
 const BrainsScript := preload("res://scripts/brains/brains.gd")
+const VatsScript := preload("res://scripts/grafting/vats.gd")
 var combat: Node = null       # bone saw swings, anesthetic jabs, dragging and strapping monsters
 var dissection: Node = null   # monster cases on the patient tables: sedation, re-dosing, the brain
+var _step_operator := 0     # host: who finished the step that is finishing the case (only inside surgery_step_done)
+var vats: Node = null         # GRAFTING part one: specimen vats, eye spoilage (scripts/grafting/vats.gd)
 var brains: Node = null       # brain spoilage, the blender, per-player upgrades, Echo and Hive Eyes
 # POCKETS HOOK: pocket spaces (the Factory, the Restaurant), their seams and crossings.
 const PocketSpacesScript := preload("res://scripts/level/pockets/pocket_spaces.gd")
@@ -288,6 +291,10 @@ func _ready() -> void:
 	brains.name = "Brains"
 	add_child(brains)
 	brains.setup(self)
+	vats = VatsScript.new()
+	vats.name = "Vats"
+	add_child(vats)
+	vats.setup(self)
 	# POCKETS HOOK: after Entities, so crossings see this frame's movement. Same path everywhere.
 	pockets = PocketSpacesScript.new()
 	pockets.name = "Pockets"
@@ -737,6 +744,7 @@ func _build_level(for_seed: int) -> void:
 	_attach_light_flicker(level)
 	_add_occluders()
 	_add_landmarks()
+	vats.on_level_built(level_info)   # GRAFTING part one: the lab wall's vat spots, the starting vats, the OR's scalpel and spoon
 	ExteriorScript.build(level, level_info)   # the storeys, signs and planters facing the lot
 	# DOORS HOOK: the level's doors and the wings' generation.
 	doors.clear()
@@ -1257,6 +1265,9 @@ func alive_players() -> Array:
 func player_pressed_interact(p: Node, target_id: String) -> void:
 	if not is_host() or not p.alive:
 		return
+	if target_id == "vat_hand":
+		vats.hand_put(p)   # GRAFTING part one: a vat and an eye both in hand
+		return
 	var node := find_interactable(target_id)
 	if node == null or not _within_reach(p, node):
 		return
@@ -1413,6 +1424,8 @@ func pickup_item(p: Node, it: Node) -> void:
 	if Items.is_worn(String(it.kind)):
 		_put_on(p, it)   # ROCKET BOOTS
 		return
+	if vats != null and vats.item_used(p, it):
+		return   # GRAFTING part one: an eye in hand goes into the vat instead
 	var i: int = p.take_into(it.kind, it.count, int(it.value))
 	if i < 0:
 		tell(p, "That needs two free hands." if Items.is_bulky(it.kind) else "Your hands are full.")
@@ -1420,6 +1433,8 @@ func pickup_item(p: Node, it: Node) -> void:
 	p.selected = i
 	if float(it.bt) > -100000.0:
 		p.slots[i]["bt"] = float(it.bt)   # SWEEP 3 HOOK (brains): the spoil clock travels with it
+	if String(it.x) != "":
+		p.slots[i]["x"] = String(it.x)   # GRAFTING part one: an eye's owner, a vat's contents
 	var pos: Vector3 = it.global_position
 	mark_db(String(it.kind), "sighted", p)   # wall terminal: an item this player has held shows in their database
 	world_items.erase(it.item_id)
@@ -1503,6 +1518,7 @@ func drop_selected(p: Node, charge: float = 0.0) -> void:
 	var it := _spawn_item(s.kind, s.count, from, WorldItem.State.LOOSE)
 	it.value = int(s.get("v", 0))
 	it.bt = float(s.get("bt", -1000000.0))   # SWEEP 3 HOOK (brains)
+	it.x = String(s.get("x", ""))   # GRAFTING part one
 	it.toss(from, vel)
 	p.clear_slot(head)
 	_sound("thud", from.origin)
@@ -1535,6 +1551,7 @@ func _drop_hands(p: Node, violent: bool) -> void:
 		var it := _spawn_item(s.kind, n, from, WorldItem.State.LOOSE)
 		it.value = v
 		it.bt = float(s.get("bt", -1000000.0))   # SWEEP 3 HOOK (brains)
+		it.x = String(s.get("x", ""))   # GRAFTING part one
 		it.toss(from, dir * randf_range(2.0, 3.5) + Vector3.UP * 2.0)
 		p.clear_slot(i)
 		emit_noise(from.origin, 0.4, "drop")
@@ -1576,6 +1593,7 @@ func storage_place(p: Node, ct: Node3D, slot: int) -> void:
 	it.value = int(s.get("v", 0))
 	if s.has("bt"):
 		it.bt = float(s.bt)   # SWEEP 3 HOOK (brains): the spoil clock travels with it
+	it.x = String(s.get("x", ""))   # GRAFTING part one
 	p.clear_slot(head)
 	_sound("items_clink", ct.slot_transform(slot).origin)
 
@@ -1804,6 +1822,8 @@ func furnace_value(kind: String, s: Dictionary) -> int:
 		return 0
 	if brains != null and brains.is_brain(kind):
 		return maxi(0, int(brains.current_value(s)))
+	if vats != null and Eyes.is_eye(kind):
+		return maxi(0, int(vats.eye_value(s)))   # GRAFTING part one: eyes spoil too
 	return maxi(0, int(s.get("v", 0)))
 
 
@@ -1894,6 +1914,7 @@ func finish_case(id: int, won: bool) -> void:
 	if dissection.owns_case(c):
 		# SWEEP 3 HOOK (dissection): a strapped monster: the brain is handed over (or ruined) with its
 		# own wording and no paycheck sting; the case clears itself a few seconds later.
+		dissection.last_operator = operated_by if operated_by != 0 else _step_operator   # GRAFTING part one: the extracted eye goes in their hand
 		dissection.on_case_finished(c, won)
 		loop.on_case_finished(c)
 		return
@@ -2022,7 +2043,9 @@ func _apply_cases_locally() -> void:
 			_free_body(t)
 	for t in want.keys():
 		var c: Dictionary = want[t]
-		var key := "%d|%s|%s" % [int(c.get("id", 0)), c.patient_id, c.ailment_id]
+		# GRAFTING part one: a strapped Hive turning from dissection into eye extraction keeps its body.
+		var body_ailment: String = "dissection" if String(c.ailment_id) == "eye_extraction" else String(c.ailment_id)
+		var key := "%d|%s|%s" % [int(c.get("id", 0)), c.patient_id, body_ailment]
 		var e: Dictionary = _bodies.get(t, {})
 		if String(e.get("key", "")) != key:
 			_free_body(t)
@@ -2137,7 +2160,9 @@ func surgery_step_done(result: Dictionary, table_index: int = -1, operator_peer:
 	_apply_cases_locally()
 	var next := Procedures.step(c.ailment_id, int(c.step_index))
 	if next.is_empty():
+		_step_operator = operator_peer   # the surgery system has already let go of them (GRAFTING part one: the eye goes to them)
 		finish_case(int(c.id), true)
+		_step_operator = 0
 	else:
 		_sound("step_done", table_position(int(c.table)))
 		say("Done: %s. Next: %s (%s)." % [step.label, next.label, Items.display_name(next.item)], 4.0)
@@ -4359,6 +4384,7 @@ func _drop_hands_in_place(p: Node) -> bool:
 		var it := _spawn_item(s.kind, int(s.count), xf, WorldItem.State.LOOSE)
 		it.value = int(s.get("v", 0))  # inventory: loot keeps its value
 		it.bt = float(s.get("bt", -1000000.0))   # SWEEP 3 HOOK (brains)
+		it.x = String(s.get("x", ""))   # GRAFTING part one
 		it.toss(xf, Vector3(cos(a), 0.0, sin(a)) * 0.4)
 		p.clear_slot(i)
 	if any:

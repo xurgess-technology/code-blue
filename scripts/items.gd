@@ -128,10 +128,53 @@ const ITEMS := {
 		"where": "Only sold at the pharmacy window.",
 		"handling": "Worn, not carried: taking a pair puts them on. Hold crouch through a sprint-dive to burn fuel and fly straight ahead. Walls hurt.",
 	},
+	# GRAFTING part one (docs/GRAFTING.md): the two eye tools, and the specimen vat. `found` is empty:
+	# game.gd stocks the scalpel and the eye spoon on the OR's storage shelves at the start of a run,
+	# and the vats stand on the lab wall (scripts/grafting/vats.gd).
+	"scalpel": {
+		"name": "Scalpel",
+		"short": "Scalpels",
+		"surgical": true,
+		"consumable": false,
+		"batch": [1, 1],
+		"fragile": false,
+		"found": {},
+		"loose_surfaces": [],
+		"real_use": "A small, very sharp blade on a slim handle for the first careful cut. Where a saw takes a limb or a skull, a scalpel takes a line through skin, or around an eye, or through a nerve.",
+		"where": "Starts on the OR's storage shelves.",
+		"handling": "Reusable. Eyeball extraction uses it twice: to cut around the eye, and to snip the optic nerve.",
+	},
+	"eye_spoon": {
+		"name": "Eye spoon",
+		"short": "Eye spoons",
+		"surgical": true,
+		"consumable": false,
+		"batch": [1, 1],
+		"fragile": false,
+		"found": {},
+		"loose_surfaces": [],
+		"real_use": "A small shallow spoon on a long handle, made to slide behind an eyeball and lift it out of its socket, or to seat one back in.",
+		"where": "Starts on the OR's storage shelves.",
+		"handling": "Reusable. Scoops the eye out of the socket.",
+	},
+	"specimen_vat": {
+		"name": "Specimen vat",
+		"short": "Specimen vats",
+		"surgical": false,
+		"consumable": false,
+		"bulky": true,
+		"batch": [1, 1],
+		"fragile": false,
+		"found": {},
+		"loose_surfaces": [],
+		"real_use": "A glass jar of cloudy preserving fluid. Anything floating in it stops rotting.",
+		"where": "Three empty ones stand on the lab wall in the OR at the start of a run.",
+		"handling": "Carried in both hands. E with an eye in hand puts it in; the vat key reaches an eye back out. E on a lab bench sets it down.",
+	},
 }
 
 ## Tabs the database terminal shows as locked, so it is obvious the pool will grow.
-const LOCKED := ["Defibrillator", "Scalpel", "Clamp", "IV bag", "Sedative dart", "Battery", "Retractor"]
+const LOCKED := ["Defibrillator", "Clamp", "IV bag", "Sedative dart", "Battery", "Retractor"]
 
 
 ## Sellable loot (scripts/economy/loot_table.gd). Not in ITEMS so the terminal, the supply spawner

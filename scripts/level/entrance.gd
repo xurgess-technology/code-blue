@@ -210,9 +210,14 @@ static func build(st: S, ox: int, oy: int) -> void:
 	# 2026-09-18: the lab wall turns the corner by the doors and runs up the east wall, where the scrub
 	# sinks used to be: three more stations, one per tile (rows 10-12), and a corner piece filling
 	# the square where the two runs meet. Set dressing, no spots.
-	for e in [["lab_analyzer", 12.5], ["lab_specimens", 11.5], ["lab_vials", 10.5]]:
+	# GRAFTING part one: two of the three east-run stations are vat benches (three vat spots each, jars of
+	# heads over them); their spots go to level_info.vat_spots (scripts/grafting/vats.gd).
+	st.spots["vat_benches"] = []
+	for e in [["lab_analyzer", 12.5], ["lab_vat_bench", 11.5], ["lab_vat_bench", 10.5]]:
 		if not put.call(e[0], 14.0 - depth.call(e[0]), e[1], WEST, or_room):
 			push_error("entrance: OR lab %s at row %.1f did not fit" % [e[0], e[1]])
+		elif e[0] == "lab_vat_bench":
+			(st.spots["vat_benches"] as Array).append({"pos": Vector2(ox + 14.0 - depth.call(e[0]), oy + e[1]), "yaw": Defs.yaw_facing(WEST)})
 	put.call("lab_corner", 13.0 + depth.call("lab_corner") - 0.01, 13.0 - depth.call("lab_corner"), N, or_room)
 	# 2026-09-18: no supply shelf (tools are used from your hands); the closet is the janitor's. Its
 	# middle row (7) stays clear from the OR door to the west wall, where dev mode's door opens

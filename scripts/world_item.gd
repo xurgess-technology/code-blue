@@ -26,6 +26,9 @@ var value: int = 0
 ## SWEEP 3 HOOK (brains): world_time a brain was harvested, -1 for everything else. Carried into a
 ## hand slot as "bt" and back out when dropped; the dumpster pays game.brains.current_value().
 var bt: float = -1000000.0   # "no spoil clock" (a real one can be negative early in a run)
+## GRAFTING part one: a small string that travels with the stack (into a hand slot as "x" and back):
+## an eye's owner ("Zach"), or what a specimen vat holds (Eyes.pack). "" for everything else.
+var x: String = ""
 
 var _visual: Node3D
 var _shape: CollisionShape3D
@@ -179,7 +182,12 @@ func interact_prompt(player) -> String:
 		return "Put on %s" % Items.display_name(kind)
 	var label := Items.stack_label(kind, count)
 	var g2 := _game()
-	if g2 != null and g2.get("brains") != null and g2.brains.is_brain(kind):
+	if kind == "specimen_vat" and g2 != null and g2.get("vats") != null:
+		return g2.vats.item_prompt(player, self)   # GRAFTING: put an eye in, or take the vat
+	if g2 != null and g2.get("vats") != null and Eyes.is_eye(kind):
+		label = Eyes.label(kind, x)
+		label += " ($%d, %s)" % [g2.vats.eye_value({"v": value, "bt": bt}), Eyes.condition(g2.vats.eye_factor(self))]
+	elif g2 != null and g2.get("brains") != null and g2.brains.is_brain(kind):
 		# SWEEP 3 HOOK (brains): what it is worth now, and how far gone it is.
 		label += " ($%d, %s)" % [g2.brains.current_value(self), g2.brains.condition(g2.brains.factor_of(self))]
 	elif value > 0:
@@ -211,6 +219,8 @@ func report() -> Dictionary:
 		d["v"] = value
 	if bt > -100000.0:
 		d["bt"] = snappedf(bt, 0.5)   # SWEEP 3 HOOK (brains)
+	if x != "":
+		d["x"] = x   # GRAFTING part one
 	if state != State.IN_CONTAINER:
 		var q := global_basis.get_rotation_quaternion()
 		d["p"] = global_position.snappedf(0.005)
@@ -226,6 +236,7 @@ func apply_remote(s: Dictionary) -> void:
 	slot = int(s.sl)
 	value = int(s.get("v", 0))
 	bt = float(s.get("bt", -1000000.0))   # SWEEP 3 HOOK (brains)
+	x = String(s.get("x", ""))   # GRAFTING part one
 	set_count(int(s.n))
 	if not s.has("p"):
 		return   # in a container: _physics_process follows the slot

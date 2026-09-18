@@ -30,6 +30,9 @@ const GRIPS := {
 	"bone_saw": {"pos": Vector3(-0.17, 0.016, 0.0), "fwd": Vector3(1, 0, 0), "up": Vector3(0, -1, 0), "style": "fist"},
 	# Hinge at -X, tips toward +X.
 	"forceps": {"pos": Vector3(-0.05, 0.016, 0.0), "fwd": Vector3(1, 0, 0), "up": Vector3(0, -1, 0), "style": "fist"},
+	# GRAFTING part one: slim tools, handle at -X, working end along +X (held like the forceps).
+	"scalpel": {"pos": Vector3(-0.045, 0.008, 0.0), "fwd": Vector3(1, 0, 0), "up": Vector3(0, -1, 0), "style": "fist"},
+	"eye_spoon": {"pos": Vector3(-0.06, 0.008, 0.0), "fwd": Vector3(1, 0, 0), "up": Vector3(0, -1, 0), "style": "fist"},
 	"tourniquet": {"pos": Vector3(0.0, 0.0, 0.0), "fwd": Vector3(0, 0, -1), "up": Vector3(0, 1, 0), "style": "palm"},
 	"suture_kit": {"pos": Vector3(0.0, 0.0, 0.0), "fwd": Vector3(1, 0, 0), "up": Vector3(0, 1, 0), "style": "palm", "bundle": 2},
 	# Loot with a handle (lying models, handle along their long side).

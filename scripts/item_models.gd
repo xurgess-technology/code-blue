@@ -51,6 +51,9 @@ static func make(kind: String, count: int = 1) -> Node3D:
 		"suture_kit": _suture_kits(root, clampi(count, 1, 4))
 		"placebo_pills": _placebo_bottle(root)   # SWEEP 4A HOOK (pharmacy, chunk 3)
 		"rocket_boots": _rocket_boots(root)   # ROCKET BOOTS
+		"scalpel": _scalpel(root)   # GRAFTING part one
+		"eye_spoon": _eye_spoon(root)
+		"specimen_vat": Vats.build_model(root)
 		_:
 			if LootTable.has(kind):
 				LootModels.build(root, kind, count)
@@ -138,6 +141,9 @@ static func footprint(kind: String) -> Vector3:
 		"suture_kit": return Vector3(0.16, 0.05, 0.11)
 		"placebo_pills": return Vector3(0.045, 0.07, 0.045)
 		"rocket_boots": return Vector3(0.22, 0.1, 0.4)
+		"scalpel": return Vector3(0.17, 0.02, 0.03)
+		"eye_spoon": return Vector3(0.2, 0.02, 0.04)
+		"specimen_vat": return Vector3(0.16, 0.26, 0.16)
 	if LootTable.has(kind):
 		return LootModels.footprint(kind)
 	return Vector3(0.15, 0.1, 0.15)
@@ -569,6 +575,36 @@ static func _bone_saw(root: Node3D) -> void:
 	_add(root, handle, Vector3(-0.17, 0.016, 0))
 	var hole := _cyl(0.012, 0.032, _mat(Color(0.05, 0.05, 0.05)))
 	_add(root, hole, Vector3(-0.17, 0.016, 0))
+
+
+## GRAFTING part one: a slim handle and a small blade along +X (like the forceps: handle at -X).
+static func _scalpel(root: Node3D) -> void:
+	var steel := _mat(Color(0.88, 0.9, 0.93), 0.25, 0.55)
+	var handle := _mat(Color(0.7, 0.72, 0.75), 0.35, 0.5)
+	_add(root, _box(Vector3(0.1, 0.009, 0.011), Color.WHITE), Vector3(-0.035, 0.008, 0)).material_override = handle
+	_add(root, _box(Vector3(0.05, 0.003, 0.009), Color.WHITE), Vector3(0.045, 0.008, 0)).material_override = steel
+	var tip := PrismMesh.new()
+	tip.size = Vector3(0.02, 0.003, 0.009)
+	var t := MeshInstance3D.new()
+	t.mesh = tip
+	t.material_override = steel
+	_add(root, t, Vector3(0.08, 0.008, 0), Vector3(90, -90, 0))
+
+
+## GRAFTING part one: a long handle and a shallow bowl on the end (+X).
+static func _eye_spoon(root: Node3D) -> void:
+	var steel := _mat(Color(0.86, 0.89, 0.92), 0.28, 0.5)
+	_add(root, _box(Vector3(0.14, 0.006, 0.01), Color.WHITE), Vector3(-0.03, 0.008, 0)).material_override = steel
+	var bowl := MeshInstance3D.new()
+	var sph := SphereMesh.new()
+	sph.radius = 0.016
+	sph.height = 0.02
+	sph.radial_segments = 14
+	sph.rings = 6
+	bowl.mesh = sph
+	bowl.material_override = steel
+	bowl.scale = Vector3(1.0, 0.45, 0.85)
+	_add(root, bowl, Vector3(0.085, 0.008, 0))
 
 
 ## downed (sweep 2 wave 3): sterile suture packs, a stack of flat peel pouches. Each shows the curved

@@ -106,6 +106,19 @@ const AILMENTS := {
 			{"id": "harvest", "label": "Pull out the brain", "item": "forceps", "uses": 0, "game": "forceps", "variant": "brain", "site": "brain"},
 		],
 	},
+	# GRAFTING part one (docs/GRAFTING.md): the other thing a strapped Hive can have done to it. A
+	# strapped Hive starts as "dissection"; holding the scalpel at the first step makes it this
+	# instead (Dissection.ailment_for). The three steps play the eye minigame's variants.
+	"eye_extraction": {
+		"name": "Eyeball Extraction",
+		"code": "EX",
+		"monster_only": true,
+		"steps": [
+			{"id": "cut", "label": "Cut around the eye", "item": "scalpel", "uses": 0, "game": "eye", "variant": "cut", "site": "eye"},
+			{"id": "scoop", "label": "Scoop the eye out", "item": "eye_spoon", "uses": 0, "game": "eye", "variant": "scoop", "site": "eye"},
+			{"id": "snip", "label": "Snip the optic nerve", "item": "scalpel", "uses": 0, "game": "eye", "variant": "snip", "site": "eye"},
+		],
+	},
 }
 
 ## Where each minigame script lives. The surgery system loads these by id.
@@ -116,6 +129,7 @@ const MINIGAME_SCRIPTS := {
 	"saw": "res://scripts/surgery/games/saw.gd",
 	"gauze": "res://scripts/surgery/games/gauze.gd",
 	"stitches": "res://scripts/surgery/games/stitches.gd",
+	"eye": "res://scripts/surgery/games/eye_ops.gd",   # GRAFTING part one: cut / scoop / snip
 }
 
 

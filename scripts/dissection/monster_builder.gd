@@ -236,6 +236,15 @@ static func _build_st(b, lying: Node3D, skel: Skeleton3D, seed_v: int) -> void:
 	var fa: Vector3 = bone_at.call("forearm.L")
 	var inj := ua.lerp(fa, 0.6) + Vector3(0.0, 0.06, 0.0)
 	_sites(b, head, head_c, hr, hd, Transform3D(Basis(), inj), 0.24)
+	# GRAFTING part one: the site the eye steps work on is the Hive's left eyeball, lying face up.
+	var eye_l := lying.find_child("Human_Eye_L", true, false) as MeshInstance3D
+	var eye_at := head_c + Vector3(0.0, 0.1, 0.0)
+	if eye_l != null and eye_l.mesh != null:
+		var ab := eye_l.mesh.get_aabb()
+		eye_at = _chain(eye_l, rig) * (ab.position + ab.size * 0.5)
+		parts["eye_node"] = eye_l
+	_site(b, "eye", Transform3D(Basis(), eye_at), rig)
+	b.drips["eye"] = [eye_at, Vector3(eye_at.x, 0.003, eye_at.z - 0.05)]
 
 
 ## Rig-less fallback: the primitive body and head (a painted face).
@@ -630,7 +639,7 @@ static func animate(b, jolt: float, env: float, _fidget: float, _twitch: float, 
 	var flags: Dictionary = b._flags
 	var flat: bool = b._flat
 	var open := bool(flags.get("skull_open", false))
-	var removed := bool(flags.get("brain_removed", false))
+	var removed := bool(flags.get("brain_removed", false)) or bool(flags.get("eye_removed", false))   # GRAFTING part one: an eye taken is a dead Hive too
 	var dt: float = minf(0.1, maxf(0.0, t - float(parts.get("last_t", t))))
 	parts["last_t"] = t
 	if removed and not flat:
@@ -661,6 +670,9 @@ static func animate(b, jolt: float, env: float, _fidget: float, _twitch: float, 
 				var xf := lifted.interpolate_with(rest, k)
 				xf.origin += Vector3(0, 0.05 * sin(k * PI), 0)
 				cap.transform = xf
+	var eye_node = parts.get("eye_node")   # GRAFTING part one: the socket is empty once the spoon has it out
+	if eye_node != null and is_instance_valid(eye_node):
+		(eye_node as Node3D).visible = not (bool(flags.get("eye_out", false)) or bool(flags.get("eye_removed", false)) or bool(b.get_meta("eye_hidden", false)))
 	var rim: Node3D = parts.get("open_skull")
 	if rim != null:
 		rim.visible = open
