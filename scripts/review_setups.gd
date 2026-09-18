@@ -51,6 +51,8 @@ static func stage(setup: String, game: Game) -> void:
 		return
 	print("[review] setup '%s' (seed %d)" % [setup, seed_of(setup)])
 	await Callable(ReviewSetups, String(SETUPS[setup].stage)).call(game)
+	for n in game.get_tree().get_nodes_in_group("review_bar"):
+		n.staged()
 
 
 # ---------------------------------------------------------------------------
@@ -179,3 +181,4 @@ static func _items(game: Game) -> void:
 	for i in row.size():
 		floor_item(game, row[i], base + out * 2.0 + side * (float(i) - 2.0) * 0.55, 1, 100)
 	print("[review] items: standing among %d loot stacks; trinkets on the floor ahead, an EpiPen in hand" % best_n)
+
