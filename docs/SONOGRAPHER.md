@@ -7,9 +7,15 @@ finds you by sound.
 ## Who it is
 
 **The Sonographer.** Ultrasound is echolocation, so this is the hospital's echolocation monster.
-It's tall and upright, with its head pushed forward and cocked to listen, so in the dark it never
-reads like the Hive's hunch. It wheels an **ultrasound cart** around with it, **plugged into it**:
-a cable runs from the cart into the back of its neck. The cart has a squeaky wheel.
+It's tall, with its head pushed forward and cocked to listen. It drags an **ultrasound cart**
+that is **plugged into it**: a pump line runs from the cart into the nape of its neck. The cart
+has a squeaky wheel.
+
+**The monster and the cart are one entity and one model.** It walks **sideways**: moving north,
+its chest faces east, its right arm stretched out behind it holding the cart, and its head turned
+to face where it's going. The cart is always in the same place relative to the body. When it
+**rushes**, it swings round to face its target and comes at them head on, **left arm flailing** in
+front, the cart bouncing along behind. In the dark, nothing else in the game has that silhouette.
 
 ## The look (stylized kit, `art/stylized/`)
 
@@ -18,14 +24,22 @@ a cable runs from the cart into the back of its neck. The cart has a squeaky whe
 - **Ears** on the large side of normal that swivel toward sounds (keep `MonsterModel.set_ears`).
 - **A long neck with see-through skin at the throat,** where the windpipe rings glow. The glow is
   faint while it's suspicious and ramps up bright while it charges an echo.
-- **The cable** from the back of its neck to the cart. When it charges, **the glow travels down
-  the cable** to the cart, so the charge shows even when only the cart is in sight.
-- **The ultrasound cart:** a chunky cart with a monitor, a probe holster and the cable, on
-  castors, one of them squeaky. Its screen is just on (a dim glow); it doesn't show anything
-  special.
-- **Clips:** idle, a walk pushing the cart, listen (freeze, ears snap round), charge (head lifts,
-  jaw drops), echo, a rush dragging the cart, the wail (a flurry of blows, with pauses), a stagger
-  (shoved), and lying (for the table).
+- **The pump line** from the cart into the nape of its neck: short, and always in the same place,
+  so it never clips. When it charges, **the glow travels down the line** to the cart, so the
+  charge shows even when only the cart is in sight.
+- **The ultrasound cart is part of the model,** on the same skeleton: a chunky cart with a
+  monitor, a pump and the line, on castors, one of them squeaky. Its screen is just on (a dim
+  glow); it doesn't show anything special.
+- **The cart trails like a trailer.** It hangs off a **pivot bone at the right hand**. On a
+  straight path it sits directly behind; round a corner, the body turns first and the cart follows
+  a beat later (procedural, in code), so it swings along the path instead of cutting through the
+  wall. Castor bones spin with speed, and the cart jostles a little. Its collision is simple (one
+  box on the pivot).
+- **Clips:** idle; the sideways drag-walk (head turned to where it's going); listen (freeze, ears
+  snap round); charge (head lifts, jaw drops); echo; the turn-to-rush (swinging round to face the
+  target); the forward rush, left arm flailing, cart bouncing behind; the wail (one-armed, left, a
+  flurry of blows with pauses); a stagger (shoved); and lying (for the table, **no cart**).
+- **The echo fires from where the head points,** not the chest.
 - Reviewed from front, side and face renders, then in the game's lighting (`tools/style_lab`), as
   DESIGN.md › Art style says.
 
@@ -48,8 +62,8 @@ a cable runs from the cart into the back of its neck. The cart has a squeaky whe
 6. **Caught in the echo = seen.** Every player the echo catches is **imaged**: a flash of
    ultrasound grain over their screen, and **deafened** by a short squeal (below). The
    Sonographer only knows where each of them was at that moment.
-7. **The rush:** it rushes to where it imaged the **nearest** player, yanking the cart along
-   behind it, clattering, the squeaky wheel squealing faster. If that player has crept away, it
+7. **The rush:** it swings round and rushes head on to where it imaged the **nearest** player,
+   left arm flailing, the cart clattering behind, the squeaky wheel squealing faster. If that player has crept away, it
    arrives, stops and listens again.
 8. **Contact: it wails on them,** a flurry of blows, until that player is **downed** or gets far
    enough away that it loses them. While it's on someone, it follows them by sound, so sprinting
@@ -85,11 +99,10 @@ with `tools/gen_audio.mjs` like every other sound.
 ## Capture, death, and the cart
 
 - Capture works as it does for the Discharged (shove, jab, drag, strap).
-- **When it's sedated or killed, the cable disconnects.** The cart, left without its
-  Sonographer, **turns into smoke** a few seconds later, as if the monster was what kept the
-  machine going. Nothing is left behind.
-- **The cart must never snag or block a hallway.** It's dragged through doors and around corners.
-  If it gets stuck, it slides free rather than stopping the monster or blocking players.
+- **When it's sedated or killed, the line disconnects.** The cart is hidden on the model, and a
+  copy of it is left standing where it was. Without its Sonographer, the copy **turns into smoke**
+  a few seconds later, as if the monster was what kept the machine going. Nothing is left behind.
+  The lying body (dragged, on the table) has no cart.
 
 ## The rename
 
@@ -106,20 +119,20 @@ blender). Later, the **Sonographer's throat becomes its graft part** and Echo be
 
 | # | Branch | What | Who |
 |---|---|---|---|
-| A | `sono-model` | The Sonographer and the cart in the stylized kit, with the clips, the throat and cable glow, and the flat scar face. Uses the one-kit rules in DESIGN.md › Art style. | Orchestrator's call; this is Blender-from-Python work |
-| B | `sono-brain` | The rename, suspicion, the echo (charge, wedge, sweep, blocking, imaging), the deafen squeal, the rush, the wail and losing you, the cart following it and turning to smoke, sounds, networking. | Opus, high |
+| A | `sono-model` | The Sonographer and its cart as one model in the stylized kit: the sideways posture, the cart on its pivot bone, the pump line, the flat scar face, the throat and line glow, and all the clips. Uses the one-kit rules in DESIGN.md › Art style. This is the big chunk; the clips are where the character is. | Orchestrator's call; this is Blender-from-Python work |
+| B | `sono-brain` | The rename, suspicion, the echo (charge, wedge, sweep, blocking, imaging), the deafen squeal, the rush, the wail and losing you, the cart's trailer swing (procedural, on the pivot bone), the cart copy that smokes away, sounds, networking. | Opus, high |
 
 A and B can run at the same time. B builds on the current Discharged model with stand-ins (a
-glowing throat marker, a primitive cart) behind a small look interface: suspicion 0–1, charge
-0–1, the mode, and the cable being plugged in or not. A implements that same interface on the new
-model. Whichever merges second hooks them up.
+glowing throat marker, a primitive cart on a pivot) behind a small look interface: suspicion 0–1,
+charge 0–1, the mode, the cart pivot's angle, and the line being plugged in or not. A implements
+that same interface on the new model. Whichever merges second hooks them up.
 
 **Timing with grafting:** B touches brains, abilities and the database, as grafting does. Start B
 after grafting's chunk C is merged. A can start any time.
 
 **Zach sees:**
-- A: `SONOGRAPHER: the model, the cart and the charge glow` (in a lab scene; `monster_lab` has
-  close-up shots).
+- A: `SONOGRAPHER: the sideways drag, the rush, and the charge glow` (in a lab scene;
+  `monster_lab` has close-up shots).
 - B: `SONOGRAPHER: make a noise, get pinged, and get away`.
 
 ## Done when
@@ -128,7 +141,8 @@ after grafting's chunk C is merged. A can start any time.
   noise rushes without echoing; a wall and a closed door block the echo; everyone caught is imaged
   and deafened; it rushes the nearest imaged player; the wail stops at downed; it loses a player
   who gets away and goes quiet; a shove interrupts the wail; the cart smokes away after capture and
-  after death.
+  after death; walking a generated hospital, the cart never ends up inside a wall at corners or
+  doorways.
 - A nettest scenario: a client sees the charge, the fan, the deafen and the cart, and is imaged
   and hunted correctly.
 - A saved database with a `discharged` entry loads as the Sonographer.
