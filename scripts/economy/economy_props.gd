@@ -1,6 +1,6 @@
 extends StaticBody3D
-## The pharmacy (hub rebuild, chunk 3, after Zach's floorplan and playtest): a wall of steel bars you
-## see straight through, medicine shelves behind it, and nobody goes in. Ordering is by fax:
+## The pharmacy (hub rebuild, chunk 3, after Zach's floorplan and playtest): a wall with a barred
+## counter window in the middle, medicine shelves behind it, and nobody goes in. Ordering is by fax:
 ##
 ##   1. At the lobby's fax terminal (fax_terminal.gd) you tick what you want on a fax form
 ##      (fax_order_ui.gd) and send it. The host takes the money (game.order_pharmacy).
@@ -33,6 +33,13 @@ const SLOT_BOTTOM := 0.9
 const SLOT_TOP := 1.3
 const BAR_GAP := 0.16
 const HEIGHT := 3.0
+## The counter window in the wall: the countertop is the drawer slot's sill, the bars run up to
+## WINDOW_TOP, and the window is at most 2 * WINDOW_HALF_MAX wide.
+const WALL_T := 0.2
+const COUNTER_Y := SLOT_BOTTOM
+const COUNTER_DEPTH := 0.45
+const WINDOW_TOP := 2.2
+const WINDOW_HALF_MAX := 3.0
 ## The attendant's walking speed and the pauses of the order timeline (seconds).
 const NURSE_SPEED := 1.6
 const PRINT_SECONDS := 2.0
@@ -168,28 +175,58 @@ func _label(text: String, size: int, col: Color) -> Label3D:
 	return l
 
 
-## Floor-to-ceiling bars across the whole front, a rail top, bottom and at counter height, one
-## collider for all of it (thrown things bounce off too).
+## Half the width of the barred counter window in the middle of the wall (the hub: 6 m of bars in a
+## 13.5 m wall; the dev room's 3 m one is nearly all window).
+func _window_half() -> float:
+	return minf(WINDOW_HALF_MAX, span * 0.5 - 0.3)
+
+
+## A pharmacy counter: solid wall across the front, and in the middle of it a window over a counter,
+## barred from the countertop to the window head, with the drawer's slot through the bars. Walls,
+## counter and bars all collide (thrown things bounce off too).
 func _build_bars() -> void:
 	var steel := _mat("steel", Color(0.42, 0.44, 0.46), 0.35, 0.7)
 	var dark := _mat("dark", Color(0.08, 0.08, 0.09), 0.6)
+	var wall := _wall_mat()
+	var top := _mat("countertop", Color(0.52, 0.5, 0.45), 0.45)
 	var half := span * 0.5
+	var win := _window_half()
+
+	# The wall: either side of the window full height, under it up to the counter, over it to the
+	# ceiling.
+	for s in [-1.0, 1.0]:
+		var w := half - win
+		if w > 0.01:
+			var cx: float = s * (win + w * 0.5)
+			_box(Vector3(w, HEIGHT, WALL_T), Vector3(cx, HEIGHT * 0.5, 0), wall)
+			_shape(Vector3(w, HEIGHT, WALL_T), Vector3(cx, HEIGHT * 0.5, 0))
+	_box(Vector3(win * 2.0, COUNTER_Y, WALL_T), Vector3(0, COUNTER_Y * 0.5, 0), wall)
+	_shape(Vector3(win * 2.0, COUNTER_Y, WALL_T), Vector3(0, COUNTER_Y * 0.5, 0))
+	_box(Vector3(win * 2.0, HEIGHT - WINDOW_TOP, WALL_T), Vector3(0, (WINDOW_TOP + HEIGHT) * 0.5, 0), wall)
+	_shape(Vector3(win * 2.0, HEIGHT - WINDOW_TOP, WALL_T), Vector3(0, (WINDOW_TOP + HEIGHT) * 0.5, 0))
+
+	# The countertop: a slab along the window's sill, sticking out into the lobby.
+	var top_size := Vector3(win * 2.0 + 0.1, 0.05, COUNTER_DEPTH)
+	var top_at := Vector3(0, COUNTER_Y - 0.025, -WALL_T * 0.5 + COUNTER_DEPTH * 0.5)
+	_box(top_size, top_at, top)
+	_shape(top_size, top_at)
+
+	# The bars, countertop to window head. Bars in front of the drawer's slot start above it, so the
+	# drawer slides through an opening instead of through the bars.
 	var bar_mesh := BoxMesh.new()
 	bar_mesh.size = Vector3(0.035, HEIGHT, 0.035)
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
 	mm.mesh = bar_mesh
-	# Bars in front of the drawer's slot stop short above and below it, so the drawer slides through
-	# an opening instead of through the bars.
-	var n := int(span / BAR_GAP)
+	var width := win * 2.0
+	var n := int(width / BAR_GAP)
 	var xforms: Array = []
 	for i in n:
-		var x := -half + BAR_GAP * 0.5 + i * (span - BAR_GAP) / float(maxi(1, n - 1))
+		var x := -win + BAR_GAP * 0.5 + i * (width - BAR_GAP) / float(maxi(1, n - 1))
 		if absf(x - DRAWER_X) < SLOT_HALF_W + 0.02:
-			xforms.append(_bar_xform(x, 0.0, SLOT_BOTTOM))
-			xforms.append(_bar_xform(x, SLOT_TOP, HEIGHT))
+			xforms.append(_bar_xform(x, SLOT_TOP, WINDOW_TOP))
 		else:
-			xforms.append(_bar_xform(x, 0.0, HEIGHT))
+			xforms.append(_bar_xform(x, COUNTER_Y, WINDOW_TOP))
 	mm.instance_count = xforms.size()
 	for i in xforms.size():
 		mm.set_instance_transform(i, xforms[i])
@@ -198,25 +235,39 @@ func _build_bars() -> void:
 	mmi.multimesh = mm
 	mmi.material_override = steel
 	add_child(mmi)
-	for y in [0.06, 2.1, HEIGHT - 0.06]:
-		_box(Vector3(span, 0.06, 0.07), Vector3(0, y, 0), steel)
-	# The counter-height rail stops either side of the slot.
+	# A steel frame round the window: a rail under the head, and a post at each jamb.
+	_box(Vector3(width, 0.06, 0.07), Vector3(0, WINDOW_TOP - 0.03, 0), steel)
 	for s in [-1.0, 1.0]:
-		var w := half - SLOT_HALF_W
-		_box(Vector3(w, 0.06, 0.07), Vector3(DRAWER_X + s * (SLOT_HALF_W + w * 0.5), DRAWER_Y - 0.05, 0), steel)
-	# Colliders: left and right of the slot full height, and under and over it.
+		_box(Vector3(0.06, WINDOW_TOP - COUNTER_Y, 0.07), Vector3(s * (win - 0.03), (COUNTER_Y + WINDOW_TOP) * 0.5, 0), steel)
+	# Colliders for the bars: left and right of the slot, and over it.
 	for s in [-1.0, 1.0]:
-		var w := half - SLOT_HALF_W
-		_shape(Vector3(w, HEIGHT, 0.08), Vector3(DRAWER_X + s * (SLOT_HALF_W + w * 0.5), HEIGHT * 0.5, 0))
-	_shape(Vector3(SLOT_HALF_W * 2.0, SLOT_BOTTOM, 0.08), Vector3(DRAWER_X, SLOT_BOTTOM * 0.5, 0))
-	_shape(Vector3(SLOT_HALF_W * 2.0, HEIGHT - SLOT_TOP, 0.08), Vector3(DRAWER_X, (SLOT_TOP + HEIGHT) * 0.5, 0))
+		var w := win - SLOT_HALF_W
+		_shape(Vector3(w, WINDOW_TOP - COUNTER_Y, 0.08), Vector3(DRAWER_X + s * (SLOT_HALF_W + w * 0.5), (COUNTER_Y + WINDOW_TOP) * 0.5, 0))
+	_shape(Vector3(SLOT_HALF_W * 2.0, WINDOW_TOP - SLOT_TOP, 0.08), Vector3(DRAWER_X, (SLOT_TOP + WINDOW_TOP) * 0.5, 0))
 
-	# The sign over the drawer, on the lobby side.
-	_box(Vector3(1.9, 0.42, 0.03), Vector3(DRAWER_X, 2.45, 0.06), dark)
+	# The sign on the wall over the window, on the lobby side.
+	var face := WALL_T * 0.5
+	_box(Vector3(1.9, 0.42, 0.03), Vector3(DRAWER_X, 2.5, face + 0.015), dark)
 	var head := _label("PHARMACY", 44, Color(0.85, 0.92, 1.0))
-	head.position = Vector3(DRAWER_X, 2.55, 0.08)
+	head.position = Vector3(DRAWER_X, 2.6, face + 0.035)
 	_price = _label("ORDERS BY FAX", 30, Color(0.8, 1.0, 0.85))
-	_price.position = Vector3(DRAWER_X, 2.35, 0.08)
+	_price.position = Vector3(DRAWER_X, 2.4, face + 0.035)
+
+
+## The hub's painted plaster, mapped in world space so the texture doesn't stretch over a box.
+static func _wall_mat() -> Material:
+	if _mats.has("wall"):
+		return _mats["wall"]
+	var base := HospitalBuilder.surface_mat("mat/wall", Color(0.62, 0.64, 0.60), 0.85)
+	var m: Material = base
+	if base is StandardMaterial3D:
+		var d: StandardMaterial3D = (base as StandardMaterial3D).duplicate()
+		d.uv1_triplanar = true
+		d.uv1_world_triplanar = true
+		d.uv1_scale = Vector3(0.5, 0.5, 0.5)
+		m = d
+	_mats["wall"] = m
+	return m
 
 
 func _bar_xform(x: float, from_y: float, to_y: float) -> Transform3D:
@@ -238,9 +289,9 @@ func _build_drawer() -> void:
 		_box(Vector3(0.04, sleeve_h, 0.9), Vector3(DRAWER_X + s * (SLOT_HALF_W - 0.02), mid_y, 0.0), dark)
 	_box(Vector3(SLOT_HALF_W * 2.0, 0.04, 0.9), Vector3(DRAWER_X, SLOT_TOP - 0.02, 0.0), dark)
 	_box(Vector3(SLOT_HALF_W * 2.0, 0.04, 0.9), Vector3(DRAWER_X, SLOT_BOTTOM + 0.02, 0.0), dark)
-	# A steel frame round the slot on the lobby face, and the "ready" lamp above it.
+	# A steel frame round the slot on the lobby face (the countertop is its sill), and the "ready"
+	# lamp above it.
 	_box(Vector3(SLOT_HALF_W * 2.0 + 0.16, 0.08, 0.05), Vector3(DRAWER_X, SLOT_TOP + 0.04, 0.06), steel)
-	_box(Vector3(SLOT_HALF_W * 2.0 + 0.16, 0.08, 0.05), Vector3(DRAWER_X, SLOT_BOTTOM - 0.04, 0.06), steel)
 	for s in [-1.0, 1.0]:
 		_box(Vector3(0.08, sleeve_h + 0.16, 0.05), Vector3(DRAWER_X + s * (SLOT_HALF_W + 0.04), mid_y, 0.06), steel)
 	_box(Vector3(0.12, 0.05, 0.02), Vector3(DRAWER_X + 0.3, SLOT_TOP + 0.13, 0.09), lamp)
