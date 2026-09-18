@@ -5,6 +5,10 @@ patch per thing we did that day. How to add to it: [RULES.md](RULES.md#changelog
 
 **2026-09-18 (0.6.x)**
 
+- **0.6.10**: Eyeball Extraction 👁️
+    - Added: Take a strapped Hive's eye out with a scalpel and an eye spoon: trace the cut and watch it open on the skin, circle the socket with the spoon, lift the eye on its nerve and slice it.
+    - Added: Specimen vats on the lab wall. Put an eye in one to keep it from spoiling, carry it, set it on a lab bench. Eyes spoil outside a vat and sell at the furnace.
+    - Added: The scalpel and eye spoon in the OR storage, and jars of heads on the lab wall.
 - **0.6.9**: Lie down, doc
     - Added: Hold E at an OR table to strap yourself down, face up and awake. Let go and hold E again to get up.
     - Changed: A strapped-down body lies along the table for everyone, with no torch or other light on it.
