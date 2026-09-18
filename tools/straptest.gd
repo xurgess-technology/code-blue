@@ -90,7 +90,8 @@ func _strapping() -> void:
 	_check(me._pitch > 0.9, "you are looking up at the ceiling (pitch %.2f)" % me._pitch)
 	_check(game.someone_on_table() == me, "the table reports you on it")
 	_check(me.report_full().get("ot", false) == true, "the snapshot carries the strapped state (ot)")
-	_check(not me.flashlight_on and not me.flashlight.visible, "your torch goes off with the straps")
+	_check(not me.flashlight.is_visible_in_tree(), "your torch goes out with the straps")
+	_check(_lit_lights(me).is_empty(), "no light of yours is left burning on your own face (%s)" % ", ".join(_lit_lights(me)))
 	_check(not me.hands.visible and not me._held_fp.visible and not me._held_tp.visible,
 		"your arms and whatever was in them are stowed, in first person and in third")
 	me.take_into("suture_kit", 1)
@@ -136,13 +137,26 @@ func _strapping() -> void:
 	me.bot_interact = false
 	await _frames(3)
 	_check(ok and not me.on_table, "a fresh press held for TABLE_UP_HOLD undoes the straps")
-	_check(me.flashlight_on, "your torch comes back on when you get up")
+	_check(me.flashlight_on and me.flashlight.is_visible_in_tree(), "your torch comes back on when you get up")
+	_check(not _lit_lights(me).is_empty(), "and your lights are burning again")
 	_check(me.hands.visible, "and your arms are yours again")
 	_check(me.alive and not me.downed and me.carry_hold == 0.0, "you get up on your feet, not downed")
 	var d := Vector2(me.global_position.x - top.x, me.global_position.z - top.z).length()
 	_check(d > 0.4 and d < 4.0, "you stand beside the table (%.1f m)" % d)
 	_check(game.someone_on_table() == null and game.strap_table == -1, "the table is free again")
 	_check(game.strap_in_prompt(other) == Game.STRAP_IN_PROMPT, "and the next surgeon can use it")
+
+	# ---- the torch is remembered, not forced back on
+	me.set_flashlight(false)
+	game.strap_in(me, ti)
+	await _frames(4)
+	_check(me.on_table and _lit_lights(me).is_empty(), "lying down with the torch already off leaves it off")
+	game.get_up_from_table(me)
+	await _frames(4)
+	_check(not me.on_table and not me.flashlight_on and not me.flashlight.is_visible_in_tree(),
+		"and getting up does not switch it on for you")
+	me.set_flashlight(true)
+	await _frames(2)
 	dev.request("remove_bots")
 	await _frames(3)
 
@@ -193,6 +207,7 @@ func _botsworth() -> void:
 		if (n as VisualInstance3D).visible:
 			meshes += 1
 	_check(meshes > 0, "the whole surgeon model is there, not a pair of arms (%d visible meshes)" % meshes)
+	_check(_lit_lights(me).is_empty(), "and nothing of yours lights your own face while he looks (%s)" % ", ".join(_lit_lights(me)))
 	await _lies_along_the_table()
 	_check(bw.global_position.distance_to(top) < 4.0, "he stands beside the table, in reach of you")
 	dev.control_botsworth()
@@ -248,6 +263,16 @@ func _set_table_yaw(ti: int, yaw: float) -> void:
 			t["yaw"] = yaw
 	if ti < 0:
 		game.player_table["yaw"] = yaw
+
+
+## GRAFT HOOK: every light this player carries that is actually burning right now.
+func _lit_lights(p: Player) -> Array:
+	var out := []
+	for n in p.find_children("*", "Light3D", true, false):
+		var l := n as Light3D
+		if l.is_visible_in_tree() and l.light_energy > 0.0:
+			out.append("%s (energy %.2f)" % [l.name, l.light_energy])
+	return out
 
 
 # =========================================================================

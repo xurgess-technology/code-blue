@@ -2803,8 +2803,6 @@ func _release_downed_links(p: Node) -> void:
 			drop_carried(c)
 		p.carried_by = 0
 	if p.on_table:
-		if not p.downed:
-			p.set_flashlight(true)   # GRAFT HOOK: off the table, the torch comes back on
 		p.on_table = false
 		if player_surgery.patient() == p:
 			player_surgery.clear()
@@ -3196,7 +3194,6 @@ func strap_in(q: Node, table_index := -1) -> void:
 	q.teleport(pinned_pose(q).origin)
 	if q.is_local or q.is_bot:
 		q.look_up_from_table()
-	q.set_flashlight(false)   # arms by your sides: no torch in a strapped hand
 	q.refresh_downed_visuals()
 	_sound("thud", player_table_top())
 	say("%s is strapped to the table. Hold E to get up." % q.player_name, 4.0)
@@ -3287,7 +3284,6 @@ func get_up_from_table(p: Node) -> void:
 	strap_table = -1
 	_apply_strap_table()
 	p.teleport(_scatter_spot(from))
-	p.set_flashlight(true)
 	p.refresh_downed_visuals()
 	_sound("thud", player_table_top())
 

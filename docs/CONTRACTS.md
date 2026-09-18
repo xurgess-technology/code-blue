@@ -1503,9 +1503,11 @@ game.strap_table: int                    # hub: the patient table they strapped 
   straps you in never also stands you up. A prompt starting with "Hold E" is never a tap (the HUD
   already draws those as `[Hold E]`, and `Player._local_step` no longer fires `interact_count`
   for one), so the table's other taps -- operate, place a teammate -- still work.
-- Strapped in, your arms are by your sides: the torch goes off, the first-person hands and the
-  held stack are hidden in first person and in third (`Player.refresh_held_visuals`), and the
-  torch comes back on when you get up.
+- Strapped in, your arms are by your sides: the first-person hands and the held stack are hidden
+  in first person and in third (`Player.refresh_held_visuals`), and **every light you carry goes
+  out** -- the torch and the soft bubble in the head -- or they light your own face up for whoever
+  leans over you (`Player.refresh_own_lights`, driven by `on_table` on every machine). Neither
+  touches `flashlight_on`, so getting up leaves the torch exactly as you left it.
 - `refresh_downed_visuals` only hides the body for a *downed* patient on the table, who has a lying
   `PlayerBody` standing in; a strapped surgeon's own body lies there for everyone else to see.
   `_update_down_pose` draws it at the table top, like that stand-in, not at the player node, which

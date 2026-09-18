@@ -1857,7 +1857,20 @@ static func _tp_scale(kind: String) -> float:
 
 func set_flashlight(on: bool) -> void:
 	flashlight_on = on
-	flashlight.visible = on
+	refresh_own_lights()
+
+
+## GRAFT HOOK: every light this surgeon carries -- the torch, and the soft bubble in the head that
+## keeps you from being blind at your own feet. Strapped to the table they all go out: your face is
+## right under them, and whoever leans over you (Dr. Botsworth, another player) would be looking at
+## a lit-up mask. Nothing here touches `flashlight_on`, so getting up restores the torch exactly as
+## you left it -- on if it was on, off if it was off. Every machine runs this off replicated state.
+func refresh_own_lights() -> void:
+	var carried_lights := not on_table
+	if flashlight != null:
+		flashlight.visible = carried_lights and flashlight_on
+	if _glow != null:
+		_glow.visible = carried_lights
 
 
 ## SWEEP 4A FOLLOW-UP (fog lot): "the flashlight shouldn't permeate the fog" -- cranking the
@@ -2066,6 +2079,7 @@ func refresh_downed_visuals() -> void:
 	if on_table and downed and not view_local():
 		body_visual.visible = false
 		name_tag.visible = false
+	refresh_own_lights()   # GRAFT HOOK: no torch and no head glow on a strapped face
 	if view_local():
 		# GRAFT HOOK: strapped down (or shown to a camera that moved elsewhere), no floating arms.
 		hands.visible = alive and not downed and not on_table and not dev_body_shown and held_by < 0 			and (game == null or not game.dev_on() or not game.dev.has_gun(peer_id))

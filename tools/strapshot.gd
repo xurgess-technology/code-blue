@@ -77,6 +77,12 @@ func _run() -> void:
 		await _shot("04_from_botsworth")
 		_look_at_with(bw, game._floor_at(top + Vector3(-2.2, -Game.OR_TABLE_TOP, 1.4)), top)
 		await _shot("05_from_botsworth_side")
+		# leaning over the head end: no torch and no head glow burning on the face
+		var b0 := Basis(Vector3.UP, game.player_table_yaw())
+		var head_end: Vector3 = top + b0 * Vector3(-0.95, 0.0, 0.0)
+		_look_at_with(bw, game._floor_at(head_end + b0 * Vector3(-0.7, -Game.OR_TABLE_TOP, 0.0)), head_end + Vector3(0, 0.12, 0))
+		await _shot("05b_face_close")
+		print("[strapshot] lights burning on the strapped body: %s" % str(_lit(me)))
 		_above(bw, top)
 		await _shot("06_from_above")
 		_report(top)
@@ -105,9 +111,20 @@ func _run() -> void:
 	me.bot_interact = false
 	await _seconds(0.5)
 	_look_from(me.global_position, top)
+	print("[strapshot] up again: torch on=%s lights burning=%s" % [me.flashlight_on, str(_lit(me))])
 	await _shot("09_back_up")
 	print("[strapshot] done, %d shots" % _i)
 	get_tree().quit(0)
+
+
+## Every light this player carries that is actually burning.
+func _lit(p: Player) -> Array:
+	var out := []
+	for n in p.find_children("*", "Light3D", true, false):
+		var l := n as Light3D
+		if l.is_visible_in_tree() and l.light_energy > 0.0:
+			out.append(l.name)
+	return out
 
 
 ## A camera above the table, looking straight down the long axis from overhead.
