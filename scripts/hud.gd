@@ -533,9 +533,11 @@ func _draw_holds(w: float, h: float) -> void:
 		progress = game.punch   # loop: clocking out
 		label = "CLOCKING OUT"
 	elif me != null and me.carry_hold > 0.0:   # downed hook
-		# GRAFT HOOK: strapped to the table, the same hold undoes the straps instead.
-		progress = clampf(me.carry_hold / (Game.TABLE_UP_HOLD if me.on_table else Game.CARRY_HOLD), 0.0, 1.0)
-		label = "GETTING UP" if me.on_table else "LIFTING"
+		# GRAFT HOOK: the table has two holds of its own -- lying down, and getting back up.
+		var strapping: bool = String(me.aim_prompt) == Game.STRAP_IN_PROMPT
+		var full: float = Game.TABLE_UP_HOLD if me.on_table else (Game.TABLE_STRAP_HOLD if strapping else Game.CARRY_HOLD)
+		progress = clampf(me.carry_hold / full, 0.0, 1.0)
+		label = "GETTING UP" if me.on_table else ("STRAPPING IN" if strapping else "LIFTING")
 	elif me != null and game.brains != null and game.brains.blend_progress(me.peer_id) > 0.0:   # SWEEP 3 HOOK (brains)
 		progress = game.brains.blend_progress(me.peer_id)
 		label = "BLENDING"

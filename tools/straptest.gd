@@ -9,6 +9,8 @@ extends Node
 ## feet, a second machine's copy of a strapped surgeon still shows a body (co-op), then "Control
 ## Dr. Botsworth" spawns him, moves the camera and input into him, and hands them back.
 
+const LightRooms := preload("res://scripts/level/light_rooms.gd")
+
 var main: Node3D
 var game: Game
 var dev: Node
@@ -62,11 +64,22 @@ func _strapping() -> void:
 	# ---- the offer
 	var node := game.find_interactable(aim)
 	_check(node != null, "the table has an aim spot (%s)" % aim)
-	_check(String(node.interact_prompt(me)) == "Lie down and strap in", "a healthy surgeon is offered the straps (%s)" % node.interact_prompt(me))
+	_check(String(node.interact_prompt(me)) == Game.STRAP_IN_PROMPT, "a healthy surgeon is offered the straps (%s)" % node.interact_prompt(me))
 
-	# ---- E lies you down
+	# ---- a tap does nothing; E has to be held
 	me.bot_aim_id = aim
 	me.bot_press += 1
+	await _frames(6)
+	_check(not me.on_table, "a tap on the table does not strap you in: it is a hold")
+	me.bot_interact = true
+	await _frames(2)
+	_check(me.carry_hold > 0.0 and not me.on_table, "holding E fills the hold ring (%.2f s)" % me.carry_hold)
+	me.bot_interact = false
+	await _frames(3)
+	_check(me.carry_hold == 0.0 and not me.on_table, "letting go early throws the hold away")
+	me.bot_interact = true
+	var strapped_ok := await _until(func(): return me.on_table, 6.0)
+	_check(strapped_ok, "holding E for TABLE_STRAP_HOLD straps you in")
 	await _frames(4)
 	_check(me.on_table and me.strapped(), "E straps you to the table (on_table=%s, strapped=%s)" % [me.on_table, me.strapped()])
 	_check(me.alive and not me.downed and me.hp == me.max_hp, "strapped in, you are awake and unhurt")
@@ -77,6 +90,12 @@ func _strapping() -> void:
 	_check(me._pitch > 0.9, "you are looking up at the ceiling (pitch %.2f)" % me._pitch)
 	_check(game.someone_on_table() == me, "the table reports you on it")
 	_check(me.report_full().get("ot", false) == true, "the snapshot carries the strapped state (ot)")
+	_check(not me.flashlight_on and not me.flashlight.visible, "your torch goes off with the straps")
+	_check(not me.hands.visible and not me._held_fp.visible and not me._held_tp.visible,
+		"your arms and whatever was in them are stowed, in first person and in third")
+	me.take_into("suture_kit", 1)
+	await _frames(3)
+	_check(not me._held_fp.visible and not me._held_tp.visible, "and anything that lands in your hands stays out of sight")
 
 	# ---- the table is taken
 	var other_id: int = dev.spawn_bot("bot")
@@ -103,21 +122,27 @@ func _strapping() -> void:
 	_check(not copy.body_visual.visible, "a downed patient still hands over to the lying PlayerBody")
 	copy.queue_free()
 
-	# ---- holding E gets you up
+	# ---- the same held press must not stand you back up
 	_check(String(game.get_up_prompt(me)) == "Hold E: get up", "strapped in, your own prompt is the straps (%s)" % game.get_up_prompt(me))
 	_check(game.get_up_block(me) == "", "nothing blocks getting up today (chunk C blocks it after the scoop)")
-	var held := 0.0
-	me.bot_interact = true
-	var ok := await _until(func(): return not me.on_table, 6.0)
-	held = t
+	_check(me.bot_interact, "(E is still held from strapping in)")
+	await _seconds(Game.TABLE_UP_HOLD + 0.5)
+	_check(me.on_table and me.carry_hold == 0.0, "the press that strapped you in cannot also get you up")
 	me.bot_interact = false
 	await _frames(3)
-	_check(ok and not me.on_table, "holding E undoes the straps")
+	# ---- a fresh hold gets you up
+	me.bot_interact = true
+	var ok := await _until(func(): return not me.on_table, 6.0)
+	me.bot_interact = false
+	await _frames(3)
+	_check(ok and not me.on_table, "a fresh press held for TABLE_UP_HOLD undoes the straps")
+	_check(me.flashlight_on, "your torch comes back on when you get up")
+	_check(me.hands.visible, "and your arms are yours again")
 	_check(me.alive and not me.downed and me.carry_hold == 0.0, "you get up on your feet, not downed")
 	var d := Vector2(me.global_position.x - top.x, me.global_position.z - top.z).length()
 	_check(d > 0.4 and d < 4.0, "you stand beside the table (%.1f m)" % d)
 	_check(game.someone_on_table() == null and game.strap_table == -1, "the table is free again")
-	_check(game.strap_in_prompt(other) == "Lie down and strap in", "and the next surgeon can use it")
+	_check(game.strap_in_prompt(other) == Game.STRAP_IN_PROMPT, "and the next surgeon can use it")
 	dev.request("remove_bots")
 	await _frames(3)
 
@@ -127,6 +152,10 @@ func _strapping() -> void:
 # =========================================================================
 
 func _botsworth() -> void:
+	# Strapped down again: what he sees is the whole point (chunk C operates on you here).
+	game.strap_in(me, _free_table())
+	await _frames(4)
+	_check(me.strapped(), "strapped in again for the swap")
 	var before: Vector3 = me.global_position
 	dev.control_botsworth()
 	await _frames(4)
@@ -139,16 +168,37 @@ func _botsworth() -> void:
 	_check(game.viewed_player() == bw and game.driving_player() == bw and game.driving_id() == bw.peer_id,
 		"the camera and the mouse are his")
 	_check(bw.view_local() and not bw.body_visual.visible and bw.hands.visible, "you see out of his eyes, in first person")
-	_check(me.dev_input_held and me.body_visual.visible, "your own body stands where you left it, visible to you")
+	_check(me.dev_input_held and me.body_visual.visible, "your own body stays where you left it, and is drawn")
+	_check(me.dev_body_shown and not me.hands.visible and not me._held_fp.visible,
+		"no first-person arms of yours floating where you were")
+	var layers_ok := true
+	for n in me.body_visual.find_children("*", "VisualInstance3D", true, false):
+		if int((n as VisualInstance3D).layers) & LightRooms.SELF != 0:
+			layers_ok = false
+	_check(layers_ok, "your body is on ordinary layers, so his camera draws it (not the mirrors' SELF layer)")
 	_check(me.global_position.distance_to(before) < 0.6, "you did not move")
 	# A full surgeon: hands that take things and an operator the surgery system accepts.
 	_check(bw.has_method("take_into") and bw.slots.size() == C.CARRY_CAP, "he has a surgeon's hands")
 	_check(bw.take_into("suture_kit", 1) >= 0 and bw.holding("suture_kit"), "he can hold a tool")
 	_check(game.players.has(bw.peer_id) and game.alive_players().has(bw), "he counts as a player at the table")
+	# ---- what he is looking at: your whole body, lying on the table
+	await _frames(4)
+	var top: Vector3 = game.player_table_top()
+	var bp: Vector3 = me.body_visual.global_position
+	_check(me.body_visual.visible and me.strapped(), "your strapped body is still drawn while he looks")
+	_check(Vector2(bp.x - top.x, bp.z - top.z).length() < 1.2 and absf(bp.y - top.y) < 0.35,
+		"and it lies on the table top, not standing somewhere else (%.2f m off)" % bp.distance_to(top))
+	var meshes := 0
+	for n in me.body_visual.find_children("*", "VisualInstance3D", true, false):
+		if (n as VisualInstance3D).visible:
+			meshes += 1
+	_check(meshes > 0, "the whole surgeon model is there, not a pair of arms (%d visible meshes)" % meshes)
+	_check(bw.global_position.distance_to(top) < 4.0, "he stands beside the table, in reach of you")
 	dev.control_botsworth()
 	await _frames(4)
 	_check(dev.possessed_player() == null and game.possessed == 0, "the same option puts you back")
 	_check(not me.dev_input_held and game.viewed_player() == me, "your input and camera are yours again")
+	_check(not me.dev_body_shown and me.hands.visible == false, "back in your own body, strapped, with no floating arms")
 	var still = game.players.get(bw.peer_id)
 	_check(still != null and not still.possessed_local and still.bot_active and still.body_visual.visible,
 		"Dr. Botsworth stays behind with his body and his brain")
@@ -201,6 +251,12 @@ func _finish() -> void:
 
 func _frames(n: int) -> void:
 	for i in n:
+		await get_tree().physics_frame
+
+
+func _seconds(sec: float) -> void:
+	var end := t + sec
+	while t < end:
 		await get_tree().physics_frame
 
 

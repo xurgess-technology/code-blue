@@ -828,7 +828,7 @@ func _local_step(delta: float) -> void:
 	_update_aim()
 	_update_scan_progress(delta)
 	if can_move and not bot_active and not hive_view and not diving and Input.is_action_just_pressed("interact") \
-			and aim_id != "" and aim_hold <= 0.0 and not aim_prompt.begins_with("!"):
+			and aim_id != "" and aim_hold <= 0.0 and not aim_prompt.begins_with("!") 			and not aim_prompt.begins_with("Hold E"):   # GRAFT HOOK: held prompts are timed by the host
 		interact_count += 1
 	# Downed hook: downed, E calls for help; carrying, E puts them down (or on the table, above).
 	elif can_move and not bot_active and not diving and Input.is_action_just_pressed("interact") and (downed or carrying != 0 or dragging_monster >= 0):
@@ -1746,8 +1746,7 @@ func _process(_delta: float) -> void:
 			if s.kind != "":
 				holder.add_child(_held_model(String(s.kind), int(s.count), holder == _held_fp))
 		# The flashlight hand hides nothing; the held stack sits in the other hand.
-		_held_fp.visible = view_local()
-		_held_tp.visible = not view_local() or _mirror_self or _carry_body
+		refresh_held_visuals()
 		if is_local:
 			_put_on_self_layer(_held_tp)
 		if view_local():
@@ -1763,6 +1762,24 @@ func _process(_delta: float) -> void:
 		hands.update(_delta)
 	if body_hands != null:
 		body_hands.update(_delta)
+
+
+## GRAFT HOOK (dev free camera, driving Dr. Botsworth): your own body is shown out in the world, on
+## its ordinary layers so the camera over there sees it like any other surgeon (LightRooms.SELF is
+## for mirrors, and the camera over there does not draw that). The carry camera turns the body off
+## whenever it lets go, so this flag is what keeps it on.
+var dev_body_shown := false
+
+
+func set_dev_body(on: bool) -> void:
+	if on == dev_body_shown:
+		return
+	dev_body_shown = on
+	if on and body_visual != null:
+		for n in body_visual.find_children("*", "VisualInstance3D", true, false):
+			(n as VisualInstance3D).layers = LightRoomsSelf.DYNAMIC
+	_refresh_self_body()
+	refresh_downed_visuals()
 
 
 ## Mirrors: show the local body to the mirror cameras (on, while one is rendering) or stop.
@@ -1785,16 +1802,16 @@ func set_carry_body(on: bool) -> void:
 ## shadowing (the torch sits inside the head), and seen by the first-person camera only for the carry
 ## camera.
 func _refresh_self_body() -> void:
-	var show := _mirror_self or _carry_body
+	var show := _mirror_self or _carry_body or dev_body_shown
 	if body_visual != null:
 		body_visual.visible = show
-		if show:
+		if show and not dev_body_shown:
 			_put_on_self_layer(body_visual)
 			for mi in body_visual.find_children("*", "GeometryInstance3D", true, false):
 				(mi as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	if body_hands != null:
 		body_hands.set_active(show)
-	_held_tp.visible = _mirror_self or _carry_body   # over the shoulder: the stack in the body's hand
+	refresh_held_visuals()   # over the shoulder: the stack in the body's hand
 	if _carry_body:
 		camera.cull_mask |= LightRoomsSelf.SELF
 	else:
@@ -2026,6 +2043,14 @@ func _set_visible_alive(a: bool) -> void:
 	collision_layer = C.L_PLAYER if a and not downed else 0
 
 
+## GRAFT HOOK: where the held stack shows: in your own hand, in your body's hand for everyone else,
+## and nowhere at all while you are strapped to the table with your arms by your sides.
+func refresh_held_visuals() -> void:
+	var stowed := on_table
+	_held_fp.visible = view_local() and not stowed
+	_held_tp.visible = (not view_local() or _mirror_self or _carry_body or dev_body_shown) and not stowed
+
+
 ## Downed hook: set every visual that follows from downed / carried / on_table. Idempotent.
 func refresh_downed_visuals() -> void:
 	_set_visible_alive(alive)
@@ -2036,7 +2061,9 @@ func refresh_downed_visuals() -> void:
 		body_visual.visible = false
 		name_tag.visible = false
 	if view_local():
-		hands.visible = alive and not downed and held_by < 0 and (game == null or not game.dev_on() or not game.dev.has_gun(peer_id))
+		# GRAFT HOOK: strapped down (or shown to a camera that moved elsewhere), no floating arms.
+		hands.visible = alive and not downed and not on_table and not dev_body_shown and held_by < 0 			and (game == null or not game.dev_on() or not game.dev.has_gun(peer_id))
+	refresh_held_visuals()
 
 
 ## Knocked down (dev stun) or downed you see the floor; everyone else sees you lying on it. Carried,
@@ -2081,12 +2108,19 @@ func _update_down_pose(delta: float) -> void:
 		# camera, the dev free camera or driving Dr. Botsworth all show it: pose it like a remote one.
 		if not body_visual.visible:
 			return
+	# GRAFT HOOK: on the table the body is drawn where the lying PlayerBody stand-in goes -- origin
+	# on the table top, along the table (scripts/downed/player_body.gd) -- not at the player node,
+	# which pinned_pose parks 0.8 m up the table so the camera sits at the head end. Every machine
+	# works it out the same way, so it lies the same from Dr. Botsworth's camera as on any screen.
+	if on_table and game != null:
+		var b := Basis(Vector3.UP, game.player_table_yaw())
+		var lie := Transform3D(b, game.player_table_top())
+		if body_hands != null and body_hands.lies_by_clip():
+			body_visual.global_transform = lie   # the rig lies down by its own "lying" clip
+		else:
+			body_visual.global_transform = lie * Transform3D(Basis(Vector3.RIGHT, -PI * 0.47), Vector3(0.0, 0.3, 0.0))
+		return
 	if body_hands != null and body_hands.lies_by_clip():
-		# GRAFT HOOK: on the table, the body goes exactly where every machine's pinned_pose puts it.
-		# (A remote copy's own node already sits there; the local one's yaw follows your mouse.)
-		if on_table and game != null:
-			body_visual.global_transform = game.pinned_pose(self)
-			return
 		# HUMAN HOOK: the human lies, crawls and hangs over the shoulder by its own clips; the Carried
 		# clip's origin (the belly on the shoulder) goes onto the carrier's left shoulder, mirrored.
 		# The whole transform (not rotation/position) so the carry's mirror never outlives it.

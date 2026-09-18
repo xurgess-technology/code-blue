@@ -188,6 +188,9 @@ const TABLE_BLEED_K := 0.5
 const CARRY_HOLD := 1.0
 ## GRAFT HOOK: hold E this long, strapped to the player table awake, to undo the straps and get up.
 const TABLE_UP_HOLD := 1.2
+## GRAFT HOOK: and this long, aiming at a free table, to lie down and be strapped in.
+const TABLE_STRAP_HOLD := 1.2
+const STRAP_IN_PROMPT := "Hold E: lie down and strap in"
 ## What a stitched-up player gets back.
 const REVIVE_HP := 2
 const CALL_COOLDOWN := 4.0
@@ -1141,11 +1144,6 @@ func _proxy_used(id: String, p: Node) -> void:
 			continue
 		if downed_any_table and int(player_table.get("index", -1)) == int(t.index):
 			player_surgery.begin(p)   # the downed teammate lying on this table
-			return
-		# GRAFT HOOK: on the hub, E on a free patient table straps you to it.
-		if downed_any_table and case_on_table(int(t.index)).is_empty() and not loop.table_reserved(int(t.index)) \
-				and strap_in_prompt(p) == "Lie down and strap in":
-			strap_in(p, int(t.index))
 			return
 		if corpses.is_corpse(case_on_table(int(t.index))):
 			return   # patient exits: a body is lifted with a hold (_tick_carry_holds), a tap does nothing
@@ -2473,8 +2471,8 @@ func _simulate(delta: float) -> void:
 			players[op].operating = true
 	if phase != Phase.MENU:
 		_tick_downed(delta)
+		_tick_table_holds(delta)   # GRAFT HOOK: hold E to strap yourself in, and again to get up
 		_tick_carry_holds(delta)
-		_tick_table_holds(delta)   # GRAFT HOOK: strapped in, holding E gets you back up
 		_apply_strap_table()       # GRAFT HOOK: a cleared stitches case hands the table back
 		_sync_player_case()   # loop: the player table's operation as a "player" case
 	match phase:
@@ -2805,6 +2803,8 @@ func _release_downed_links(p: Node) -> void:
 			drop_carried(c)
 		p.carried_by = 0
 	if p.on_table:
+		if not p.downed:
+			p.set_flashlight(true)   # GRAFT HOOK: off the table, the torch comes back on
 		p.on_table = false
 		if player_surgery.patient() == p:
 			player_surgery.clear()
@@ -2845,8 +2845,8 @@ func can_pick_up(q: Node, p: Node, check_hands: bool = true) -> bool:
 ## Host: holding E on a downed teammate picks them up after CARRY_HOLD seconds.
 func _tick_carry_holds(delta: float) -> void:
 	for q in players.values():
-		if q.on_table:
-			continue   # GRAFT HOOK: their E is the straps (_tick_table_holds), not a lift
+		if _table_holding.has(q.peer_id):
+			continue   # GRAFT HOOK: this hold is the table's (_tick_table_holds), not a lift
 		var target = null
 		if q.wants_interact and q.aim_id.begins_with("pl_"):
 			target = players.get(int(q.aim_id.substr(3)))
@@ -3139,7 +3139,7 @@ func strap_in_prompt(q: Node) -> String:
 		return ""
 	if q.operating:
 		return "!Step back from the operation first."
-	return "Lie down and strap in"
+	return STRAP_IN_PROMPT
 
 
 ## GRAFT HOOK: whoever is lying on the player table right now (downed or strapped in), or null.
@@ -3153,10 +3153,8 @@ func someone_on_table() -> Node:
 func _player_table_used(q: Node) -> void:
 	if q.carrying != 0:
 		carrier_pressed_interact(q, "player_table")
-	elif strap_in_prompt(q) == "Lie down and strap in":
-		strap_in(q)   # GRAFT HOOK
 	else:
-		player_surgery.begin(q)
+		player_surgery.begin(q)   # GRAFT HOOK: strapping yourself in is a hold, not this tap
 
 
 ## Host: the carrier lays their downed teammate on the player table; the stitches case starts.
@@ -3186,7 +3184,7 @@ func place_on_player_table(q: Node, table_index := -1) -> void:
 func strap_in(q: Node, table_index := -1) -> void:
 	if not is_host() or q == null or not is_instance_valid(q):
 		return
-	if strap_in_prompt(q) != "Lie down and strap in":
+	if strap_in_prompt(q) != STRAP_IN_PROMPT:
 		return
 	end_operations(q)
 	q.carry_hold = 0.0
@@ -3198,6 +3196,7 @@ func strap_in(q: Node, table_index := -1) -> void:
 	q.teleport(pinned_pose(q).origin)
 	if q.is_local or q.is_bot:
 		q.look_up_from_table()
+	q.set_flashlight(false)   # arms by your sides: no torch in a strapped hand
 	q.refresh_downed_visuals()
 	_sound("thud", player_table_top())
 	say("%s is strapped to the table. Hold E to get up." % q.player_name, 4.0)
@@ -3220,18 +3219,59 @@ func get_up_prompt(p: Node) -> String:
 	return "!" + why if why != "" else "Hold E: get up"
 
 
-## GRAFT HOOK: host, every frame. Strapped in and holding E long enough undoes the straps.
+## GRAFT HOOK: peers who must let go of E before it counts again, so one long press cannot strap
+## you in and then stand you straight back up.
+var _table_hold_gate := {}
+## GRAFT HOOK: peers whose carry_hold this tick owns, so _tick_carry_holds leaves it alone.
+var _table_holding := {}
+
+
+## GRAFT HOOK: host, every frame. Both of the table's holds: aiming at a free table and holding E
+## lies you down strapped; strapped in, holding E undoes the straps. The key has to be let go in
+## between, so the press that straps you in never also gets you up.
 func _tick_table_holds(delta: float) -> void:
+	_table_holding.clear()
 	for p in players.values():
-		if not p.strapped():
+		var to_table: int = -2 if p.on_table else _aimed_strap_table(p)
+		if not p.strapped() and to_table == -2:
+			_table_hold_gate.erase(p.peer_id)
 			continue
-		if not p.wants_interact or get_up_block(p) != "":
+		_table_holding[p.peer_id] = true
+		if not p.wants_interact:
+			_table_hold_gate.erase(p.peer_id)   # let go: the next press is a fresh hold
+			p.carry_hold = 0.0
+			continue
+		if _table_hold_gate.has(p.peer_id) or (p.strapped() and get_up_block(p) != ""):
 			p.carry_hold = 0.0
 			continue
 		p.carry_hold += delta
-		if p.carry_hold >= TABLE_UP_HOLD:
+		if to_table != -2:
+			if p.carry_hold >= TABLE_STRAP_HOLD:
+				p.carry_hold = 0.0
+				_table_hold_gate[p.peer_id] = true
+				strap_in(p, to_table)
+		elif p.carry_hold >= TABLE_UP_HOLD:
 			p.carry_hold = 0.0
+			_table_hold_gate[p.peer_id] = true
 			get_up_from_table(p)
+
+
+## GRAFT HOOK: the table `q` is aiming at and could strap themselves to: its index, -1 for the
+## level's own player table, -2 for "not that". Host side, and it checks reach like every hold.
+func _aimed_strap_table(q: Node) -> int:
+	if q == null or q.aim_id == "" or strap_in_prompt(q) != STRAP_IN_PROMPT:
+		return -2
+	var node := find_interactable(q.aim_id)
+	if node == null or not _within_reach(q, node):
+		return -2
+	if q.aim_id == "player_table":
+		return -1
+	if not downed_any_table or not q.aim_id.begins_with("table"):
+		return -2
+	for t in patient_tables:
+		if table_interact_id(int(t.index)) == q.aim_id:
+			return int(t.index) if table_free(int(t.index)) else -2
+	return -2
 
 
 ## GRAFT HOOK: host. The straps come off and the surgeon stands beside the table.
@@ -3247,6 +3287,7 @@ func get_up_from_table(p: Node) -> void:
 	strap_table = -1
 	_apply_strap_table()
 	p.teleport(_scatter_spot(from))
+	p.set_flashlight(true)
 	p.refresh_downed_visuals()
 	_sound("thud", player_table_top())
 

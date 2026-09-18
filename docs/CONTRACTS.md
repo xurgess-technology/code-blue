@@ -1483,9 +1483,9 @@ follows `on_table` (the pinned pose, the look-up camera, the "lying" clip, `ot` 
 works unchanged. `Player.strapped()` is the difference: `on_table and alive and not downed`.
 
 ```gdscript
-game.TABLE_UP_HOLD (1.2 s)
-game.strap_in_prompt(q) -> String        # "Lie down and strap in", "!..." or "" (not on offer)
-game.strap_in(q, table_index := -1)      # host; E at the table when the prompt says so
+game.TABLE_STRAP_HOLD (1.2 s)  game.TABLE_UP_HOLD (1.2 s)  game.STRAP_IN_PROMPT
+game.strap_in_prompt(q) -> String        # STRAP_IN_PROMPT, "!..." or "" (not on offer)
+game.strap_in(q, table_index := -1)      # host; the hold finished (never a tap)
 game.get_up_block(p) -> String           # "" = free to go. CHUNK C REFUSES HERE after the scoop
 game.get_up_prompt(p) -> String          # what the strapped surgeon sees looking up
 game.get_up_from_table(p)                # host; the straps come off, they stand beside the table
@@ -1497,11 +1497,27 @@ game.strap_table: int                    # hub: the patient table they strapped 
 - The prompt hangs off the existing aim spots: `player_table` on levels with one, and each patient
   table (`table`, `table_<i>`) on the hub, where `strap_table` rides the snapshot so every machine's
   `player_table` (and so `pinned_pose`) names the same table. Only one person is ever on a table.
-- Getting up is `carry_hold` again, timed by `game._tick_table_holds` from the strapped player's
-  `wants_interact` (`Player._pinned_step` reports E while strapped). The HUD ring says GETTING UP.
+- **Both ways on and off are holds**, timed by `game._tick_table_holds` on `carry_hold` from the
+  player's `wants_interact` (`Player._pinned_step` reports E while strapped). The HUD ring says
+  STRAPPING IN / GETTING UP. E has to be let go in between (`_table_hold_gate`), so the press that
+  straps you in never also stands you up. A prompt starting with "Hold E" is never a tap (the HUD
+  already draws those as `[Hold E]`, and `Player._local_step` no longer fires `interact_count`
+  for one), so the table's other taps -- operate, place a teammate -- still work.
+- Strapped in, your arms are by your sides: the torch goes off, the first-person hands and the
+  held stack are hidden in first person and in third (`Player.refresh_held_visuals`), and the
+  torch comes back on when you get up.
 - `refresh_downed_visuals` only hides the body for a *downed* patient on the table, who has a lying
   `PlayerBody` standing in; a strapped surgeon's own body lies there for everyone else to see.
-- Tests: `tools/straptest.tscn` (headless).
+  `_update_down_pose` draws it where that stand-in goes -- origin on the table top, along the
+  table -- not at the player node, which `pinned_pose` parks 0.8 m up the table so the camera sits
+  at the head end.
+- Your own body is normally drawn to nobody. `Player.set_dev_body(on)` shows it out in the world
+  on its ordinary layers (not the mirrors' `LightRooms.SELF`) and keeps the carry camera from
+  switching it off again; driving Dr. Botsworth turns it on, and hides your first-person arms so
+  they do not float over the table in his view.
+- Tests: `tools/straptest.tscn` (headless), `tools/strapshot.tscn` (the smoke look: shots into
+  `tools/strap_shots/`, run through `toolseview.bat 2 "SMOKE" -Scene res://tools/strapshot.tscn`
+  so no window ever takes focus).
 
 ## Combat (combat worker, sweep 3)
 

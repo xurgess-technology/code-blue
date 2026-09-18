@@ -48,7 +48,6 @@ const WorldItemScript := preload("res://scripts/world_item.gd")
 const LootTable := preload("res://scripts/economy/loot_table.gd")
 const MonsterScript3 := preload("res://scripts/monster.gd")  # SWEEP 3 HOOK (monsters): display names
 const DevDoorScript := preload("res://scripts/dev/dev_door.gd")
-const FreeCamScript := preload("res://scripts/dev/free_cam.gd")   # GRAFT HOOK: shows your own body
 ## How far south of the parking lot's far edge the hidden room stands, metres (well past the fog).
 const ROOM_GAP := 30.0
 
@@ -1013,7 +1012,7 @@ func possess_bot(id: int) -> void:
 	var me = game.local_player()
 	if me != null and is_instance_valid(me):
 		me.dev_input_held = true
-		FreeCamScript._show_body_on(me, true)   # so you can look at yourself from over there
+		me.set_dev_body(true)   # so you can look at yourself, lying there, from over there
 	game.say("You are %s. The same button puts you back." % p.player_name, 3.0)
 	state_changed.emit()
 
@@ -1030,7 +1029,7 @@ func release_bot() -> void:
 	var me = game.local_player()
 	if me != null and is_instance_valid(me):
 		me.dev_input_held = false
-		FreeCamScript._show_body_on(me, false)
+		me.set_dev_body(false)
 		if me.camera != null:
 			me.camera.current = true
 	state_changed.emit()
