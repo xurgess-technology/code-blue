@@ -6,6 +6,8 @@
 #   tools\review.bat 2 "OR: try the new saw" -Scene res://tools/monster_lab.tscn
 #   tools\review.bat 3 "NET: join and shove me" -Count 2          (two windows, for co-op)
 #   tools\review.bat main "FAX: new stamp timing"                 (this checkout instead of a slot)
+#   toolseview.bat 4 "ICONS: pick things up" --setup=icons      (skips the menu: a solo shift with the
+#                                                                  named setup from scripts/review_setups.gd staged)
 #
 # Anything after the named options goes to the game as user args (after "--"), e.g. --seed=3.
 # Steam is off (--no-steam) unless you pass --steam. Logs go to <slot>\.godot\review-<n>.log.

@@ -183,11 +183,32 @@ func _launch() -> void:
 	rig.queue_free()
 	if screen.is_processing():
 		await screen.done
+	# A review window with --setup=<name> skips the title menu and goes straight into the shift
+	# (scripts/review_setups.gd); an unknown name says so in the log and opens the menu as usual.
+	var setup := ReviewSetups.requested()
+	if setup != "" and not ReviewSetups.exists(setup):
+		push_warning("[review] no setup '%s'; known: %s" % [setup, ", ".join(ReviewSetups.names())])
+		setup = ""
 	# The admission page has fed off the top; the sign-in sheet carries the paper on from there.
-	menu.feed_in(screen.paper_scroll_px(), screen.feed_speed(), screen.pages_printed() + 1)
+	if setup == "":
+		menu.feed_in(screen.paper_scroll_px(), screen.feed_speed(), screen.pages_printed() + 1)
 	screen.queue_free()
 	launching = false
 	launched.emit()
+	if setup != "":
+		_boot_setup(setup)
+
+
+## Review window: solo host on the setup's seed, the shift begun, the world settled, then the setup stages
+## its things (ReviewSetups.stage).
+func _boot_setup(setup: String) -> void:
+	await _start_solo("Reviewer", ReviewSetups.seed_of(setup))
+	while game.get_parent().has_node("WarmupCover") or game.local_player() == null:
+		await get_tree().process_frame
+	game.begin_shift()
+	for i in 45:
+		await get_tree().process_frame
+	await ReviewSetups.stage(setup, game)
 
 
 func _after_launch() -> void:
@@ -257,10 +278,10 @@ func _basic_environment() -> WorldEnvironment:
 # session start
 # =========================================================================
 
-func _start_solo(player_name: String) -> void:
+func _start_solo(player_name: String, forced_seed := -1) -> void:
 	if not await _loading_screen_up("solo", player_name):
 		return
-	var run_seed := randi()
+	var run_seed := randi() if forced_seed < 0 else forced_seed
 	await game.prebuild_level(run_seed, 1)
 	Net.start_solo(player_name)
 	game.start_session(run_seed)
